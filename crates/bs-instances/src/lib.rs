@@ -1,0 +1,47 @@
+//! Мультиинстансность: живые подключения к домашнему и федеративным
+//! инстансам Backspace, автоматическое переподключение.
+//!
+//! Ключевые типы:
+//! - [`InstanceHandle`] — подключение к одному инстансу: HTTP-клиент,
+//!   WebSocket-соединение и фоновая задача с backoff-переподключением.
+//! - [`InstanceRegistry`] — набор активных подключений по [`Origin`].
+//! - [`ReconnectPolicy`] — параметры экспоненциального backoff.
+//!
+//! # Пример
+//! ```no_run
+//! # async fn run() -> Result<(), bs_instances::InstanceError> {
+//! use bs_instances::{InstanceHandle, ReconnectPolicy};
+//! use bs_identity::CredentialStore;
+//! use bs_types::{ClientKind, Origin};
+//!
+//! let mut store = CredentialStore::new();
+//! let (handle, ready) = InstanceHandle::login(
+//!     &mut store,
+//!     Origin::Home,
+//!     "https://chat.example.com",
+//!     "alice",
+//!     "secret",
+//!     Some(ClientKind::Desktop),
+//!     ReconnectPolicy::default(),
+//! )
+//! .await?;
+//! # let _ = (handle, ready);
+//! # Ok(())
+//! # }
+//! ```
+
+#![forbid(unsafe_code)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+
+pub mod error;
+pub mod handle;
+pub mod reconnect;
+pub mod registry;
+
+pub use error::InstanceError;
+pub use handle::{ConnectionState, INITIAL_READY_TIMEOUT, InstanceEvent, InstanceHandle};
+pub use reconnect::ReconnectPolicy;
+pub use registry::InstanceRegistry;
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,108 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/bs-types",
+    "crates/bs-permissions",
+    "crates/bs-api",
+    "crates/bs-ws",
+    "crates/bs-instances",
+    "crates/bs-identity",
+    "crates/bs-voice",
+    "crates/bs-core",
+    "crates/bs-app",
+    "crates/bs-tui",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "AGPL-3.0-only"
+repository = "https://github.com/TheZwiss/backspace"
+authors = ["Backspace RS contributors"]
+
+[workspace.dependencies]
+# внутренние крейты
+bs-types = { path = "crates/bs-types" }
+bs-permissions = { path = "crates/bs-permissions" }
+bs-api = { path = "crates/bs-api" }
+bs-ws = { path = "crates/bs-ws" }
+bs-instances = { path = "crates/bs-instances" }
+bs-identity = { path = "crates/bs-identity" }
+bs-voice = { path = "crates/bs-voice" }
+bs-core = { path = "crates/bs-core" }
+
+# сериализация
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ошибки
+thiserror = "2"
+anyhow = "1"
+
+# асинхронность и сеть
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "fs", "signal"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip", "brotli"] }
+futures-util = "0.3"
+http = "1"
+url = { version = "2", features = ["serde"] }
+
+# GUI
+eframe = "0.37"
+egui = "0.37"
+
+# TUI
+ratatui = "0.30"
+crossterm = "0.29"
+
+# утилиты
+bitflags = { version = "2", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+zeroize = { version = "1", features = ["derive"] }
+
+# тесты
+insta = { version = "1", features = ["json"] }
+pretty_assertions = "1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+doc_markdown = "allow"
+must_use_candidate = "allow"
+# Слишком назойливо для публичного API библиотечных крейтов.
+missing_const_for_fn = "allow"
+# Допускаем `as` для числовых приведений в местах, где это явно безопасно.
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 1

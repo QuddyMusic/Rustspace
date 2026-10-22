@@ -1,0 +1,30 @@
+[package]
+name = "bs-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "backspace-rs"
+path = "src/main.rs"
+
+[dependencies]
+bs-core = { workspace = true }
+bs-instances = { workspace = true }
+bs-identity = { workspace = true }
+bs-types = { workspace = true }
+tokio = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+wiremock = "0.6"
+tokio-tungstenite = { workspace = true, features = ["handshake"] }
+futures-util = { workspace = true }

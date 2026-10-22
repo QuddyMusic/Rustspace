@@ -1,0 +1,98 @@
+//! Высокоуровневый login-flow поверх `bs-api`.
+
+use bs_api::ApiClient;
+use bs_types::{Origin, User};
+
+use crate::error::IdentityError;
+use crate::secret::AccessToken;
+use crate::store::CredentialStore;
+
+/// Сессия одного инстанса: авторизованный клиент + профиль пользователя.
+#[derive(Debug)]
+pub struct InstanceSession {
+    origin: Origin,
+    client: ApiClient,
+    token: AccessToken,
+    user: User,
+}
+
+impl InstanceSession {
+    /// Подключается к инстансу: логинится, сохраняет токен, тянет профиль.
+    ///
+    /// `base` — абсолютный URL инстанса без `/api` (например,
+    /// `https://chat.example.com`). При успехе токен кладётся в `store`
+    /// под ключом `origin`.
+    pub async fn login(
+        store: &mut CredentialStore,
+        origin: Origin,
+        base: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<Self, IdentityError> {
+        let mut client = ApiClient::new(origin.clone(), base)?;
+        let auth = client.login_and_attach(username, password).await?;
+        let token = AccessToken::new(auth.token);
+        store.insert(origin.clone(), token.clone());
+        Ok(Self {
+            origin,
+            client,
+            token,
+            user: auth.user,
+        })
+    }
+
+    /// Восстанавливает сессию из сохранённого токена, проверяя его через
+    /// `GET /api/users/@me`. При 401 токен удаляется из `store`.
+    pub async fn resume(
+        store: &mut CredentialStore,
+        origin: Origin,
+        base: &str,
+    ) -> Result<Self, IdentityError> {
+        let token = store.get(&origin)?.clone();
+        let mut client = ApiClient::new(origin.clone(), base)?;
+        client.set_token(Some(token.expose().to_owned()));
+        match client.me().await {
+            Ok(user) => Ok(Self {
+                origin,
+                client,
+                token,
+                user,
+            }),
+            Err(err) if err.is_unauthorized() => {
+                store.remove(&origin);
+                Err(IdentityError::TokenRejected)
+            }
+            Err(err) => Err(IdentityError::Api(err)),
+        }
+    }
+
+    /// Инстанс сессии.
+    pub fn origin(&self) -> &Origin {
+        &self.origin
+    }
+
+    /// Авторизованный REST-клиент.
+    pub fn client(&self) -> &ApiClient {
+        &self.client
+    }
+
+    /// Изменяемый REST-клиент (для дальнейших запросов).
+    pub fn client_mut(&mut self) -> &mut ApiClient {
+        &mut self.client
+    }
+
+    /// Токен сессии.
+    pub fn token(&self) -> &AccessToken {
+        &self.token
+    }
+
+    /// Профиль вошедшего пользователя.
+    pub fn user(&self) -> &User {
+        &self.user
+    }
+
+    /// Разлогинивает: удаляет токен из хранилища.
+    pub fn logout(self, store: &mut CredentialStore) {
+        store.remove(&self.origin);
+    }
+}

@@ -1,0 +1,31 @@
+[package]
+name = "bs-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terminal UI для backspace-rs: проверка протокола вручную"
+
+[lints]
+workspace = true
+
+[dependencies]
+bs-types.workspace = true
+bs-core.workspace = true
+bs-instances.workspace = true
+bs-identity.workspace = true
+
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+
+ratatui.workspace = true
+crossterm.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[[bin]]
+name = "bs-tui"
+path = "src/main.rs"

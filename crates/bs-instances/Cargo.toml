@@ -1,0 +1,21 @@
+[package]
+name = "bs-instances"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bs-types = { workspace = true }
+bs-api = { workspace = true }
+bs-ws = { workspace = true }
+bs-identity = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true }
+tracing = { workspace = true }
