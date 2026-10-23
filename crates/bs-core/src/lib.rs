@@ -32,7 +32,8 @@ mod state;
 pub use apply::{apply, apply_at};
 pub use error::CoreError;
 pub use federation::{
-    ReattachDecision, ensure_remote_credential, maybe_auto_reattach, peer_home_with_remote,
+    ReattachDecision, RecoveryAction, ensure_remote_credential, maybe_auto_reattach,
+    peer_home_with_remote, recovery_action,
 };
 pub use multicache::{DrainStats, MultiCache, Routed};
 pub use session::{CoreSession, DRAIN_LIMIT};

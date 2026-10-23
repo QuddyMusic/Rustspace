@@ -16,8 +16,10 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod auth;
 pub mod client;
 pub mod error;
 
+pub use auth::AuthFailure;
 pub use client::{CLIENT_PING_INTERVAL, READY_TIMEOUT, WsConnection, WsParts, WsSender};
 pub use error::WsError;

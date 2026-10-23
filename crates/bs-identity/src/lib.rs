@@ -28,6 +28,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod credential;
 pub mod error;
 pub mod identity;
 pub mod persist;
@@ -35,6 +36,7 @@ pub mod secret;
 pub mod session;
 pub mod store;
 
+pub use credential::{CredentialOutcome, SkipReason};
 pub use error::IdentityError;
 pub use identity::{
     HomeIdentity, IdentityFields, SelfIdentity, delivering_host, home_host_of, home_identity_of,

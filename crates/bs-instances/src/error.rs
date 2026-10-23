@@ -15,6 +15,10 @@ pub enum InstanceError {
     #[error("ошибка websocket: {0}")]
     Ws(#[from] WsError),
 
+    /// Ошибка REST-запроса (например, `reattach`).
+    #[error("ошибка api: {0}")]
+    Api(#[from] bs_api::ApiError),
+
     /// Инстанс с таким origin не найден в реестре.
     #[error("инстанс не найден: {origin}")]
     UnknownInstance {

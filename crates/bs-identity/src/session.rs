@@ -91,6 +91,18 @@ impl InstanceSession {
         &self.user
     }
 
+    /// Заменяет токен сессии (например, после смены пароля на удалённом
+    /// инстансе: сервер отзывает прежние сессии и выдаёт новый JWT).
+    pub fn set_token(&mut self, token: AccessToken) {
+        self.client.set_token(Some(token.expose().to_owned()));
+        self.token = token;
+    }
+
+    /// Обновляет профиль (после re-attach или смены имени).
+    pub fn set_user(&mut self, user: User) {
+        self.user = user;
+    }
+
     /// Разлогинивает: удаляет токен из хранилища.
     pub fn logout(self, store: &mut CredentialStore) {
         store.remove(&self.origin);

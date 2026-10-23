@@ -203,10 +203,12 @@ where
         };
         match &event {
             ServerEvent::Ready { .. } => return Ok(event),
-            ServerEvent::Error { message, code, .. } => {
-                return Err(WsError::AuthRejected {
+            ServerEvent::Error { message, .. } => {
+                // Сервер Backspace не шлёт машинного кода, поэтому
+                // причина восстанавливается по тексту сообщения.
+                return Err(WsError::AuthFailed {
+                    failure: crate::auth::AuthFailure::classify(message),
                     message: message.clone(),
-                    code: code.clone(),
                 });
             }
             _ => {}

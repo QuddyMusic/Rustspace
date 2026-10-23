@@ -18,13 +18,13 @@ pub enum WsError {
     #[error("соединение закрыто до ready")]
     ClosedBeforeReady,
 
-    /// Сервер прислал `error` вместо `ready` при аутентификации.
-    #[error("сервер отклонил аутентификацию: {message}")]
-    AuthRejected {
+    /// Сервер отверг токен; причина классифицирована по тексту.
+    #[error("сервер отклонил аутентификацию ({failure:?}): {message}")]
+    AuthFailed {
+        /// Классифицированная причина.
+        failure: crate::auth::AuthFailure,
         /// Сообщение из события `error`.
         message: String,
-        /// Машинный код, если был.
-        code: Option<String>,
     },
 
     /// Соединение разорвано.

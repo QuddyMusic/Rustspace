@@ -165,6 +165,42 @@ pub fn maybe_auto_reattach(
     }
 }
 
+/// Что делать после отказа аутентификации на инстансе.
+///
+/// Отличается от [`ReattachDecision`]: тот смотрит на состояние
+/// подключения, а этот — на причину отказа, полученную от сервера.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RecoveryAction {
+    /// Токен протух/отозван: сходить за новым (перепривязка или логин).
+    RefreshToken,
+    /// Причина фатальна (аккаунт удалён, сломан протокол) — не повторять.
+    Stop,
+    /// Причина неясна: допустима одна повторная попытка подключения.
+    Retry,
+}
+
+/// Решение по причине отказа `bs_ws::AuthFailure`.
+///
+/// # Пример
+/// ```
+/// use bs_core::{RecoveryAction, recovery_action};
+/// use bs_ws::AuthFailure;
+///
+/// assert_eq!(recovery_action(AuthFailure::Revoked), RecoveryAction::RefreshToken);
+/// assert_eq!(recovery_action(AuthFailure::AccountDeleted), RecoveryAction::Stop);
+/// ```
+#[must_use]
+pub const fn recovery_action(failure: bs_ws::AuthFailure) -> RecoveryAction {
+    if failure.is_recoverable() {
+        RecoveryAction::RefreshToken
+    } else if failure.is_fatal() {
+        RecoveryAction::Stop
+    } else {
+        RecoveryAction::Retry
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

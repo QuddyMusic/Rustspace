@@ -2,13 +2,18 @@
 //!
 //! Держит авторизованный HTTP-клиент, WebSocket-соединение и фоновую
 //! задачу, которая автоматически переподключается с backoff.
+//!
+//! Токен можно заменить на лету ([`InstanceHandle::replace_token`]):
+//! диспетчер увидит новое значение, сбросит текущее соединение и
+//! переподключится с новым JWT. Это путь для `change_password` на
+//! удалённом инстансе и для `reattach` после отсоединения.
 
 use std::time::Duration;
 
 use bs_api::ApiClient;
 use bs_identity::{AccessToken, CredentialStore, IdentityError, InstanceSession};
 use bs_types::{ClientEvent, ClientKind, Origin, ServerEvent, User};
-use bs_ws::{WsConnection, WsError};
+use bs_ws::{AuthFailure, WsConnection, WsError};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::error::InstanceError;
@@ -46,8 +51,14 @@ pub enum InstanceEvent {
     StateChanged(ConnectionState),
     /// Пришло событие сервера (включая первый `ready`).
     Server(Box<ServerEvent>),
-    /// Сервер отклонил токен; переподключение не поможет.
+    /// Сервер отклонил токен.
+    ///
+    /// Для восстановимых причин ([`AuthFailure::is_recoverable`]) диспетчер
+    /// остаётся живым и ждёт [`InstanceHandle::replace_token`]; для
+    /// фатальных ([`AuthFailure::is_fatal`]) он останавливается.
     AuthRejected {
+        /// Классифицированная причина отказа.
+        failure: AuthFailure,
         /// Сообщение сервера.
         message: String,
         /// Машинный код, если был.
@@ -67,7 +78,7 @@ pub struct InstanceHandle {
     origin: Origin,
     base: String,
     user: User,
-    token: AccessToken,
+    token: watch::Sender<AccessToken>,
     client: ApiClient,
     commands: mpsc::Sender<Command>,
     events: broadcast::Sender<InstanceEvent>,
@@ -122,17 +133,17 @@ impl InstanceHandle {
         let mut initial_rx = event_tx.subscribe();
         let (state_tx, state_rx) = watch::channel(ConnectionState::Connecting);
         let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_BUFFER);
+        let (token_tx, token_rx) = watch::channel(token.clone());
 
         let base_for_task = base.clone();
-        let token_for_task = token.expose().to_owned();
         let evt_for_task = event_tx.clone();
         let task = tokio::spawn(async move {
             run_dispatcher(
                 base_for_task,
-                token_for_task,
                 client_kind,
                 policy,
                 cmd_rx,
+                token_rx,
                 evt_for_task,
                 state_tx,
             )
@@ -145,7 +156,7 @@ impl InstanceHandle {
             origin,
             base,
             user,
-            token,
+            token: token_tx,
             client,
             commands: cmd_tx,
             events: event_tx,
@@ -170,9 +181,10 @@ impl InstanceHandle {
         &self.user
     }
 
-    /// Токен доступа.
-    pub fn token(&self) -> &AccessToken {
-        &self.token
+    /// Текущий токен доступа (копия).
+    #[must_use]
+    pub fn token(&self) -> AccessToken {
+        self.token.borrow().clone()
     }
 
     /// Авторизованный HTTP-клиент.
@@ -188,6 +200,45 @@ impl InstanceHandle {
     /// Подписка на поток событий (включая смены состояния).
     pub fn subscribe(&self) -> broadcast::Receiver<InstanceEvent> {
         self.events.subscribe()
+    }
+
+    /// Заменяет токен и заставляет диспетчер переподключиться с ним.
+    ///
+    /// Нужен после `POST /api/users/@me/change-password` на удалённом
+    /// инстансе (сервер отзывает прежние сессии и выдаёт новый JWT) и
+    /// после `POST /api/users/@me/reattach`.
+    ///
+    /// HTTP-клиент обновляется сразу; WebSocket переподключается, как
+    /// только диспетчер увидит новое значение.
+    ///
+    /// # Ошибки
+    /// [`InstanceError::DispatcherClosed`] — диспетчер уже завершился
+    /// (например, после фатального отказа auth), и токен принять некому.
+    pub fn replace_token(&mut self, token: AccessToken) -> Result<(), InstanceError> {
+        self.client.set_token(Some(token.expose().to_owned()));
+        self.token
+            .send(token)
+            .map_err(|_| InstanceError::DispatcherClosed)
+    }
+
+    /// Перепривязывает отсоединённый аккаунт к домашнему инстансу.
+    ///
+    /// Вызывает `POST /api/users/@me/reattach` на этом инстансе под его
+    /// сессией, обновляет профиль и переподключает WebSocket с новым self-view.
+    /// `token` — одноразовый токен из `POST /api/auth/attach-proof` домашнего
+    /// инстанса.
+    ///
+    /// # Ошибки
+    /// - [`InstanceError::Api`] — сервер отклонил перепривязку (403 — аккаунт
+    ///   не отсоединён, 404 — не найден, 400 — плохой токен);
+    /// - [`InstanceError::DispatcherClosed`] — диспетчер уже завершился.
+    pub async fn reattach(&mut self, token: &str) -> Result<(), InstanceError> {
+        let response = self.client.reattach(token).await?;
+        self.user = response.user;
+        // Токен сессии не меняется, но соединению нужен свежий `ready`
+        // с обновлённым self-view — переподключаемся, переотправив тот же JWT.
+        let current = self.token.borrow().clone();
+        self.replace_token(current)
     }
 
     /// Отправляет событие на сервер.
@@ -220,8 +271,12 @@ async fn wait_for_ready(
                 Ok(InstanceEvent::Server(boxed)) if matches!(*boxed, ServerEvent::Ready { .. }) => {
                     return Ok(*boxed);
                 }
-                Ok(InstanceEvent::AuthRejected { message, code }) => {
-                    tracing::warn!(%message, ?code, "server rejected ws auth");
+                Ok(InstanceEvent::AuthRejected {
+                    failure,
+                    message,
+                    code,
+                }) => {
+                    tracing::warn!(%message, ?code, ?failure, "server rejected ws auth");
                     return Err(InstanceError::Identity(IdentityError::TokenRejected));
                 }
                 Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
@@ -244,13 +299,14 @@ fn set_state(tx: &watch::Sender<ConnectionState>, state: ConnectionState) {
 #[allow(clippy::too_many_arguments)]
 async fn run_dispatcher(
     base: String,
-    token: String,
     client_kind: Option<ClientKind>,
     policy: ReconnectPolicy,
     mut commands: mpsc::Receiver<Command>,
+    mut tokens: watch::Receiver<AccessToken>,
     events: broadcast::Sender<InstanceEvent>,
     state: watch::Sender<ConnectionState>,
 ) {
+    let mut token = tokens.borrow_and_update().clone();
     let mut attempt: u32 = 0;
     loop {
         set_state(
@@ -262,7 +318,7 @@ async fn run_dispatcher(
             },
         );
 
-        match WsConnection::connect(&base, &token, client_kind).await {
+        match WsConnection::connect(&base, token.expose(), client_kind).await {
             Ok((connection, ready)) => {
                 attempt = 0;
                 set_state(&state, ConnectionState::Connected);
@@ -272,6 +328,7 @@ async fn run_dispatcher(
                 let sender = parts.sender;
                 let mut receiver = parts.receiver;
                 let task = parts.task;
+                let mut rotate = false;
 
                 loop {
                     tokio::select! {
@@ -288,22 +345,55 @@ async fn run_dispatcher(
                                 return;
                             }
                         },
+                        changed = tokens.changed() => {
+                            if changed.is_err() {
+                                // Владелец handle пропал — работать не для кого.
+                                drop(sender);
+                                let _ = task.await;
+                                set_state(&state, ConnectionState::Stopped);
+                                return;
+                            }
+                            token = tokens.borrow_and_update().clone();
+                            rotate = true;
+                            break;
+                        }
                         event = receiver.recv() => match event {
                             Some(event) => {
-                                if events.send(InstanceEvent::Server(Box::new(event))).is_err() {
-                                    // Нет подписчиков — не повод рвать соединение.
-                                }
+                                // Нет подписчиков — не повод рвать соединение.
+                                let _ = events.send(InstanceEvent::Server(Box::new(event)));
                             }
                             None => break,
                         },
                     }
                 }
                 let _ = task.await;
+                if rotate {
+                    // Новый токен: переподключаемся сразу, без backoff.
+                    attempt = 0;
+                    continue;
+                }
             }
-            Err(WsError::AuthRejected { message, code }) => {
-                let _ = events.send(InstanceEvent::AuthRejected { message, code });
-                set_state(&state, ConnectionState::Stopped);
-                return;
+            Err(WsError::AuthFailed { failure, message }) => {
+                let _ = events.send(InstanceEvent::AuthRejected {
+                    failure,
+                    message: message.clone(),
+                    code: None,
+                });
+                if failure.is_fatal() {
+                    set_state(&state, ConnectionState::Stopped);
+                    return;
+                }
+                if failure.is_recoverable() {
+                    // Ждём новый токен (reattach / смена пароля) или shutdown.
+                    set_state(&state, ConnectionState::Reconnecting { attempt });
+                    if !wait_for_token(&mut tokens, &mut commands, &state).await {
+                        return;
+                    }
+                    token = tokens.borrow_and_update().clone();
+                    attempt = 0;
+                    continue;
+                }
+                tracing::warn!(%message, base = %base, "ws auth failed; will retry");
             }
             Err(err) => {
                 tracing::warn!(%err, base = %base, "ws connect failed; will retry");
@@ -317,6 +407,35 @@ async fn run_dispatcher(
         wait_backoff(delay, &mut commands, &state).await;
         if state.borrow().eq(&ConnectionState::Stopped) {
             return;
+        }
+    }
+}
+
+/// Ждёт новый токен или shutdown.
+///
+/// Возвращает `true`, если пришёл новый токен и пора переподключаться;
+/// `false` — если нужно завершить диспетчер (shutdown или пропал владелец).
+async fn wait_for_token(
+    tokens: &mut watch::Receiver<AccessToken>,
+    commands: &mut mpsc::Receiver<Command>,
+    state: &watch::Sender<ConnectionState>,
+) -> bool {
+    loop {
+        tokio::select! {
+            changed = tokens.changed() => {
+                if changed.is_err() {
+                    set_state(state, ConnectionState::Stopped);
+                    return false;
+                }
+                return true;
+            }
+            cmd = commands.recv() => match cmd {
+                Some(Command::Shutdown) | None => {
+                    set_state(state, ConnectionState::Stopped);
+                    return false;
+                }
+                Some(Command::Send(_)) => {}
+            },
         }
     }
 }

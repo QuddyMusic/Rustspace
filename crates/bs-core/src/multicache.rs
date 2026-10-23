@@ -478,6 +478,7 @@ mod tests {
         let unknown = OriginEvent {
             origin: remote(),
             event: InstanceEvent::AuthRejected {
+                failure: bs_ws::AuthFailure::Invalid,
                 message: "nope".into(),
                 code: None,
             },
