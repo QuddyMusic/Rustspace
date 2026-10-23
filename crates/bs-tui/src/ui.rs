@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 
 use crate::app::{App, Screen, Status};
-use crate::chat::{self, sidebar};
+use crate::chat;
 use crate::login::Field;
 use crate::social::{self, SocialState, SocialTab};
 
@@ -172,7 +172,7 @@ fn render_chat(frame: &mut Frame<'_>, app: &App, area: Rect) {
         return;
     };
 
-    render_sidebar(frame, app, cache, sidebar_area);
+    render_sidebar(frame, app, sidebar_area);
 
     let channel_id = app.chat().current_channel_id(cache);
     let channel_name = channel_id
@@ -248,8 +248,8 @@ fn render_chat(frame: &mut Frame<'_>, app: &App, area: Rect) {
     );
 }
 
-fn render_sidebar(frame: &mut Frame<'_>, app: &App, cache: &bs_core::Cache, area: Rect) {
-    let spaces = sidebar(cache);
+fn render_sidebar(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let spaces = chat::combined_sidebar(app.multi());
     let mut items: Vec<ListItem<'_>> = Vec::new();
     for (space_index, space) in spaces.iter().enumerate() {
         let space_style = if space_index == app.chat().space_index() {
@@ -259,10 +259,14 @@ fn render_sidebar(frame: &mut Frame<'_>, app: &App, cache: &bs_core::Cache, area
         } else {
             Style::default().add_modifier(Modifier::BOLD)
         };
-        items.push(ListItem::new(Line::from(Span::styled(
-            space.name.clone(),
-            space_style,
-        ))));
+        let mut spans = vec![Span::styled(space.name.clone(), space_style)];
+        if &space.origin != app.active() {
+            spans.push(Span::styled(
+                format!(" @{}", instance_label(&space.origin)),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        items.push(ListItem::new(Line::from(spans)));
         if space_index != app.chat().space_index() {
             continue;
         }

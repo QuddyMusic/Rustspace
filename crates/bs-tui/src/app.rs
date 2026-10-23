@@ -258,8 +258,10 @@ impl App {
 
     /// Общие действия после смены инстанса: пересчёт курсоров и подгрузка.
     fn after_switch(&mut self) {
+        let active = self.active.clone();
+        self.chat.follow(&active);
+        self.chat.clamp_multi(&self.multi);
         if let Some(cache) = self.multi.cache(&self.active) {
-            self.chat.clamp(cache);
             self.social.clamp(cache);
         }
         self.screen = Screen::Chat;
@@ -341,10 +343,11 @@ impl App {
                     self.multi.insert_ready(origin.clone(), *payload);
                 }
                 self.states.insert(origin.clone(), Status::Connected);
-                self.active = origin;
+                self.active = origin.clone();
                 self.screen = Screen::Chat;
+                self.chat.follow(&origin);
+                self.chat.clamp_multi(&self.multi);
                 if let Some(cache) = self.multi.cache(&self.active) {
-                    self.chat.clamp(cache);
                     self.social.clamp(cache);
                 }
                 self.refresh_social();
@@ -358,7 +361,7 @@ impl App {
                     && origin == self.active
                     && let Some(cache) = self.multi.cache(&self.active)
                 {
-                    self.chat.clamp(cache);
+                    self.chat.clamp_multi(&self.multi);
                     self.social.clamp(cache);
                 }
             }
@@ -559,26 +562,32 @@ impl App {
 
     /// Сдвигает выбор канала на `delta`.
     pub fn nav_channel(&mut self, delta: isize) {
-        {
-            let active = self.active.clone();
-            let Some(cache) = self.multi.cache(&active) else {
-                return;
-            };
-            self.chat.move_channel(cache, delta);
-        }
+        self.chat.move_channel_multi(&self.multi, delta);
+        self.sync_active();
         self.ack_current_channel();
     }
 
     /// Сдвигает выбор пространства на `delta`.
     pub fn nav_space(&mut self, delta: isize) {
-        {
-            let active = self.active.clone();
-            let Some(cache) = self.multi.cache(&active) else {
-                return;
-            };
-            self.chat.move_space(cache, delta);
-        }
+        self.chat.move_space_multi(&self.multi, delta);
+        self.sync_active();
         self.ack_current_channel();
+    }
+
+    /// Держит `active` в согласии с инстансом, который выбран в сайдбаре.
+    ///
+    /// Объединённый сайдбар позволяет уйти на пространство другого инстанса
+    /// стрелками — тогда меняется и `active`, и все запросы/события уходят
+    /// уже туда.
+    fn sync_active(&mut self) {
+        let origin = self.chat.origin().clone();
+        if origin != self.active && self.multi.contains(&origin) {
+            self.active = origin;
+            if let Some(cache) = self.multi.cache(&self.active) {
+                self.social.clamp(cache);
+            }
+            self.refresh_social();
+        }
     }
 
     /// Отправляет REST-запрос фоновой сессии.

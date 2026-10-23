@@ -5,12 +5,14 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bs_core::Cache;
-use bs_types::MessageWithUser;
+use bs_core::{Cache, MultiCache};
+use bs_types::{MessageWithUser, Origin};
 
 /// Пространство в сайдбаре: id, имя и его каналы.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpaceEntry {
+    /// Инстанс, которому принадлежит пространство.
+    pub origin: Origin,
     /// Идентификатор пространства.
     pub id: String,
     /// Отображаемое имя.
@@ -36,6 +38,11 @@ pub struct ChannelEntry {
 /// прыгал бы между кадрами. Пространства — по имени, каналы — по `position`,
 /// затем по имени.
 pub fn sidebar(cache: &Cache) -> Vec<SpaceEntry> {
+    sidebar_for(&Origin::Home, cache)
+}
+
+/// Собирает сайдбар одного инстанса; `origin` попадает в каждый элемент.
+pub fn sidebar_for(origin: &Origin, cache: &Cache) -> Vec<SpaceEntry> {
     let mut spaces: Vec<SpaceEntry> = cache
         .spaces()
         .map(|swc| {
@@ -50,6 +57,7 @@ pub fn sidebar(cache: &Cache) -> Vec<SpaceEntry> {
                 .collect();
             channels.sort_by(|a, b| a.name.cmp(&b.name));
             SpaceEntry {
+                origin: origin.clone(),
                 id: swc.space.id.clone(),
                 name: swc.space.name.clone(),
                 channels,
@@ -57,6 +65,23 @@ pub fn sidebar(cache: &Cache) -> Vec<SpaceEntry> {
         })
         .collect();
     spaces.sort_by(|a, b| a.name.cmp(&b.name));
+    spaces
+}
+
+/// Объединённый сайдбар всех подключённых инстансов.
+pub fn combined_sidebar(multi: &MultiCache) -> Vec<SpaceEntry> {
+    let mut origins = multi.origins();
+    origins.sort_by(|a, b| {
+        b.is_home()
+            .cmp(&a.is_home())
+            .then_with(|| a.as_web_str().cmp(&b.as_web_str()))
+    });
+    let mut spaces = Vec::new();
+    for origin in &origins {
+        if let Some(cache) = multi.cache(origin) {
+            spaces.extend(sidebar_for(origin, cache));
+        }
+    }
     spaces
 }
 
@@ -165,8 +190,9 @@ pub fn chat_command(c: char) -> Option<ChatCommand> {
 }
 
 /// Выбор в сайдбаре, выбранное сообщение и текст композера.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ChatState {
+    origin: Origin,
     space: usize,
     channel: usize,
     composer: String,
@@ -176,10 +202,45 @@ pub struct ChatState {
     last_ack: Option<(String, String)>,
 }
 
+impl Default for ChatState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChatState {
-    /// Пустое состояние: первое пространство, первый канал.
+    /// Пустое состояние: домашний инстанс, первое пространство, первый канал.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            origin: Origin::Home,
+            space: 0,
+            channel: 0,
+            composer: String::new(),
+            typing_sent_for: None,
+            selected: None,
+            mode: ComposerMode::New,
+            last_ack: None,
+        }
+    }
+
+    /// Инстанс, к которому относится текущий выбор.
+    pub fn origin(&self) -> &Origin {
+        &self.origin
+    }
+
+    /// Переключает выбор на другой инстанс, сбрасывая позицию и правку.
+    ///
+    /// Возвращает `true`, если инстанс действительно сменился: вызывающий
+    /// по этому флагу понимает, нужно ли пересчитывать границы (`clamp`).
+    pub fn follow(&mut self, origin: &Origin) -> bool {
+        if &self.origin == origin {
+            return false;
+        }
+        self.origin = origin.clone();
+        self.space = 0;
+        self.channel = 0;
+        self.reset_selection();
+        true
     }
 
     /// Индекс выбранного пространства.
@@ -226,6 +287,38 @@ impl ChatState {
         true
     }
 
+    /// Пересчитывает выбор по объединённому списку всех инстансов.
+    pub fn clamp_multi(&mut self, multi: &MultiCache) {
+        let spaces = combined_sidebar(multi);
+        if spaces.is_empty() {
+            self.space = 0;
+            self.channel = 0;
+            self.selected = None;
+            self.cancel_edit();
+            return;
+        }
+        if !spaces.iter().any(|s| s.origin == self.origin) {
+            self.origin = spaces[0].origin.clone();
+            self.space = 0;
+            self.channel = 0;
+        }
+        self.space = self.space.min(spaces.len() - 1);
+        if spaces[self.space].origin != self.origin {
+            self.space = spaces
+                .iter()
+                .position(|s| s.origin == self.origin)
+                .unwrap_or(0);
+            self.channel = 0;
+        }
+        let channels = spaces[self.space].channels.len();
+        self.channel = if channels == 0 {
+            0
+        } else {
+            self.channel.min(channels - 1)
+        };
+        self.clamp_selection_in(multi.cache(&self.origin));
+    }
+
     /// Пересчитывает выбор после смены данных: индексы зажимаются в границы.
     pub fn clamp(&mut self, cache: &Cache) {
         let spaces = sidebar(cache);
@@ -263,6 +356,41 @@ impl ChatState {
     /// Сдвигает выбор канала на `delta` с зажимом в границы.
     pub fn move_channel(&mut self, cache: &Cache, delta: isize) {
         let spaces = sidebar(cache);
+        let Some(space) = spaces.get(self.space) else {
+            return;
+        };
+        let count = space.channels.len();
+        if count == 0 {
+            return;
+        }
+        let next = self.channel.saturating_add_signed(delta).min(count - 1);
+        if next != self.channel {
+            self.channel = next;
+            self.reset_selection();
+        }
+    }
+
+    /// Сдвигает выбор пространства по объединённому списку инстансов.
+    pub fn move_space_multi(&mut self, multi: &MultiCache, delta: isize) {
+        let spaces = combined_sidebar(multi);
+        if spaces.is_empty() {
+            return;
+        }
+        let next = self
+            .space
+            .saturating_add_signed(delta)
+            .min(spaces.len() - 1);
+        if next != self.space {
+            self.space = next;
+            self.channel = 0;
+            self.origin = spaces[next].origin.clone();
+            self.reset_selection();
+        }
+    }
+
+    /// Сдвигает выбор канала по объединённому списку инстансов.
+    pub fn move_channel_multi(&mut self, multi: &MultiCache, delta: isize) {
+        let spaces = combined_sidebar(multi);
         let Some(space) = spaces.get(self.space) else {
             return;
         };
@@ -345,6 +473,16 @@ impl ChatState {
     /// Если выбранное сообщение исчезло (удалено или сменился канал),
     /// выбирается последнее в ленте, а незавершённая правка отменяется.
     pub fn clamp_selection(&mut self, cache: &Cache) {
+        self.clamp_selection_in(Some(cache));
+    }
+
+    /// То же, но кэш может отсутствовать (инстанс ещё не отдал `ready`).
+    pub fn clamp_selection_in(&mut self, cache: Option<&Cache>) {
+        let Some(cache) = cache else {
+            self.selected = None;
+            self.cancel_edit();
+            return;
+        };
         let channel_id = self.current_channel_id(cache);
         let messages = channel_id
             .as_deref()
@@ -742,5 +880,74 @@ mod tests {
         assert_eq!(chat_command('a'), Some(ChatCommand::Ack));
         assert_eq!(chat_command('x'), None);
         assert_eq!(chat_command('E'), None);
+    }
+
+    fn remote() -> Origin {
+        Origin::parse_web_str("https://remote.example").unwrap()
+    }
+
+    fn multi_two() -> MultiCache {
+        let ready: ReadyPayload = serde_json::from_value(two_spaces_json()).unwrap();
+        let other: ReadyPayload = serde_json::from_value(serde_json::json!({
+            "user": me(),
+            "spaces": [space("s9", "Gamma", &serde_json::json!([channel("c9", "s9", "gamma", 0)]))]
+        }))
+        .unwrap();
+        MultiCache::from_ready([(Origin::Home, ready), (remote(), other)])
+    }
+
+    fn two_spaces_json() -> serde_json::Value {
+        serde_json::json!({
+            "user": me(),
+            "spaces": [
+                space("s1", "Alpha", &serde_json::json!([channel("c1", "s1", "alpha", 0)])),
+                space("s2", "Beta", &serde_json::json!([channel("c3", "s2", "general", 0)]))
+            ]
+        })
+    }
+
+    #[test]
+    fn combined_sidebar_marks_origins() {
+        let multi = multi_two();
+        let spaces = combined_sidebar(&multi);
+        let names: Vec<_> = spaces.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["Alpha", "Beta", "Gamma"]);
+        assert_eq!(spaces[0].origin, Origin::Home);
+        assert_eq!(spaces[1].origin, Origin::Home);
+        assert_eq!(spaces[2].origin, remote());
+    }
+
+    #[test]
+    fn moving_space_crosses_instances() {
+        let multi = multi_two();
+        let mut state = ChatState::new();
+        state.move_space_multi(&multi, 2);
+        assert_eq!(state.space_index(), 2);
+        assert_eq!(state.origin(), &remote());
+        state.move_space_multi(&multi, -2);
+        assert_eq!(state.origin(), &Origin::Home);
+    }
+
+    #[test]
+    fn follow_resets_choice_only_on_real_change() {
+        let mut state = ChatState::new();
+        state.move_space_multi(&multi_two(), 1);
+        assert!(!state.follow(&Origin::Home));
+        assert_eq!(state.space_index(), 1);
+        assert!(state.follow(&remote()));
+        assert_eq!(state.space_index(), 0);
+        assert_eq!(state.origin(), &remote());
+    }
+
+    #[test]
+    fn clamp_multi_falls_back_when_instance_vanishes() {
+        let mut multi = multi_two();
+        let mut state = ChatState::new();
+        state.follow(&remote());
+        state.clamp_multi(&multi);
+        assert_eq!(state.origin(), &remote());
+        multi.remove(&remote());
+        state.clamp_multi(&multi);
+        assert_eq!(state.origin(), &Origin::Home);
     }
 }
