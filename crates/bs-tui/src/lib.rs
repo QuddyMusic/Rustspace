@@ -10,5 +10,6 @@ pub mod app;
 pub mod chat;
 pub mod login;
 pub mod net;
+pub mod social;
 pub mod term;
 pub mod ui;

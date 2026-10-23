@@ -15,6 +15,51 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::login::Credentials;
 
+/// Запрос к REST API, который TUI отправляет фоновой сессии.
+///
+/// WebSocket-события [`ClientEvent`] идут отдельным каналом: у них разная
+/// природа — команда серверу против запроса данных.
+#[derive(Debug, Clone)]
+pub enum NetRequest {
+    /// Список друзей.
+    Friends,
+    /// Список заявок в друзья.
+    FriendRequests,
+    /// Поиск пользователей по подстроке.
+    SearchUsers(String),
+    /// Список личных каналов.
+    DmChannels,
+    /// Отправить заявку в друзья.
+    SendFriendRequest(bs_api::SendFriendRequest),
+    /// Принять или отклонить заявку.
+    RespondFriendRequest(String, bs_api::FriendRequestDecision),
+    /// Отозвать свою заявку.
+    CancelFriendRequest(String),
+    /// Удалить друга.
+    RemoveFriend(String),
+    /// Открыть (или создать) личный канал с пользователем.
+    OpenDm(bs_api::CreateDmRequest),
+}
+
+/// Ответ фоновой сессии на [`NetRequest`].
+#[derive(Debug)]
+pub enum NetResponse {
+    /// Пришли друзья.
+    Friends(Vec<bs_types::Friend>),
+    /// Пришли заявки в друзья.
+    FriendRequests(Vec<bs_types::FriendRequest>),
+    /// Пришли результаты поиска пользователей.
+    Users(Vec<bs_types::User>),
+    /// Пришли личные каналы.
+    DmChannels(Vec<bs_types::DmChannel>),
+    /// Пришёл личный канал (после открытия).
+    DmChannel(Box<bs_types::DmChannel>),
+    /// Запись прошла успешно, данных нет.
+    Done,
+    /// Запрос не удался.
+    Failed(String),
+}
+
 /// Что фоновая сессия сообщает TUI.
 #[derive(Debug)]
 pub enum NetEvent {
@@ -33,6 +78,8 @@ pub enum NetEvent {
 pub struct NetWorker {
     events: std_mpsc::Receiver<NetEvent>,
     commands: tokio_mpsc::UnboundedSender<ClientEvent>,
+    requests: tokio_mpsc::UnboundedSender<NetRequest>,
+    responses: std_mpsc::Receiver<NetResponse>,
     join: Option<thread::JoinHandle<()>>,
 }
 
@@ -44,6 +91,8 @@ impl NetWorker {
     pub fn spawn(creds: Credentials) -> Self {
         let (events_tx, events) = std_mpsc::channel();
         let (commands, commands_rx) = tokio_mpsc::unbounded_channel();
+        let (requests, requests_rx) = tokio_mpsc::unbounded_channel();
+        let (responses_tx, responses) = std_mpsc::channel();
 
         let join = thread::Builder::new()
             .name("bs-tui-net".to_owned())
@@ -60,13 +109,21 @@ impl NetWorker {
                         return;
                     }
                 };
-                runtime.block_on(run_session(creds, &events_tx, commands_rx));
+                runtime.block_on(run_session(
+                    creds,
+                    &events_tx,
+                    commands_rx,
+                    requests_rx,
+                    &responses_tx,
+                ));
             })
             .ok();
 
         Self {
             events,
             commands,
+            requests,
+            responses,
             join,
         }
     }
@@ -81,13 +138,29 @@ impl NetWorker {
         self.commands.send(event).is_ok()
     }
 
+    /// Отправляет REST-запрос. `false` — сессия уже мертва.
+    pub fn request(&self, request: NetRequest) -> bool {
+        self.requests.send(request).is_ok()
+    }
+
+    /// Неблокирующе забирает готовые ответы REST.
+    pub fn drain_responses(&self) -> Vec<NetResponse> {
+        self.responses.try_iter().collect()
+    }
+
     /// Дожидается завершения фонового потока.
     ///
     /// Канал команд закрывается до ожидания: иначе фоновый `select!` никогда
     /// не увидит `None` и поток не завершится.
     pub fn join(self) {
-        let Self { commands, join, .. } = self;
+        let Self {
+            commands,
+            requests,
+            join,
+            ..
+        } = self;
         drop(commands);
+        drop(requests);
         if let Some(join) = join {
             let _ = join.join();
         }
@@ -98,7 +171,10 @@ async fn run_session(
     creds: Credentials,
     events: &std_mpsc::Sender<NetEvent>,
     mut commands: tokio_mpsc::UnboundedReceiver<ClientEvent>,
+    mut requests: tokio_mpsc::UnboundedReceiver<NetRequest>,
+    responses: &std_mpsc::Sender<NetResponse>,
 ) {
+    let mut requests_open = true;
     let mut store = CredentialStore::new();
     let login = InstanceHandle::login(
         &mut store,
@@ -150,6 +226,14 @@ async fn run_session(
                     return;
                 }
             },
+            request = recv_request(&mut requests, &mut requests_open) => {
+                if let Some(request) = request {
+                    let response = handle_request(handle.client(), request).await;
+                    if responses.send(response).is_err() {
+                        return;
+                    }
+                }
+            },
             command = commands.recv() => {
                 let Some(event) = command else {
                     let _ = handle.shutdown().await;
@@ -160,5 +244,69 @@ async fn run_session(
                 }
             }
         }
+    }
+}
+
+/// Ждёт следующий REST-запрос; при закрытом канале «засыпает» навсегда.
+///
+/// Возвращать [`std::future::pending`] нужно, чтобы закрытый канал не давал
+/// `select!` мгновенно готовую ветку и не крутил цикл вхолостую.
+async fn recv_request(
+    requests: &mut tokio_mpsc::UnboundedReceiver<NetRequest>,
+    open: &mut bool,
+) -> Option<NetRequest> {
+    if !*open {
+        return std::future::pending().await;
+    }
+    let request = requests.recv().await;
+    if request.is_none() {
+        *open = false;
+    }
+    request
+}
+
+/// Выполняет REST-запрос и превращает результат в [`NetResponse`].
+async fn handle_request(client: &bs_api::ApiClient, request: NetRequest) -> NetResponse {
+    match request {
+        NetRequest::Friends => match client.friends().await {
+            Ok(friends) => NetResponse::Friends(friends),
+            Err(err) => NetResponse::Failed(err.to_string()),
+        },
+        NetRequest::FriendRequests => match client.friend_requests().await {
+            Ok(requests) => NetResponse::FriendRequests(requests),
+            Err(err) => NetResponse::Failed(err.to_string()),
+        },
+        NetRequest::SearchUsers(query) => match client.search_users(&query).await {
+            Ok(users) => NetResponse::Users(users),
+            Err(err) => NetResponse::Failed(err.to_string()),
+        },
+        NetRequest::DmChannels => match client.dm_channels().await {
+            Ok(channels) => NetResponse::DmChannels(channels),
+            Err(err) => NetResponse::Failed(err.to_string()),
+        },
+        NetRequest::OpenDm(request) => match client.open_dm(&request).await {
+            Ok(channel) => NetResponse::DmChannel(Box::new(channel)),
+            Err(err) => NetResponse::Failed(err.to_string()),
+        },
+        NetRequest::SendFriendRequest(request) => {
+            match client.send_friend_request(&request).await {
+                Ok(_) => NetResponse::Done,
+                Err(err) => NetResponse::Failed(err.to_string()),
+            }
+        }
+        NetRequest::RespondFriendRequest(id, decision) => {
+            match client.respond_friend_request(&id, decision).await {
+                Ok(()) => NetResponse::Done,
+                Err(err) => NetResponse::Failed(err.to_string()),
+            }
+        }
+        NetRequest::CancelFriendRequest(id) => match client.cancel_friend_request(&id).await {
+            Ok(()) => NetResponse::Done,
+            Err(err) => NetResponse::Failed(err.to_string()),
+        },
+        NetRequest::RemoveFriend(user_id) => match client.remove_friend(&user_id).await {
+            Ok(()) => NetResponse::Done,
+            Err(err) => NetResponse::Failed(err.to_string()),
+        },
     }
 }

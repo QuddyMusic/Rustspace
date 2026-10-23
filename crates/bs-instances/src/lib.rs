@@ -5,6 +5,8 @@
 //! - [`InstanceHandle`] — подключение к одному инстансу: HTTP-клиент,
 //!   WebSocket-соединение и фоновая задача с backoff-переподключением.
 //! - [`InstanceRegistry`] — набор активных подключений по [`Origin`].
+//! - [`EventMultiplexer`] — объединённый поток событий всех инстансов
+//!   с пометкой origin-ом (аналог общего обработчика в `useWebSocket.ts`).
 //! - [`ReconnectPolicy`] — параметры экспоненциального backoff.
 //!
 //! # Пример
@@ -35,11 +37,13 @@
 
 pub mod error;
 pub mod handle;
+pub mod multiplex;
 pub mod reconnect;
 pub mod registry;
 
 pub use error::InstanceError;
 pub use handle::{ConnectionState, INITIAL_READY_TIMEOUT, InstanceEvent, InstanceHandle};
+pub use multiplex::{EventMultiplexer, OriginEvent, RegistryStatus, SharedMultiplexer};
 pub use reconnect::ReconnectPolicy;
 pub use registry::InstanceRegistry;
 

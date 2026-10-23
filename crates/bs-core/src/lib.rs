@@ -24,10 +24,12 @@
 
 pub mod apply;
 mod error;
+mod multicache;
 mod session;
 mod state;
 
 pub use apply::{apply, apply_at};
 pub use error::CoreError;
+pub use multicache::{DrainStats, MultiCache, Routed};
 pub use session::{CoreSession, DRAIN_LIMIT};
 pub use state::{Cache, TYPING_TTL_MS, TypingEntry};

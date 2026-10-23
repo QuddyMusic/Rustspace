@@ -8,6 +8,7 @@ use crate::bridge::Bridge;
 use crate::logic::{connection_label, next_screen, should_wake};
 use crate::screens::chat::ChatScreen;
 use crate::screens::login::LoginScreen;
+use crate::screens::social::SocialScreen;
 
 /// Как часто будить UI, пока идёт логин или есть живое соединение.
 const WAKE_INTERVAL: Duration = Duration::from_millis(200);
@@ -19,6 +20,8 @@ pub(crate) enum Screen {
     Login,
     /// Основной интерфейс.
     Chat,
+    /// Друзья, заявки, поиск, личные каналы.
+    Social,
 }
 
 /// Состояние приложения целиком.
@@ -27,6 +30,7 @@ pub(crate) struct BackspaceApp {
     pub(crate) bridge: Bridge,
     pub(crate) login: LoginScreen,
     pub(crate) chat: ChatScreen,
+    pub(crate) social: SocialScreen,
 }
 
 impl BackspaceApp {
@@ -37,6 +41,7 @@ impl BackspaceApp {
             bridge: Bridge::new(runtime),
             login: LoginScreen::default(),
             chat: ChatScreen::default(),
+            social: SocialScreen::default(),
         }
     }
 }
@@ -65,14 +70,35 @@ impl eframe::App for BackspaceApp {
         let lost = self.bridge.take_session_lost();
         if lost {
             self.bridge.reset_session();
+            self.social.reset();
         }
         self.screen = next_screen(self.screen, ready, lost);
+
+        // Только что открытый личный канал — сразу переключаемся в чат.
+        if let Some(channel) = self.bridge.take_opened_dm() {
+            self.chat.selected_channel = Some(channel);
+            self.screen = Screen::Chat;
+        }
 
         match self.screen {
             Screen::Login => self.login.show(ui, &mut self.bridge),
             Screen::Chat => {
                 self.status_bar(ui);
-                self.chat.show(ui, &self.bridge);
+                let open_social = self.chat.show(ui, &self.bridge);
+                if open_social {
+                    self.social.reset();
+                    self.screen = Screen::Social;
+                }
+            }
+            Screen::Social => {
+                self.status_bar(ui);
+                if self.social.show(ui, &self.bridge) {
+                    self.screen = Screen::Chat;
+                }
+                if let Some(channel) = self.social.take_open_channel() {
+                    self.chat.selected_channel = Some(channel);
+                    self.screen = Screen::Chat;
+                }
             }
         }
 

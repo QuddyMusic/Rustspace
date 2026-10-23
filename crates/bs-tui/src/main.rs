@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use bs_tui::app::{App, Screen};
+use bs_tui::chat::{self, ChatCommand};
 use bs_tui::term::TerminalGuard;
 use bs_tui::ui;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -54,6 +55,51 @@ fn handle_key(app: &mut App, key: KeyEvent) {
     match app.screen() {
         Screen::Login => handle_login_key(app, key),
         Screen::Chat => handle_chat_key(app, key),
+        Screen::Social => handle_social_key(app, key),
+    }
+}
+
+fn handle_social_key(app: &mut App, key: KeyEvent) {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let typing = app.social().tab() == bs_tui::social::SocialTab::Search;
+    match key.code {
+        KeyCode::Esc => app.close_social(),
+        KeyCode::Char('q') if ctrl => app.quit(),
+        KeyCode::Left => app.social_prev_tab(),
+        KeyCode::Right => app.social_next_tab(),
+        KeyCode::Down => app.social_move(1),
+        KeyCode::Up => app.social_move(-1),
+        KeyCode::Enter => {
+            if typing {
+                app.run_search();
+            } else {
+                app.social_open_dm();
+            }
+        }
+        KeyCode::Backspace => {
+            if typing {
+                app.social_backspace();
+            }
+        }
+        KeyCode::Char('r') if !typing => {
+            app.load_tab();
+        }
+        KeyCode::Char('a') if !typing => {
+            app.social_accept_request();
+        }
+        KeyCode::Char('d') if !typing => {
+            app.social_decline_request();
+        }
+        KeyCode::Char('x') if !typing => {
+            if !app.social_cancel_request() {
+                app.social_remove_friend();
+            }
+        }
+        KeyCode::Char('n') if !typing => {
+            app.social_send_request();
+        }
+        KeyCode::Char(c) if typing => app.social_push_char(c),
+        _ => {}
     }
 }
 
@@ -74,20 +120,56 @@ fn handle_login_key(app: &mut App, key: KeyEvent) {
 fn handle_chat_key(app: &mut App, key: KeyEvent) {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
-        KeyCode::Esc => app.logout(),
+        KeyCode::Esc => {
+            if app.chat().is_editing() {
+                app.cancel_edit();
+            } else {
+                app.logout();
+            }
+        }
         KeyCode::Char('q') if ctrl => app.quit(),
-        KeyCode::Tab | KeyCode::Down => app.nav_channel(1),
-        KeyCode::BackTab | KeyCode::Up => app.nav_channel(-1),
+        KeyCode::Tab => app.nav_channel(1),
+        KeyCode::BackTab => app.nav_channel(-1),
+        KeyCode::Down => app.nav_message(1),
+        KeyCode::Up => app.nav_message(-1),
         KeyCode::Left => app.nav_space(-1),
         KeyCode::Right => app.nav_space(1),
         KeyCode::Enter => {
             app.send_composer();
         }
         KeyCode::Backspace => app.chat_mut().backspace(),
-        KeyCode::Char(c) => {
-            app.chat_mut().push_char(c);
-            app.notify_typing();
-        }
+        KeyCode::Char('s') if ctrl => app.open_social(),
+        KeyCode::Char(c) => handle_chat_char(app, c),
         _ => {}
     }
+}
+
+/// Одиночная клавиша в чате: команда или символ в композер.
+///
+/// Команды срабатывают только при пустом композере и вне режима правки,
+/// иначе `e`, `d`, `+`, `-` и `a` — обычный текст сообщения.
+fn handle_chat_char(app: &mut App, c: char) {
+    let plain = app.chat().composer().is_empty() && !app.chat().is_editing();
+    if plain && let Some(command) = chat::chat_command(c) {
+        match command {
+            ChatCommand::Edit => {
+                app.edit_selected();
+            }
+            ChatCommand::Delete => {
+                app.delete_selected();
+            }
+            ChatCommand::React => {
+                app.react_selected(chat::DEFAULT_REACTION);
+            }
+            ChatCommand::Unreact => {
+                app.unreact_selected(chat::DEFAULT_REACTION);
+            }
+            ChatCommand::Ack => {
+                app.ack_current_channel();
+            }
+        }
+        return;
+    }
+    app.chat_mut().push_char(c);
+    app.notify_typing();
 }

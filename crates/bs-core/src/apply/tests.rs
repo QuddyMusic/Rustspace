@@ -415,3 +415,197 @@ fn channel_deleted_drops_typing_entries() {
     assert!(apply(&mut c, deleted));
     assert!(!c.is_typing("c1", "u2", 0));
 }
+
+// ─── Друзья ───────────────────────────────────────────────────────────────
+
+fn friend_json(id: &str, username: &str, added_at: i64) -> String {
+    format!(
+        r#"{{"id":"{id}","username":"{username}","displayName":null,
+            "avatar":null,"banner":null,"accentColor":null,"avatarColor":null,
+            "bio":null,"status":"online","customStatus":null,
+            "createdAt":1,"addedAt":{added_at},"homeUserId":null,"homeInstance":null}}"#
+    )
+}
+
+fn friend_request_json(id: &str, from: &str, to: &str) -> String {
+    format!(
+        r#"{{"id":"{id}","fromId":"{from}","toId":"{to}",
+            "status":"pending","createdAt":5,"user":null}}"#
+    )
+}
+
+fn friend(id: &str, username: &str, added_at: i64) -> bs_types::Friend {
+    serde_json::from_str(&friend_json(id, username, added_at)).expect("друг парсится")
+}
+
+fn friend_request(id: &str, from: &str, to: &str) -> bs_types::FriendRequest {
+    serde_json::from_str(&friend_request_json(id, from, to)).expect("заявка парсится")
+}
+
+#[test]
+fn friend_requests_are_stored_and_deduplicated() {
+    let mut c = cache();
+    let incoming = friend_request("r1", "u2", "u1");
+    assert!(apply(
+        &mut c,
+        ServerEvent::FriendRequestReceived {
+            request: incoming.clone()
+        }
+    ));
+    assert!(!apply(
+        &mut c,
+        ServerEvent::FriendRequestReceived { request: incoming }
+    ));
+
+    let outgoing = friend_request("r2", "u1", "u3");
+    assert!(apply(
+        &mut c,
+        ServerEvent::FriendRequestSent { request: outgoing }
+    ));
+
+    assert_eq!(c.friend_requests().count(), 2);
+    assert_eq!(c.incoming_friend_requests().count(), 1);
+    assert_eq!(c.outgoing_friend_requests().count(), 1);
+    assert_eq!(
+        c.incoming_friend_requests().next().map(|r| r.id.as_str()),
+        Some("r1")
+    );
+    assert!(c.friend_request("r2").is_some());
+    assert!(c.friend_request("nope").is_none());
+}
+
+#[test]
+fn friend_request_accepted_adds_friend_and_drops_request() {
+    let mut c = cache();
+    assert!(apply(
+        &mut c,
+        ServerEvent::FriendRequestReceived {
+            request: friend_request("r1", "u2", "u1")
+        }
+    ));
+
+    let bob = friend("u2", "bob", 10);
+    assert!(apply(
+        &mut c,
+        ServerEvent::FriendRequestAccepted {
+            friend: bob.clone(),
+            request_id: "r1".to_owned()
+        }
+    ));
+    assert!(c.friend_request("r1").is_none());
+    assert_eq!(c.friend("u2"), Some(&bob));
+    assert_eq!(c.friends().count(), 1);
+    assert_eq!(c.user_status("u2"), Some(UserStatus::Online));
+
+    // Повторное принятие той же заявки ничего не меняет.
+    assert!(!apply(
+        &mut c,
+        ServerEvent::FriendRequestAccepted {
+            friend: bob,
+            request_id: "r1".to_owned()
+        }
+    ));
+}
+
+#[test]
+fn friend_request_cancelled_and_declined_remove_request() {
+    let mut c = cache();
+    assert!(apply(
+        &mut c,
+        ServerEvent::FriendRequestSent {
+            request: friend_request("r1", "u1", "u2")
+        }
+    ));
+    assert!(apply(
+        &mut c,
+        ServerEvent::FriendRequestReceived {
+            request: friend_request("r2", "u3", "u1")
+        }
+    ));
+
+    assert!(apply(
+        &mut c,
+        ServerEvent::FriendRequestCancelled {
+            request_id: "r1".to_owned(),
+            user_id: "u2".to_owned()
+        }
+    ));
+    assert!(c.friend_request("r1").is_none());
+
+    assert!(apply(
+        &mut c,
+        ServerEvent::FriendRequestDeclined {
+            request_id: "r2".to_owned(),
+            user_id: "u1".to_owned()
+        }
+    ));
+    assert!(c.friend_request("r2").is_none());
+
+    // Повторное удаление — без изменений.
+    assert!(!apply(
+        &mut c,
+        ServerEvent::FriendRequestCancelled {
+            request_id: "r1".to_owned(),
+            user_id: "u2".to_owned()
+        }
+    ));
+    assert!(c.friend_requests().next().is_none());
+}
+
+#[test]
+fn friend_removed_drops_friend_only_once() {
+    let mut c = cache();
+    assert!(apply(
+        &mut c,
+        ServerEvent::FriendRequestAccepted {
+            friend: friend("u2", "bob", 10),
+            request_id: "r1".to_owned()
+        }
+    ));
+    assert!(c.friend("u2").is_some());
+
+    assert!(apply(
+        &mut c,
+        ServerEvent::FriendRemoved {
+            user_id: "u2".to_owned()
+        }
+    ));
+    assert!(c.friend("u2").is_none());
+    assert!(!apply(
+        &mut c,
+        ServerEvent::FriendRemoved {
+            user_id: "u2".to_owned()
+        }
+    ));
+}
+
+#[test]
+fn friends_are_sorted_case_insensitively() {
+    let mut c = cache();
+    for (id, name) in [("u2", "Zoe"), ("u3", "alice"), ("u4", "Bob")] {
+        assert!(apply(
+            &mut c,
+            ServerEvent::FriendRequestAccepted {
+                friend: friend(id, name, 1),
+                request_id: format!("r-{id}")
+            }
+        ));
+    }
+    let names: Vec<&str> = c.friends().map(|f| f.username.as_str()).collect();
+    assert_eq!(names, ["alice", "Bob", "Zoe"]);
+}
+
+#[test]
+fn friend_relay_failure_does_not_change_cache() {
+    let mut c = cache();
+    assert!(!apply(
+        &mut c,
+        ServerEvent::FriendRequestRelayFailed {
+            request_id: "r1".to_owned(),
+            reason: "timeout".to_owned(),
+            message: "узел недоступен".to_owned(),
+            target_handle: "bob@remote.example".to_owned()
+        }
+    ));
+    assert!(c.friend_requests().next().is_none());
+}

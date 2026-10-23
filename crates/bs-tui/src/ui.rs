@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use crate::app::{App, Screen, Status};
 use crate::chat::{self, sidebar};
 use crate::login::Field;
+use crate::social::{self, SocialState, SocialTab};
 
 /// Сколько последних сообщений показывать в ленте.
 const MESSAGE_WINDOW: usize = 500;
@@ -33,6 +34,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
     match app.screen() {
         Screen::Login => render_login(frame, app, body),
         Screen::Chat => render_chat(frame, app, body),
+        Screen::Social => render_social(frame, app, body),
     }
 
     frame.render_widget(
@@ -126,17 +128,31 @@ fn render_chat(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .and_then(|id| cache.channel(id))
         .map_or_else(|| " Чат ".to_owned(), |c| format!(" #{} ", c.name));
 
-    let rows = channel_id
-        .as_deref()
-        .map_or_else(Vec::new, |id| chat::message_rows(cache, id, MESSAGE_WINDOW));
+    let me = cache.me().id.as_str();
+    let rows = channel_id.as_deref().map_or_else(Vec::new, |id| {
+        chat::message_rows(cache, id, MESSAGE_WINDOW, me)
+    });
+    let selected = app.chat().selected_message_id();
     let lines: Vec<Line<'_>> = rows
         .iter()
-        .map(|(author, text)| {
-            Line::from(vec![
-                Span::styled(author.clone(), Style::default().fg(Color::Magenta)),
+        .map(|row| {
+            let mut spans = vec![
+                Span::styled(row.author.clone(), Style::default().fg(Color::Magenta)),
                 Span::raw(": "),
-                Span::raw(text.clone()),
-            ])
+                Span::raw(row.text.clone()),
+            ];
+            if row.edited {
+                spans.push(Span::styled(
+                    " (изменено)",
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            let line = Line::from(spans);
+            if selected == Some(row.id.as_str()) {
+                line.style(Style::default().bg(Color::DarkGray))
+            } else {
+                line
+            }
         })
         .collect();
 
@@ -161,9 +177,20 @@ fn render_chat(frame: &mut Frame<'_>, app: &App, area: Rect) {
     };
     frame.render_widget(Paragraph::new(typing_line), typing_area);
 
+    let composer_title = if app.chat().is_editing() {
+        " Правка (Esc — отмена) "
+    } else {
+        " Сообщение "
+    };
+    let composer_style = if app.chat().is_editing() {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
     frame.render_widget(
         Paragraph::new(app.chat().composer())
-            .block(Block::default().borders(Borders::ALL).title(" Сообщение ")),
+            .style(composer_style)
+            .block(Block::default().borders(Borders::ALL).title(composer_title)),
         composer_area,
     );
 }
@@ -210,12 +237,144 @@ fn render_sidebar(frame: &mut Frame<'_>, app: &App, cache: &bs_core::Cache, area
     );
 }
 
+fn render_social(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let [tabs_area, body, hint_area] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(3),
+        Constraint::Length(2),
+    ])
+    .areas(area);
+
+    let social = app.social();
+    let tabs: Vec<Span<'_>> = [
+        SocialTab::Friends,
+        SocialTab::Requests,
+        SocialTab::Search,
+        SocialTab::Dms,
+    ]
+    .into_iter()
+    .map(|tab| {
+        let title = format!(" {} ", tab.title());
+        if tab == social.tab() {
+            Span::styled(
+                title,
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::raw(title)
+        }
+    })
+    .collect();
+    frame.render_widget(Paragraph::new(Line::from(tabs)), tabs_area);
+
+    let Some(cache) = app.cache() else {
+        frame.render_widget(
+            Paragraph::new("Состояние ещё не загружено")
+                .block(Block::default().borders(Borders::ALL).title(" Социальное ")),
+            body,
+        );
+        return;
+    };
+
+    let cursor = social.cursor();
+    let items = social_items(cache, social);
+
+    let title = format!(" {} ", social.tab().title());
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .highlight_symbol("> ");
+    let mut state = ratatui::widgets::ListState::default();
+    if social.len(cache) > 0 {
+        state.select(Some(cursor));
+    }
+    frame.render_stateful_widget(list, body, &mut state);
+
+    let mut hints: Vec<Line<'_>> = Vec::new();
+    if social.tab() == SocialTab::Search {
+        hints.push(Line::from(vec![
+            Span::raw("Поиск: "),
+            Span::styled(social.query(), Style::default().fg(Color::Cyan)),
+        ]));
+    }
+    if let Some(message) = social.message() {
+        hints.push(Line::from(Span::styled(
+            message.to_owned(),
+            Style::default().fg(Color::Yellow),
+        )));
+    }
+    frame.render_widget(Paragraph::new(hints), hint_area);
+}
+
+/// Строки активного списка социального экрана.
+fn social_items<'a>(cache: &bs_core::Cache, social: &'a SocialState) -> Vec<ListItem<'a>> {
+    match social.tab() {
+        SocialTab::Friends => social::friend_rows(cache)
+            .into_iter()
+            .map(|row| {
+                ListItem::new(Line::from(vec![
+                    Span::styled(row.name, Style::default().fg(Color::Magenta)),
+                    Span::raw(" — "),
+                    Span::styled(row.status, Style::default().fg(Color::DarkGray)),
+                ]))
+            })
+            .collect(),
+        SocialTab::Requests => social::request_rows(cache)
+            .into_iter()
+            .map(|row| {
+                let mark = if row.incoming {
+                    "входящая"
+                } else {
+                    "исходящая"
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(row.name, Style::default().fg(Color::Magenta)),
+                    Span::raw(" — "),
+                    Span::styled(mark, Style::default().fg(Color::DarkGray)),
+                ]))
+            })
+            .collect(),
+        SocialTab::Search => social::user_rows(cache, social.search_results())
+            .into_iter()
+            .map(|row| {
+                let mark = if row.friend {
+                    " (в друзьях)"
+                } else {
+                    ""
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(row.name, Style::default().fg(Color::Magenta)),
+                    Span::styled(mark, Style::default().fg(Color::DarkGray)),
+                ]))
+            })
+            .collect(),
+        SocialTab::Dms => social::dm_rows(cache)
+            .into_iter()
+            .map(|row| {
+                let last = row.last.unwrap_or_default();
+                ListItem::new(Line::from(vec![
+                    Span::styled(row.name, Style::default().fg(Color::Cyan)),
+                    Span::raw(" — "),
+                    Span::styled(last, Style::default().fg(Color::DarkGray)),
+                ]))
+            })
+            .collect(),
+    }
+}
+
 fn footer_hint(app: &App) -> String {
     match app.screen() {
         Screen::Login => format!(
             "Tab — поле, Enter — войти, Esc — выход | {}",
             app.form().hint()
         ),
-        Screen::Chat => "Tab — канал, Enter — отправить, Esc — разлогиниться, q — выход".to_owned(),
+        Screen::Chat => {
+            "Tab — канал, ↑↓ — сообщение, e — правка, d — удалить, +/− — реакция, a — прочитано, Esc — назад".to_owned()
+        }
+        Screen::Social => {
+            "←→ — вкладка, ↑↓ — выбор, Enter — открыть/принять, x — удалить, Esc — назад".to_owned()
+        }
     }
 }

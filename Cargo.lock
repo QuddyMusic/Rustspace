@@ -620,6 +620,7 @@ dependencies = [
 name = "bs-app"
 version = "0.1.0"
 dependencies = [
+ "bs-api",
  "bs-core",
  "bs-identity",
  "bs-instances",
@@ -699,6 +700,7 @@ dependencies = [
 name = "bs-tui"
 version = "0.1.0"
 dependencies = [
+ "bs-api",
  "bs-core",
  "bs-identity",
  "bs-instances",

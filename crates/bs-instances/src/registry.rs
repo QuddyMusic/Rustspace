@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use bs_types::Origin;
 
 use crate::error::InstanceError;
-use crate::handle::InstanceHandle;
+use crate::handle::{ConnectionState, InstanceHandle};
+use crate::multiplex::RegistryStatus;
 
 /// Набор активных подключений к инстансам (домашнему и федеративным).
 #[derive(Debug, Default)]
@@ -73,5 +74,32 @@ impl InstanceRegistry {
     /// Итератор по всем handle.
     pub fn iter(&self) -> impl Iterator<Item = (&Origin, &InstanceHandle)> {
         self.handles.iter()
+    }
+
+    /// Текущее состояние подключений по всем инстансам.
+    ///
+    /// Для UI: переключатель инстансов и индикаторы связи.
+    pub fn status(&self) -> RegistryStatus {
+        let states: HashMap<Origin, ConnectionState> = self
+            .handles
+            .iter()
+            .map(|(origin, handle)| (origin.clone(), handle.state()))
+            .collect();
+        RegistryStatus { states }
+    }
+
+    /// Останавливает все подключения и очищает реестр.
+    ///
+    /// Ошибки отдельных shutdown собираются в `Vec`, чтобы одна проблемная
+    /// сессия не мешала остановить остальные.
+    pub async fn shutdown_all(&mut self) -> Vec<InstanceError> {
+        let handles: Vec<InstanceHandle> = self.handles.drain().map(|(_, h)| h).collect();
+        let mut errors = Vec::new();
+        for handle in handles {
+            if let Err(err) = handle.shutdown().await {
+                errors.push(err);
+            }
+        }
+        errors
     }
 }

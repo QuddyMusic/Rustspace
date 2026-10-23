@@ -15,6 +15,7 @@ mod bridge;
 mod fake_instance;
 mod logic;
 mod screens;
+mod social;
 
 fn main() -> eframe::Result {
     tracing_subscriber::fmt()

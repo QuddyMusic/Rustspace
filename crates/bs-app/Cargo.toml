@@ -13,6 +13,7 @@ name = "backspace-rs"
 path = "src/main.rs"
 
 [dependencies]
+bs-api = { workspace = true }
 bs-core = { workspace = true }
 bs-instances = { workspace = true }
 bs-identity = { workspace = true }

@@ -16,6 +16,48 @@ use bs_types::{ClientEvent, ClientKind, Origin, ReadyPayload, ServerEvent};
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc as tokio_mpsc};
 
+/// REST-запрос, который GUI отправляет фоновой сессии.
+#[derive(Debug, Clone)]
+pub(crate) enum BridgeRequest {
+    /// Список друзей.
+    Friends,
+    /// Список заявок в друзья.
+    FriendRequests,
+    /// Поиск пользователей по подстроке.
+    SearchUsers(String),
+    /// Список личных каналов.
+    DmChannels,
+    /// Открыть (или создать) личный канал с пользователем.
+    OpenDm(String),
+    /// Отправить заявку в друзья по имени пользователя.
+    SendFriendRequest(String),
+    /// Принять или отклонить входящую заявку.
+    RespondFriendRequest(String, bool),
+    /// Отозвать свою заявку.
+    CancelFriendRequest(String),
+    /// Удалить друга.
+    RemoveFriend(String),
+}
+
+/// Ответ фоновой сессии на [`BridgeRequest`].
+#[derive(Debug)]
+pub(crate) enum BridgeResponse {
+    /// Пришли друзья.
+    Friends(Vec<bs_types::Friend>),
+    /// Пришли заявки в друзья.
+    FriendRequests(Vec<bs_types::FriendRequest>),
+    /// Пришли результаты поиска пользователей.
+    Users(Vec<bs_types::User>),
+    /// Пришли личные каналы.
+    DmChannels(Vec<bs_types::DmChannel>),
+    /// Открыт личный канал.
+    DmChannel(Box<bs_types::DmChannel>),
+    /// Запись прошла успешно.
+    Done,
+    /// Запрос не удался.
+    Failed(String),
+}
+
 /// Событие из фоновой задачи в GUI-поток.
 #[derive(Debug)]
 enum BridgeEvent {
@@ -37,6 +79,15 @@ pub(crate) struct Bridge {
     runtime: Handle,
     events: Option<std_mpsc::Receiver<BridgeEvent>>,
     commands: Option<tokio_mpsc::UnboundedSender<ClientEvent>>,
+    requests: Option<tokio_mpsc::UnboundedSender<BridgeRequest>>,
+    responses: Option<std_mpsc::Receiver<BridgeResponse>>,
+    friends: Vec<bs_types::Friend>,
+    friend_requests: Vec<bs_types::FriendRequest>,
+    dm_channels: Vec<bs_types::DmChannel>,
+    search_results: Vec<bs_types::User>,
+    social_error: Option<String>,
+    /// Канал, только что открытый по запросу `OpenDm` (нужно переключить чат).
+    opened_dm: Option<String>,
     cache: Option<Cache>,
     ready: bool,
     busy: bool,
@@ -72,6 +123,14 @@ impl Bridge {
             runtime,
             events: None,
             commands: None,
+            requests: None,
+            responses: None,
+            friends: Vec::new(),
+            friend_requests: Vec::new(),
+            dm_channels: Vec::new(),
+            search_results: Vec::new(),
+            social_error: None,
+            opened_dm: None,
             cache: None,
             ready: false,
             busy: false,
@@ -87,6 +146,14 @@ impl Bridge {
             let next = self.events.as_ref().map(std_mpsc::Receiver::try_recv);
             match next {
                 Some(Ok(event)) => self.handle_event(event),
+                Some(Err(std_mpsc::TryRecvError::Empty | std_mpsc::TryRecvError::Disconnected))
+                | None => break,
+            }
+        }
+        loop {
+            let next = self.responses.as_ref().map(std_mpsc::Receiver::try_recv);
+            match next {
+                Some(Ok(response)) => self.handle_response(response),
                 Some(Err(std_mpsc::TryRecvError::Empty | std_mpsc::TryRecvError::Disconnected))
                 | None => break,
             }
@@ -161,6 +228,14 @@ impl Bridge {
     pub(crate) fn reset_session(&mut self) {
         self.events = None;
         self.commands = None;
+        self.requests = None;
+        self.responses = None;
+        self.friends.clear();
+        self.friend_requests.clear();
+        self.dm_channels.clear();
+        self.search_results.clear();
+        self.social_error = None;
+        self.opened_dm = None;
         self.cache = None;
         self.ready = false;
         self.session_lost = false;
@@ -188,8 +263,12 @@ impl Bridge {
 
         let (events_tx, events_rx) = std_mpsc::channel();
         let (commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
+        let (requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
+        let (responses_tx, responses_rx) = std_mpsc::channel();
         self.events = Some(events_rx);
         self.commands = Some(commands_tx);
+        self.requests = Some(requests_tx);
+        self.responses = Some(responses_rx);
 
         let username = username.trim().to_owned();
         let password = password.to_owned();
@@ -199,17 +278,129 @@ impl Bridge {
             password,
             events_tx,
             commands_rx,
+            requests_rx,
+            responses_tx,
         ));
     }
 
     /// Отправляет сообщение в канал (в фоне).
     pub(crate) fn send_message(&self, channel_id: String, content: String) {
+        self.send(ClientEvent::MessageCreate {
+            channel_id,
+            content,
+            reply_to_id: None,
+        });
+    }
+
+    /// Отправляет команду серверу, если сессия жива.
+    pub(crate) fn send(&self, event: ClientEvent) {
         if let Some(commands) = self.commands.as_ref() {
-            let _ = commands.send(ClientEvent::MessageCreate {
-                channel_id,
-                content,
-                reply_to_id: None,
-            });
+            let _ = commands.send(event);
+        }
+    }
+
+    /// Правит своё сообщение.
+    pub(crate) fn edit_message(&self, message_id: String, content: String) {
+        self.send(ClientEvent::MessageEdit {
+            message_id,
+            content,
+        });
+    }
+
+    /// Удаляет своё сообщение.
+    pub(crate) fn delete_message(&self, message_id: String) {
+        self.send(ClientEvent::MessageDelete { message_id });
+    }
+
+    /// Ставит реакцию.
+    pub(crate) fn add_reaction(&self, message_id: String, emoji: String) {
+        self.send(ClientEvent::ReactionAdd { message_id, emoji });
+    }
+
+    /// Убирает реакцию.
+    pub(crate) fn remove_reaction(&self, message_id: String, emoji: String) {
+        self.send(ClientEvent::ReactionRemove { message_id, emoji });
+    }
+
+    /// Подтверждает прочтение канала до сообщения.
+    pub(crate) fn ack_channel(&self, channel_id: String, message_id: String) {
+        self.send(ClientEvent::ChannelAck {
+            channel_id,
+            message_id,
+        });
+    }
+
+    /// Отправляет REST-запрос, если сессия жива.
+    pub(crate) fn request(&self, request: BridgeRequest) {
+        if let Some(requests) = self.requests.as_ref() {
+            let _ = requests.send(request);
+        }
+    }
+
+    /// Последние полученные друзья.
+    pub(crate) fn friends(&self) -> &[bs_types::Friend] {
+        &self.friends
+    }
+
+    /// Последние полученные заявки.
+    pub(crate) fn friend_requests(&self) -> &[bs_types::FriendRequest] {
+        &self.friend_requests
+    }
+
+    /// Последние полученные личные каналы.
+    pub(crate) fn dm_channels(&self) -> &[bs_types::DmChannel] {
+        &self.dm_channels
+    }
+
+    /// Последние результаты поиска пользователей.
+    pub(crate) fn search_results(&self) -> &[bs_types::User] {
+        &self.search_results
+    }
+
+    /// `true` ровно один раз — если только что открыли личный канал.
+    pub(crate) fn take_opened_dm(&mut self) -> Option<String> {
+        self.opened_dm.take()
+    }
+
+    /// Ошибка последнего REST-запроса.
+    pub(crate) fn social_error(&self) -> Option<&str> {
+        self.social_error.as_deref()
+    }
+
+    /// Применяет ответ REST-запроса к локальным спискам.
+    fn handle_response(&mut self, response: BridgeResponse) {
+        match response {
+            BridgeResponse::Friends(friends) => {
+                self.friends = friends;
+                self.social_error = None;
+            }
+            BridgeResponse::FriendRequests(requests) => {
+                self.friend_requests = requests;
+                self.social_error = None;
+            }
+            BridgeResponse::Users(users) => {
+                self.search_results = users;
+                self.social_error = None;
+            }
+            BridgeResponse::DmChannels(channels) => {
+                self.dm_channels = channels;
+                self.social_error = None;
+            }
+            BridgeResponse::DmChannel(channel) => {
+                let id = channel.id.clone();
+                self.opened_dm = Some(id.clone());
+                if !self.dm_channels.iter().any(|known| known.id == id) {
+                    self.dm_channels.push(*channel);
+                }
+                self.social_error = None;
+            }
+            BridgeResponse::Done => {
+                self.social_error = None;
+                self.request(BridgeRequest::Friends);
+                self.request(BridgeRequest::FriendRequests);
+                self.request(BridgeRequest::DmChannels);
+            }
+            BridgeResponse::Failed(message) => self.social_error = Some(message),
         }
     }
 }
@@ -221,6 +412,8 @@ async fn run_session(
     password: String,
     events: std_mpsc::Sender<BridgeEvent>,
     mut commands: tokio_mpsc::UnboundedReceiver<ClientEvent>,
+    mut requests: tokio_mpsc::UnboundedReceiver<BridgeRequest>,
+    responses: std_mpsc::Sender<BridgeResponse>,
 ) {
     let mut store = CredentialStore::new();
     let login = InstanceHandle::login(
@@ -282,6 +475,15 @@ async fn run_session(
                     return;
                 }
             },
+            request = requests.recv() => match request {
+                Some(request) => {
+                    let response = handle_request(handle.client(), request).await;
+                    if responses.send(response).is_err() {
+                        return;
+                    }
+                }
+                None => return,
+            },
             command = commands.recv() => match command {
                 Some(event) => {
                     if let Err(err) = handle.send(event).await {
@@ -291,6 +493,61 @@ async fn run_session(
                 None => return,
             },
         }
+    }
+}
+
+/// Выполняет REST-запрос и превращает результат в [`BridgeResponse`].
+async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> BridgeResponse {
+    match request {
+        BridgeRequest::Friends => match client.friends().await {
+            Ok(friends) => BridgeResponse::Friends(friends),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::FriendRequests => match client.friend_requests().await {
+            Ok(requests) => BridgeResponse::FriendRequests(requests),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::SearchUsers(query) => match client.search_users(&query).await {
+            Ok(users) => BridgeResponse::Users(users),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::DmChannels => match client.dm_channels().await {
+            Ok(channels) => BridgeResponse::DmChannels(channels),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::OpenDm(user_id) => {
+            let request = bs_api::CreateDmRequest::user(user_id);
+            match client.open_dm(&request).await {
+                Ok(channel) => BridgeResponse::DmChannel(Box::new(channel)),
+                Err(err) => BridgeResponse::Failed(err.to_string()),
+            }
+        }
+        BridgeRequest::SendFriendRequest(username) => {
+            let request = bs_api::SendFriendRequest::username(username);
+            match client.send_friend_request(&request).await {
+                Ok(_) => BridgeResponse::Done,
+                Err(err) => BridgeResponse::Failed(err.to_string()),
+            }
+        }
+        BridgeRequest::RespondFriendRequest(id, accept) => {
+            let decision = if accept {
+                bs_api::FriendRequestDecision::Accept
+            } else {
+                bs_api::FriendRequestDecision::Decline
+            };
+            match client.respond_friend_request(&id, decision).await {
+                Ok(()) => BridgeResponse::Done,
+                Err(err) => BridgeResponse::Failed(err.to_string()),
+            }
+        }
+        BridgeRequest::CancelFriendRequest(id) => match client.cancel_friend_request(&id).await {
+            Ok(()) => BridgeResponse::Done,
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::RemoveFriend(user_id) => match client.remove_friend(&user_id).await {
+            Ok(()) => BridgeResponse::Done,
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
     }
 }
 
@@ -364,6 +621,8 @@ mod tests {
 
         let (events_tx, events_rx) = std_mpsc::channel();
         let (_commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
+        let (_requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
+        let (responses_tx, _responses_rx) = std_mpsc::channel();
 
         run_session(
             server.uri(),
@@ -371,6 +630,8 @@ mod tests {
             "secret".to_owned(),
             events_tx,
             commands_rx,
+            requests_rx,
+            responses_tx,
         )
         .await;
 
@@ -485,6 +746,8 @@ mod tests {
 
         let (events_tx, events_rx) = std_mpsc::channel();
         let (commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
+        let (_requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
+        let (responses_tx, _responses_rx) = std_mpsc::channel();
 
         let session = tokio::spawn(run_session(
             base,
@@ -492,6 +755,8 @@ mod tests {
             "secret".to_owned(),
             events_tx,
             commands_rx,
+            requests_rx,
+            responses_tx,
         ));
 
         let event = tokio::task::spawn_blocking({
@@ -514,10 +779,17 @@ mod tests {
             })
             .expect("команда должна уйти в канал");
 
-        let received = tokio::time::timeout(Duration::from_secs(10), server_events.recv())
-            .await
-            .expect("сервер должен получить событие")
-            .expect("канал событий сервера не должен закрыться");
+        // Heartbeat шлёт `ping` в произвольный момент — пропускаем его.
+        let received = loop {
+            let event = tokio::time::timeout(Duration::from_secs(10), server_events.recv())
+                .await
+                .expect("сервер должен получить событие")
+                .expect("канал событий сервера не должен закрыться");
+            if matches!(event, ClientEvent::Ping) {
+                continue;
+            }
+            break event;
+        };
 
         assert!(
             matches!(

@@ -7,9 +7,10 @@
 use std::collections::HashMap;
 
 use bs_types::{
-    ActiveCallInfo, Activity, Channel, ChannelId, DmChannel, MessageWithUser, PresenceIdentity,
-    ReadState, ReadyPayload, SpaceFolder, SpaceId, SpaceLayoutItem, SpaceVoiceState,
-    SpaceWithChannelsAndMembers, User, UserId, UserStatus, VoiceUserState,
+    ActiveCallInfo, Activity, Channel, ChannelId, DmChannel, Friend, FriendRequest,
+    MessageWithUser, PresenceIdentity, ReadState, ReadyPayload, SpaceFolder, SpaceId,
+    SpaceLayoutItem, SpaceVoiceState, SpaceWithChannelsAndMembers, User, UserId, UserStatus,
+    VoiceUserState,
 };
 
 /// Сколько «печатает…» живёт без продления (мс).
@@ -69,6 +70,10 @@ pub struct Cache {
     pub(crate) awaiting_approval_peer_origins: Vec<String>,
     pub(crate) active_peer_origins: Vec<String>,
     pub(crate) pending_approval_count: i64,
+    /// Друзья по `UserId`.
+    pub(crate) friends: HashMap<UserId, Friend>,
+    /// Заявки в друзья по id заявки (входящие и исходящие, только `pending`).
+    pub(crate) friend_requests: HashMap<String, FriendRequest>,
 }
 
 impl Cache {
@@ -145,6 +150,8 @@ impl Cache {
             awaiting_approval_peer_origins: awaiting_approval_peer_origins.unwrap_or_default(),
             active_peer_origins: active_peer_origins.unwrap_or_default(),
             pending_approval_count: pending_approval_count.unwrap_or(0),
+            friends: HashMap::new(),
+            friend_requests: HashMap::new(),
         }
     }
 
@@ -327,6 +334,59 @@ impl Cache {
     pub fn pending_approval_count(&self) -> i64 {
         self.pending_approval_count
     }
+
+    /// Друзья, отсортированные по отображаемому имени (без учёта регистра).
+    pub fn friends(&self) -> impl Iterator<Item = &Friend> {
+        let mut list: Vec<(&Friend, String)> = self
+            .friends
+            .values()
+            .map(|friend| (friend, friend_sort_key(friend)))
+            .collect();
+        list.sort_by(|a, b| a.1.cmp(&b.1));
+        list.into_iter().map(|(friend, _)| friend)
+    }
+
+    /// Друг по идентификатору пользователя.
+    pub fn friend(&self, user_id: &str) -> Option<&Friend> {
+        self.friends.get(user_id)
+    }
+
+    /// Все известные заявки в друзья (входящие и исходящие), по времени создания.
+    pub fn friend_requests(&self) -> impl Iterator<Item = &FriendRequest> {
+        let mut list: Vec<&FriendRequest> = self.friend_requests.values().collect();
+        list.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        list.into_iter()
+    }
+
+    /// Заявка в друзья по её идентификатору.
+    pub fn friend_request(&self, id: &str) -> Option<&FriendRequest> {
+        self.friend_requests.get(id)
+    }
+
+    /// Входящие заявки (адресованы текущему пользователю).
+    pub fn incoming_friend_requests(&self) -> impl Iterator<Item = &FriendRequest> {
+        self.friend_requests()
+            .filter(|request| request.to_id == self.me.id)
+    }
+
+    /// Исходящие заявки (отправлены текущим пользователем).
+    pub fn outgoing_friend_requests(&self) -> impl Iterator<Item = &FriendRequest> {
+        self.friend_requests()
+            .filter(|request| request.from_id == self.me.id)
+    }
+}
+
+/// Ключ сортировки друзей: отображаемое имя (или username) в нижнем регистре.
+fn friend_sort_key(friend: &Friend) -> String {
+    friend
+        .display_name
+        .as_deref()
+        .unwrap_or(friend.username.as_str())
+        .to_lowercase()
 }
 
 #[cfg(test)]

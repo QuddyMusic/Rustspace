@@ -44,6 +44,7 @@ pub fn apply_at(cache: &mut Cache, event: ServerEvent, now_ms: i64) -> bool {
         Category::Unread => try_unread(cache, event),
         Category::Dm => try_dm(cache, event),
         Category::Federation => try_federation(cache, event),
+        Category::Friends => try_friends(cache, event),
         Category::Ignored => false,
     }
 }
@@ -60,6 +61,7 @@ enum Category {
     Unread,
     Dm,
     Federation,
+    Friends,
     Ignored,
 }
 
@@ -110,6 +112,13 @@ fn categorize(event: &ServerEvent) -> Category {
         ServerEvent::FederationPeerRejected { .. }
         | ServerEvent::FederationPeerActive { .. }
         | ServerEvent::FederationApprovalRequestReceived { .. } => Category::Federation,
+        ServerEvent::FriendRequestReceived { .. }
+        | ServerEvent::FriendRequestSent { .. }
+        | ServerEvent::FriendRequestAccepted { .. }
+        | ServerEvent::FriendRequestCancelled { .. }
+        | ServerEvent::FriendRequestDeclined { .. }
+        | ServerEvent::FriendRequestRelayFailed { .. }
+        | ServerEvent::FriendRemoved { .. } => Category::Friends,
         _ => Category::Ignored,
     }
 }
@@ -636,6 +645,36 @@ fn try_federation(cache: &mut Cache, event: ServerEvent) -> bool {
 }
 
 // ─── Вспомогательные функции ──────────────────────────────────────────────
+
+fn try_friends(cache: &mut Cache, event: ServerEvent) -> bool {
+    match event {
+        // ─── Друзья ───────────────────────────────────────────────────────
+        ServerEvent::FriendRequestReceived { request }
+        | ServerEvent::FriendRequestSent { request } => {
+            if cache.friend_requests.get(&request.id) == Some(&request) {
+                return false;
+            }
+            cache.friend_requests.insert(request.id.clone(), request);
+            true
+        }
+        ServerEvent::FriendRequestAccepted { friend, request_id } => {
+            let request_removed = cache.friend_requests.remove(&request_id).is_some();
+            if cache.friends.get(&friend.id) == Some(&friend) {
+                return request_removed;
+            }
+            cache.user_statuses.insert(friend.id.clone(), friend.status);
+            cache.friends.insert(friend.id.clone(), friend);
+            true
+        }
+        ServerEvent::FriendRequestCancelled { request_id, .. }
+        | ServerEvent::FriendRequestDeclined { request_id, .. } => {
+            cache.friend_requests.remove(&request_id).is_some()
+        }
+        ServerEvent::FriendRemoved { user_id } => cache.friends.remove(&user_id).is_some(),
+
+        _ => false,
+    }
+}
 
 /// Текущий момент в epoch-миллисекундах (0, если часы ушли до эпохи).
 fn now_ms() -> i64 {

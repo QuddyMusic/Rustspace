@@ -19,6 +19,8 @@ pub mod events;
 pub mod id;
 pub mod message;
 pub mod origin;
+pub mod search;
+pub mod social;
 pub mod space;
 pub mod user;
 
@@ -28,6 +30,8 @@ pub use events::*;
 pub use id::*;
 pub use message::*;
 pub use origin::*;
+pub use search::*;
+pub use social::*;
 pub use space::*;
 pub use user::*;
 

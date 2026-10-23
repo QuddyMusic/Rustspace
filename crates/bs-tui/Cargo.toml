@@ -14,6 +14,7 @@ bs-types.workspace = true
 bs-core.workspace = true
 bs-instances.workspace = true
 bs-identity.workspace = true
+bs-api.workspace = true
 
 tokio.workspace = true
 tracing.workspace = true
