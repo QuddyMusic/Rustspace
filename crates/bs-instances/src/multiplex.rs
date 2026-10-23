@@ -150,17 +150,17 @@ pub type SharedMultiplexer = Arc<EventMultiplexer>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     #[test]
     fn registry_status_counts_connected() {
-        let mut states = HashMap::new();
-        states.insert(Origin::Home, ConnectionState::Connected);
-        states.insert(
+        let mut map = HashMap::new();
+        map.insert(Origin::Home, ConnectionState::Connected);
+        map.insert(
             Origin::parse_web_str("https://nova.ddns.net").unwrap(),
             ConnectionState::Reconnecting { attempt: 2 },
         );
-        let status = RegistryStatus { states };
+        let status = RegistryStatus { states: map };
         assert_eq!(status.connected_count(), 1);
         assert_eq!(status.len(), 2);
         assert!(!status.is_empty());

@@ -39,22 +39,16 @@ pub fn user_display_name(user: &User) -> String {
 /// При ошибке разбора возвращает значение как есть.
 #[must_use]
 pub fn host_of(origin: &str) -> String {
-    match url::Url::parse(origin) {
-        Ok(u) => host_of_url(&u),
-        Err(_) => origin.to_owned(),
-    }
+    url::Url::parse(origin).map_or_else(|_| origin.to_owned(), |u| host_of_url(&u))
 }
 
 /// host:port из уже разобранного URL.
 #[must_use]
 pub fn host_of_url(url: &url::Url) -> String {
-    match url.host_str() {
-        Some(h) => match url.port() {
-            Some(p) => format!("{h}:{p}"),
-            None => h.to_owned(),
-        },
-        None => String::new(),
-    }
+    url.host_str().map_or_else(String::new, |h| {
+        url.port()
+            .map_or_else(|| h.to_owned(), |p| format!("{h}:{p}"))
+    })
 }
 
 /// Нормализация произвольной строки в origin-host (с портом).
@@ -238,6 +232,8 @@ impl SelfIdentity {
 }
 
 /// `selfIdentityOf(user, myRowIds)`: `None`, если пользователь не залогинен.
+// Конкретный `HashMap` важен: `SelfIdentity::row_ids` хранит именно его.
+#[allow(clippy::implicit_hasher)]
 #[must_use]
 pub fn self_identity_of(
     user: Option<&User>,
@@ -282,7 +278,7 @@ pub fn is_mine(
 #[must_use]
 pub fn own_row_at(session: &User, origin: &str, row_id: &str, local_host: &str) -> User {
     let mut out = session.clone();
-    out.id = row_id.to_owned();
+    row_id.clone_into(&mut out.id);
     let home = home_identity_of(&IdentityFields::of_user(session), "", local_host);
     let Some(home) = home else {
         return out;
@@ -367,7 +363,10 @@ mod tests {
 
     #[test]
     fn home_host_drops_scheme_port_path_case() {
-        assert_eq!(home_host_of("https://Nova.DDNS.net:8443/x"), "nova.ddns.net");
+        assert_eq!(
+            home_host_of("https://Nova.DDNS.net:8443/x"),
+            "nova.ddns.net"
+        );
         assert_eq!(home_host_of("nova.ddns.net"), "nova.ddns.net");
         assert_eq!(home_host_of("nova.ddns.net:8443"), "nova.ddns.net");
         assert_eq!(home_host_of(""), "");
@@ -379,14 +378,20 @@ mod tests {
             normalize_origin_to_host("https://nova.ddns.net:8443/path"),
             "nova.ddns.net:8443"
         );
-        assert_eq!(normalize_origin_to_host("nova.ddns.net:8443"), "nova.ddns.net:8443");
+        assert_eq!(
+            normalize_origin_to_host("nova.ddns.net:8443"),
+            "nova.ddns.net:8443"
+        );
         assert_eq!(normalize_origin_to_host("  "), "");
     }
 
     #[test]
     fn delivering_host_uses_local_for_empty_origin() {
         assert_eq!(delivering_host("", LOCAL), LOCAL);
-        assert_eq!(delivering_host("https://orbit.ddns.net", LOCAL), "orbit.ddns.net");
+        assert_eq!(
+            delivering_host("https://orbit.ddns.net", LOCAL),
+            "orbit.ddns.net"
+        );
     }
 
     #[test]
@@ -418,7 +423,11 @@ mod tests {
     #[test]
     fn user_key_matches_across_origins() {
         let at_home = user_key_of(&fields("42", None), "", LOCAL);
-        let at_remote = user_key_of(&fields("7", Some((LOCAL, "42"))), "https://nova.ddns.net", LOCAL);
+        let at_remote = user_key_of(
+            &fields("7", Some((LOCAL, "42"))),
+            "https://nova.ddns.net",
+            LOCAL,
+        );
         assert_eq!(at_home, format!("{LOCAL}:42"));
         assert_eq!(at_remote, at_home);
     }

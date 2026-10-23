@@ -24,12 +24,16 @@
 
 pub mod apply;
 mod error;
+mod federation;
 mod multicache;
 mod session;
 mod state;
 
 pub use apply::{apply, apply_at};
 pub use error::CoreError;
+pub use federation::{
+    ReattachDecision, ensure_remote_credential, maybe_auto_reattach, peer_home_with_remote,
+};
 pub use multicache::{DrainStats, MultiCache, Routed};
 pub use session::{CoreSession, DRAIN_LIMIT};
 pub use state::{Cache, TYPING_TTL_MS, TypingEntry};

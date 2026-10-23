@@ -40,7 +40,9 @@ impl From<PersistError> for IdentityError {
         match err {
             PersistError::Io(io) => Self::Io(io),
             PersistError::Json(json) => Self::TokenFileCorrupted(json.to_string()),
-            PersistError::BadOrigin { origin } => Self::TokenFileCorrupted(format!("origin: {origin}")),
+            PersistError::BadOrigin { origin } => {
+                Self::TokenFileCorrupted(format!("origin: {origin}"))
+            }
         }
     }
 }
@@ -56,7 +58,8 @@ impl CredentialStore {
                 Some((origin.as_web_str(), token.expose().to_owned()))
             })
             .collect();
-        serde_json::to_value(map).unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+        serde_json::to_value(map)
+            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
     }
 
     /// Восстанавливает хранилище из JSON-объекта.
@@ -75,9 +78,10 @@ impl CredentialStore {
             if token.is_empty() {
                 continue;
             }
-            let origin = Origin::parse_web_str(origin_str).map_err(|_| PersistError::BadOrigin {
-                origin: origin_str.clone(),
-            })?;
+            let origin =
+                Origin::parse_web_str(origin_str).map_err(|_| PersistError::BadOrigin {
+                    origin: origin_str.clone(),
+                })?;
             store.insert(origin, AccessToken::new(token));
         }
         Ok(store)
@@ -142,7 +146,10 @@ mod tests {
     fn json_roundtrip_keeps_origins() {
         let mut store = CredentialStore::new();
         store.insert(Origin::Home, AccessToken::new("home-token"));
-        store.insert(remote("https://nova.ddns.net"), AccessToken::new("remote-token"));
+        store.insert(
+            remote("https://nova.ddns.net"),
+            AccessToken::new("remote-token"),
+        );
 
         let json = store.to_json();
         let restored = CredentialStore::from_json(&json).unwrap();
@@ -201,7 +208,8 @@ mod tests {
 
     #[tokio::test]
     async fn load_missing_file_is_empty_store() {
-        let path = std::env::temp_dir().join(format!("bs-identity-missing-{}.json", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("bs-identity-missing-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let store = CredentialStore::load_from_path(&path).await.unwrap();
         assert!(store.is_empty());

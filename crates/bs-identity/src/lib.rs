@@ -37,9 +37,9 @@ pub mod store;
 
 pub use error::IdentityError;
 pub use identity::{
-    delivering_host, home_host_of, home_identity_of, is_issued_by_home, is_mine,
-    normalize_origin_to_host, own_row_at, parse_federated_username, self_identity_of,
-    user_display_name, user_key, user_key_of, HomeIdentity, IdentityFields, SelfIdentity,
+    HomeIdentity, IdentityFields, SelfIdentity, delivering_host, home_host_of, home_identity_of,
+    is_issued_by_home, is_mine, normalize_origin_to_host, own_row_at, parse_federated_username,
+    self_identity_of, user_display_name, user_key, user_key_of,
 };
 pub use persist::PersistError;
 pub use secret::AccessToken;

@@ -35,7 +35,8 @@ use std::collections::HashMap;
 
 use bs_instances::{InstanceEvent, OriginEvent};
 use bs_types::{
-    Channel, DmChannel, MessageWithUser, Origin, ReadyPayload, ServerEvent, SpaceWithChannelsAndMembers,
+    Channel, DmChannel, MessageWithUser, Origin, ReadyPayload, ServerEvent,
+    SpaceWithChannelsAndMembers,
 };
 use tokio::sync::broadcast;
 
@@ -170,16 +171,15 @@ impl MultiCache {
 
     /// Применяет событие к кэшу указанного инстанса.
     pub fn apply(&mut self, origin: &Origin, event: ServerEvent) -> Routed {
-        match self.caches.get_mut(origin) {
-            None => Routed::UnknownOrigin,
-            Some(cache) => {
+        self.caches
+            .get_mut(origin)
+            .map_or(Routed::UnknownOrigin, |cache| {
                 if apply(cache, event) {
                     Routed::Changed
                 } else {
                     Routed::Unchanged
                 }
-            }
-        }
+            })
     }
 
     /// Маршрутизирует событие из мультиплексора по его origin.
@@ -202,11 +202,7 @@ impl MultiCache {
     ///
     /// Возвращает статистику. Закрытый поток не считается ошибкой —
     /// разбор просто прекращается.
-    pub fn drain(
-        &mut self,
-        rx: &mut broadcast::Receiver<OriginEvent>,
-        limit: usize,
-    ) -> DrainStats {
+    pub fn drain(&mut self, rx: &mut broadcast::Receiver<OriginEvent>, limit: usize) -> DrainStats {
         let mut stats = DrainStats::default();
         for _ in 0..limit {
             match rx.try_recv() {
@@ -354,6 +350,7 @@ mod tests {
         .expect("user")
     }
 
+    #[allow(clippy::needless_pass_by_value)] // удобно вызывать с литералами
     fn ready(me: bs_types::User, space: &str, channel: &str, unread: i64) -> ReadyPayload {
         serde_json::from_value(serde_json::json!({
             "user": me,
@@ -387,8 +384,14 @@ mod tests {
         assert!(multi.insert_ready(remote(), ready(user("u9", "bob"), "s1", "c1", 5)));
 
         assert_eq!(multi.len(), 2);
-        assert_eq!(multi.me(&Origin::Home).map(|u| u.username.as_str()), Some("alice"));
-        assert_eq!(multi.me(&remote()).map(|u| u.username.as_str()), Some("bob"));
+        assert_eq!(
+            multi.me(&Origin::Home).map(|u| u.username.as_str()),
+            Some("alice")
+        );
+        assert_eq!(
+            multi.me(&remote()).map(|u| u.username.as_str()),
+            Some("bob")
+        );
         assert_eq!(multi.unread_total_in(&Origin::Home), 2);
         assert_eq!(multi.unread_total_in(&remote()), 5);
         assert_eq!(multi.unread_total(), 7);
@@ -455,7 +458,10 @@ mod tests {
 
         let channels = multi.channels();
         assert_eq!(channels.len(), 2);
-        assert_eq!(channels.iter().filter(|(o, _)| **o == Origin::Home).count(), 1);
+        assert_eq!(
+            channels.iter().filter(|(o, _)| **o == Origin::Home).count(),
+            1
+        );
     }
 
     #[test]
@@ -523,10 +529,8 @@ mod tests {
 
     #[test]
     fn remove_drops_instance() {
-        let mut multi = MultiCache::from_ready([(
-            Origin::Home,
-            ready(user("u1", "alice"), "s", "c", 0),
-        )]);
+        let mut multi =
+            MultiCache::from_ready([(Origin::Home, ready(user("u1", "alice"), "s", "c", 0))]);
         assert!(multi.contains(&Origin::Home));
         assert!(multi.remove(&Origin::Home).is_some());
         assert!(multi.is_empty());
