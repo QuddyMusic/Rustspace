@@ -1,12 +1,14 @@
-//! Состояние TUI: экраны, форма логина, кэш и подключение.
+//! Состояние TUI: экраны, форма логина, кэши инстансов и подключение.
 
-use bs_core::{Cache, apply};
+use std::collections::HashMap;
+
+use bs_core::{Cache, MultiCache};
 use bs_instances::ConnectionState;
-use bs_types::{ClientEvent, ServerEvent};
+use bs_types::{ClientEvent, Origin, ServerEvent};
 
 use crate::chat::ChatState;
 use crate::login::LoginForm;
-use crate::net::{NetEvent, NetRequest, NetResponse, NetWorker};
+use crate::net::{NetEvent, NetPayload, NetRequest, NetResponse, NetWorker};
 use crate::social::{self, SocialSelection, SocialState, SocialTab};
 
 /// Какой экран сейчас показан.
@@ -35,17 +37,30 @@ pub enum Status {
     Failed(String),
 }
 
+/// Статус для инстанса, о котором ничего не известно.
+static IDLE: Status = Status::Idle;
+
 /// Корневое состояние приложения.
-#[derive(Default)]
+///
+/// Кэшей несколько: по одному на каждый подключённый инстанс. Активный
+/// инстанс задаёт, что видно на экране, но события приходят от всех сразу.
 pub struct App {
     screen: Screen,
     running: bool,
     form: LoginForm,
-    status: Status,
     worker: Option<NetWorker>,
-    cache: Option<Cache>,
+    multi: MultiCache,
+    active: Origin,
+    home_base: Option<String>,
+    states: HashMap<Origin, Status>,
     chat: ChatState,
     social: SocialState,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl std::fmt::Debug for App {
@@ -54,9 +69,11 @@ impl std::fmt::Debug for App {
             .field("screen", &self.screen)
             .field("running", &self.running)
             .field("form", &self.form)
-            .field("status", &self.status)
             .field("worker", &self.worker.is_some())
-            .field("cache", &self.cache.is_some())
+            .field("instances", &self.multi.len())
+            .field("active", &self.active)
+            .field("home_base", &self.home_base)
+            .field("states", &self.states)
             .field("chat", &self.chat)
             .field("social", &self.social)
             .finish()
@@ -70,9 +87,11 @@ impl App {
             screen: Screen::Login,
             running: true,
             form: LoginForm::new(),
-            status: Status::Idle,
             worker: None,
-            cache: None,
+            multi: MultiCache::new(),
+            active: Origin::Home,
+            home_base: None,
+            states: HashMap::new(),
             chat: ChatState::new(),
             social: SocialState::new(),
         }
@@ -93,14 +112,34 @@ impl App {
         &mut self.form
     }
 
-    /// Состояние подключения.
-    pub fn status(&self) -> &Status {
-        &self.status
+    /// Инстанс, на который смотрит интерфейс.
+    pub fn active(&self) -> &Origin {
+        &self.active
     }
 
-    /// Кэш состояния; `None` до первого `ready`.
+    /// Все известные инстансы: домашний первым, затем удалённые.
+    pub fn instances(&self) -> Vec<Origin> {
+        self.multi.origins()
+    }
+
+    /// Статус конкретного инстанса.
+    pub fn status_of(&self, origin: &Origin) -> &Status {
+        self.states.get(origin).unwrap_or(&IDLE)
+    }
+
+    /// Состояние подключения активного инстанса.
+    pub fn status(&self) -> &Status {
+        self.status_of(&self.active)
+    }
+
+    /// Кэш активного инстанса; `None` до первого `ready`.
     pub fn cache(&self) -> Option<&Cache> {
-        self.cache.as_ref()
+        self.multi.cache(&self.active)
+    }
+
+    /// Все кэши (для сводок и отладки).
+    pub fn multi(&self) -> &MultiCache {
+        &self.multi
     }
 
     /// Выбор канала и композер.
@@ -125,7 +164,19 @@ impl App {
 
     /// Можно ли сейчас начинать логин.
     pub fn can_submit(&self) -> bool {
-        self.worker.is_none() && self.form.is_submittable()
+        self.form.is_submittable()
+    }
+
+    /// Выводит origin для адреса: первый адрес становится домашним.
+    fn origin_for(&mut self, base: &str) -> Origin {
+        match self.home_base.clone() {
+            None => {
+                self.home_base = Some(base.to_owned());
+                Origin::Home
+            }
+            Some(home) if home == base => Origin::Home,
+            Some(_) => Origin::parse_web_str(base).unwrap_or(Origin::Home),
+        }
     }
 
     /// Запускает логин в фоне. Возвращает `false`, если это неуместно.
@@ -136,9 +187,105 @@ impl App {
         let Some(creds) = self.form.credentials() else {
             return false;
         };
-        self.worker = Some(NetWorker::spawn(creds));
-        self.status = Status::Connecting;
+        let origin = self.origin_for(&creds.base);
+        let worker = self.worker.get_or_insert_with(NetWorker::spawn);
+        if !worker.connect(origin.clone(), creds) {
+            return false;
+        }
+        self.states.insert(origin.clone(), Status::Connecting);
+        self.active = origin;
+        self.screen = Screen::Chat;
         true
+    }
+
+    /// Открывает форму для добавления ещё одного инстанса.
+    pub fn begin_add_instance(&mut self) {
+        self.form = LoginForm::new();
+        self.screen = Screen::Login;
+    }
+
+    /// Отменяет добавление инстанса: возвращает туда, откуда пришли.
+    ///
+    /// Возвращает `false`, если подключённых инстансов ещё нет и отменять
+    /// некуда (тогда Esc должен выходить из приложения).
+    pub fn cancel_login(&mut self) -> bool {
+        if self.multi.is_empty() {
+            return false;
+        }
+        self.screen = Screen::Chat;
+        self.form = LoginForm::new();
+        true
+    }
+
+    /// Подключён ли хотя бы один инстанс.
+    pub fn has_instances(&self) -> bool {
+        !self.multi.is_empty()
+    }
+
+    /// Переключает активный инстанс на следующий.
+    pub fn next_instance(&mut self) {
+        self.cycle_instance(1);
+    }
+
+    /// Переключает активный инстанс на предыдущий.
+    pub fn prev_instance(&mut self) {
+        self.cycle_instance(-1);
+    }
+
+    fn cycle_instance(&mut self, delta: isize) {
+        let origins = self.multi.origins();
+        if origins.len() < 2 {
+            return;
+        }
+        let current = origins.iter().position(|o| *o == self.active);
+        let next = current.map_or(0, |index| {
+            let len = origins.len() as isize;
+            ((index as isize + delta).rem_euclid(len)) as usize
+        });
+        self.active = origins[next].clone();
+        self.after_switch();
+    }
+
+    /// Переключает на конкретный инстанс, если он известен.
+    pub fn switch_to(&mut self, origin: Origin) -> bool {
+        if !self.multi.contains(&origin) {
+            return false;
+        }
+        self.active = origin;
+        self.after_switch();
+        true
+    }
+
+    /// Общие действия после смены инстанса: пересчёт курсоров и подгрузка.
+    fn after_switch(&mut self) {
+        if let Some(cache) = self.multi.cache(&self.active) {
+            self.chat.clamp(cache);
+            self.social.clamp(cache);
+        }
+        self.screen = Screen::Chat;
+        self.refresh_social();
+    }
+
+    /// Отключается от активного инстанса и убирает его из списка.
+    pub fn disconnect_active(&mut self) {
+        if !self.multi.contains(&self.active) && self.multi.is_empty() {
+            return;
+        }
+        let origin = self.active.clone();
+        self.multi.remove(&origin);
+        self.states.remove(&origin);
+        if let Some(worker) = self.worker.as_ref() {
+            worker.disconnect(origin);
+        }
+        if let Some(next) = self.multi.origins().first().cloned() {
+            self.active = next;
+            self.after_switch();
+        } else {
+            self.active = Origin::Home;
+            self.screen = Screen::Login;
+            self.chat = ChatState::new();
+            self.social = SocialState::new();
+        }
     }
 
     /// Забирает накопившиеся события сети и применяет их к состоянию.
@@ -158,27 +305,29 @@ impl App {
 
     /// Применяет ответ фоновой сессии на REST-запрос.
     pub fn apply_net_response(&mut self, response: NetResponse) {
-        match response {
-            NetResponse::Friends(_)
-            | NetResponse::FriendRequests(_)
-            | NetResponse::DmChannels(_) => {
-                if let Some(cache) = self.cache.as_ref() {
+        if response.origin != self.active {
+            // Ответ от фонового инстанса не должен подменять экран.
+            return;
+        }
+        match response.payload {
+            NetPayload::Friends(_) | NetPayload::FriendRequests(_) | NetPayload::DmChannels(_) => {
+                if let Some(cache) = self.multi.cache(&self.active) {
                     self.social.clamp(cache);
                 }
             }
-            NetResponse::Users(users) => {
+            NetPayload::Users(users) => {
                 self.social.set_search_results(users);
                 self.social.set_message(None);
             }
-            NetResponse::DmChannel(channel) => {
+            NetPayload::DmChannel(channel) => {
                 self.social
                     .set_message(Some(format!("личный канал: {}", channel.id)));
             }
-            NetResponse::Done => {
+            NetPayload::Done => {
                 self.social.set_message(None);
                 self.refresh_social();
             }
-            NetResponse::Failed(message) => {
+            NetPayload::Failed(message) => {
                 self.social.set_message(Some(message));
             }
         }
@@ -187,43 +336,57 @@ impl App {
     /// Применяет одно событие фоновой сессии.
     pub fn apply_net_event(&mut self, event: NetEvent) {
         match event {
-            NetEvent::Ready(event) => {
+            NetEvent::Ready { origin, event } => {
                 if let ServerEvent::Ready(payload) = *event {
-                    self.cache = Some(Cache::from_ready(*payload));
+                    self.multi.insert_ready(origin.clone(), *payload);
                 }
-                self.status = Status::Connected;
+                self.states.insert(origin.clone(), Status::Connected);
+                self.active = origin;
                 self.screen = Screen::Chat;
-                if let Some(cache) = self.cache.as_ref() {
+                if let Some(cache) = self.multi.cache(&self.active) {
                     self.chat.clamp(cache);
                     self.social.clamp(cache);
                 }
                 self.refresh_social();
             }
-            NetEvent::Server(event) => {
-                if let ServerEvent::Ready(_) = event.as_ref() {
-                    self.status = Status::Connected;
-                    self.screen = Screen::Chat;
+            NetEvent::Server { origin, event } => {
+                if let ServerEvent::Ready(payload) = *event {
+                    // Повторный `ready` (переподключение): пересобираем кэш.
+                    self.multi.insert_ready(origin.clone(), *payload);
+                    self.states.insert(origin.clone(), Status::Connected);
+                } else if self.multi.apply(&origin, *event).is_accepted()
+                    && origin == self.active
+                    && let Some(cache) = self.multi.cache(&self.active)
+                {
+                    self.chat.clamp(cache);
+                    self.social.clamp(cache);
                 }
-                let Some(cache) = self.cache.as_mut() else {
-                    return;
-                };
-                let _ = apply(cache, *event);
-                self.chat.clamp(cache);
-                self.social.clamp(cache);
             }
-            NetEvent::State(state) => {
-                tracing::debug!(?state, "состояние соединения");
-                self.status = match state {
+            NetEvent::State { origin, state } => {
+                let status = match state {
                     ConnectionState::Connecting | ConnectionState::Reconnecting { .. } => {
                         Status::Connecting
                     }
                     ConnectionState::Connected => Status::Connected,
                     ConnectionState::Stopped => Status::Failed("соединение остановлено".to_owned()),
                 };
+                self.states.insert(origin, status);
             }
-            NetEvent::Failed(message) => {
-                self.status = Status::Failed(message);
-                self.worker = None;
+            NetEvent::Disconnected { origin } => {
+                self.multi.remove(&origin);
+                self.states.remove(&origin);
+                if origin == self.active {
+                    if let Some(next) = self.multi.origins().first().cloned() {
+                        self.active = next;
+                        self.after_switch();
+                    } else {
+                        self.active = Origin::Home;
+                        self.screen = Screen::Login;
+                    }
+                }
+            }
+            NetEvent::Failed { origin, message } => {
+                self.states.insert(origin, Status::Failed(message));
             }
         }
     }
@@ -233,7 +396,7 @@ impl App {
     /// В режиме правки вместо нового сообщения уходит `message_edit`.
     /// Возвращает `false`, если отправлять некуда или нечего.
     pub fn send_composer(&mut self) -> bool {
-        if self.cache.is_none() || self.worker.is_none() {
+        if self.cache().is_none() {
             return false;
         }
         let editing = self.chat.editing_message_id().map(str::to_owned);
@@ -261,36 +424,31 @@ impl App {
 
     /// id текущего канала по кэшу.
     fn current_channel_id(&self) -> Option<String> {
-        self.cache
-            .as_ref()
-            .and_then(|cache| self.chat.current_channel_id(cache))
+        let cache = self.cache()?;
+        self.chat.current_channel_id(cache)
     }
 
-    /// Отправляет событие в фоновую сессию.
+    /// Отправляет событие в фоновую сессию активного инстанса.
     fn send_event(&self, event: ClientEvent) -> bool {
         self.worker
             .as_ref()
-            .is_some_and(|worker| worker.send(event))
+            .is_some_and(|worker| worker.send(&self.active, event))
     }
 
     /// Сдвигает курсор по ленте сообщений текущего канала.
     pub fn nav_message(&mut self, delta: isize) {
-        let Self {
-            cache: Some(cache),
-            chat,
-            ..
-        } = self
-        else {
+        let active = self.active.clone();
+        let Some(cache) = self.multi.cache(&active) else {
             return;
         };
-        chat.move_selection(cache, delta);
+        self.chat.move_selection(cache, delta);
     }
 
     /// Начинает правку выбранного своего сообщения.
     ///
     /// Возвращает `false`, если сообщение не выбрано или написано не нами.
     pub fn edit_selected(&mut self) -> bool {
-        let Some(cache) = self.cache.as_ref() else {
+        let Some(cache) = self.cache() else {
             return false;
         };
         let Some(message) = self.chat.selected_message(cache) else {
@@ -314,7 +472,7 @@ impl App {
     ///
     /// Возвращает `false`, если сообщение не выбрано или написано не нами.
     pub fn delete_selected(&mut self) -> bool {
-        let Some(cache) = self.cache.as_ref() else {
+        let Some(cache) = self.cache() else {
             return false;
         };
         let Some(message) = self.chat.selected_message(cache) else {
@@ -354,7 +512,7 @@ impl App {
 
     /// id выбранного сообщения в текущем канале.
     fn selected_message_id(&self) -> Option<String> {
-        let cache = self.cache.as_ref()?;
+        let cache = self.cache()?;
         self.chat
             .selected_message(cache)
             .map(|message| message.message.id.clone())
@@ -364,7 +522,7 @@ impl App {
     ///
     /// Повторный вызов для той же пары «канал, сообщение» ничего не шлёт.
     pub fn ack_current_channel(&mut self) -> bool {
-        let Some(cache) = self.cache.as_ref() else {
+        let Some(cache) = self.cache() else {
             return false;
         };
         let Some(channel_id) = self.chat.current_channel_id(cache) else {
@@ -385,7 +543,7 @@ impl App {
 
     /// Посылает `typing_start`, если в этом канале ещё не посылали.
     pub fn notify_typing(&mut self) {
-        let Some(cache) = self.cache.as_ref() else {
+        let Some(cache) = self.cache() else {
             return;
         };
         let Some(channel_id) = self.chat.current_channel_id(cache) else {
@@ -395,22 +553,18 @@ impl App {
             return;
         }
         if let Some(worker) = self.worker.as_ref() {
-            worker.send(ClientEvent::TypingStart { channel_id });
+            worker.send(&self.active, ClientEvent::TypingStart { channel_id });
         }
     }
 
-    /// Сдвигает выбор канала на `delta` (split borrow: кэш и чат — разные поля).
+    /// Сдвигает выбор канала на `delta`.
     pub fn nav_channel(&mut self, delta: isize) {
         {
-            let Self {
-                cache: Some(cache),
-                chat,
-                ..
-            } = self
-            else {
+            let active = self.active.clone();
+            let Some(cache) = self.multi.cache(&active) else {
                 return;
             };
-            chat.move_channel(cache, delta);
+            self.chat.move_channel(cache, delta);
         }
         self.ack_current_channel();
     }
@@ -418,15 +572,11 @@ impl App {
     /// Сдвигает выбор пространства на `delta`.
     pub fn nav_space(&mut self, delta: isize) {
         {
-            let Self {
-                cache: Some(cache),
-                chat,
-                ..
-            } = self
-            else {
+            let active = self.active.clone();
+            let Some(cache) = self.multi.cache(&active) else {
                 return;
             };
-            chat.move_space(cache, delta);
+            self.chat.move_space(cache, delta);
         }
         self.ack_current_channel();
     }
@@ -435,7 +585,7 @@ impl App {
     fn request(&self, request: NetRequest) -> bool {
         self.worker
             .as_ref()
-            .is_some_and(|worker| worker.request(request))
+            .is_some_and(|worker| worker.request(&self.active, request))
     }
 
     /// Перезапрашивает друзей и заявки.
@@ -485,15 +635,13 @@ impl App {
 
     /// Сдвигает курсор активного списка.
     pub fn social_move(&mut self, delta: isize) {
-        let Self {
-            cache: Some(cache),
-            social,
-            ..
-        } = self
-        else {
-            return;
-        };
-        social.move_cursor(cache, delta);
+        {
+            let active = self.active.clone();
+            let Some(cache) = self.multi.cache(&active) else {
+                return;
+            };
+            self.social.move_cursor(cache, delta);
+        }
     }
 
     /// Запускает поиск по текущей строке запроса.
@@ -520,7 +668,7 @@ impl App {
     /// Возвращает пару «вид элемента, его id» — этого хватает, чтобы
     /// отличить действие с другом от действия с заявкой.
     pub fn social_selection(&self) -> Option<SocialSelection> {
-        let cache = self.cache.as_ref()?;
+        let cache = self.cache()?;
         let cursor = self.social.cursor();
         match self.social.tab() {
             SocialTab::Friends => social::friend_rows(cache)
@@ -606,13 +754,14 @@ impl App {
         }
     }
 
-    /// Отключается и возвращает на экран логина.
+    /// Отключается от всех инстансов и возвращает на экран логина.
     pub fn logout(&mut self) {
         if let Some(worker) = self.worker.take() {
             worker.join();
         }
-        self.cache = None;
-        self.status = Status::Idle;
+        self.multi = MultiCache::new();
+        self.states.clear();
+        self.active = Origin::Home;
         self.screen = Screen::Login;
     }
 
@@ -624,5 +773,49 @@ impl App {
     /// Просит цикл событий завершиться.
     pub fn quit(&mut self) {
         self.running = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_login_becomes_home() {
+        let mut app = App::new();
+        assert_eq!(app.origin_for("http://localhost:3000"), Origin::Home);
+        assert_eq!(app.origin_for("http://localhost:3000"), Origin::Home);
+    }
+
+    #[test]
+    fn second_login_becomes_remote() {
+        let mut app = App::new();
+        app.origin_for("http://localhost:3000");
+        let origin = app.origin_for("https://chat.example.com");
+        assert!(matches!(origin, Origin::Remote(_)));
+        assert_eq!(origin.as_web_str(), "https://chat.example.com");
+    }
+
+    #[test]
+    fn unknown_instance_status_is_idle() {
+        let app = App::new();
+        assert_eq!(app.status(), &Status::Idle);
+        assert_eq!(app.status_of(&Origin::Home), &Status::Idle);
+    }
+
+    #[test]
+    fn switching_to_unknown_instance_fails() {
+        let mut app = App::new();
+        let remote = Origin::parse_web_str("https://chat.example.com").unwrap();
+        assert!(!app.switch_to(remote));
+    }
+
+    #[test]
+    fn cycling_with_single_instance_is_noop() {
+        let mut app = App::new();
+        app.next_instance();
+        assert_eq!(app.active(), &Origin::Home);
+        app.prev_instance();
+        assert_eq!(app.active(), &Origin::Home);
     }
 }

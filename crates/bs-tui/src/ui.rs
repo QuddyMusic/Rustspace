@@ -1,5 +1,6 @@
 //! Отрисовка кадра.
 
+use bs_types::Origin;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -24,7 +25,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
     .areas(frame.area());
 
     frame.render_widget(
-        Paragraph::new("backspace-rs TUI")
+        Paragraph::new(header_line(app))
             .alignment(Alignment::Center)
             .style(Style::default().add_modifier(Modifier::BOLD))
             .block(Block::default().borders(Borders::ALL)),
@@ -41,6 +42,57 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
         Paragraph::new(Line::from(footer_hint(app))).alignment(Alignment::Center),
         footer,
     );
+}
+
+/// Метка инстанса для интерфейса: `home` или адрес удалённого.
+fn instance_label(origin: &Origin) -> String {
+    if origin.is_home() {
+        "home".to_owned()
+    } else {
+        origin.as_web_str()
+    }
+}
+
+/// Верхняя строка: название и список инстансов с выделенным активным.
+///
+/// Пока инстансов нет, остаётся прежний статичный заголовок.
+fn header_line(app: &App) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = vec![Span::raw("backspace-rs TUI")];
+    let instances = app.instances();
+    if instances.is_empty() {
+        return Line::from(spans);
+    }
+    let active = app.active();
+    spans.push(Span::raw(" — ["));
+    for (index, origin) in instances.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
+        }
+        let style = if origin == active {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        spans.push(Span::styled(instance_label(origin), style));
+    }
+    spans.push(Span::raw("]"));
+    Line::from(spans)
+}
+
+/// Заголовок ленты: канал и, если инстансов несколько, метка активного.
+///
+/// Метка нужна, чтобы при мультиинстансности было видно, чей это канал.
+fn chat_title(app: &App, channel: Option<&str>) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(
+        channel.map_or_else(|| " Чат ".to_owned(), |name| format!(" #{name} ")),
+    )];
+    if app.instances().len() > 1 {
+        spans.push(Span::styled(
+            format!("@{} ", instance_label(app.active())),
+            Style::default().fg(Color::Cyan),
+        ));
+    }
+    Line::from(spans)
 }
 
 fn render_login(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -123,10 +175,11 @@ fn render_chat(frame: &mut Frame<'_>, app: &App, area: Rect) {
     render_sidebar(frame, app, cache, sidebar_area);
 
     let channel_id = app.chat().current_channel_id(cache);
-    let title = channel_id
+    let channel_name = channel_id
         .as_deref()
         .and_then(|id| cache.channel(id))
-        .map_or_else(|| " Чат ".to_owned(), |c| format!(" #{} ", c.name));
+        .map(|c| c.name.as_str());
+    let title = chat_title(app, channel_name);
 
     let me = cache.me().id.as_str();
     let rows = channel_id.as_deref().map_or_else(Vec::new, |id| {
@@ -366,12 +419,19 @@ fn social_items<'a>(cache: &bs_core::Cache, social: &'a SocialState) -> Vec<List
 
 fn footer_hint(app: &App) -> String {
     match app.screen() {
-        Screen::Login => format!(
-            "Tab — поле, Enter — войти, Esc — выход | {}",
-            app.form().hint()
-        ),
+        Screen::Login => {
+            let cancel = if app.has_instances() {
+                "Esc — отмена"
+            } else {
+                "Esc — выход"
+            };
+            format!(
+                "Tab — поле, Enter — войти, {cancel} | {}",
+                app.form().hint()
+            )
+        }
         Screen::Chat => {
-            "Tab — канал, ↑↓ — сообщение, e — правка, d — удалить, +/− — реакция, a — прочитано, Esc — назад".to_owned()
+            "Tab — канал, ↑↓ — сообщение, e — правка, d — удалить, +/− — реакция, a — прочитано, Esc — назад | Ctrl+] / Ctrl+[ — инстанс, Ctrl+i — добавить, Ctrl+w — отключить".to_owned()
         }
         Screen::Social => {
             "←→ — вкладка, ↑↓ — выбор, Enter — открыть/принять, x — удалить, Esc — назад".to_owned()
