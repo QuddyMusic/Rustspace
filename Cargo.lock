@@ -706,6 +706,7 @@ dependencies = [
  "bs-instances",
  "bs-types",
  "crossterm",
+ "futures-util",
  "ratatui",
  "serde_json",
  "thiserror 2.0.21",

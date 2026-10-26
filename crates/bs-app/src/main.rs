@@ -8,6 +8,8 @@
 // Бинарь: `pub` не нужен (unreachable_pub), а `pub(crate)` внутри приватных
 // модулей clippy считает избыточным. Оставляем `pub(crate)` — он честнее.
 #![allow(clippy::redundant_pub_crate)]
+// В тестах паника — законный способ упасть быстро и с понятным текстом.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 mod app;
 mod bridge;

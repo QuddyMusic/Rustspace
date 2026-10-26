@@ -22,12 +22,12 @@
 - Друзья: запросы, принятие.
 - Поиск.
 
-## Этап 3 — Мультиинстанс (3–4 недели) ▶
-- `bs-instances`: HashMap<Origin, InstanceHandle>, токены в кейчейне/файле.
-- `bs-identity`: UserKey, isMine, myRowIds — порт identity.ts.
-- Маршрутизация событий по origin (порт useWebSocket.ts — своя архитектура, не построчная).
-- peerHomeWithRemote, ensureRemoteCredential, maybeAutoReattach — по client-federation.md.
-- UI: переключатель инстансов, объединённый список spaces/DMs с origin-метками.
+## Этап 3 — Мультиинстанс (3–4 недели) ✅
+- `bs-instances`: реестр `HashMap<Origin, InstanceHandle>`, токены в кейчейне/файле, состояние каждого соединения. ✅
+- `bs-identity`: UserKey, isMine, myRowIds — порт identity.ts. ✅
+- Маршрутизация событий по origin (порт useWebSocket.ts — своя архитектура, не построчная): `MultiCache` с origin-метками. ✅
+- peerHomeWithRemote, ensureRemoteCredential, maybeAutoReattach — по client-federation.md. ✅
+- UI: переключатель инстансов, объединённый список spaces/DMs с origin-метками, добавление и отключение инстансов — и в GUI, и в TUI. ✅
 
 ## Этап 4 — Голос (отдельный трек, 4+ недель)
 - Исследование: webrtc-rs + LiveKit signaling vs FFI к libwebrtc.

@@ -7,9 +7,10 @@
 //! Так GUI никогда не блокируется на сети, а `Cache` (не `Clone`) не
 //! приходится копировать между потоками.
 
+use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
 
-use bs_core::{Cache, apply};
+use bs_core::{Cache, MultiCache};
 use bs_identity::CredentialStore;
 use bs_instances::{ConnectionState, InstanceEvent, InstanceHandle, ReconnectPolicy};
 use bs_types::{ClientEvent, ClientKind, Origin, ReadyPayload, ServerEvent};
@@ -59,18 +60,44 @@ pub(crate) enum BridgeResponse {
 }
 
 /// Событие из фоновой задачи в GUI-поток.
+///
+/// Каждое событие помечено `origin`: по нему GUI решает, к какому
+/// инстансу применить изменение.
 #[derive(Debug)]
 enum BridgeEvent {
-    /// Первый снимок состояния.
-    Ready(Box<ReadyPayload>),
-    /// Дельта состояния.
-    Server(Box<ServerEvent>),
-    /// Ошибка логина или соединения.
-    Error(String),
-    /// Сменилось состояние соединения (connecting/connected/reconnecting/stopped).
-    State(ConnectionState),
-    /// Соединение окончательно закрыто.
-    Disconnected,
+    /// Первый снимок состояния инстанса.
+    Ready {
+        /// Чей это снимок.
+        origin: Origin,
+        /// Сам снимок.
+        payload: Box<ReadyPayload>,
+    },
+    /// Дельта состояния инстанса.
+    Server {
+        /// Чей это событие.
+        origin: Origin,
+        /// Само событие.
+        event: Box<ServerEvent>,
+    },
+    /// Ошибка логина или соединения инстанса.
+    Error {
+        /// Где произошла ошибка.
+        origin: Origin,
+        /// Текст ошибки.
+        message: String,
+    },
+    /// Сменилось состояние соединения инстанса.
+    State {
+        /// Какой инстанс.
+        origin: Origin,
+        /// Новое состояние.
+        state: ConnectionState,
+    },
+    /// Соединение инстанса окончательно закрыто.
+    Disconnected {
+        /// Какой инстанс отключился.
+        origin: Origin,
+    },
 }
 
 /// Мост GUI ↔ tokio.
@@ -78,8 +105,12 @@ enum BridgeEvent {
 pub(crate) struct Bridge {
     runtime: Handle,
     events: Option<std_mpsc::Receiver<BridgeEvent>>,
-    commands: Option<tokio_mpsc::UnboundedSender<ClientEvent>>,
-    requests: Option<tokio_mpsc::UnboundedSender<BridgeRequest>>,
+    /// Отправитель событий: один на все инстансы, чтобы GUI читал один канал.
+    events_tx: Option<std_mpsc::Sender<BridgeEvent>>,
+    /// Каналы команд по инстансам: отправляем в активный.
+    commands: HashMap<Origin, tokio_mpsc::UnboundedSender<ClientEvent>>,
+    /// Каналы REST-запросов по инстансам.
+    requests: HashMap<Origin, tokio_mpsc::UnboundedSender<BridgeRequest>>,
     responses: Option<std_mpsc::Receiver<BridgeResponse>>,
     friends: Vec<bs_types::Friend>,
     friend_requests: Vec<bs_types::FriendRequest>,
@@ -88,7 +119,12 @@ pub(crate) struct Bridge {
     social_error: Option<String>,
     /// Канал, только что открытый по запросу `OpenDm` (нужно переключить чат).
     opened_dm: Option<String>,
-    cache: Option<Cache>,
+    /// Кэши всех подключённых инстансов.
+    multi: MultiCache,
+    /// Инстанс, на который смотрит интерфейс.
+    active: Origin,
+    /// Состояние соединения по инстансам.
+    states: HashMap<Origin, ConnectionState>,
     ready: bool,
     busy: bool,
     /// Потеряна ли живая сессия: GUI должен вернуться на логин.
@@ -122,8 +158,9 @@ impl Bridge {
         Self {
             runtime,
             events: None,
-            commands: None,
-            requests: None,
+            events_tx: None,
+            commands: HashMap::new(),
+            requests: HashMap::new(),
             responses: None,
             friends: Vec::new(),
             friend_requests: Vec::new(),
@@ -131,7 +168,9 @@ impl Bridge {
             search_results: Vec::new(),
             social_error: None,
             opened_dm: None,
-            cache: None,
+            multi: MultiCache::new(),
+            active: Origin::Home,
+            states: HashMap::new(),
             ready: false,
             busy: false,
             session_lost: false,
@@ -162,32 +201,53 @@ impl Bridge {
 
     fn handle_event(&mut self, event: BridgeEvent) {
         match event {
-            BridgeEvent::Ready(payload) => {
-                self.cache = Some(Cache::from_ready(*payload));
+            BridgeEvent::Ready { origin, payload } => {
+                self.multi.insert_ready(origin.clone(), *payload);
+                self.states
+                    .insert(origin.clone(), ConnectionState::Connected);
+                if origin.is_home() {
+                    self.active = origin;
+                }
                 self.ready = true;
                 self.busy = false;
                 self.session_lost = false;
                 self.last_error = None;
             }
-            BridgeEvent::Server(event) => {
-                if let Some(cache) = self.cache.as_mut() {
-                    let _ = apply(cache, *event);
+            BridgeEvent::Server { origin, event } => {
+                let _ = self.multi.apply(&origin, *event);
+            }
+            BridgeEvent::State { origin, state } => {
+                if origin == self.active {
+                    self.connection = state.clone();
                 }
+                self.states.insert(origin, state);
             }
-            BridgeEvent::State(state) => {
-                self.connection = state;
-            }
-            BridgeEvent::Error(message) => {
+            BridgeEvent::Error { origin, message } => {
                 self.last_error = Some(message);
                 self.busy = false;
-                // Ошибка до первого ready — отказ логина, на логине и остаёмся.
-                self.session_lost = self.cache.is_some();
+                // Ошибка домашнего инстанса до первого ready — отказ логина.
+                // Потеря удалённого инстанса сессию не роняет.
+                if origin.is_home() {
+                    self.session_lost = self.multi.contains(&origin);
+                }
             }
-            BridgeEvent::Disconnected => {
+            BridgeEvent::Disconnected { origin } => {
+                self.states.insert(origin.clone(), ConnectionState::Stopped);
                 self.last_error = Some("соединение закрыто".to_owned());
                 self.busy = false;
-                self.session_lost = true;
-                self.connection = ConnectionState::Stopped;
+                if origin == self.active {
+                    self.connection = ConnectionState::Stopped;
+                }
+                // Потеря домашнего инстанса возвращает на логин; удалённый
+                // просто выпадает из списка.
+                if origin.is_home() {
+                    self.session_lost = true;
+                } else {
+                    self.multi.remove(&origin);
+                    if self.active == origin {
+                        self.focus_first();
+                    }
+                }
             }
         }
     }
@@ -207,9 +267,84 @@ impl Bridge {
         self.last_error.as_deref()
     }
 
-    /// Текущий кэш состояния (если уже подключены).
-    pub(crate) const fn cache(&self) -> Option<&Cache> {
-        self.cache.as_ref()
+    /// Кэш активного инстанса; `None` до первого `ready`.
+    pub(crate) fn cache(&self) -> Option<&Cache> {
+        self.multi.cache(&self.active)
+    }
+
+    /// Все подключённые инстансы: домашний первым.
+    pub(crate) fn instances(&self) -> Vec<Origin> {
+        self.multi.origins()
+    }
+
+    /// Инстанс, на который смотрит интерфейс.
+    pub(crate) const fn active(&self) -> &Origin {
+        &self.active
+    }
+
+    /// Переключает интерфейс на другой инстанс.
+    ///
+    /// Если такого инстанса нет, выбор игнорируется: иначе UI остался бы
+    /// без кэша и показывал пустоту.
+    pub(crate) fn set_active(&mut self, origin: Origin) {
+        if origin == self.active || !self.multi.contains(&origin) {
+            return;
+        }
+        self.active = origin;
+        self.connection = self
+            .states
+            .get(&self.active)
+            .cloned()
+            .unwrap_or(ConnectionState::Connecting);
+    }
+
+    /// Следующий инстанс по кругу.
+    pub(crate) fn next_instance(&mut self) {
+        self.step_instance(1);
+    }
+
+    /// Предыдущий инстанс по кругу.
+    pub(crate) fn prev_instance(&mut self) {
+        self.step_instance(-1);
+    }
+
+    /// Сдвиг активного инстанса на `delta` позиций по кругу.
+    fn step_instance(&mut self, delta: isize) {
+        let origins = self.multi.origins();
+        if origins.is_empty() {
+            return;
+        }
+        let Some(index) = origins.iter().position(|origin| *origin == self.active) else {
+            self.set_active(origins[0].clone());
+            return;
+        };
+        let len = origins.len() as isize;
+        let next = (index as isize + delta).rem_euclid(len) as usize;
+        self.set_active(origins[next].clone());
+    }
+
+    /// Ставит активным первый доступный инстанс.
+    fn focus_first(&mut self) {
+        if let Some(first) = self.multi.origins().first().cloned() {
+            self.set_active(first);
+        } else {
+            self.active = Origin::Home;
+            self.connection = ConnectionState::Connecting;
+        }
+    }
+
+    /// Все кэши (для объединённых списков).
+    pub(crate) const fn multi(&self) -> &MultiCache {
+        &self.multi
+    }
+
+    /// Состояние соединения конкретного инстанса.
+    ///
+    /// Для неизвестного инстанса отвечаем `Connecting`: это честнее, чем
+    /// показывать «остановлено» про то, что ещё не начинали.
+    pub(crate) fn status_of(&self, origin: &Origin) -> &ConnectionState {
+        static CONNECTING: ConnectionState = ConnectionState::Connecting;
+        self.states.get(origin).unwrap_or(&CONNECTING)
     }
 
     /// Текущее состояние соединения (для строки статуса).
@@ -227,16 +362,19 @@ impl Bridge {
     /// Кэш и каналы связи больше не нужны: старая задача уже завершилась.
     pub(crate) fn reset_session(&mut self) {
         self.events = None;
-        self.commands = None;
-        self.requests = None;
+        self.events_tx = None;
+        self.commands.clear();
+        self.requests.clear();
         self.responses = None;
+        self.multi = MultiCache::new();
+        self.states.clear();
+        self.active = Origin::Home;
         self.friends.clear();
         self.friend_requests.clear();
         self.dm_channels.clear();
         self.search_results.clear();
         self.social_error = None;
         self.opened_dm = None;
-        self.cache = None;
         self.ready = false;
         self.session_lost = false;
         self.connection = ConnectionState::Connecting;
@@ -265,14 +403,16 @@ impl Bridge {
         let (commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
         let (requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
         let (responses_tx, responses_rx) = std_mpsc::channel();
+        self.events_tx = Some(events_tx.clone());
         self.events = Some(events_rx);
-        self.commands = Some(commands_tx);
-        self.requests = Some(requests_tx);
+        self.commands.insert(Origin::Home, commands_tx);
+        self.requests.insert(Origin::Home, requests_tx);
         self.responses = Some(responses_rx);
 
         let username = username.trim().to_owned();
         let password = password.to_owned();
         self.runtime.spawn(run_session(
+            Origin::Home,
             base,
             username,
             password,
@@ -281,6 +421,109 @@ impl Bridge {
             requests_rx,
             responses_tx,
         ));
+    }
+
+    /// Запускает вторую сессию к удалённому инстансу.
+    ///
+    /// `base` — адрес без схемы или с ней; origin выводится из него, чтобы
+    /// один и тот же инстанс не завёлся дважды.
+    pub(crate) fn add_instance(&mut self, base: &str, username: &str, password: &str) {
+        let Some(base) = normalize_base(base) else {
+            self.last_error = Some("заполните адрес инстанса".to_owned());
+            return;
+        };
+        let origin = match Origin::parse_web_str(&base) {
+            Ok(origin) => origin,
+            Err(err) => {
+                self.last_error = Some(format!("некорректный адрес: {err}"));
+                return;
+            }
+        };
+        if self.states.contains_key(&origin) {
+            // Уже подключён: просто переключаемся на него.
+            self.set_active(origin);
+            return;
+        }
+        if username.trim().is_empty() || password.is_empty() {
+            self.last_error = Some("заполните логин и пароль".to_owned());
+            return;
+        }
+
+        let (commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
+        let (requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
+        let (responses_tx, responses_rx) = std_mpsc::channel();
+        // Команды и REST-запросы адресуются активному инстансу.
+        self.commands.insert(origin.clone(), commands_tx);
+        self.requests.insert(origin.clone(), requests_tx);
+        self.responses = Some(responses_rx);
+        let Some(events_tx) = self.events_tx.clone() else {
+            // Домашняя сессия ещё не создавала канал — заводим его сами.
+            let (events_tx, events_rx) = std_mpsc::channel();
+            self.events_tx = Some(events_tx.clone());
+            self.events = Some(events_rx);
+            return self.spawn_instance(
+                origin,
+                base,
+                username,
+                password,
+                events_tx,
+                commands_rx,
+                requests_rx,
+                responses_tx,
+            );
+        };
+        self.spawn_instance(
+            origin,
+            base,
+            username,
+            password,
+            events_tx,
+            commands_rx,
+            requests_rx,
+            responses_tx,
+        );
+    }
+
+    /// Запускает фоновую сессию инстанса.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "сессия собирается из готовых каналов"
+    )]
+    fn spawn_instance(
+        &mut self,
+        origin: Origin,
+        base: String,
+        username: &str,
+        password: &str,
+        events_tx: std_mpsc::Sender<BridgeEvent>,
+        commands_rx: tokio_mpsc::UnboundedReceiver<ClientEvent>,
+        requests_rx: tokio_mpsc::UnboundedReceiver<BridgeRequest>,
+        responses_tx: std_mpsc::Sender<BridgeResponse>,
+    ) {
+        self.states
+            .insert(origin.clone(), ConnectionState::Connecting);
+        self.runtime.spawn(run_session(
+            origin,
+            base,
+            username.trim().to_owned(),
+            password.to_owned(),
+            events_tx,
+            commands_rx,
+            requests_rx,
+            responses_tx,
+        ));
+    }
+
+    /// Отключает удалённый инстанс и убирает его из списка.
+    pub(crate) fn remove_instance(&mut self, origin: &Origin) {
+        if origin.is_home() {
+            return;
+        }
+        self.multi.remove(origin);
+        self.states.remove(origin);
+        if self.active == *origin {
+            self.focus_first();
+        }
     }
 
     /// Отправляет сообщение в канал (в фоне).
@@ -294,7 +537,7 @@ impl Bridge {
 
     /// Отправляет команду серверу, если сессия жива.
     pub(crate) fn send(&self, event: ClientEvent) {
-        if let Some(commands) = self.commands.as_ref() {
+        if let Some(commands) = self.commands.get(&self.active) {
             let _ = commands.send(event);
         }
     }
@@ -332,7 +575,7 @@ impl Bridge {
 
     /// Отправляет REST-запрос, если сессия жива.
     pub(crate) fn request(&self, request: BridgeRequest) {
-        if let Some(requests) = self.requests.as_ref() {
+        if let Some(requests) = self.requests.get(&self.active) {
             let _ = requests.send(request);
         }
     }
@@ -406,7 +649,12 @@ impl Bridge {
 }
 
 /// Фоновая сессия: логин, затем пересылка событий и команд.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "сессия собирается из готовых каналов"
+)]
 async fn run_session(
+    origin: Origin,
     base: String,
     username: String,
     password: String,
@@ -418,7 +666,7 @@ async fn run_session(
     let mut store = CredentialStore::new();
     let login = InstanceHandle::login(
         &mut store,
-        Origin::Home,
+        origin.clone(),
         &base,
         &username,
         &password,
@@ -430,21 +678,29 @@ async fn run_session(
     let (handle, ready) = match login {
         Ok(pair) => pair,
         Err(err) => {
-            let _ = events.send(BridgeEvent::Error(err.to_string()));
+            let _ = events.send(BridgeEvent::Error {
+                origin,
+                message: err.to_string(),
+            });
             return;
         }
     };
 
     match ready {
         ServerEvent::Ready(payload) => {
-            if events.send(BridgeEvent::Ready(payload)).is_err() {
+            let event = BridgeEvent::Ready {
+                origin: origin.clone(),
+                payload,
+            };
+            if events.send(event).is_err() {
                 return;
             }
         }
         other => {
-            let _ = events.send(BridgeEvent::Error(format!(
-                "ожидался ready, пришло {other:?}"
-            )));
+            let _ = events.send(BridgeEvent::Error {
+                origin,
+                message: format!("ожидался ready, пришло {other:?}"),
+            });
             return;
         }
     }
@@ -454,16 +710,26 @@ async fn run_session(
         tokio::select! {
             event = sub.recv() => match event {
                 Ok(InstanceEvent::Server(boxed)) => {
-                    if events.send(BridgeEvent::Server(boxed)).is_err() {
+                    let event = BridgeEvent::Server {
+                        origin: origin.clone(),
+                        event: boxed,
+                    };
+                    if events.send(event).is_err() {
                         return;
                     }
                 }
-                Ok(InstanceEvent::AuthRejected { message, code }) => {
-                    let code = code.map_or_else(String::new, |c| format!(" [{c}]"));
-                    let _ = events.send(BridgeEvent::Error(format!("{message}{code}")));
+                Ok(InstanceEvent::AuthRejected { failure, message, .. }) => {
+                    let _ = events.send(BridgeEvent::Error {
+                        origin: origin.clone(),
+                        message: format!("{message} ({failure:?})"),
+                    });
                 }
                 Ok(InstanceEvent::StateChanged(state)) => {
-                    if events.send(BridgeEvent::State(state)).is_err() {
+                    let event = BridgeEvent::State {
+                        origin: origin.clone(),
+                        state,
+                    };
+                    if events.send(event).is_err() {
                         return;
                     }
                 }
@@ -471,7 +737,7 @@ async fn run_session(
                     tracing::warn!(skipped, "пропущены события инстанса");
                 }
                 Err(broadcast::error::RecvError::Closed) => {
-                    let _ = events.send(BridgeEvent::Disconnected);
+                    let _ = events.send(BridgeEvent::Disconnected { origin });
                     return;
                 }
             },
@@ -487,7 +753,10 @@ async fn run_session(
             command = commands.recv() => match command {
                 Some(event) => {
                     if let Err(err) = handle.send(event).await {
-                        let _ = events.send(BridgeEvent::Error(err.to_string()));
+                        let _ = events.send(BridgeEvent::Error {
+                            origin: origin.clone(),
+                            message: err.to_string(),
+                        });
                     }
                 }
                 None => return,
@@ -555,9 +824,8 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
 mod tests {
     use std::time::Duration;
 
-    use bs_core::Cache;
     use bs_instances::ConnectionState;
-    use bs_types::ReadyPayload;
+    use bs_types::{Origin, ReadyPayload};
 
     use super::{Bridge, BridgeEvent, normalize_base, run_session, std_mpsc};
     use tokio::sync::mpsc as tokio_mpsc;
@@ -587,6 +855,12 @@ mod tests {
         .expect("ready payload должен разбираться")
     }
 
+    /// Удалённый origin для тестов.
+    #[allow(clippy::expect_used, reason = "в тестах паника допустима")]
+    fn remote() -> Origin {
+        Origin::parse_web_str("https://chat.example.com").expect("origin")
+    }
+
     /// Пустой runtime нужен только как держатель `Handle`; задачи в этих
     /// тестах не запускаются, сети нет.
     #[allow(clippy::expect_used, reason = "в тестах паника допустима")]
@@ -599,6 +873,355 @@ mod tests {
         // на всё время теста, а дропать его вручную ради этого не нужно.
         std::mem::forget(runtime);
         Bridge::new(handle)
+    }
+
+    /// Кладёт в мост готовый кэш инстанса, минуя сеть.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "удобно вызывать с литералами"
+    )]
+    fn seed(bridge: &mut Bridge, origin: Origin) {
+        bridge.multi.insert_ready(origin.clone(), ready_payload());
+        bridge
+            .states
+            .insert(origin.clone(), ConnectionState::Connected);
+        if origin == bridge.active {
+            bridge.connection = ConnectionState::Connected;
+        }
+    }
+
+    #[test]
+    fn remote_origin_routes_to_own_cache() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        seed(&mut bridge, remote());
+        assert_eq!(bridge.instances().len(), 2);
+        assert!(bridge.multi().cache(&remote()).is_some());
+    }
+
+    #[test]
+    fn server_event_applies_to_its_origin_only() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        seed(&mut bridge, remote());
+        let before_home = bridge
+            .multi()
+            .cache(&Origin::Home)
+            .map(|cache| cache.messages("chan-1").len());
+        bridge.handle_event(BridgeEvent::Server {
+            origin: remote(),
+            event: Box::new(bs_types::ServerEvent::Pong),
+        });
+        let after_home = bridge
+            .multi()
+            .cache(&Origin::Home)
+            .map(|cache| cache.messages("chan-1").len());
+        assert_eq!(before_home, after_home, "чужой кэш не должен меняться");
+    }
+
+    #[test]
+    fn set_active_switches_cache() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        seed(&mut bridge, remote());
+        bridge.set_active(remote());
+        assert_eq!(bridge.active(), &remote());
+        assert!(bridge.cache().is_some());
+        assert_eq!(
+            bridge.connection(),
+            &ConnectionState::Connected,
+            "состояние берётся у нового активного инстанса"
+        );
+    }
+
+    #[test]
+    fn set_active_ignores_unknown_origin() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        bridge.set_active(remote());
+        assert_eq!(
+            bridge.active(),
+            &Origin::Home,
+            "незнакомый инстанс не выбираем"
+        );
+    }
+
+    #[test]
+    fn next_and_prev_wrap_around() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        seed(&mut bridge, remote());
+        bridge.set_active(Origin::Home);
+        bridge.next_instance();
+        assert_eq!(bridge.active(), &remote());
+        bridge.next_instance();
+        assert_eq!(bridge.active(), &Origin::Home, "по кругу");
+        bridge.prev_instance();
+        assert_eq!(bridge.active(), &remote());
+    }
+
+    #[test]
+    fn removing_active_falls_back_to_first() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        seed(&mut bridge, remote());
+        bridge.set_active(remote());
+        bridge.remove_instance(&remote());
+        assert_eq!(bridge.active(), &Origin::Home);
+        assert_eq!(bridge.instances(), vec![Origin::Home]);
+    }
+
+    #[test]
+    fn removing_home_is_ignored() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        bridge.remove_instance(&Origin::Home);
+        assert!(bridge.multi().contains(&Origin::Home));
+    }
+
+    #[test]
+    fn status_of_defaults_to_connecting() {
+        let bridge = new_bridge();
+        assert_eq!(bridge.status_of(&remote()), &ConnectionState::Connecting);
+    }
+
+    #[test]
+    fn state_event_updates_connection_for_active() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        bridge.set_active(Origin::Home);
+        bridge.handle_event(BridgeEvent::State {
+            origin: Origin::Home,
+            state: ConnectionState::Reconnecting { attempt: 2 },
+        });
+        assert_eq!(
+            bridge.connection(),
+            &ConnectionState::Reconnecting { attempt: 2 }
+        );
+        assert!(!bridge.take_session_lost());
+    }
+
+    #[test]
+    fn state_event_for_remote_does_not_touch_active_connection() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        seed(&mut bridge, remote());
+        bridge.set_active(Origin::Home);
+        bridge.handle_event(BridgeEvent::State {
+            origin: remote(),
+            state: ConnectionState::Stopped,
+        });
+        assert_eq!(bridge.connection(), &ConnectionState::Connected);
+        assert_eq!(bridge.status_of(&remote()), &ConnectionState::Stopped);
+    }
+
+    #[test]
+    fn error_without_cache_is_login_error_not_session_loss() {
+        let mut bridge = new_bridge();
+        bridge.busy = true;
+        bridge.handle_event(BridgeEvent::Error {
+            origin: Origin::Home,
+            message: "неверный пароль".to_owned(),
+        });
+        assert!(!bridge.is_busy());
+        assert!(
+            !bridge.take_session_lost(),
+            "отказ логина оставляет пользователя на форме"
+        );
+    }
+
+    #[test]
+    fn error_with_cache_marks_session_lost() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        bridge.handle_event(BridgeEvent::Error {
+            origin: Origin::Home,
+            message: "boom".to_owned(),
+        });
+        assert!(bridge.take_session_lost(), "живая сессия потеряна");
+    }
+
+    #[test]
+    fn remote_error_does_not_lose_home_session() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        seed(&mut bridge, remote());
+        bridge.handle_event(BridgeEvent::Error {
+            origin: remote(),
+            message: "boom".to_owned(),
+        });
+        assert!(!bridge.take_session_lost());
+    }
+
+    #[test]
+    fn disconnected_home_marks_session_lost_and_stops() {
+        let mut bridge = new_bridge();
+        bridge.handle_event(BridgeEvent::Disconnected {
+            origin: Origin::Home,
+        });
+        assert!(bridge.take_session_lost());
+        assert_eq!(bridge.connection(), &ConnectionState::Stopped);
+        assert_eq!(bridge.last_error(), Some("соединение закрыто"));
+    }
+
+    #[test]
+    fn disconnected_remote_drops_instance() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        seed(&mut bridge, remote());
+        bridge.handle_event(BridgeEvent::Disconnected { origin: remote() });
+        assert!(!bridge.take_session_lost(), "домашняя сессия жива");
+        assert!(!bridge.multi().contains(&remote()));
+    }
+
+    #[test]
+    fn take_session_lost_is_one_shot() {
+        let mut bridge = new_bridge();
+        bridge.handle_event(BridgeEvent::Disconnected {
+            origin: Origin::Home,
+        });
+        assert!(bridge.take_session_lost());
+        assert!(!bridge.take_session_lost());
+    }
+
+    #[test]
+    fn reset_session_clears_instances() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        seed(&mut bridge, remote());
+        bridge.ready = true;
+        bridge.session_lost = true;
+        bridge.connection = ConnectionState::Stopped;
+
+        bridge.reset_session();
+
+        assert!(bridge.cache().is_none());
+        assert!(bridge.instances().is_empty());
+        assert_eq!(bridge.active(), &Origin::Home);
+        assert!(!bridge.ready, "ready должен быть сброшен");
+        assert_eq!(bridge.connection(), &ConnectionState::Connecting);
+        assert!(!bridge.session_lost);
+    }
+
+    #[test]
+    fn ready_clears_session_lost_and_error() {
+        let mut bridge = new_bridge();
+        bridge.session_lost = true;
+        bridge.last_error = Some("старое".to_owned());
+        bridge.handle_event(BridgeEvent::Ready {
+            origin: Origin::Home,
+            payload: Box::new(ready_payload()),
+        });
+        assert!(!bridge.session_lost);
+        assert_eq!(bridge.last_error(), None);
+        assert!(bridge.cache().is_some());
+    }
+
+    #[test]
+    fn take_ready_is_one_shot() {
+        let mut bridge = new_bridge();
+        bridge.ready = true;
+        assert!(bridge.take_ready(), "первый вызов должен вернуть true");
+        assert!(!bridge.take_ready(), "второй вызов должен вернуть false");
+    }
+
+    #[test]
+    fn take_ready_false_initially() {
+        let mut bridge = new_bridge();
+        assert!(!bridge.take_ready());
+    }
+
+    #[test]
+    fn normalize_base_adds_https_scheme() {
+        assert_eq!(
+            normalize_base("backspace.example").as_deref(),
+            Some("https://backspace.example")
+        );
+        assert_eq!(
+            normalize_base("  example.com:8443  ").as_deref(),
+            Some("https://example.com:8443")
+        );
+    }
+
+    #[test]
+    fn normalize_base_keeps_explicit_scheme() {
+        assert_eq!(
+            normalize_base("http://localhost:3000").as_deref(),
+            Some("http://localhost:3000")
+        );
+        assert_eq!(
+            normalize_base("ws://example.com").as_deref(),
+            Some("ws://example.com")
+        );
+    }
+
+    #[test]
+    fn normalize_base_rejects_empty() {
+        assert_eq!(normalize_base(""), None);
+        assert_eq!(normalize_base("   "), None);
+    }
+
+    #[test]
+    fn start_login_rejects_empty_fields() {
+        let cases = [
+            ("", "user", "pass"),
+            ("   ", "user", "pass"),
+            ("https://example.com", "", "pass"),
+            ("https://example.com", "user", ""),
+        ];
+        for (base, user, pass) in cases {
+            let mut bridge = new_bridge();
+            bridge.start_login(base, user, pass);
+            assert!(!bridge.is_busy(), "пустые поля не должны взводить busy");
+            assert_eq!(
+                bridge.last_error(),
+                Some("заполните адрес, логин и пароль"),
+                "base={base:?} user={user:?} pass={pass:?}"
+            );
+            assert!(bridge.events.is_none(), "канал событий не создаётся");
+            assert!(bridge.commands.is_empty(), "канал команд не создаётся");
+        }
+    }
+
+    #[test]
+    fn start_login_accepts_host_without_scheme() {
+        let mut bridge = new_bridge();
+        bridge.start_login("backspace.example", "user", "pass");
+        assert!(bridge.is_busy(), "адрес без схемы должен приниматься");
+        assert_eq!(bridge.last_error(), None);
+        assert!(bridge.events.is_some(), "канал событий должен быть создан");
+        assert!(bridge.commands.contains_key(&Origin::Home));
+    }
+
+    #[test]
+    fn start_login_ignored_while_busy() {
+        let mut bridge = new_bridge();
+        bridge.busy = true;
+        bridge.start_login("https://example.com", "user", "pass");
+        assert!(bridge.events.is_none());
+        assert!(bridge.commands.is_empty());
+        assert_eq!(bridge.last_error(), None);
+    }
+
+    #[test]
+    fn add_instance_rejects_empty_login() {
+        let mut bridge = new_bridge();
+        bridge.add_instance("https://chat.example.com", "", "pass");
+        assert_eq!(bridge.last_error(), Some("заполните логин и пароль"));
+    }
+
+    #[test]
+    fn add_instance_rejects_bad_base() {
+        let mut bridge = new_bridge();
+        bridge.add_instance("   ", "user", "pass");
+        assert_eq!(bridge.last_error(), Some("заполните адрес инстанса"));
+    }
+
+    #[test]
+    fn send_message_without_session_is_noop() {
+        let bridge = new_bridge();
+        bridge.send_message("chan-1".to_owned(), "hello".to_owned());
+        assert!(bridge.commands.is_empty());
     }
 
     /// Ошибка HTTP-логина должна доехать до GUI как `BridgeEvent::Error`,
@@ -625,6 +1248,7 @@ mod tests {
         let (responses_tx, _responses_rx) = std_mpsc::channel();
 
         run_session(
+            Origin::Home,
             server.uri(),
             "alice".to_owned(),
             "secret".to_owned(),
@@ -638,13 +1262,10 @@ mod tests {
         let event = events_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("run_session должен прислать событие об ошибке");
-        assert!(
-            matches!(&event, BridgeEvent::Error(_)),
-            "ожидалась ошибка, пришло {event:?}"
-        );
-        let BridgeEvent::Error(message) = event else {
-            return;
+        let BridgeEvent::Error { origin, message } = event else {
+            unreachable!("ожидалась ошибка, пришло {event:?}");
         };
+        assert_eq!(origin, Origin::Home, "ошибка домашнего инстанса");
         assert!(message.contains("401"), "текст ошибки: {message}");
         assert!(
             message.contains("Invalid credentials"),
@@ -654,84 +1275,6 @@ mod tests {
             events_rx.try_recv().is_err(),
             "после ошибки логина сессия не должна продолжаться"
         );
-    }
-
-    #[test]
-    fn state_event_updates_connection() {
-        let mut bridge = new_bridge();
-        bridge.handle_event(BridgeEvent::State(ConnectionState::Reconnecting {
-            attempt: 2,
-        }));
-        assert_eq!(
-            bridge.connection(),
-            &ConnectionState::Reconnecting { attempt: 2 }
-        );
-        // Состояние само по себе не считается потерей сессии.
-        assert!(!bridge.take_session_lost());
-    }
-
-    #[test]
-    fn error_without_cache_is_login_error_not_session_loss() {
-        let mut bridge = new_bridge();
-        bridge.busy = true;
-        bridge.handle_event(BridgeEvent::Error("неверный пароль".to_owned()));
-        assert!(!bridge.is_busy());
-        assert!(
-            !bridge.take_session_lost(),
-            "отказ логина оставляет пользователя на форме"
-        );
-    }
-
-    #[test]
-    fn error_with_cache_marks_session_lost() {
-        let mut bridge = new_bridge();
-        bridge.cache = Some(Cache::from_ready(ready_payload()));
-        bridge.handle_event(BridgeEvent::Error("boom".to_owned()));
-        assert!(bridge.take_session_lost(), "живая сессия потеряна");
-    }
-
-    #[test]
-    fn disconnected_marks_session_lost_and_stops() {
-        let mut bridge = new_bridge();
-        bridge.handle_event(BridgeEvent::Disconnected);
-        assert!(bridge.take_session_lost());
-        assert_eq!(bridge.connection(), &ConnectionState::Stopped);
-        assert_eq!(bridge.last_error(), Some("соединение закрыто"));
-    }
-
-    #[test]
-    fn take_session_lost_is_one_shot() {
-        let mut bridge = new_bridge();
-        bridge.handle_event(BridgeEvent::Disconnected);
-        assert!(bridge.take_session_lost());
-        assert!(!bridge.take_session_lost());
-    }
-
-    #[test]
-    fn reset_session_clears_cache_and_channels() {
-        let mut bridge = new_bridge();
-        bridge.cache = Some(Cache::from_ready(ready_payload()));
-        bridge.ready = true;
-        bridge.session_lost = true;
-        bridge.connection = ConnectionState::Stopped;
-
-        bridge.reset_session();
-
-        assert!(bridge.cache().is_none());
-        assert!(!bridge.ready, "ready должен быть сброшен");
-        assert_eq!(bridge.connection(), &ConnectionState::Connecting);
-        assert!(!bridge.session_lost);
-    }
-
-    #[test]
-    fn ready_clears_session_lost_and_error() {
-        let mut bridge = new_bridge();
-        bridge.session_lost = true;
-        bridge.last_error = Some("старое".to_owned());
-        bridge.handle_event(BridgeEvent::Ready(Box::new(ready_payload())));
-        assert!(!bridge.session_lost);
-        assert_eq!(bridge.last_error(), None);
-        assert!(bridge.cache().is_some());
     }
 
     /// Полный happy-path: HTTP-логин, WebSocket `auth`, `ready`, затем
@@ -750,6 +1293,7 @@ mod tests {
         let (responses_tx, _responses_rx) = std_mpsc::channel();
 
         let session = tokio::spawn(run_session(
+            Origin::Home,
             base,
             "alice".to_owned(),
             "secret".to_owned(),
@@ -767,8 +1311,8 @@ mod tests {
         .expect("join");
 
         assert!(
-            matches!(event, Ok(BridgeEvent::Ready(_))),
-            "ожидался ready, пришло {event:?}"
+            matches!(&event, Ok(BridgeEvent::Ready { origin, .. }) if origin.is_home()),
+            "ожидался ready домашнего инстанса, пришло {event:?}"
         );
 
         commands_tx
@@ -800,134 +1344,10 @@ mod tests {
             "сервер получил {received:?}"
         );
 
-        // Закрываем канал команд — сессия должна корректно завершиться.
         drop(commands_tx);
         tokio::time::timeout(Duration::from_secs(10), session)
             .await
             .expect("run_session должен завершиться")
             .expect("задача не должна паниковать");
-    }
-
-    #[test]
-    fn take_ready_is_one_shot() {
-        let mut bridge = new_bridge();
-        bridge.ready = true;
-        assert!(bridge.take_ready(), "первый вызов должен вернуть true");
-        assert!(!bridge.take_ready(), "второй вызов должен вернуть false");
-    }
-
-    #[test]
-    fn take_ready_false_initially() {
-        let mut bridge = new_bridge();
-        assert!(!bridge.take_ready());
-    }
-
-    #[test]
-    fn error_clears_busy_and_sets_message() {
-        let mut bridge = new_bridge();
-        bridge.busy = true;
-        bridge.handle_event(BridgeEvent::Error("boom".to_owned()));
-        assert!(!bridge.is_busy(), "ошибка должна снимать busy");
-        assert_eq!(bridge.last_error(), Some("boom"));
-    }
-
-    #[test]
-    fn disconnected_clears_busy_and_sets_message() {
-        let mut bridge = new_bridge();
-        bridge.busy = true;
-        bridge.handle_event(BridgeEvent::Disconnected);
-        assert!(!bridge.is_busy());
-        assert_eq!(bridge.last_error(), Some("соединение закрыто"));
-    }
-
-    #[test]
-    fn start_login_rejects_empty_fields() {
-        let cases = [
-            ("", "user", "pass"),
-            ("   ", "user", "pass"),
-            ("https://example.com", "", "pass"),
-            ("https://example.com", "user", ""),
-        ];
-        for (base, user, pass) in cases {
-            let mut bridge = new_bridge();
-            bridge.start_login(base, user, pass);
-            assert!(!bridge.is_busy(), "пустые поля не должны взводить busy");
-            assert_eq!(
-                bridge.last_error(),
-                Some("заполните адрес, логин и пароль"),
-                "base={base:?} user={user:?} pass={pass:?}"
-            );
-            assert!(
-                bridge.events.is_none(),
-                "канал событий не должен создаваться"
-            );
-            assert!(
-                bridge.commands.is_none(),
-                "канал команд не должен создаваться"
-            );
-        }
-    }
-
-    #[test]
-    fn normalize_base_adds_https_scheme() {
-        assert_eq!(
-            normalize_base("backspace.example").as_deref(),
-            Some("https://backspace.example")
-        );
-        assert_eq!(
-            normalize_base("  example.com:8443  ").as_deref(),
-            Some("https://example.com:8443")
-        );
-    }
-
-    #[test]
-    fn normalize_base_keeps_explicit_scheme() {
-        assert_eq!(
-            normalize_base("http://localhost:3000").as_deref(),
-            Some("http://localhost:3000")
-        );
-        assert_eq!(
-            normalize_base("https://example.com").as_deref(),
-            Some("https://example.com")
-        );
-        assert_eq!(
-            normalize_base("ws://example.com").as_deref(),
-            Some("ws://example.com")
-        );
-    }
-
-    #[test]
-    fn normalize_base_rejects_empty() {
-        assert_eq!(normalize_base(""), None);
-        assert_eq!(normalize_base("   "), None);
-    }
-
-    #[test]
-    fn start_login_accepts_host_without_scheme() {
-        let mut bridge = new_bridge();
-        bridge.start_login("backspace.example", "user", "pass");
-        assert!(bridge.is_busy(), "адрес без схемы должен приниматься");
-        assert_eq!(bridge.last_error(), None);
-        assert!(bridge.events.is_some(), "канал событий должен быть создан");
-        assert!(bridge.commands.is_some(), "канал команд должен быть создан");
-    }
-
-    #[test]
-    fn start_login_ignored_while_busy() {
-        let mut bridge = new_bridge();
-        bridge.busy = true;
-        bridge.start_login("https://example.com", "user", "pass");
-        // Ранний выход: ни каналов, ни изменения ошибки.
-        assert!(bridge.events.is_none());
-        assert!(bridge.commands.is_none());
-        assert_eq!(bridge.last_error(), None);
-    }
-
-    #[test]
-    fn send_message_without_session_is_noop() {
-        let bridge = new_bridge();
-        // Не должно паниковать и не должно ничего отправлять.
-        bridge.send_message("chan-1".to_owned(), "hello".to_owned());
-        assert!(bridge.commands.is_none());
     }
 }
