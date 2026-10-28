@@ -609,3 +609,176 @@ fn friend_relay_failure_does_not_change_cache() {
     ));
     assert!(c.friend_requests().next().is_none());
 }
+
+fn dm_message_json(id: &str, created_at: i64, content: &str) -> String {
+    format!(
+        r#"{{"id":"{id}","dmChannelId":"dm1","userId":"u1","content":"{content}",
+            "createdAt":{created_at},"user":{ALICE},"attachments":[],"embeds":[],
+            "reactions":[]}}"#
+    )
+}
+
+fn dm_message(id: &str, created_at: i64, content: &str) -> bs_types::DmMessageWithUser {
+    serde_json::from_str(&dm_message_json(id, created_at, content)).expect("dm-сообщение парсится")
+}
+
+fn dm_event(kind: &str, id: &str, created_at: i64, content: &str) -> ServerEvent {
+    event(&format!(
+        r#"{{"type":"{kind}","message":{}}}"#,
+        dm_message_json(id, created_at, content)
+    ))
+}
+
+#[test]
+fn dm_message_created_is_stored_and_sets_preview() {
+    let mut c = cache();
+    assert!(apply(
+        &mut c,
+        dm_event("dm_message_created", "m2", 20, "второе")
+    ));
+    assert!(apply(
+        &mut c,
+        dm_event("dm_message_created", "m1", 10, "первое")
+    ));
+
+    let ids: Vec<_> = c
+        .dm_messages("dm1")
+        .iter()
+        .map(|m| m.message.id.as_str())
+        .collect();
+    assert_eq!(ids, ["m1", "m2"], "порядок по времени");
+    assert!(
+        c.dm_channel("dm1")
+            .is_some_and(|dm| dm.last_message.is_some())
+    );
+}
+
+#[test]
+fn dm_message_created_for_unknown_dm_is_still_stored() {
+    let mut c = cache();
+    c.dm_channels.clear();
+    assert!(apply(
+        &mut c,
+        dm_event("dm_message_created", "m1", 10, "привет")
+    ));
+    assert_eq!(c.dm_messages("dm1").len(), 1);
+}
+
+#[test]
+fn dm_message_updated_replaces_content() {
+    let mut c = cache();
+    assert!(apply(
+        &mut c,
+        dm_event("dm_message_created", "m1", 10, "до")
+    ));
+    assert!(apply(
+        &mut c,
+        dm_event("dm_message_updated", "m1", 10, "после")
+    ));
+    assert_eq!(c.dm_messages("dm1").len(), 1);
+    assert_eq!(
+        c.dm_messages("dm1")[0].message.content.as_deref(),
+        Some("после")
+    );
+}
+
+#[test]
+fn dm_message_deleted_removes_message() {
+    let mut c = cache();
+    assert!(apply(&mut c, dm_event("dm_message_created", "m1", 10, "x")));
+    let deleted = event(r#"{"type":"dm_message_deleted","messageId":"m1","dmChannelId":"dm1"}"#);
+    assert!(apply(&mut c, deleted.clone()));
+    assert!(c.dm_messages("dm1").is_empty());
+    assert!(
+        !apply(&mut c, deleted),
+        "повторное удаление ничего не меняет"
+    );
+}
+
+#[test]
+fn dm_embeds_resolved_updates_message() {
+    let mut c = cache();
+    assert!(apply(
+        &mut c,
+        dm_event("dm_message_created", "m1", 10, "ссылка")
+    ));
+    let resolved =
+        event(r#"{"type":"dm_embeds_resolved","messageId":"m1","dmChannelId":"dm1","embeds":[]}"#);
+    assert!(apply(&mut c, resolved));
+}
+
+#[test]
+fn reactions_apply_to_dm_messages() {
+    let mut c = cache();
+    assert!(apply(&mut c, dm_event("dm_message_created", "m1", 10, "x")));
+    let added = event(&format!(
+        r#"{{"type":"reaction_added","messageId":"m1","reaction":{{
+            "id":"r1","messageId":"m1","userId":"u1","emoji":"👍","createdAt":1,
+            "user":{ALICE}}}}}"#
+    ));
+    assert!(apply(&mut c, added));
+    assert_eq!(c.dm_messages("dm1")[0].reactions.len(), 1);
+    let removed =
+        event(r#"{"type":"reaction_removed","messageId":"m1","userId":"u1","emoji":"👍"}"#);
+    assert!(apply(&mut c, removed));
+    assert!(c.dm_messages("dm1")[0].reactions.is_empty());
+}
+
+#[test]
+fn merge_history_orders_dedups_and_keeps_live_version() {
+    let mut c = cache();
+    assert!(apply(
+        &mut c,
+        dm_event("dm_message_created", "m3", 30, "живое")
+    ));
+    let added = c.merge_dm_history(
+        "dm1",
+        vec![
+            dm_message("m1", 10, "старое"),
+            dm_message("m2", 20, "среднее"),
+            dm_message("m3", 30, "из истории"),
+        ],
+    );
+    assert_eq!(added, 2, "m3 уже есть");
+    let ids: Vec<_> = c
+        .dm_messages("dm1")
+        .iter()
+        .map(|m| m.message.id.as_str())
+        .collect();
+    assert_eq!(ids, ["m1", "m2", "m3"]);
+    assert_eq!(
+        c.dm_messages("dm1")[2].message.content.as_deref(),
+        Some("живое")
+    );
+}
+
+#[test]
+fn merge_history_for_space_channel_is_idempotent() {
+    let mut c = cache();
+    let page = || vec![message("a", 10, "1"), message("b", 20, "2")];
+    assert_eq!(c.merge_history("c1", page()), 2);
+    assert_eq!(c.merge_history("c1", page()), 0);
+    assert_eq!(c.messages("c1").len(), 2);
+}
+
+#[test]
+fn equal_timestamps_are_ordered_by_snowflake_id() {
+    let mut c = cache();
+    // «9» короче «10», значит и меньше как snowflake.
+    c.merge_history("c1", vec![message("10", 5, "b"), message("9", 5, "a")]);
+    let ids: Vec<_> = c
+        .messages("c1")
+        .iter()
+        .map(|m| m.message.id.as_str())
+        .collect();
+    assert_eq!(ids, ["9", "10"]);
+}
+
+#[test]
+fn ready_clears_dm_messages() {
+    let mut c = cache();
+    assert!(apply(&mut c, dm_event("dm_message_created", "m1", 10, "x")));
+    let payload = serde_json::from_str(READY_JSON).expect("ready парсится");
+    assert!(apply(&mut c, ServerEvent::Ready(Box::new(payload))));
+    assert!(c.dm_messages("dm1").is_empty());
+}

@@ -7,11 +7,12 @@
 //! из параметра [`apply_at`]; [`apply`] подставляет системное время.
 
 use bs_types::{
-    ChannelId, DmChannelLastMessage, MessageId, MessageWithUser, PresenceIdentity, ReadState,
-    ServerEvent, SpaceVoiceState, User, UserId, UserStatus, VoiceStateAction, VoiceUserState,
+    ChannelId, DmChannelLastMessage, DmMessageWithUser, MessageId, MessageWithUser,
+    PresenceIdentity, Reaction, ReadState, ServerEvent, SpaceVoiceState, User, UserId, UserStatus,
+    VoiceStateAction, VoiceUserState,
 };
 
-use crate::state::{Cache, TYPING_TTL_MS, TypingEntry};
+use crate::state::{Cache, TYPING_TTL_MS, TypingEntry, insert_sorted};
 
 /// Применяет событие сервера к кэшу, используя системное время.
 ///
@@ -107,6 +108,8 @@ fn categorize(event: &ServerEvent) -> Category {
         | ServerEvent::DmChannelUpdated { .. }
         | ServerEvent::DmMessageCreated { .. }
         | ServerEvent::DmMessageUpdated { .. }
+        | ServerEvent::DmMessageDeleted { .. }
+        | ServerEvent::DmEmbedsResolved { .. }
         | ServerEvent::DmMemberAdded { .. }
         | ServerEvent::DmMemberRemoved { .. } => Category::Dm,
         ServerEvent::FederationPeerRejected { .. }
@@ -155,16 +158,16 @@ fn try_messages(cache: &mut Cache, event: ServerEvent) -> bool {
         ServerEvent::ReactionAdded {
             message_id,
             reaction,
-        } => match find_message_mut(cache, &message_id) {
-            Some(msg) => {
-                let already = msg.reactions.iter().any(|r| {
+        } => match reactions_mut(cache, &message_id) {
+            Some(reactions) => {
+                let already = reactions.iter().any(|r| {
                     r.id == reaction.id
                         || (r.user_id == reaction.user_id && r.emoji == reaction.emoji)
                 });
                 if already {
                     return false;
                 }
-                msg.reactions.push(reaction);
+                reactions.push(reaction);
                 true
             }
             None => false,
@@ -173,15 +176,11 @@ fn try_messages(cache: &mut Cache, event: ServerEvent) -> bool {
             message_id,
             user_id,
             emoji,
-        } => match find_message_mut(cache, &message_id) {
-            Some(msg) => {
-                let before = msg.reactions.len();
-                msg.reactions
-                    .retain(|r| !(r.user_id == user_id && r.emoji == emoji));
-                msg.reactions.len() != before
-            }
-            None => false,
-        },
+        } => reactions_mut(cache, &message_id).is_some_and(|reactions| {
+            let before = reactions.len();
+            reactions.retain(|r| !(r.user_id == user_id && r.emoji == emoji));
+            reactions.len() != before
+        }),
 
         _ => false,
     }
@@ -581,12 +580,35 @@ fn try_dm(cache: &mut Cache, event: ServerEvent) -> bool {
             None => false,
         },
         ServerEvent::DmMessageCreated { message } | ServerEvent::DmMessageUpdated { message } => {
-            let Some(dm) = cache.dm_channels.get_mut(&message.message.dm_channel_id) else {
-                return false;
-            };
-            dm.last_message = Some(DmChannelLastMessage::Full(Box::new(message)));
+            upsert_dm_message(cache, message.clone());
+            if let Some(dm) = cache.dm_channels.get_mut(&message.message.dm_channel_id) {
+                dm.last_message = Some(DmChannelLastMessage::Full(Box::new(message)));
+            }
             true
         }
+        ServerEvent::DmMessageDeleted {
+            message_id,
+            dm_channel_id,
+        } => cache
+            .dm_messages
+            .get_mut(&dm_channel_id)
+            .is_some_and(|list| {
+                let before = list.len();
+                list.retain(|m| m.message.id != message_id);
+                list.len() != before
+            }),
+        ServerEvent::DmEmbedsResolved {
+            message_id,
+            dm_channel_id,
+            embeds,
+        } => cache
+            .dm_messages
+            .get_mut(&dm_channel_id)
+            .and_then(|list| list.iter_mut().find(|m| m.message.id == message_id))
+            .is_some_and(|msg| {
+                msg.embeds = embeds;
+                true
+            }),
         ServerEvent::DmMemberAdded {
             dm_channel_id,
             user,
@@ -702,8 +724,44 @@ fn upsert_message(cache: &mut Cache, message: MessageWithUser) {
         list[pos] = message;
         return;
     }
-    let pos = list.partition_point(|m| m.message.created_at <= message.message.created_at);
-    list.insert(pos, message);
+    insert_sorted(list, message, |m| {
+        (m.message.created_at, m.message.id.as_str())
+    });
+}
+
+fn upsert_dm_message(cache: &mut Cache, message: DmMessageWithUser) {
+    let list = cache
+        .dm_messages
+        .entry(message.message.dm_channel_id.clone())
+        .or_default();
+    if let Some(pos) = list.iter().position(|m| m.message.id == message.message.id) {
+        list[pos] = message;
+        return;
+    }
+    insert_sorted(list, message, |m| {
+        (m.message.created_at, m.message.id.as_str())
+    });
+}
+
+/// Реакции сообщения: и канала пространства, и личного канала.
+fn reactions_mut<'a>(
+    cache: &'a mut Cache,
+    message_id: &MessageId,
+) -> Option<&'a mut Vec<Reaction>> {
+    if let Some(msg) = cache
+        .messages
+        .values_mut()
+        .flat_map(|v| v.iter_mut())
+        .find(|m| m.message.id == *message_id)
+    {
+        return Some(&mut msg.reactions);
+    }
+    cache
+        .dm_messages
+        .values_mut()
+        .flat_map(|v| v.iter_mut())
+        .find(|m| m.message.id == *message_id)
+        .map(|m| &mut m.reactions)
 }
 
 fn set_last_message_id(cache: &mut Cache, channel_id: &ChannelId, message_id: MessageId) {

@@ -297,6 +297,18 @@ impl MultiCache {
             .map_or(&[], |cache| cache.messages(channel_id))
     }
 
+    /// Сообщения личного канала в конкретном инстансе.
+    #[must_use]
+    pub fn dm_messages(
+        &self,
+        origin: &Origin,
+        dm_channel_id: &str,
+    ) -> &[bs_types::DmMessageWithUser] {
+        self.caches
+            .get(origin)
+            .map_or(&[], |cache| cache.dm_messages(dm_channel_id))
+    }
+
     /// Есть ли непрочитанные хотя бы в одном инстансе.
     #[must_use]
     pub fn has_unread(&self) -> bool {

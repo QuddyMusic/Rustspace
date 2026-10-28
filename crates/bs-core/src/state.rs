@@ -7,10 +7,10 @@
 use std::collections::HashMap;
 
 use bs_types::{
-    ActiveCallInfo, Activity, Channel, ChannelId, DmChannel, Friend, FriendRequest,
-    MessageWithUser, PresenceIdentity, ReadState, ReadyPayload, SpaceFolder, SpaceId,
-    SpaceLayoutItem, SpaceVoiceState, SpaceWithChannelsAndMembers, User, UserId, UserStatus,
-    VoiceUserState,
+    ActiveCallInfo, Activity, Channel, ChannelId, DmChannel, DmMessageWithUser, Friend,
+    FriendRequest, MessageWithUser, PresenceIdentity, ReadState, ReadyPayload, SpaceFolder,
+    SpaceId, SpaceLayoutItem, SpaceVoiceState, SpaceWithChannelsAndMembers, User, UserId,
+    UserStatus, VoiceUserState,
 };
 
 /// Сколько «печатает…» живёт без продления (мс).
@@ -49,6 +49,8 @@ pub struct Cache {
     pub(crate) spaces: HashMap<SpaceId, SpaceWithChannelsAndMembers>,
     pub(crate) dm_channels: HashMap<String, DmChannel>,
     pub(crate) messages: HashMap<ChannelId, Vec<MessageWithUser>>,
+    /// Сообщения личных каналов по id личного канала.
+    pub(crate) dm_messages: HashMap<String, Vec<DmMessageWithUser>>,
     pub(crate) typing: HashMap<ChannelId, Vec<TypingEntry>>,
     pub(crate) folders: Vec<SpaceFolder>,
     pub(crate) space_layout: Vec<SpaceLayoutItem>,
@@ -127,6 +129,7 @@ impl Cache {
                 .collect(),
             dm_channels: dm_channels.into_iter().map(|d| (d.id.clone(), d)).collect(),
             messages: HashMap::new(),
+            dm_messages: HashMap::new(),
             typing: HashMap::new(),
             folders: folders.unwrap_or_default(),
             space_layout: space_layout.unwrap_or_default(),
@@ -206,6 +209,36 @@ impl Cache {
     #[must_use]
     pub fn messages(&self, channel_id: &str) -> &[MessageWithUser] {
         self.messages.get(channel_id).map_or(&[], Vec::as_slice)
+    }
+
+    /// Закэшированные сообщения личного канала (пустой срез, если не загружены).
+    #[must_use]
+    pub fn dm_messages(&self, dm_channel_id: &str) -> &[DmMessageWithUser] {
+        self.dm_messages
+            .get(dm_channel_id)
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// Вливает страницу истории канала пространства в кэш.
+    ///
+    /// Уже известные сообщения не перезаписываются: их ведёт поток живых
+    /// событий, он свежее ответа REST. Возвращает число новых сообщений.
+    pub fn merge_history(&mut self, channel_id: &str, page: Vec<MessageWithUser>) -> usize {
+        let list = self.messages.entry(channel_id.to_owned()).or_default();
+        merge_sorted(list, page, |m| {
+            (m.message.created_at, m.message.id.as_str())
+        })
+    }
+
+    /// Вливает страницу истории личного канала в кэш (см. [`Self::merge_history`]).
+    pub fn merge_dm_history(&mut self, dm_channel_id: &str, page: Vec<DmMessageWithUser>) -> usize {
+        let list = self
+            .dm_messages
+            .entry(dm_channel_id.to_owned())
+            .or_default();
+        merge_sorted(list, page, |m| {
+            (m.message.created_at, m.message.id.as_str())
+        })
     }
 
     /// Кто печатает в канале на момент `now_ms` (протухшие записи отброшены).
@@ -387,6 +420,50 @@ fn friend_sort_key(friend: &Friend) -> String {
         .as_deref()
         .unwrap_or(friend.username.as_str())
         .to_lowercase()
+}
+
+/// Ключ порядка сообщений: время, затем snowflake-id (короче — меньше).
+fn order_key(created_at: i64, id: &str) -> (i64, usize, &str) {
+    (created_at, id.len(), id)
+}
+
+/// Вставляет `item` в отсортированный список; существующий id не трогает.
+///
+/// Возвращает `true`, если сообщение добавлено.
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "используется из apply; `pub` тут нарушил бы unreachable_pub"
+)]
+pub(crate) fn insert_sorted<T>(
+    list: &mut Vec<T>,
+    item: T,
+    key: impl for<'a> Fn(&'a T) -> (i64, &'a str),
+) -> bool {
+    let (created_at, id) = key(&item);
+    if list.iter().any(|existing| key(existing).1 == id) {
+        return false;
+    }
+    let wanted = order_key(created_at, id);
+    let pos = list.partition_point(|existing| {
+        let (c, i) = key(existing);
+        order_key(c, i) <= wanted
+    });
+    list.insert(pos, item);
+    true
+}
+
+fn merge_sorted<T>(
+    list: &mut Vec<T>,
+    page: Vec<T>,
+    key: impl for<'a> Fn(&'a T) -> (i64, &'a str) + Copy,
+) -> usize {
+    let mut added = 0;
+    for item in page {
+        if insert_sorted(list, item, key) {
+            added += 1;
+        }
+    }
+    added
 }
 
 #[cfg(test)]
