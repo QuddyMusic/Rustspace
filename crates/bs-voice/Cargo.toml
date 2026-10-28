@@ -11,7 +11,14 @@ workspace = true
 [dependencies]
 bs-types = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = "0.1"
 url = { workspace = true }
 tracing = { workspace = true }
+livekit = { version = "0.9.7", default-features = false, features = ["native", "rustls-tls-webpki-roots", "tokio", "glib-main-loop"] }
+xcap = { version = "0.9", default-features = false }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
