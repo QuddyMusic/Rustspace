@@ -109,6 +109,27 @@ pub(crate) const fn should_wake(busy: bool, has_cache: bool) -> bool {
     busy || has_cache
 }
 
+/// Расстояние до верха ленты (px), с которого подгружается более старая страница.
+pub(crate) const LOAD_OLDER_THRESHOLD_PX: f32 = 40.0;
+
+/// Пора ли подгрузить более старые сообщения.
+///
+/// Если вся лента помещается в окно, листать нечего — догружаем, пока не
+/// заполнится экран. Иначе нужен реальный скролл: сразу после первой
+/// страницы лента ещё не прижата к низу (`offset` = 0), и без флага
+/// `was_scrolled_down` пользователь открывал бы канал уже посреди истории.
+pub(crate) fn should_load_older(
+    offset_y: f32,
+    content_h: f32,
+    viewport_h: f32,
+    was_scrolled_down: bool,
+) -> bool {
+    if content_h <= viewport_h {
+        return true;
+    }
+    was_scrolled_down && offset_y < LOAD_OLDER_THRESHOLD_PX
+}
+
 #[cfg(test)]
 mod tests {
     use bs_instances::ConnectionState;
@@ -116,7 +137,7 @@ mod tests {
 
     use super::{
         author_name, can_manage_message, can_send, connection_label, message_actions, next_screen,
-        outgoing_text, should_ack, should_wake,
+        outgoing_text, should_ack, should_load_older, should_wake,
     };
     use crate::app::Screen;
 
@@ -238,5 +259,20 @@ mod tests {
         assert!(should_wake(false, true), "есть кэш");
         assert!(should_wake(true, true));
         assert!(!should_wake(false, false), "нечего ждать — можно спать");
+    }
+
+    #[test]
+    fn load_older_when_content_fits_viewport() {
+        assert!(should_load_older(0.0, 100.0, 400.0, false));
+    }
+
+    #[test]
+    fn load_older_needs_real_scroll_for_long_content() {
+        // Первый кадр после загрузки: offset ещё 0, но вниз не листали.
+        assert!(!should_load_older(0.0, 2000.0, 400.0, false));
+        // Листали вниз, а затем вернулись к верху.
+        assert!(should_load_older(10.0, 2000.0, 400.0, true));
+        // Читаем середину: подгружать рано.
+        assert!(!should_load_older(500.0, 2000.0, 400.0, true));
     }
 }

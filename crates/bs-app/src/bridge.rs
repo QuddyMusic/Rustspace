@@ -13,9 +13,53 @@ use std::sync::mpsc as std_mpsc;
 use bs_core::{Cache, MultiCache};
 use bs_identity::CredentialStore;
 use bs_instances::{ConnectionState, InstanceEvent, InstanceHandle, ReconnectPolicy};
-use bs_types::{ClientEvent, ClientKind, Origin, ReadyPayload, ServerEvent};
+use bs_types::{
+    ClientEvent, ClientKind, DmMessageWithUser, MessageWithUser, Origin, ReadyPayload, ServerEvent,
+};
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc as tokio_mpsc};
+
+/// Сколько сообщений просим у сервера за один запрос истории.
+pub(crate) const HISTORY_PAGE: u16 = 50;
+
+/// Вид канала: у каналов пространств и личных каналов разные события,
+/// разные REST-маршруты и разные хранилища в кэше.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ChannelKind {
+    /// Текстовый канал пространства.
+    Space,
+    /// Личный канал (1-на-1 или группа).
+    Dm,
+}
+
+/// Состояние загрузки истории одного канала.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct HistoryState {
+    /// Страница запрошена, ответа ещё нет.
+    pub(crate) loading: bool,
+    /// Сервер вернул неполную страницу: старее ничего нет.
+    pub(crate) exhausted: bool,
+    /// Ошибка последнего запроса.
+    pub(crate) error: Option<String>,
+}
+
+/// Страница истории из REST-ответа.
+#[derive(Debug)]
+pub(crate) enum HistoryItems {
+    /// Сообщения канала пространства.
+    Space(Vec<MessageWithUser>),
+    /// Сообщения личного канала.
+    Dm(Vec<DmMessageWithUser>),
+}
+
+impl HistoryItems {
+    fn len(&self) -> usize {
+        match self {
+            Self::Space(items) => items.len(),
+            Self::Dm(items) => items.len(),
+        }
+    }
+}
 
 /// REST-запрос, который GUI отправляет фоновой сессии.
 #[derive(Debug, Clone)]
@@ -38,6 +82,15 @@ pub(crate) enum BridgeRequest {
     CancelFriendRequest(String),
     /// Удалить друга.
     RemoveFriend(String),
+    /// Страница истории: самая новая или старее `before`.
+    History {
+        /// Канал или личный канал.
+        channel_id: String,
+        /// Какой это вид канала.
+        kind: ChannelKind,
+        /// Курсор «старее этого id»; `None` — самые новые.
+        before: Option<String>,
+    },
 }
 
 /// Ответ фоновой сессии на [`BridgeRequest`].
@@ -53,6 +106,20 @@ pub(crate) enum BridgeResponse {
     DmChannels(Vec<bs_types::DmChannel>),
     /// Открыт личный канал.
     DmChannel(Box<bs_types::DmChannel>),
+    /// Пришла страница истории.
+    History {
+        /// Канал, чью историю запрашивали.
+        channel_id: String,
+        /// Сами сообщения.
+        items: HistoryItems,
+    },
+    /// История не загрузилась.
+    HistoryFailed {
+        /// Канал, чью историю запрашивали.
+        channel_id: String,
+        /// Текст ошибки.
+        message: String,
+    },
     /// Запись прошла успешно.
     Done,
     /// Запрос не удался.
@@ -111,7 +178,12 @@ pub(crate) struct Bridge {
     commands: HashMap<Origin, tokio_mpsc::UnboundedSender<ClientEvent>>,
     /// Каналы REST-запросов по инстансам.
     requests: HashMap<Origin, tokio_mpsc::UnboundedSender<BridgeRequest>>,
-    responses: Option<std_mpsc::Receiver<BridgeResponse>>,
+    /// Ответы REST всех инстансов, помеченные origin: один канал на всех.
+    responses: Option<std_mpsc::Receiver<(Origin, BridgeResponse)>>,
+    /// Отправитель ответов: общий для всех инстансов.
+    responses_tx: Option<std_mpsc::Sender<(Origin, BridgeResponse)>>,
+    /// Загрузка истории по `(инстанс, id канала)`.
+    history: HashMap<(Origin, String), HistoryState>,
     friends: Vec<bs_types::Friend>,
     friend_requests: Vec<bs_types::FriendRequest>,
     dm_channels: Vec<bs_types::DmChannel>,
@@ -162,6 +234,8 @@ impl Bridge {
             commands: HashMap::new(),
             requests: HashMap::new(),
             responses: None,
+            responses_tx: None,
+            history: HashMap::new(),
             friends: Vec::new(),
             friend_requests: Vec::new(),
             dm_channels: Vec::new(),
@@ -192,7 +266,7 @@ impl Bridge {
         loop {
             let next = self.responses.as_ref().map(std_mpsc::Receiver::try_recv);
             match next {
-                Some(Ok(response)) => self.handle_response(response),
+                Some(Ok((origin, response))) => self.handle_response(&origin, response),
                 Some(Err(std_mpsc::TryRecvError::Empty | std_mpsc::TryRecvError::Disconnected))
                 | None => break,
             }
@@ -203,6 +277,9 @@ impl Bridge {
         match event {
             BridgeEvent::Ready { origin, payload } => {
                 self.multi.insert_ready(origin.clone(), *payload);
+                // `ready` пересобирает кэш без сообщений: историю надо
+                // загрузить заново (первый `ready` и каждый реконнект).
+                self.history.retain(|(owner, _), _| *owner != origin);
                 self.states
                     .insert(origin.clone(), ConnectionState::Connected);
                 if origin.is_home() {
@@ -366,6 +443,8 @@ impl Bridge {
         self.commands.clear();
         self.requests.clear();
         self.responses = None;
+        self.responses_tx = None;
+        self.history.clear();
         self.multi = MultiCache::new();
         self.states.clear();
         self.active = Origin::Home;
@@ -408,6 +487,7 @@ impl Bridge {
         self.commands.insert(Origin::Home, commands_tx);
         self.requests.insert(Origin::Home, requests_tx);
         self.responses = Some(responses_rx);
+        self.responses_tx = Some(responses_tx.clone());
 
         let username = username.trim().to_owned();
         let password = password.to_owned();
@@ -451,11 +531,17 @@ impl Bridge {
 
         let (commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
         let (requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
-        let (responses_tx, responses_rx) = std_mpsc::channel();
+        // Ответы всех инстансов идут в один общий канал: раньше каждый новый
+        // инстанс подменял приёмник, и домашняя сессия теряла ответы.
+        let responses_tx = self.responses_tx.clone().unwrap_or_else(|| {
+            let (tx, rx) = std_mpsc::channel();
+            self.responses = Some(rx);
+            self.responses_tx = Some(tx.clone());
+            tx
+        });
         // Команды и REST-запросы адресуются активному инстансу.
         self.commands.insert(origin.clone(), commands_tx);
         self.requests.insert(origin.clone(), requests_tx);
-        self.responses = Some(responses_rx);
         let Some(events_tx) = self.events_tx.clone() else {
             // Домашняя сессия ещё не создавала канал — заводим его сами.
             let (events_tx, events_rx) = std_mpsc::channel();
@@ -498,7 +584,7 @@ impl Bridge {
         events_tx: std_mpsc::Sender<BridgeEvent>,
         commands_rx: tokio_mpsc::UnboundedReceiver<ClientEvent>,
         requests_rx: tokio_mpsc::UnboundedReceiver<BridgeRequest>,
-        responses_tx: std_mpsc::Sender<BridgeResponse>,
+        responses_tx: std_mpsc::Sender<(Origin, BridgeResponse)>,
     ) {
         self.states
             .insert(origin.clone(), ConnectionState::Connecting);
@@ -526,12 +612,23 @@ impl Bridge {
         }
     }
 
-    /// Отправляет сообщение в канал (в фоне).
-    pub(crate) fn send_message(&self, channel_id: String, content: String) {
-        self.send(ClientEvent::MessageCreate {
-            channel_id,
-            content,
-            reply_to_id: None,
+    /// Отправляет сообщение в канал или личный канал (в фоне).
+    ///
+    /// Для ЛС сервер ждёт отдельное событие `dm_message_create`: обычный
+    /// `message_create` с id личного канала он молча отбрасывает.
+    pub(crate) fn send_message(&self, kind: ChannelKind, channel_id: String, content: String) {
+        self.send(match kind {
+            ChannelKind::Space => ClientEvent::MessageCreate {
+                channel_id,
+                content,
+                reply_to_id: None,
+            },
+            ChannelKind::Dm => ClientEvent::DmMessageCreate {
+                dm_channel_id: channel_id,
+                content: Some(content),
+                attachments: None,
+                reply_to_id: None,
+            },
         });
     }
 
@@ -543,16 +640,25 @@ impl Bridge {
     }
 
     /// Правит своё сообщение.
-    pub(crate) fn edit_message(&self, message_id: String, content: String) {
-        self.send(ClientEvent::MessageEdit {
-            message_id,
-            content,
+    pub(crate) fn edit_message(&self, kind: ChannelKind, message_id: String, content: String) {
+        self.send(match kind {
+            ChannelKind::Space => ClientEvent::MessageEdit {
+                message_id,
+                content,
+            },
+            ChannelKind::Dm => ClientEvent::DmMessageEdit {
+                message_id,
+                content,
+            },
         });
     }
 
     /// Удаляет своё сообщение.
-    pub(crate) fn delete_message(&self, message_id: String) {
-        self.send(ClientEvent::MessageDelete { message_id });
+    pub(crate) fn delete_message(&self, kind: ChannelKind, message_id: String) {
+        self.send(match kind {
+            ChannelKind::Space => ClientEvent::MessageDelete { message_id },
+            ChannelKind::Dm => ClientEvent::DmMessageDelete { message_id },
+        });
     }
 
     /// Ставит реакцию.
@@ -610,9 +716,130 @@ impl Bridge {
         self.social_error.as_deref()
     }
 
-    /// Применяет ответ REST-запроса к локальным спискам.
-    fn handle_response(&mut self, response: BridgeResponse) {
+    /// Отправляет REST-запрос конкретному инстансу; `false`, если сессии нет.
+    fn request_to(&self, origin: &Origin, request: BridgeRequest) -> bool {
+        self.requests
+            .get(origin)
+            .is_some_and(|requests| requests.send(request).is_ok())
+    }
+
+    /// Состояние загрузки истории канала.
+    pub(crate) fn history_state(&self, origin: &Origin, channel_id: &str) -> Option<&HistoryState> {
+        self.history.get(&(origin.clone(), channel_id.to_owned()))
+    }
+
+    /// Просит самые новые сообщения канала, если ещё не просили.
+    ///
+    /// Безопасно вызывать каждый кадр: повторный запрос не уходит, пока
+    /// состояние канала известно.
+    pub(crate) fn ensure_history(&mut self, origin: &Origin, kind: ChannelKind, channel_id: &str) {
+        let key = (origin.clone(), channel_id.to_owned());
+        if self.history.contains_key(&key) {
+            return;
+        }
+        let request = BridgeRequest::History {
+            channel_id: channel_id.to_owned(),
+            kind,
+            before: None,
+        };
+        if self.request_to(origin, request) {
+            self.history.insert(
+                key,
+                HistoryState {
+                    loading: true,
+                    ..HistoryState::default()
+                },
+            );
+        }
+    }
+
+    /// Подгружает страницу старее уже загруженного (или повторяет первую
+    /// страницу после ошибки).
+    pub(crate) fn load_older(&mut self, origin: &Origin, kind: ChannelKind, channel_id: &str) {
+        let key = (origin.clone(), channel_id.to_owned());
+        let Some(state) = self.history.get(&key) else {
+            return;
+        };
+        if state.loading || state.exhausted {
+            return;
+        }
+        let oldest = match kind {
+            ChannelKind::Space => self
+                .multi
+                .messages(origin, channel_id)
+                .first()
+                .map(|m| m.message.id.clone()),
+            ChannelKind::Dm => self
+                .multi
+                .dm_messages(origin, channel_id)
+                .first()
+                .map(|m| m.message.id.clone()),
+        };
+        if oldest.is_none() && state.error.is_none() {
+            return;
+        }
+        let request = BridgeRequest::History {
+            channel_id: channel_id.to_owned(),
+            kind,
+            before: oldest,
+        };
+        if self.request_to(origin, request)
+            && let Some(state) = self.history.get_mut(&key)
+        {
+            state.loading = true;
+            state.error = None;
+        }
+    }
+
+    /// Вливает страницу истории в кэш инстанса и обновляет состояние канала.
+    fn apply_history(&mut self, origin: &Origin, channel_id: &str, items: HistoryItems) {
+        let key = (origin.clone(), channel_id.to_owned());
+        let Some(state) = self.history.get_mut(&key) else {
+            // Пришёл после реконнекта: `ready` уже сбросил кэш и состояние.
+            return;
+        };
+        state.loading = false;
+        state.error = None;
+        state.exhausted = items.len() < usize::from(HISTORY_PAGE);
+        let Some(cache) = self.multi.cache_mut(origin) else {
+            return;
+        };
+        match items {
+            HistoryItems::Space(page) => {
+                cache.merge_history(channel_id, page);
+            }
+            HistoryItems::Dm(page) => {
+                cache.merge_dm_history(channel_id, page);
+            }
+        }
+    }
+
+    /// Применяет ответ REST-запроса инстанса `origin`.
+    fn handle_response(&mut self, origin: &Origin, response: BridgeResponse) {
         match response {
+            BridgeResponse::History { channel_id, items } => {
+                self.apply_history(origin, &channel_id, items);
+                return;
+            }
+            BridgeResponse::HistoryFailed {
+                channel_id,
+                message,
+            } => {
+                if let Some(state) = self.history.get_mut(&(origin.clone(), channel_id)) {
+                    state.loading = false;
+                    state.error = Some(message);
+                }
+                return;
+            }
+            _ => {}
+        }
+        // Списки друзей и ЛС показывают активный инстанс: ответ другого
+        // (например, запрошенный до переключения) их бы перемешал.
+        if *origin != self.active {
+            return;
+        }
+        match response {
+            BridgeResponse::History { .. } | BridgeResponse::HistoryFailed { .. } => {}
             BridgeResponse::Friends(friends) => {
                 self.friends = friends;
                 self.social_error = None;
@@ -632,6 +859,11 @@ impl Bridge {
             BridgeResponse::DmChannel(channel) => {
                 let id = channel.id.clone();
                 self.opened_dm = Some(id.clone());
+                // Сервер не обязан присылать создателю `dm_channel_created`,
+                // а сайдбар и лента читают личные каналы из кэша.
+                if let Some(cache) = self.multi.cache_mut(origin) {
+                    cache.upsert_dm_channel((*channel).clone());
+                }
                 if !self.dm_channels.iter().any(|known| known.id == id) {
                     self.dm_channels.push(*channel);
                 }
@@ -661,7 +893,7 @@ async fn run_session(
     events: std_mpsc::Sender<BridgeEvent>,
     mut commands: tokio_mpsc::UnboundedReceiver<ClientEvent>,
     mut requests: tokio_mpsc::UnboundedReceiver<BridgeRequest>,
-    responses: std_mpsc::Sender<BridgeResponse>,
+    responses: std_mpsc::Sender<(Origin, BridgeResponse)>,
 ) {
     let mut store = CredentialStore::new();
     let login = InstanceHandle::login(
@@ -744,7 +976,7 @@ async fn run_session(
             request = requests.recv() => match request {
                 Some(request) => {
                     let response = handle_request(handle.client(), request).await;
-                    if responses.send(response).is_err() {
+                    if responses.send((origin.clone(), response)).is_err() {
                         return;
                     }
                 }
@@ -817,6 +1049,30 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
             Ok(()) => BridgeResponse::Done,
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
+        BridgeRequest::History {
+            channel_id,
+            kind,
+            before,
+        } => {
+            let cursor = before.map(bs_api::PagingCursor::Before);
+            let items = match kind {
+                ChannelKind::Space => client
+                    .messages(&channel_id, cursor, Some(HISTORY_PAGE))
+                    .await
+                    .map(|page| HistoryItems::Space(page.messages)),
+                ChannelKind::Dm => client
+                    .dm_messages(&channel_id, cursor, Some(HISTORY_PAGE))
+                    .await
+                    .map(|page| HistoryItems::Dm(page.messages)),
+            };
+            match items {
+                Ok(items) => BridgeResponse::History { channel_id, items },
+                Err(err) => BridgeResponse::HistoryFailed {
+                    channel_id,
+                    message: err.to_string(),
+                },
+            }
+        }
     }
 }
 
@@ -827,7 +1083,7 @@ mod tests {
     use bs_instances::ConnectionState;
     use bs_types::{Origin, ReadyPayload};
 
-    use super::{Bridge, BridgeEvent, normalize_base, run_session, std_mpsc};
+    use super::{Bridge, BridgeEvent, ChannelKind, normalize_base, run_session, std_mpsc};
     use tokio::sync::mpsc as tokio_mpsc;
 
     /// Минимальный `ready`, достаточный для создания кэша.
@@ -1220,7 +1476,7 @@ mod tests {
     #[test]
     fn send_message_without_session_is_noop() {
         let bridge = new_bridge();
-        bridge.send_message("chan-1".to_owned(), "hello".to_owned());
+        bridge.send_message(ChannelKind::Space, "chan-1".to_owned(), "hello".to_owned());
         assert!(bridge.commands.is_empty());
     }
 
@@ -1349,5 +1605,268 @@ mod tests {
             .await
             .expect("run_session должен завершиться")
             .expect("задача не должна паниковать");
+    }
+
+    // ─── ЛС и история ────────────────────────────────────────────────────
+
+    use super::{BridgeRequest, BridgeResponse, HISTORY_PAGE, HistoryItems};
+    use bs_types::{ClientEvent, DmMessageWithUser};
+
+    #[allow(clippy::expect_used, reason = "в тестах паника допустима")]
+    fn dm_msg(id: &str, created_at: i64) -> DmMessageWithUser {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "dmChannelId": "dm1", "userId": "u2", "content": "привет",
+            "createdAt": created_at,
+            "user": {
+                "id": "u2", "username": "bob", "displayName": null, "avatar": null,
+                "banner": null, "accentColor": null, "avatarColor": null, "bio": null,
+                "status": "online", "customStatus": null, "isAdmin": false,
+                "createdAt": 1, "homeInstance": null, "homeUserId": null,
+                "replicatedInstances": []
+            },
+            "attachments": [], "embeds": [], "reactions": []
+        }))
+        .expect("dm-сообщение разбирается")
+    }
+
+    fn page_of(count: usize) -> HistoryItems {
+        // Сообщения 1..=count, id возрастают вместе со временем.
+        HistoryItems::Dm(
+            (1..=count)
+                .map(|n| dm_msg(&format!("{n:03}"), i64::try_from(n).unwrap_or(0)))
+                .collect(),
+        )
+    }
+
+    /// Мост с домашним инстансом и перехватом команд и REST-запросов.
+    fn wired_bridge() -> (
+        Bridge,
+        tokio_mpsc::UnboundedReceiver<ClientEvent>,
+        tokio_mpsc::UnboundedReceiver<BridgeRequest>,
+    ) {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        let (commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
+        let (requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
+        bridge.commands.insert(Origin::Home, commands_tx);
+        bridge.requests.insert(Origin::Home, requests_tx);
+        (bridge, commands_rx, requests_rx)
+    }
+
+    #[test]
+    fn dm_send_uses_dm_message_create() {
+        let (bridge, mut commands, _requests) = wired_bridge();
+        bridge.send_message(ChannelKind::Dm, "dm1".to_owned(), "привет".to_owned());
+        match commands.try_recv() {
+            Ok(ClientEvent::DmMessageCreate {
+                dm_channel_id,
+                content,
+                attachments,
+                reply_to_id,
+            }) => {
+                assert_eq!(dm_channel_id, "dm1");
+                assert_eq!(content.as_deref(), Some("привет"));
+                assert!(attachments.is_none() && reply_to_id.is_none());
+            }
+            other => panic!("ожидался dm_message_create, пришло {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dm_edit_and_delete_use_dm_events() {
+        let (bridge, mut commands, _requests) = wired_bridge();
+        bridge.edit_message(ChannelKind::Dm, "m1".to_owned(), "правка".to_owned());
+        bridge.delete_message(ChannelKind::Dm, "m1".to_owned());
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(ClientEvent::DmMessageEdit { .. })
+        ));
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(ClientEvent::DmMessageDelete { .. })
+        ));
+    }
+
+    #[test]
+    fn space_send_keeps_message_create() {
+        let (bridge, mut commands, _requests) = wired_bridge();
+        bridge.send_message(ChannelKind::Space, "c1".to_owned(), "hi".to_owned());
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(ClientEvent::MessageCreate { .. })
+        ));
+    }
+
+    #[test]
+    fn ensure_history_requests_once() {
+        let (mut bridge, _commands, mut requests) = wired_bridge();
+        bridge.ensure_history(&Origin::Home, ChannelKind::Dm, "dm1");
+        bridge.ensure_history(&Origin::Home, ChannelKind::Dm, "dm1");
+        assert!(matches!(
+            requests.try_recv(),
+            Ok(BridgeRequest::History {
+                before: None,
+                kind: ChannelKind::Dm,
+                ..
+            })
+        ));
+        assert!(requests.try_recv().is_err(), "повторного запроса нет");
+        assert!(
+            bridge
+                .history_state(&Origin::Home, "dm1")
+                .is_some_and(|state| state.loading)
+        );
+    }
+
+    #[test]
+    fn ensure_history_without_session_leaves_no_state() {
+        let mut bridge = new_bridge();
+        seed(&mut bridge, Origin::Home);
+        bridge.ensure_history(&Origin::Home, ChannelKind::Dm, "dm1");
+        assert!(bridge.history_state(&Origin::Home, "dm1").is_none());
+    }
+
+    #[test]
+    fn full_page_keeps_history_open_and_short_page_closes_it() {
+        let (mut bridge, _commands, _requests) = wired_bridge();
+        bridge.ensure_history(&Origin::Home, ChannelKind::Dm, "dm1");
+        bridge.handle_response(
+            &Origin::Home,
+            BridgeResponse::History {
+                channel_id: "dm1".to_owned(),
+                items: page_of(usize::from(HISTORY_PAGE)),
+            },
+        );
+        let state = bridge.history_state(&Origin::Home, "dm1").cloned();
+        assert_eq!(
+            state.map(|s| (s.loading, s.exhausted)),
+            Some((false, false))
+        );
+        assert_eq!(
+            bridge.multi().dm_messages(&Origin::Home, "dm1").len(),
+            usize::from(HISTORY_PAGE)
+        );
+
+        bridge.handle_response(
+            &Origin::Home,
+            BridgeResponse::History {
+                channel_id: "dm1".to_owned(),
+                items: HistoryItems::Dm(vec![dm_msg("000", 0)]),
+            },
+        );
+        assert!(
+            bridge
+                .history_state(&Origin::Home, "dm1")
+                .is_some_and(|state| state.exhausted)
+        );
+    }
+
+    #[test]
+    fn load_older_uses_oldest_message_as_cursor() {
+        let (mut bridge, _commands, mut requests) = wired_bridge();
+        bridge.ensure_history(&Origin::Home, ChannelKind::Dm, "dm1");
+        let _ = requests.try_recv();
+        bridge.handle_response(
+            &Origin::Home,
+            BridgeResponse::History {
+                channel_id: "dm1".to_owned(),
+                items: page_of(usize::from(HISTORY_PAGE)),
+            },
+        );
+        bridge.load_older(&Origin::Home, ChannelKind::Dm, "dm1");
+        match requests.try_recv() {
+            Ok(BridgeRequest::History { before, .. }) => {
+                assert_eq!(before.as_deref(), Some("001"));
+            }
+            other => panic!("ожидался запрос истории, пришло {other:?}"),
+        }
+        // Пока страница в пути, второй запрос не уходит.
+        bridge.load_older(&Origin::Home, ChannelKind::Dm, "dm1");
+        assert!(requests.try_recv().is_err());
+    }
+
+    #[test]
+    fn failed_history_can_be_retried() {
+        let (mut bridge, _commands, mut requests) = wired_bridge();
+        bridge.ensure_history(&Origin::Home, ChannelKind::Dm, "dm1");
+        let _ = requests.try_recv();
+        bridge.handle_response(
+            &Origin::Home,
+            BridgeResponse::HistoryFailed {
+                channel_id: "dm1".to_owned(),
+                message: "нет сети".to_owned(),
+            },
+        );
+        let state = bridge.history_state(&Origin::Home, "dm1").cloned();
+        assert_eq!(state.and_then(|s| s.error).as_deref(), Some("нет сети"));
+        bridge.load_older(&Origin::Home, ChannelKind::Dm, "dm1");
+        assert!(matches!(
+            requests.try_recv(),
+            Ok(BridgeRequest::History { before: None, .. })
+        ));
+    }
+
+    #[test]
+    fn ready_resets_history_of_that_origin_only() {
+        let (mut bridge, _commands, _requests) = wired_bridge();
+        seed(&mut bridge, remote());
+        let (tx, _rx) = tokio_mpsc::unbounded_channel();
+        bridge.requests.insert(remote(), tx);
+        bridge.ensure_history(&Origin::Home, ChannelKind::Dm, "dm1");
+        bridge.ensure_history(&remote(), ChannelKind::Dm, "dm1");
+
+        bridge.handle_event(BridgeEvent::Ready {
+            origin: Origin::Home,
+            payload: Box::new(ready_payload()),
+        });
+        assert!(bridge.history_state(&Origin::Home, "dm1").is_none());
+        assert!(bridge.history_state(&remote(), "dm1").is_some());
+    }
+
+    #[test]
+    fn history_response_lands_in_its_own_origin() {
+        let (mut bridge, _commands, _requests) = wired_bridge();
+        seed(&mut bridge, remote());
+        let (tx, _rx) = tokio_mpsc::unbounded_channel();
+        bridge.requests.insert(remote(), tx);
+        // Активен домашний, ответ приходит от удалённого.
+        bridge.ensure_history(&remote(), ChannelKind::Dm, "dm1");
+        bridge.handle_response(
+            &remote(),
+            BridgeResponse::History {
+                channel_id: "dm1".to_owned(),
+                items: page_of(3),
+            },
+        );
+        assert_eq!(bridge.multi().dm_messages(&remote(), "dm1").len(), 3);
+        assert!(bridge.multi().dm_messages(&Origin::Home, "dm1").is_empty());
+    }
+
+    #[test]
+    fn social_response_from_inactive_origin_is_ignored() {
+        let (mut bridge, _commands, _requests) = wired_bridge();
+        seed(&mut bridge, remote());
+        bridge.handle_response(&remote(), BridgeResponse::Failed("чужая ошибка".to_owned()));
+        assert_eq!(bridge.social_error(), None);
+        bridge.handle_response(&Origin::Home, BridgeResponse::Failed("своя".to_owned()));
+        assert_eq!(bridge.social_error(), Some("своя"));
+    }
+
+    #[test]
+    fn opened_dm_is_added_to_cache() {
+        let (mut bridge, _commands, _requests) = wired_bridge();
+        let channel: bs_types::DmChannel = serde_json::from_value(serde_json::json!({
+            "id": "dm9", "federatedId": null, "ownerId": null,
+            "ownerHomeUserId": null, "ownerHomeInstance": null, "createdAt": 1,
+            "members": [], "metadataUpdatedAt": 2
+        }))
+        .unwrap_or_else(|err| panic!("dm разбирается: {err}"));
+        bridge.handle_response(&Origin::Home, BridgeResponse::DmChannel(Box::new(channel)));
+        assert!(
+            bridge
+                .cache()
+                .is_some_and(|c| c.dm_channel("dm9").is_some())
+        );
+        assert_eq!(bridge.take_opened_dm().as_deref(), Some("dm9"));
     }
 }

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tokio::runtime::Handle;
 
-use crate::bridge::Bridge;
+use crate::bridge::{Bridge, ChannelKind};
 use crate::logic::{connection_label, next_screen, should_wake};
 use crate::screens::chat::{ChatScreen, SelectedChannel, origin_label};
 use crate::screens::login::LoginScreen;
@@ -202,6 +202,7 @@ impl eframe::App for BackspaceApp {
             self.chat.selected_channel = Some(SelectedChannel {
                 origin: self.bridge.active().clone(),
                 channel,
+                kind: ChannelKind::Dm,
             });
             self.screen = Screen::Chat;
         }
@@ -225,6 +226,7 @@ impl eframe::App for BackspaceApp {
                     self.chat.selected_channel = Some(SelectedChannel {
                         origin: self.bridge.active().clone(),
                         channel,
+                        kind: ChannelKind::Dm,
                     });
                     self.screen = Screen::Chat;
                 }
