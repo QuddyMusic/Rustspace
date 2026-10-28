@@ -4,8 +4,8 @@
 //! `401 unauthorized`.
 
 use bs_types::{
-    DiscoverResponse, DmChannel, DmSearchResponse, Friend, FriendRequest, MessageSearchResponse,
-    User,
+    DiscoverResponse, DmChannel, DmSearchResponse, Friend, FriendRequest, LiveKitTokenRequest,
+    LiveKitTokenResponse, MessageSearchResponse, User,
 };
 use serde::Serialize;
 use url::form_urlencoded;
@@ -302,5 +302,37 @@ impl ApiClient {
     /// `POST /api/dm` — открыть (или получить существующий) личный канал.
     pub async fn open_dm(&self, request: &CreateDmRequest) -> Result<DmChannel, ApiError> {
         self.post_json("/api/dm", request).await
+    }
+
+    /// `POST /api/livekit/token` — JWT и `wss://`-адрес LiveKit для входа
+    /// в голосовой канал пространства. Комната на сервере — сам `channelId`.
+    pub async fn livekit_token_channel(
+        &self,
+        channel_id: &str,
+    ) -> Result<LiveKitTokenResponse, ApiError> {
+        self.post_json(
+            "/api/livekit/token",
+            &LiveKitTokenRequest {
+                channel_id: Some(channel_id.to_owned()),
+                dm_channel_id: None,
+            },
+        )
+        .await
+    }
+
+    /// `POST /api/livekit/token` — JWT и `wss://`-адрес LiveKit для DM-звонка.
+    /// Сервер назовёт комнату по `federatedId` канала, если он есть.
+    pub async fn livekit_token_dm(
+        &self,
+        dm_channel_id: &str,
+    ) -> Result<LiveKitTokenResponse, ApiError> {
+        self.post_json(
+            "/api/livekit/token",
+            &LiveKitTokenRequest {
+                channel_id: None,
+                dm_channel_id: Some(dm_channel_id.to_owned()),
+            },
+        )
+        .await
     }
 }

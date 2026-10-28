@@ -334,6 +334,28 @@ pub struct ActiveCallInfo {
     pub livekit_token: Option<String>,
 }
 
+/// Тело `POST /api/livekit/token` (`LiveKitTokenRequest` в TS).
+///
+/// Для голосового канала заполнен `channel_id`, для DM-звонка —
+/// `dm_channel_id`; незаполненное поле не сериализуется.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveKitTokenRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dm_channel_id: Option<String>,
+}
+
+/// Ответ `POST /api/livekit/token` (`LiveKitTokenResponse` в TS):
+/// JWT с грантами комнаты и `wss://`-адрес LiveKit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveKitTokenResponse {
+    pub token: String,
+    pub url: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
