@@ -211,6 +211,12 @@ impl Cache {
         self.messages.get(channel_id).map_or(&[], Vec::as_slice)
     }
 
+    /// Добавляет или обновляет личный канал (например, после `POST /api/dm`:
+    /// сервер не обязан присылать создателю `dm_channel_created`).
+    pub fn upsert_dm_channel(&mut self, channel: DmChannel) {
+        self.dm_channels.insert(channel.id.clone(), channel);
+    }
+
     /// Закэшированные сообщения личного канала (пустой срез, если не загружены).
     #[must_use]
     pub fn dm_messages(&self, dm_channel_id: &str) -> &[DmMessageWithUser] {
