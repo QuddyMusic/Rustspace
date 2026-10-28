@@ -40,6 +40,10 @@ pub enum NetRequest {
     RemoveFriend(String),
     /// Открыть (или создать) личный канал с пользователем.
     OpenDm(bs_api::CreateDmRequest),
+    /// Получить токен LiveKit для голосового канала.
+    LiveKitTokenChannel(String),
+    /// Получить токен LiveKit для личного звонка.
+    LiveKitTokenDm(String),
 }
 
 /// Ответ фоновой сессии на [`NetRequest`], помеченный origin-ом.
@@ -64,6 +68,8 @@ pub enum NetPayload {
     DmChannels(Vec<bs_types::DmChannel>),
     /// Пришёл личный канал (после открытия).
     DmChannel(Box<bs_types::DmChannel>),
+    /// Получен URL и токен для подключения к LiveKit.
+    LiveKitToken(bs_api::LiveKitTokenResponse),
     /// Запись прошла успешно, данных нет.
     Done,
     /// Запрос не удался.
@@ -458,6 +464,18 @@ async fn handle_request(client: &bs_api::ApiClient, request: NetRequest) -> NetP
             Ok(channel) => NetPayload::DmChannel(Box::new(channel)),
             Err(err) => NetPayload::Failed(err.to_string()),
         },
+        NetRequest::LiveKitTokenChannel(channel_id) => {
+            match client.livekit_token_channel(&channel_id).await {
+                Ok(token) => NetPayload::LiveKitToken(token),
+                Err(err) => NetPayload::Failed(err.to_string()),
+            }
+        }
+        NetRequest::LiveKitTokenDm(dm_channel_id) => {
+            match client.livekit_token_dm(&dm_channel_id).await {
+                Ok(token) => NetPayload::LiveKitToken(token),
+                Err(err) => NetPayload::Failed(err.to_string()),
+            }
+        }
         NetRequest::SendFriendRequest(request) => {
             match client.send_friend_request(&request).await {
                 Ok(_) => NetPayload::Done,

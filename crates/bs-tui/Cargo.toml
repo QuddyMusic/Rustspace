@@ -15,6 +15,7 @@ bs-core.workspace = true
 bs-instances.workspace = true
 bs-identity.workspace = true
 bs-api.workspace = true
+bs-voice.workspace = true
 
 tokio.workspace = true
 futures-util.workspace = true

@@ -1,15 +1,19 @@
 //! Состояние TUI: экраны, форма логина, кэши инстансов и подключение.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use bs_core::{Cache, MultiCache};
 use bs_instances::ConnectionState;
 use bs_types::{ClientEvent, Origin, ServerEvent};
+use bs_voice::VoiceEvent;
+use bs_voice::protocol::{CallIdentity, ProtocolAction, VoiceCoordinator};
 
 use crate::chat::ChatState;
 use crate::login::LoginForm;
 use crate::net::{NetEvent, NetPayload, NetRequest, NetResponse, NetWorker};
 use crate::social::{self, SocialSelection, SocialState, SocialTab};
+use crate::voice::{VoiceCtl, VoiceCtlEvent};
 
 /// Какой экран сейчас показан.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -55,6 +59,11 @@ pub struct App {
     states: HashMap<Origin, Status>,
     chat: ChatState,
     social: SocialState,
+    voice: Option<VoiceCtl>,
+    coord: VoiceCoordinator,
+    started: Instant,
+    me_id: String,
+    me_name: String,
 }
 
 impl Default for App {
@@ -76,6 +85,11 @@ impl std::fmt::Debug for App {
             .field("states", &self.states)
             .field("chat", &self.chat)
             .field("social", &self.social)
+            .field("voice", &self.voice.is_some())
+            .field("coord", &self.coord)
+            .field("started", &self.started)
+            .field("me_id", &self.me_id)
+            .field("me_name", &self.me_name)
             .finish()
     }
 }
@@ -94,6 +108,11 @@ impl App {
             states: HashMap::new(),
             chat: ChatState::new(),
             social: SocialState::new(),
+            voice: None,
+            coord: VoiceCoordinator::new(),
+            started: Instant::now(),
+            me_id: String::new(),
+            me_name: String::new(),
         }
     }
 
@@ -303,6 +322,7 @@ impl App {
         for response in responses {
             self.apply_net_response(response);
         }
+        self.pump_voice();
     }
 
     /// Применяет ответ фоновой сессии на REST-запрос.
@@ -325,6 +345,9 @@ impl App {
                 self.social
                     .set_message(Some(format!("личный канал: {}", channel.id)));
             }
+            NetPayload::LiveKitToken(token) => {
+                self.start_voice_session(token.url, token.token);
+            }
             NetPayload::Done => {
                 self.social.set_message(None);
                 self.refresh_social();
@@ -336,10 +359,17 @@ impl App {
     }
 
     /// Применяет одно событие фоновой сессии.
+    #[allow(clippy::too_many_lines)]
     pub fn apply_net_event(&mut self, event: NetEvent) {
         match event {
             NetEvent::Ready { origin, event } => {
                 if let ServerEvent::Ready(payload) = *event {
+                    self.me_id.clone_from(&payload.user.id);
+                    self.me_name = payload
+                        .user
+                        .display_name
+                        .clone()
+                        .unwrap_or_else(|| payload.user.username.clone());
                     self.multi.insert_ready(origin.clone(), *payload);
                 }
                 self.states.insert(origin.clone(), Status::Connected);
@@ -355,14 +385,84 @@ impl App {
             NetEvent::Server { origin, event } => {
                 if let ServerEvent::Ready(payload) = *event {
                     // Повторный `ready` (переподключение): пересобираем кэш.
+                    self.me_id.clone_from(&payload.user.id);
+                    self.me_name = payload
+                        .user
+                        .display_name
+                        .clone()
+                        .unwrap_or_else(|| payload.user.username.clone());
                     self.multi.insert_ready(origin.clone(), *payload);
                     self.states.insert(origin.clone(), Status::Connected);
-                } else if self.multi.apply(&origin, *event).is_accepted()
-                    && origin == self.active
-                    && let Some(cache) = self.multi.cache(&self.active)
-                {
-                    self.chat.clamp_multi(&self.multi);
-                    self.social.clamp(cache);
+                } else {
+                    match *event {
+                        ServerEvent::DmCallIncoming {
+                            dm_channel_id,
+                            federated_call_id,
+                            caller_id,
+                            caller_name,
+                            livekit_url,
+                            livekit_token,
+                            ..
+                        } => {
+                            self.on_call_incoming(
+                                origin.as_web_str(),
+                                dm_channel_id,
+                                federated_call_id,
+                                caller_id,
+                                caller_name,
+                                livekit_url,
+                                livekit_token,
+                            );
+                        }
+                        ServerEvent::DmCallAccepted {
+                            dm_channel_id,
+                            federated_call_id,
+                            ..
+                        } => {
+                            let identity = CallIdentity {
+                                dm_channel_id,
+                                federated_call_id,
+                                origin: Some(origin.as_web_str()),
+                            };
+                            self.coord.server_accepted(&identity);
+                        }
+                        ServerEvent::DmCallRejected {
+                            dm_channel_id,
+                            federated_call_id,
+                        }
+                        | ServerEvent::DmCallEnded {
+                            dm_channel_id,
+                            federated_call_id,
+                        } => {
+                            let identity = CallIdentity {
+                                dm_channel_id,
+                                federated_call_id,
+                                origin: Some(origin.as_web_str()),
+                            };
+                            self.call_ended(&identity);
+                        }
+                        ServerEvent::DmCallUndeliverable {
+                            dm_channel_id,
+                            federated_call_id,
+                            ..
+                        } => {
+                            let identity = CallIdentity {
+                                dm_channel_id,
+                                federated_call_id: Some(federated_call_id),
+                                origin: Some(origin.as_web_str()),
+                            };
+                            self.call_ended(&identity);
+                        }
+                        other => {
+                            if self.multi.apply(&origin, other).is_accepted()
+                                && origin == self.active
+                                && let Some(cache) = self.multi.cache(&self.active)
+                            {
+                                self.chat.clamp_multi(&self.multi);
+                                self.social.clamp(cache);
+                            }
+                        }
+                    }
                 }
             }
             NetEvent::State { origin, state } => {
@@ -392,6 +492,204 @@ impl App {
                 self.states.insert(origin, Status::Failed(message));
             }
         }
+    }
+
+    /// Переключает микрофон: обновляет координатор и шлёт команду исполнителю.
+    pub fn toggle_mute(&mut self) {
+        let Some(voice) = self.voice.as_ref() else {
+            self.social
+                .set_message(Some("голос: нет активного сеанса".to_owned()));
+            return;
+        };
+        let muted = !self.coord.is_muted();
+        let deafened = self.coord.is_deafened();
+        self.coord.set_mute_state(muted, deafened);
+        voice.set_muted(muted);
+        self.social.set_message(Some(format!(
+            "микрофон: {}",
+            if muted {
+                "выключен"
+            } else {
+                "включён"
+            }
+        )));
+    }
+
+    /// Переключает глушение звука: обновляет координатор и шлёт команду исполнителю.
+    pub fn toggle_deafen(&mut self) {
+        let Some(voice) = self.voice.as_ref() else {
+            self.social
+                .set_message(Some("голос: нет активного сеанса".to_owned()));
+            return;
+        };
+        let deafened = !self.coord.is_deafened();
+        let muted = self.coord.is_muted();
+        self.coord.set_mute_state(muted, deafened);
+        voice.set_deafened(deafened);
+        self.social.set_message(Some(format!(
+            "звук: {}",
+            if deafened {
+                "заглушён"
+            } else {
+                "включён"
+            }
+        )));
+    }
+
+    /// Забирает события голосового исполнителя и тикает координатор звонков.
+    fn pump_voice(&mut self) {
+        let now = self.started.elapsed();
+        let events = match self.voice.as_ref() {
+            Some(voice) => voice.drain(),
+            None => return,
+        };
+        for event in events {
+            match event {
+                VoiceCtlEvent::Connected => {
+                    self.social
+                        .set_message(Some("голос: подключено к комнате".to_owned()));
+                }
+                VoiceCtlEvent::ConnectFailed { message } => {
+                    self.coord.clear();
+                    self.social
+                        .set_message(Some(format!("голос: ошибка подключения: {message}")));
+                }
+                VoiceCtlEvent::Disconnected => {
+                    self.coord.clear();
+                    self.social.set_message(Some("голос: отключено".to_owned()));
+                }
+                VoiceCtlEvent::Voice(voice_event) => self.apply_voice_event(voice_event, now),
+            }
+        }
+        let actions = self.coord.tick(now);
+        for action in actions {
+            self.apply_protocol_action(action);
+        }
+    }
+
+    /// Реагирует на события комнаты LiveKit.
+    fn apply_voice_event(&mut self, event: VoiceEvent, now: Duration) {
+        match event {
+            VoiceEvent::ParticipantJoined { name, .. } => {
+                self.social
+                    .set_message(Some(format!("голос: {name} в комнате")));
+            }
+            VoiceEvent::ParticipantLeft { .. } => {
+                self.social
+                    .set_message(Some("голос: участник вышел".to_owned()));
+            }
+            VoiceEvent::ActiveSpeakers { identities } => {
+                if let Some(first) = identities.first() {
+                    self.social.set_message(Some(format!("говорит: {first}")));
+                }
+            }
+            VoiceEvent::MuteChanged { identity, muted } => {
+                if identity == self.me_id {
+                    let deafened = self.coord.is_deafened();
+                    self.coord.set_mute_state(muted, deafened);
+                }
+            }
+            VoiceEvent::Reconnecting | VoiceEvent::Disconnected { .. } => {
+                self.coord.transport_lost(now);
+            }
+            VoiceEvent::Reconnected => {
+                self.coord.rebind();
+            }
+            VoiceEvent::Connected { .. }
+            | VoiceEvent::TrackSubscribed { .. }
+            | VoiceEvent::TrackUnsubscribed { .. } => {}
+        }
+    }
+
+    /// Исполняет решение протокола звонков через сетевого воркера.
+    fn apply_protocol_action(&mut self, action: ProtocolAction) {
+        match action {
+            ProtocolAction::SendAccept(identity) => {
+                self.send_call_event(
+                    &identity,
+                    ClientEvent::DmCallAccept {
+                        dm_channel_id: identity.dm_channel_id.clone(),
+                        federated_call_id: identity.federated_call_id.clone(),
+                    },
+                );
+            }
+            ProtocolAction::SendReject(identity) => {
+                self.send_call_event(
+                    &identity,
+                    ClientEvent::DmCallReject {
+                        dm_channel_id: identity.dm_channel_id.clone(),
+                        federated_call_id: identity.federated_call_id.clone(),
+                    },
+                );
+            }
+            ProtocolAction::SendEnd(identity) | ProtocolAction::IncomingTimedOut(identity) => {
+                self.send_call_event(
+                    &identity,
+                    ClientEvent::DmCallEnd {
+                        dm_channel_id: identity.dm_channel_id.clone(),
+                        federated_call_id: identity.federated_call_id.clone(),
+                    },
+                );
+            }
+            ProtocolAction::RebindExpired(identity) => {
+                self.call_ended(&identity);
+            }
+            ProtocolAction::IgnoreStaleEvent => {}
+        }
+    }
+
+    /// Входящий звонок: регистрируем в координаторе и сразу подключаемся
+    /// к комнате LiveKit, если токен уже в событии.
+    #[allow(clippy::too_many_arguments)]
+    fn on_call_incoming(
+        &mut self,
+        origin: String,
+        dm_channel_id: Option<String>,
+        federated_call_id: Option<String>,
+        caller_id: String,
+        caller_name: String,
+        livekit_url: Option<String>,
+        livekit_token: Option<String>,
+    ) {
+        let identity = CallIdentity {
+            dm_channel_id,
+            federated_call_id,
+            origin: Some(origin),
+        };
+        let now = self.started.elapsed();
+        if !self
+            .coord
+            .incoming_call(identity, caller_id, caller_name, now)
+        {
+            return;
+        }
+        if let (Some(url), Some(token)) = (livekit_url, livekit_token) {
+            self.start_voice_session(url, token);
+        }
+    }
+
+    /// Сервер подтвердил завершение звонка: чистим координатор и комнату.
+    fn call_ended(&mut self, identity: &CallIdentity) {
+        // Чужое или устаревшее событие не должно отключать текущую комнату.
+        if self.coord.server_ended(identity) {
+            self.hangup_voice();
+        }
+    }
+
+    /// Кладёт трубку: рвём LiveKit-сессию, если она была.
+    fn hangup_voice(&self) {
+        if let Some(voice) = self.voice.as_ref() {
+            voice.disconnect();
+        }
+    }
+
+    /// Подключает голосовую сессию к комнате LiveKit по готовому токену.
+    fn start_voice_session(&mut self, url: String, token: String) {
+        if self.me_id.is_empty() {
+            return;
+        }
+        let voice = self.voice.get_or_insert_with(VoiceCtl::spawn);
+        voice.connect(url, token, self.me_id.clone(), self.me_name.clone());
     }
 
     /// Отправляет набранный текст в текущий канал.
@@ -433,9 +731,26 @@ impl App {
 
     /// Отправляет событие в фоновую сессию активного инстанса.
     fn send_event(&self, event: ClientEvent) -> bool {
+        self.send_event_to(&self.active, event)
+    }
+
+    /// Отправляет событие в заданный инстанс независимо от выбора UI.
+    fn send_event_to(&self, origin: &Origin, event: ClientEvent) -> bool {
         self.worker
             .as_ref()
-            .is_some_and(|worker| worker.send(&self.active, event))
+            .is_some_and(|worker| worker.send(origin, event))
+    }
+
+    /// Маршрутизирует команду звонка только в исходный инстанс.
+    fn send_call_event(&self, identity: &CallIdentity, event: ClientEvent) -> bool {
+        let Some(origin) = identity
+            .origin
+            .as_deref()
+            .and_then(|value| Origin::parse_web_str(value).ok())
+        else {
+            return false;
+        };
+        self.send_event_to(&origin, event)
     }
 
     /// Сдвигает курсор по ленте сообщений текущего канала.

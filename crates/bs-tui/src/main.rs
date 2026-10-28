@@ -180,6 +180,12 @@ fn handle_chat_char(app: &mut App, c: char) {
             ChatCommand::Ack => {
                 app.ack_current_channel();
             }
+            ChatCommand::Mute => {
+                app.toggle_mute();
+            }
+            ChatCommand::Deafen => {
+                app.toggle_deafen();
+            }
         }
         return;
     }

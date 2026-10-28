@@ -168,6 +168,10 @@ pub enum ChatCommand {
     Unreact,
     /// Подтвердить прочтение текущего канала.
     Ack,
+    /// Переключить микрофон (mute).
+    Mute,
+    /// Переключить звук (deafen).
+    Deafen,
 }
 
 /// Эмодзи, которым оперируют клавиши `+` и `-`.
@@ -185,6 +189,8 @@ pub fn chat_command(c: char) -> Option<ChatCommand> {
         '+' => Some(ChatCommand::React),
         '-' => Some(ChatCommand::Unreact),
         'a' => Some(ChatCommand::Ack),
+        'm' => Some(ChatCommand::Mute),
+        'v' => Some(ChatCommand::Deafen),
         _ => None,
     }
 }

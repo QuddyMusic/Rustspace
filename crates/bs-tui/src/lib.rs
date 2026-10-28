@@ -13,3 +13,4 @@ pub mod net;
 pub mod social;
 pub mod term;
 pub mod ui;
+pub mod voice;
