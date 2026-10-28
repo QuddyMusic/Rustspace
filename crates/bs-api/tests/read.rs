@@ -150,3 +150,92 @@ async fn space_not_found_maps_error() {
     assert_eq!(err.status(), Some(reqwest::StatusCode::NOT_FOUND));
     assert_eq!(err.code(), Some("space_not_found"));
 }
+
+fn dm_message_json(id: &str) -> serde_json::Value {
+    json!({
+        "id": id,
+        "dmChannelId": "d1",
+        "userId": "u1",
+        "content": "привет",
+        "createdAt": 1_750_000_000_000_i64,
+        "user": serde_json::from_str::<serde_json::Value>(USER_JSON).unwrap(),
+        "attachments": [],
+        "embeds": [],
+        "reactions": []
+    })
+}
+
+#[tokio::test]
+async fn dm_messages_requests_dm_route_with_limit_and_before() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/dm/d1/messages"))
+        .and(query_param("limit", "2"))
+        .and(query_param("before", "m9"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([dm_message_json("m1"), dm_message_json("m2")])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let page = client(&server)
+        .dm_messages("d1", Some(PagingCursor::Before("m9".into())), Some(2))
+        .await
+        .unwrap();
+    assert_eq!(page.messages.len(), 2);
+    assert_eq!(page.messages[0].message.dm_channel_id, "d1");
+    assert!(!page.paged_after);
+}
+
+#[tokio::test]
+async fn dm_messages_detects_paging_after_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/dm/d1/messages"))
+        .and(query_param("after", "m1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-backspace-paging", "after")
+                .set_body_json(json!([dm_message_json("m2")])),
+        )
+        .mount(&server)
+        .await;
+
+    let page = client(&server)
+        .dm_messages("d1", Some(PagingCursor::After("m1".into())), None)
+        .await
+        .unwrap();
+    assert!(page.paged_after);
+}
+
+#[tokio::test]
+async fn dm_messages_clamps_limit_and_maps_errors() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/dm/d1/messages"))
+        .and(query_param("limit", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/dm/nope/messages"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "error":"Not a member","code":"not_dm_member"
+        })))
+        .mount(&server)
+        .await;
+
+    let page = client(&server)
+        .dm_messages("d1", None, Some(500))
+        .await
+        .unwrap();
+    assert!(page.messages.is_empty());
+
+    let err = client(&server)
+        .dm_messages("nope", None, None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Some("not_dm_member"));
+}

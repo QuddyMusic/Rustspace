@@ -35,7 +35,8 @@ pub use federation::{
     FederationCredentialRequest, FederationCredentialResponse, ReattachRequest, ReattachResponse,
 };
 pub use read::{
-    MESSAGES_LIMIT_DEFAULT, MESSAGES_LIMIT_MAX, MESSAGES_LIMIT_MIN, MessagePage, PagingCursor,
+    DmMessagePage, MESSAGES_LIMIT_DEFAULT, MESSAGES_LIMIT_MAX, MESSAGES_LIMIT_MIN, MessagePage,
+    PagingCursor,
 };
 pub use write::{
     CreateDmRequest, FriendRequestDecision, MessageSearchQuery, SEARCH_LIMIT_DEFAULT,
