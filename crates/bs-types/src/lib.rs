@@ -22,6 +22,7 @@ pub mod origin;
 pub mod search;
 pub mod social;
 pub mod space;
+pub mod transport;
 pub mod user;
 
 pub use channel::*;
@@ -33,6 +34,7 @@ pub use origin::*;
 pub use search::*;
 pub use social::*;
 pub use space::*;
+pub use transport::{TransportError, TransportPolicy};
 pub use user::*;
 
 /// Максимальная длина одного сообщения в символах.

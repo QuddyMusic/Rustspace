@@ -61,7 +61,7 @@ impl FederationCredentialRequest {
 }
 
 /// Ответ `POST /api/users/@me/federation-credential`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FederationCredentialResponse {
     /// Origin, для которого выдан секрет (канонизированный сервером).
@@ -73,7 +73,7 @@ pub struct FederationCredentialResponse {
 }
 
 /// Тело `POST /api/users/@me/change-password`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangePasswordRequest {
     /// Текущий пароль; на домашнем инстансе обязателен, для федеративного
@@ -111,7 +111,7 @@ impl ChangePasswordRequest {
 ///
 /// Сервер отзывает прочие сессии аккаунта, поэтому возвращённый токен
 /// нужно немедленно применить к клиенту удалённого инстанса.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangePasswordResponse {
     /// Свежий JWT вместо отозванного.
@@ -119,14 +119,14 @@ pub struct ChangePasswordResponse {
 }
 
 /// Ответ `POST /api/auth/attach-proof`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachProofResponse {
     /// Одноразовый токен (64 hex-символа), привязанный к целевому домену.
     pub token: String,
 }
 
 /// Тело `POST /api/users/@me/reattach`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct ReattachRequest {
     /// Токен из [`AttachProofResponse`].
     pub token: String,
@@ -206,6 +206,51 @@ impl ApiClient {
             token: token.to_owned(),
         };
         self.post_json("/api/users/@me/reattach", &body).await
+    }
+}
+
+// Секреты в `Debug` не печатаются: структуры попадают в `tracing`/`dbg!`.
+
+impl std::fmt::Debug for FederationCredentialResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FederationCredentialResponse")
+            .field("origin", &self.origin)
+            .field("secret", &"<redacted>")
+            .field("provisioned", &self.provisioned)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for ChangePasswordRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChangePasswordRequest")
+            .field("current_password", &"<redacted>")
+            .field("new_password", &"<redacted>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for ChangePasswordResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChangePasswordResponse")
+            .field("token", &"<redacted>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for AttachProofResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AttachProofResponse")
+            .field("token", &"<redacted>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for ReattachRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReattachRequest")
+            .field("token", &"<redacted>")
+            .finish()
     }
 }
 

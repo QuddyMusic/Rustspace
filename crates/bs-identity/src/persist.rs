@@ -97,16 +97,23 @@ impl CredentialStore {
                 tokio::fs::create_dir_all(parent).await?;
             }
         }
-        let json = serde_json::to_vec_pretty(&self.to_json())?;
-        let tmp = path.with_extension("tmp");
-        {
+        let json = zeroize::Zeroizing::new(serde_json::to_vec_pretty(&self.to_json())?);
+        // Имя временного файла непредсказуемо, а сам файл создаётся сразу
+        // с правами 0600 и `create_new`: ни окна, когда токены читаются всеми,
+        // ни подмены через заранее созданную символическую ссылку.
+        let tmp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
+        let write = async {
             use tokio::io::AsyncWriteExt as _;
-            let mut file = tokio::fs::File::create(&tmp).await?;
+            let mut file = open_private(&tmp).await?;
             file.write_all(&json).await?;
             file.sync_all().await?;
+            drop(file);
+            tokio::fs::rename(&tmp, path).await
+        };
+        if let Err(err) = write.await {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(err.into());
         }
-        set_private_permissions(&tmp).await?;
-        tokio::fs::rename(&tmp, path).await?;
         Ok(())
     }
 
@@ -122,16 +129,13 @@ impl CredentialStore {
     }
 }
 
-#[cfg(unix)]
-async fn set_private_permissions(path: &Path) -> Result<(), std::io::Error> {
-    use std::os::unix::fs::PermissionsExt as _;
-    let perms = std::fs::Permissions::from_mode(0o600);
-    tokio::fs::set_permissions(path, perms).await
-}
-
-#[cfg(not(unix))]
-async fn set_private_permissions(_path: &Path) -> Result<(), std::io::Error> {
-    Ok(())
+/// Создаёт новый файл, доступный только владельцу (на Unix — `0600`).
+async fn open_private(path: &Path) -> Result<tokio::fs::File, std::io::Error> {
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    options.open(path).await
 }
 
 #[cfg(test)]

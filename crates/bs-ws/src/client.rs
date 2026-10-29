@@ -2,11 +2,12 @@
 
 use std::time::Duration;
 
-use bs_types::{ClientEvent, ClientKind, ServerEvent};
+use bs_types::{ClientEvent, ClientKind, ServerEvent, TransportPolicy};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async_with_config};
 use url::Url;
 
 use crate::error::WsError;
@@ -16,6 +17,15 @@ pub const CLIENT_PING_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Таймаут на получение `ready` после `auth`.
 pub const READY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Максимальный размер одного входящего сообщения WebSocket.
+///
+/// Умолчание tungstenite — 64 МиБ; события Backspace (даже `ready` со
+/// списками участников) на порядки меньше, а сервер — внешний.
+pub const MAX_INCOMING_MESSAGE: usize = 8 * 1024 * 1024;
+
+/// Максимальный размер одного входящего фрейма.
+pub const MAX_INCOMING_FRAME: usize = 2 * 1024 * 1024;
 
 /// Тип потока tokio-tungstenite.
 pub type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -41,8 +51,26 @@ impl WsConnection {
         token: &str,
         client: Option<ClientKind>,
     ) -> Result<(Self, ServerEvent), WsError> {
+        Self::connect_with_policy(base, token, client, TransportPolicy::Strict).await
+    }
+
+    /// Как [`WsConnection::connect`], но с явной политикой транспорта.
+    ///
+    /// Токен уходит первым фреймом `auth`; по открытому `ws://` он был бы
+    /// виден любому на пути, поэтому `Strict` пускает только `wss` и loopback.
+    pub async fn connect_with_policy(
+        base: &str,
+        token: &str,
+        client: Option<ClientKind>,
+        policy: TransportPolicy,
+    ) -> Result<(Self, ServerEvent), WsError> {
         let url = ws_url(base)?;
-        let (stream, _response) = connect_async(url.as_str()).await?;
+        policy.check(&url)?;
+        let config = WebSocketConfig::default()
+            .max_message_size(Some(MAX_INCOMING_MESSAGE))
+            .max_frame_size(Some(MAX_INCOMING_FRAME));
+        let (stream, _response) =
+            connect_async_with_config(url.as_str(), Some(config), false).await?;
         let (mut sink, mut source) = stream.split();
 
         let auth = ClientEvent::Auth {
@@ -70,9 +98,15 @@ impl WsConnection {
                     incoming = source.next() => {
                         match incoming {
                             Some(Ok(WsMessage::Text(text))) => {
-                                if let Ok(event) = serde_json::from_str::<ServerEvent>(&text) {
-                                    if in_tx.send(event).await.is_err() {
-                                        break;
+                                match serde_json::from_str::<ServerEvent>(&text) {
+                                    Ok(event) => {
+                                        if in_tx.send(event).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    // Содержимое не логируем: это чужие сообщения.
+                                    Err(err) => {
+                                        tracing::debug!(%err, bytes = text.len(), "событие сервера не разобрано");
                                     }
                                 }
                             }
@@ -262,5 +296,13 @@ mod tests {
     #[test]
     fn rejects_relative_url() {
         assert!(ws_url("not a url").is_err());
+    }
+
+    #[tokio::test]
+    async fn plaintext_ws_to_remote_host_is_refused_before_connecting() {
+        // 192.0.2.0/24 (TEST-NET-1) недостижим: если бы политика не сработала,
+        // тест завис бы на соединении, а не получил мгновенный отказ.
+        let result = super::WsConnection::connect("http://192.0.2.1:3005", "jwt", None).await;
+        assert!(matches!(result, Err(crate::error::WsError::Insecure(_))));
     }
 }

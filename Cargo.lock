@@ -666,6 +666,7 @@ dependencies = [
  "tracing",
  "url",
  "wiremock",
+ "zeroize",
 ]
 
 [[package]]
@@ -718,6 +719,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "uuid",
  "zeroize",
 ]
 

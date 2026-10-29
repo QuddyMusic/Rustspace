@@ -16,6 +16,7 @@ thiserror = { workspace = true }
 reqwest = { workspace = true }
 url = { workspace = true }
 tracing = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 bs-types = { workspace = true }

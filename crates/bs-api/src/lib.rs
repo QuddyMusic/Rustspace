@@ -28,7 +28,7 @@ pub mod write;
 
 pub use auth::AuthResponse;
 pub use bs_types::{LiveKitTokenRequest, LiveKitTokenResponse};
-pub use client::{ApiClient, DEFAULT_TIMEOUT, USER_AGENT};
+pub use client::{ApiClient, DEFAULT_TIMEOUT, MAX_RESPONSE_BYTES, USER_AGENT};
 pub use error::ApiError;
 pub use federation::{
     AttachProofResponse, ChangePasswordRequest, ChangePasswordResponse,

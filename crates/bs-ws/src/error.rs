@@ -14,6 +14,10 @@ pub enum WsError {
     #[error("некорректный URL: {0}")]
     Url(#[from] url::ParseError),
 
+    /// Адрес не проходит политику транспорта (открытый `ws://`).
+    #[error(transparent)]
+    Insecure(#[from] bs_types::TransportError),
+
     /// Сервер закрыл соединение до прихода `ready`.
     #[error("соединение закрыто до ready")]
     ClosedBeforeReady,

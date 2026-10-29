@@ -19,6 +19,17 @@ pub enum ApiError {
     #[error("некорректный URL: {0}")]
     Url(#[from] url::ParseError),
 
+    /// Адрес инстанса не проходит политику транспорта (открытый http).
+    #[error(transparent)]
+    Insecure(#[from] bs_types::TransportError),
+
+    /// Ответ больше допустимого размера: клиент не читает его целиком.
+    #[error("ответ сервера слишком большой (больше {limit} байт)")]
+    ResponseTooLarge {
+        /// Лимит, который превышен.
+        limit: usize,
+    },
+
     /// Сервер ответил не-2xx и прислал разбираемое тело ошибки.
     #[error("сервер вернул HTTP {status}: {}", body.error)]
     Server {
@@ -56,7 +67,7 @@ impl ApiError {
             | Self::Decode { status, .. }
             | Self::Unexpected { status, .. } => Some(*status),
             Self::Transport(err) => err.status(),
-            Self::Url(_) => None,
+            Self::Url(_) | Self::Insecure(_) | Self::ResponseTooLarge { .. } => None,
         }
     }
 

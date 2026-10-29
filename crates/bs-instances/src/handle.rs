@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use bs_api::ApiClient;
 use bs_identity::{AccessToken, CredentialStore, IdentityError, InstanceSession};
-use bs_types::{ClientEvent, ClientKind, Origin, ServerEvent, User};
+use bs_types::{ClientEvent, ClientKind, Origin, ServerEvent, TransportPolicy, User};
 use bs_ws::{AuthFailure, WsConnection, WsError};
 use tokio::sync::{broadcast, mpsc, watch};
 
@@ -100,7 +100,35 @@ impl InstanceHandle {
         client_kind: Option<ClientKind>,
         policy: ReconnectPolicy,
     ) -> Result<(Self, ServerEvent), InstanceError> {
-        let session = InstanceSession::login(store, origin, base, username, password).await?;
+        Self::login_with_transport(
+            store,
+            origin,
+            base,
+            username,
+            password,
+            client_kind,
+            policy,
+            TransportPolicy::Strict,
+        )
+        .await
+    }
+
+    /// Как [`InstanceHandle::login`], но с явной политикой транспорта
+    /// (разрешить ли открытый `http://` вне loopback).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn login_with_transport(
+        store: &mut CredentialStore,
+        origin: Origin,
+        base: &str,
+        username: &str,
+        password: &str,
+        client_kind: Option<ClientKind>,
+        policy: ReconnectPolicy,
+        transport: TransportPolicy,
+    ) -> Result<(Self, ServerEvent), InstanceError> {
+        let session =
+            InstanceSession::login_with_policy(store, origin, base, username, password, transport)
+                .await?;
         Self::from_session(session, client_kind, policy).await
     }
 
@@ -115,10 +143,22 @@ impl InstanceHandle {
         let user = session.user().clone();
         let token = session.token().clone();
         let client = session.client().clone();
+        let transport = client.policy();
 
-        Self::start(origin, base, user, token, client, client_kind, policy).await
+        Self::start(
+            origin,
+            base,
+            user,
+            token,
+            client,
+            client_kind,
+            policy,
+            transport,
+        )
+        .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn start(
         origin: Origin,
         base: String,
@@ -127,6 +167,7 @@ impl InstanceHandle {
         client: ApiClient,
         client_kind: Option<ClientKind>,
         policy: ReconnectPolicy,
+        transport: TransportPolicy,
     ) -> Result<(Self, ServerEvent), InstanceError> {
         let (event_tx, _) = broadcast::channel(EVENT_BUFFER);
         // Подписываемся ДО запуска диспетчера, чтобы не потерять первый `ready`.
@@ -142,6 +183,7 @@ impl InstanceHandle {
                 base_for_task,
                 client_kind,
                 policy,
+                transport,
                 cmd_rx,
                 token_rx,
                 evt_for_task,
@@ -301,6 +343,7 @@ async fn run_dispatcher(
     base: String,
     client_kind: Option<ClientKind>,
     policy: ReconnectPolicy,
+    transport: TransportPolicy,
     mut commands: mpsc::Receiver<Command>,
     mut tokens: watch::Receiver<AccessToken>,
     events: broadcast::Sender<InstanceEvent>,
@@ -318,7 +361,8 @@ async fn run_dispatcher(
             },
         );
 
-        match WsConnection::connect(&base, token.expose(), client_kind).await {
+        match WsConnection::connect_with_policy(&base, token.expose(), client_kind, transport).await
+        {
             Ok((connection, ready)) => {
                 attempt = 0;
                 set_state(&state, ConnectionState::Connected);

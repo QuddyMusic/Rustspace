@@ -1,7 +1,7 @@
 //! Высокоуровневый login-flow поверх `bs-api`.
 
 use bs_api::ApiClient;
-use bs_types::{Origin, User};
+use bs_types::{Origin, TransportPolicy, User};
 
 use crate::error::IdentityError;
 use crate::secret::AccessToken;
@@ -29,7 +29,27 @@ impl InstanceSession {
         username: &str,
         password: &str,
     ) -> Result<Self, IdentityError> {
-        let mut client = ApiClient::new(origin.clone(), base)?;
+        Self::login_with_policy(
+            store,
+            origin,
+            base,
+            username,
+            password,
+            TransportPolicy::Strict,
+        )
+        .await
+    }
+
+    /// Как [`InstanceSession::login`], но с явной политикой транспорта.
+    pub async fn login_with_policy(
+        store: &mut CredentialStore,
+        origin: Origin,
+        base: &str,
+        username: &str,
+        password: &str,
+        policy: TransportPolicy,
+    ) -> Result<Self, IdentityError> {
+        let mut client = ApiClient::with_policy(origin.clone(), base, policy)?;
         let auth = client.login_and_attach(username, password).await?;
         let token = AccessToken::new(auth.token);
         store.insert(origin.clone(), token.clone());

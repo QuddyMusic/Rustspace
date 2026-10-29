@@ -7,7 +7,9 @@ use crate::client::ApiClient;
 use crate::error::ApiError;
 
 /// Тело запроса `POST /api/auth/login`.
-#[derive(Debug, Clone, Serialize)]
+///
+/// `Debug` не печатает пароль.
+#[derive(Clone, Serialize)]
 pub struct LoginRequest<'a> {
     /// Имя пользователя.
     pub username: &'a str,
@@ -15,14 +17,34 @@ pub struct LoginRequest<'a> {
     pub password: &'a str,
 }
 
+impl std::fmt::Debug for LoginRequest<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginRequest")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
+}
+
 /// Ответ `POST /api/auth/login`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `Debug` не печатает токен.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthResponse {
     /// JWT для `Authorization: Bearer`.
     pub token: String,
     /// Профиль вошедшего пользователя.
     pub user: User,
+}
+
+impl std::fmt::Debug for AuthResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthResponse")
+            .field("token", &"<redacted>")
+            .field("user", &self.user)
+            .finish()
+    }
 }
 
 impl ApiClient {
