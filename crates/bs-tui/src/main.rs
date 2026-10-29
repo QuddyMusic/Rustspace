@@ -27,6 +27,12 @@ fn main() -> ExitCode {
 fn run() -> io::Result<()> {
     let (mut guard, mut terminal) = TerminalGuard::enter()?;
     let mut app = App::new();
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == "--allow-insecure")
+    {
+        app.allow_insecure();
+    }
 
     while app.is_running() {
         app.pump_network();
@@ -105,11 +111,7 @@ fn handle_social_key(app: &mut App, key: KeyEvent) {
 
 fn handle_login_key(app: &mut App, key: KeyEvent) {
     match key.code {
-        KeyCode::Esc => {
-            if !app.cancel_login() {
-                app.quit();
-            }
-        }
+        KeyCode::Esc => app.quit(),
         KeyCode::Tab => app.form_mut().focus_next(),
         KeyCode::BackTab => app.form_mut().focus_prev(),
         KeyCode::Backspace => app.form_mut().backspace(),
@@ -123,9 +125,8 @@ fn handle_login_key(app: &mut App, key: KeyEvent) {
 
 /// Клавиши чата: навигация, композер и Ctrl-сочетания.
 ///
-/// Ctrl-сочетания: `Q` — выход, `S` — соцэкран, `]`/`[` — следующий и
-/// предыдущий инстанс, `I` — форма добавления инстанса, `W` — отключиться
-/// от активного инстанса.
+/// Ctrl-сочетания: `Q` — выход, `S` — соцэкран, `W` — выйти из инстанса
+/// (одновременно к нескольким инстансам подключиться нельзя).
 fn handle_chat_key(app: &mut App, key: KeyEvent) {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
@@ -148,9 +149,6 @@ fn handle_chat_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Backspace => app.chat_mut().backspace(),
         KeyCode::Char('s') if ctrl => app.open_social(),
-        KeyCode::Char(']') if ctrl => app.next_instance(),
-        KeyCode::Char('[') if ctrl => app.prev_instance(),
-        KeyCode::Char('i') if ctrl => app.begin_add_instance(),
         KeyCode::Char('w') if ctrl => app.disconnect_active(),
         KeyCode::Char(c) => handle_chat_char(app, c),
         _ => {}

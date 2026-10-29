@@ -763,7 +763,6 @@ dependencies = [
  "bs-types",
  "bs-voice",
  "crossterm",
- "futures-util",
  "ratatui",
  "serde_json",
  "thiserror 2.0.21",

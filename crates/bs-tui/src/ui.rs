@@ -53,46 +53,24 @@ fn instance_label(origin: &Origin) -> String {
     }
 }
 
-/// Верхняя строка: название и список инстансов с выделенным активным.
-///
-/// Пока инстансов нет, остаётся прежний статичный заголовок.
+/// Верхняя строка: название и подключённый инстанс (он всегда один).
 fn header_line(app: &App) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = vec![Span::raw("backspace-rs TUI")];
-    let instances = app.instances();
-    if instances.is_empty() {
-        return Line::from(spans);
-    }
-    let active = app.active();
-    spans.push(Span::raw(" — ["));
-    for (index, origin) in instances.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
-        }
-        let style = if origin == active {
-            Style::default().add_modifier(Modifier::REVERSED)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        spans.push(Span::styled(instance_label(origin), style));
-    }
-    spans.push(Span::raw("]"));
-    Line::from(spans)
-}
-
-/// Заголовок ленты: канал и, если инстансов несколько, метка активного.
-///
-/// Метка нужна, чтобы при мультиинстансности было видно, чей это канал.
-fn chat_title(app: &App, channel: Option<&str>) -> Line<'static> {
-    let mut spans: Vec<Span<'static>> = vec![Span::raw(
-        channel.map_or_else(|| " Чат ".to_owned(), |name| format!(" #{name} ")),
-    )];
-    if app.instances().len() > 1 {
+    if app.has_instances() {
+        spans.push(Span::raw(" — "));
         spans.push(Span::styled(
-            format!("@{} ", instance_label(app.active())),
-            Style::default().fg(Color::Cyan),
+            instance_label(app.active()),
+            Style::default().add_modifier(Modifier::REVERSED),
         ));
     }
     Line::from(spans)
+}
+
+/// Заголовок ленты: канал.
+fn chat_title(channel: Option<&str>) -> Line<'static> {
+    Line::from(Span::raw(
+        channel.map_or_else(|| " Чат ".to_owned(), |name| format!(" #{name} ")),
+    ))
 }
 
 fn render_login(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -179,7 +157,7 @@ fn render_chat(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .as_deref()
         .and_then(|id| cache.channel(id))
         .map(|c| c.name.as_str());
-    let title = chat_title(app, channel_name);
+    let title = chat_title(channel_name);
 
     let me = cache.me().id.as_str();
     let rows = channel_id.as_deref().map_or_else(Vec::new, |id| {
@@ -424,18 +402,13 @@ fn social_items<'a>(cache: &bs_core::Cache, social: &'a SocialState) -> Vec<List
 fn footer_hint(app: &App) -> String {
     match app.screen() {
         Screen::Login => {
-            let cancel = if app.has_instances() {
-                "Esc — отмена"
-            } else {
-                "Esc — выход"
-            };
             format!(
-                "Tab — поле, Enter — войти, {cancel} | {}",
+                "Tab — поле, Enter — войти, Esc — выход | {}",
                 app.form().hint()
             )
         }
         Screen::Chat => {
-            "Tab — канал, ↑↓ — сообщение, e — правка, d — удалить, +/− — реакция, a — прочитано, Esc — назад | Ctrl+] / Ctrl+[ — инстанс, Ctrl+i — добавить, Ctrl+w — отключить".to_owned()
+            "Tab — канал, ↑↓ — сообщение, e — правка, d — удалить, +/− — реакция, a — прочитано, Esc — назад | Ctrl+w — выйти из инстанса".to_owned()
         }
         Screen::Social => {
             "←→ — вкладка, ↑↓ — выбор, Enter — открыть/принять, x — удалить, Esc — назад".to_owned()

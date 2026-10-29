@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use bs_core::{Cache, MultiCache};
 use bs_instances::ConnectionState;
-use bs_types::{ClientEvent, Origin, ServerEvent};
+use bs_types::{ClientEvent, Origin, ServerEvent, TransportPolicy};
 use bs_voice::VoiceEvent;
 use bs_voice::protocol::{CallIdentity, ProtocolAction, VoiceCoordinator};
 
@@ -55,7 +55,7 @@ pub struct App {
     worker: Option<NetWorker>,
     multi: MultiCache,
     active: Origin,
-    home_base: Option<String>,
+    transport: TransportPolicy,
     states: HashMap<Origin, Status>,
     chat: ChatState,
     social: SocialState,
@@ -81,7 +81,7 @@ impl std::fmt::Debug for App {
             .field("worker", &self.worker.is_some())
             .field("instances", &self.multi.len())
             .field("active", &self.active)
-            .field("home_base", &self.home_base)
+            .field("transport", &self.transport)
             .field("states", &self.states)
             .field("chat", &self.chat)
             .field("social", &self.social)
@@ -104,7 +104,7 @@ impl App {
             worker: None,
             multi: MultiCache::new(),
             active: Origin::Home,
-            home_base: None,
+            transport: TransportPolicy::Strict,
             states: HashMap::new(),
             chat: ChatState::new(),
             social: SocialState::new(),
@@ -114,6 +114,11 @@ impl App {
             me_id: String::new(),
             me_name: String::new(),
         }
+    }
+
+    /// Разрешает открытый `http://` вне loopback (явное согласие пользователя).
+    pub fn allow_insecure(&mut self) {
+        self.transport = TransportPolicy::AllowInsecure;
     }
 
     /// Текущий экран.
@@ -186,18 +191,6 @@ impl App {
         self.form.is_submittable()
     }
 
-    /// Выводит origin для адреса: первый адрес становится домашним.
-    fn origin_for(&mut self, base: &str) -> Origin {
-        match self.home_base.clone() {
-            None => {
-                self.home_base = Some(base.to_owned());
-                Origin::Home
-            }
-            Some(home) if home == base => Origin::Home,
-            Some(_) => Origin::parse_web_str(base).unwrap_or(Origin::Home),
-        }
-    }
-
     /// Запускает логин в фоне. Возвращает `false`, если это неуместно.
     pub fn submit_login(&mut self) -> bool {
         if !self.can_submit() {
@@ -206,9 +199,13 @@ impl App {
         let Some(creds) = self.form.credentials() else {
             return false;
         };
-        let origin = self.origin_for(&creds.base);
+        // Один инстанс за раз: пока есть сессия или идёт вход, второй не стартует.
+        if self.has_instances() || self.status() == &Status::Connecting {
+            return false;
+        }
+        let origin = Origin::Home;
         let worker = self.worker.get_or_insert_with(NetWorker::spawn);
-        if !worker.connect(origin.clone(), creds) {
+        if !worker.connect(origin.clone(), creds, self.transport) {
             return false;
         }
         self.states.insert(origin.clone(), Status::Connecting);
@@ -217,62 +214,9 @@ impl App {
         true
     }
 
-    /// Открывает форму для добавления ещё одного инстанса.
-    pub fn begin_add_instance(&mut self) {
-        self.form = LoginForm::new();
-        self.screen = Screen::Login;
-    }
-
-    /// Отменяет добавление инстанса: возвращает туда, откуда пришли.
-    ///
-    /// Возвращает `false`, если подключённых инстансов ещё нет и отменять
-    /// некуда (тогда Esc должен выходить из приложения).
-    pub fn cancel_login(&mut self) -> bool {
-        if self.multi.is_empty() {
-            return false;
-        }
-        self.screen = Screen::Chat;
-        self.form = LoginForm::new();
-        true
-    }
-
     /// Подключён ли хотя бы один инстанс.
     pub fn has_instances(&self) -> bool {
         !self.multi.is_empty()
-    }
-
-    /// Переключает активный инстанс на следующий.
-    pub fn next_instance(&mut self) {
-        self.cycle_instance(1);
-    }
-
-    /// Переключает активный инстанс на предыдущий.
-    pub fn prev_instance(&mut self) {
-        self.cycle_instance(-1);
-    }
-
-    fn cycle_instance(&mut self, delta: isize) {
-        let origins = self.multi.origins();
-        if origins.len() < 2 {
-            return;
-        }
-        let current = origins.iter().position(|o| *o == self.active);
-        let next = current.map_or(0, |index| {
-            let len = origins.len() as isize;
-            ((index as isize + delta).rem_euclid(len)) as usize
-        });
-        self.active = origins[next].clone();
-        self.after_switch();
-    }
-
-    /// Переключает на конкретный инстанс, если он известен.
-    pub fn switch_to(&mut self, origin: Origin) -> bool {
-        if !self.multi.contains(&origin) {
-            return false;
-        }
-        self.active = origin;
-        self.after_switch();
-        true
     }
 
     /// Общие действия после смены инстанса: пересчёт курсоров и подгрузка.
@@ -296,7 +240,7 @@ impl App {
         self.multi.remove(&origin);
         self.states.remove(&origin);
         if let Some(worker) = self.worker.as_ref() {
-            worker.disconnect(origin);
+            worker.disconnect();
         }
         if let Some(next) = self.multi.origins().first().cloned() {
             self.active = next;
@@ -605,31 +549,22 @@ impl App {
     fn apply_protocol_action(&mut self, action: ProtocolAction) {
         match action {
             ProtocolAction::SendAccept(identity) => {
-                self.send_call_event(
-                    &identity,
-                    ClientEvent::DmCallAccept {
-                        dm_channel_id: identity.dm_channel_id.clone(),
-                        federated_call_id: identity.federated_call_id.clone(),
-                    },
-                );
+                self.send_event(ClientEvent::DmCallAccept {
+                    dm_channel_id: identity.dm_channel_id,
+                    federated_call_id: identity.federated_call_id,
+                });
             }
             ProtocolAction::SendReject(identity) => {
-                self.send_call_event(
-                    &identity,
-                    ClientEvent::DmCallReject {
-                        dm_channel_id: identity.dm_channel_id.clone(),
-                        federated_call_id: identity.federated_call_id.clone(),
-                    },
-                );
+                self.send_event(ClientEvent::DmCallReject {
+                    dm_channel_id: identity.dm_channel_id,
+                    federated_call_id: identity.federated_call_id,
+                });
             }
             ProtocolAction::SendEnd(identity) | ProtocolAction::IncomingTimedOut(identity) => {
-                self.send_call_event(
-                    &identity,
-                    ClientEvent::DmCallEnd {
-                        dm_channel_id: identity.dm_channel_id.clone(),
-                        federated_call_id: identity.federated_call_id.clone(),
-                    },
-                );
+                self.send_event(ClientEvent::DmCallEnd {
+                    dm_channel_id: identity.dm_channel_id,
+                    federated_call_id: identity.federated_call_id,
+                });
             }
             ProtocolAction::RebindExpired(identity) => {
                 self.call_ended(&identity);
@@ -731,26 +666,9 @@ impl App {
 
     /// Отправляет событие в фоновую сессию активного инстанса.
     fn send_event(&self, event: ClientEvent) -> bool {
-        self.send_event_to(&self.active, event)
-    }
-
-    /// Отправляет событие в заданный инстанс независимо от выбора UI.
-    fn send_event_to(&self, origin: &Origin, event: ClientEvent) -> bool {
         self.worker
             .as_ref()
-            .is_some_and(|worker| worker.send(origin, event))
-    }
-
-    /// Маршрутизирует команду звонка только в исходный инстанс.
-    fn send_call_event(&self, identity: &CallIdentity, event: ClientEvent) -> bool {
-        let Some(origin) = identity
-            .origin
-            .as_deref()
-            .and_then(|value| Origin::parse_web_str(value).ok())
-        else {
-            return false;
-        };
-        self.send_event_to(&origin, event)
+            .is_some_and(|worker| worker.send(event))
     }
 
     /// Сдвигает курсор по ленте сообщений текущего канала.
@@ -871,7 +789,7 @@ impl App {
             return;
         }
         if let Some(worker) = self.worker.as_ref() {
-            worker.send(&self.active, ClientEvent::TypingStart { channel_id });
+            worker.send(ClientEvent::TypingStart { channel_id });
         }
     }
 
@@ -1105,22 +1023,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_login_becomes_home() {
-        let mut app = App::new();
-        assert_eq!(app.origin_for("http://localhost:3000"), Origin::Home);
-        assert_eq!(app.origin_for("http://localhost:3000"), Origin::Home);
-    }
-
-    #[test]
-    fn second_login_becomes_remote() {
-        let mut app = App::new();
-        app.origin_for("http://localhost:3000");
-        let origin = app.origin_for("https://chat.example.com");
-        assert!(matches!(origin, Origin::Remote(_)));
-        assert_eq!(origin.as_web_str(), "https://chat.example.com");
-    }
-
-    #[test]
     fn unknown_instance_status_is_idle() {
         let app = App::new();
         assert_eq!(app.status(), &Status::Idle);
@@ -1128,18 +1030,26 @@ mod tests {
     }
 
     #[test]
-    fn switching_to_unknown_instance_fails() {
+    fn login_is_refused_while_connecting() {
         let mut app = App::new();
-        let remote = Origin::parse_web_str("https://chat.example.com").unwrap();
-        assert!(!app.switch_to(remote));
+        app.form_mut().focus_next();
+        "alice".chars().for_each(|c| app.form_mut().push_char(c));
+        app.form_mut().focus_next();
+        "secret".chars().for_each(|c| app.form_mut().push_char(c));
+        assert!(app.can_submit(), "форма заполнена");
+        app.states.insert(Origin::Home, Status::Connecting);
+        assert!(
+            !app.submit_login(),
+            "второй вход во время первого невозможен"
+        );
+        assert!(app.worker.is_none(), "воркер не поднимался");
     }
 
     #[test]
-    fn cycling_with_single_instance_is_noop() {
+    fn insecure_transport_is_opt_in() {
         let mut app = App::new();
-        app.next_instance();
-        assert_eq!(app.active(), &Origin::Home);
-        app.prev_instance();
-        assert_eq!(app.active(), &Origin::Home);
+        assert_eq!(app.transport, TransportPolicy::Strict);
+        app.allow_insecure();
+        assert_eq!(app.transport, TransportPolicy::AllowInsecure);
     }
 }

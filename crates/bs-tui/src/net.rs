@@ -1,17 +1,17 @@
 //! Фоновая сессия: tokio-рантайм в отдельном потоке, общение с TUI через каналы.
 //!
 //! TUI-поток не должен блокироваться на сети, а терминал нельзя трогать из
-//! tokio-задачи. Поэтому здесь живёт [`NetWorker`]: он держит реестр
-//! [`InstanceHandle`] по инстансам, пересылает их события и состояния
-//! наружу, а внутрь принимает команды с указанием origin.
+//! tokio-задачи. Поэтому здесь живёт [`NetWorker`]: он держит не более
+//! одного [`InstanceHandle`] (вход в несколько инстансов одновременно
+//! запрещён), пересылает его события и состояния наружу, а внутрь принимает
+//! команды.
 
-use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
 use std::thread;
 
 use bs_identity::CredentialStore;
 use bs_instances::{ConnectionState, InstanceEvent, InstanceHandle, ReconnectPolicy};
-use bs_types::{ClientEvent, ClientKind, Origin, ServerEvent};
+use bs_types::{ClientEvent, ClientKind, Origin, ServerEvent, TransportPolicy};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::login::Credentials;
@@ -122,16 +122,13 @@ enum Command {
         origin: Origin,
         /// Учётные данные для логина.
         creds: Credentials,
+        /// Можно ли открытое `http://` вне loopback.
+        transport: TransportPolicy,
     },
     /// Отключиться от инстанса.
-    Disconnect {
-        /// Инстанс.
-        origin: Origin,
-    },
+    Disconnect,
     /// Отправить событие серверу инстанса.
     Send {
-        /// Инстанс.
-        origin: Origin,
         /// Событие клиента.
         event: ClientEvent,
     },
@@ -197,25 +194,27 @@ impl NetWorker {
     }
 
     /// Подключается к инстансу. `false` — сессия уже мертва.
-    pub fn connect(&self, origin: Origin, creds: Credentials) -> bool {
+    ///
+    /// Если инстанс уже подключён, воркер откажет событием
+    /// [`NetEvent::Failed`]: параллельных входов не бывает.
+    pub fn connect(&self, origin: Origin, creds: Credentials, transport: TransportPolicy) -> bool {
         self.commands
-            .send(Command::Connect { origin, creds })
+            .send(Command::Connect {
+                origin,
+                creds,
+                transport,
+            })
             .is_ok()
     }
 
     /// Отключается от инстанса. `false` — сессия уже мертва.
-    pub fn disconnect(&self, origin: Origin) -> bool {
-        self.commands.send(Command::Disconnect { origin }).is_ok()
+    pub fn disconnect(&self) -> bool {
+        self.commands.send(Command::Disconnect).is_ok()
     }
 
     /// Отправляет команду серверу инстанса. `false` — сессия уже мертва.
-    pub fn send(&self, origin: &Origin, event: ClientEvent) -> bool {
-        self.commands
-            .send(Command::Send {
-                origin: origin.clone(),
-                event,
-            })
-            .is_ok()
+    pub fn send(&self, event: ClientEvent) -> bool {
+        self.commands.send(Command::Send { event }).is_ok()
     }
 
     /// Отправляет REST-запрос инстансу. `false` — сессия уже мертва.
@@ -246,8 +245,9 @@ impl NetWorker {
     }
 }
 
-/// Один подключённый инстанс в фоновой сессии.
+/// Единственный подключённый инстанс фоновой сессии.
 struct Live {
+    origin: Origin,
     handle: InstanceHandle,
     sub: tokio::sync::broadcast::Receiver<InstanceEvent>,
 }
@@ -255,30 +255,37 @@ struct Live {
 /// Состояние фоновой сессии между командами.
 struct Session {
     store: CredentialStore,
-    live: HashMap<Origin, Live>,
+    /// Не более одного инстанса: это структурный запрет на параллельный вход.
+    live: Option<Live>,
 }
 
 impl Session {
     fn new() -> Self {
         Self {
             store: CredentialStore::new(),
-            live: HashMap::new(),
+            live: None,
         }
     }
 
     /// Подключает инстанс: логин и запуск диспетчера.
+    ///
+    /// Если сессия уже есть, отказывает, не трогая ни её, ни сеть.
     async fn connect(
         &mut self,
         origin: Origin,
         creds: Credentials,
+        transport: TransportPolicy,
         events: &std_mpsc::Sender<NetEvent>,
     ) {
-        // Переподключение к тому же origin: старый handle корректно гасим.
-        if let Some(previous) = self.live.remove(&origin) {
-            let _ = previous.handle.shutdown().await;
+        if self.live.is_some() {
+            let _ = events.send(NetEvent::Failed {
+                origin,
+                message: "Сначала выйдите из текущего инстанса".to_owned(),
+            });
+            return;
         }
 
-        let login = InstanceHandle::login(
+        let login = InstanceHandle::login_with_transport(
             &mut self.store,
             origin.clone(),
             &creds.base,
@@ -286,6 +293,7 @@ impl Session {
             &creds.password,
             Some(ClientKind::Desktop),
             ReconnectPolicy::default(),
+            transport,
         )
         .await;
 
@@ -301,7 +309,11 @@ impl Session {
         };
 
         let sub = handle.subscribe();
-        self.live.insert(origin.clone(), Live { handle, sub });
+        self.live = Some(Live {
+            origin: origin.clone(),
+            handle,
+            sub,
+        });
 
         let _ = events.send(NetEvent::Ready {
             origin,
@@ -310,19 +322,17 @@ impl Session {
     }
 
     /// Отключает инстанс, если он есть.
-    async fn disconnect(&mut self, origin: &Origin, events: &std_mpsc::Sender<NetEvent>) {
-        if let Some(live) = self.live.remove(origin) {
+    async fn disconnect(&mut self, events: &std_mpsc::Sender<NetEvent>) {
+        if let Some(live) = self.live.take() {
+            let origin = live.origin.clone();
             let _ = live.handle.shutdown().await;
-            let _ = events.send(NetEvent::Disconnected {
-                origin: origin.clone(),
-            });
+            let _ = events.send(NetEvent::Disconnected { origin });
         }
     }
 
-    /// Гасит все подключения при завершении сессии.
-    async fn shutdown_all(&mut self) {
-        let drained: Vec<Live> = self.live.drain().map(|(_, live)| live).collect();
-        for live in drained {
+    /// Гасит подключение при завершении сессии.
+    async fn shutdown(&mut self) {
+        if let Some(live) = self.live.take() {
             let _ = live.handle.shutdown().await;
         }
     }
@@ -338,46 +348,41 @@ async fn run_session(
     loop {
         tokio::select! {
             command = commands.recv() => match command {
-                Some(Command::Connect { origin, creds }) => {
-                    session.connect(origin, creds, events).await;
+                Some(Command::Connect { origin, creds, transport }) => {
+                    session.connect(origin, creds, transport, events).await;
                 }
-                Some(Command::Disconnect { origin }) => {
-                    session.disconnect(&origin, events).await;
+                Some(Command::Disconnect) => {
+                    session.disconnect(events).await;
                 }
-                Some(Command::Send { origin, event }) => {
-                    if let Some(live) = session.live.get(&origin) {
-                        if let Err(err) = live.handle.send(event).await {
-                            tracing::warn!(%err, "не удалось отправить команду");
-                        }
+                Some(Command::Send { event }) => {
+                    if let Some(live) = session.live.as_ref()
+                        && let Err(err) = live.handle.send(event).await
+                    {
+                        tracing::warn!(%err, "не удалось отправить команду");
                     }
                 }
                 Some(Command::Request { origin, request }) => {
-                    let Some(live) = session.live.get(&origin) else {
+                    let Some(live) = session.live.as_ref() else {
                         let _ = responses.send(NetResponse {
                             origin,
-                            payload: NetPayload::Failed(
-                                "инстанс не подключён".to_owned(),
-                            ),
+                            payload: NetPayload::Failed("инстанс не подключён".to_owned()),
                         });
                         continue;
                     };
                     let payload = handle_request(live.handle.client(), request).await;
                     if responses.send(NetResponse { origin, payload }).is_err() {
-                        session.shutdown_all().await;
+                        session.shutdown().await;
                         return;
                     }
                 }
                 None => {
-                    session.shutdown_all().await;
+                    session.shutdown().await;
                     return;
                 }
             },
-            received = recv_any(&mut session.live) => {
-                let Some((origin, event)) = received else {
-                    continue;
-                };
-                if relay_event(origin, event, events).is_break() {
-                    session.shutdown_all().await;
+            received = recv_live(&mut session.live) => {
+                if relay_event(received.0, received.1, events).is_break() {
+                    session.shutdown().await;
                     return;
                 }
             }
@@ -385,38 +390,20 @@ async fn run_session(
     }
 }
 
-/// Ждёт событие от любого подключённого инстанса.
+/// Ждёт событие подключённого инстанса.
 ///
-/// Возвращает `None`, если реестр пуст (ветка «спит», чтобы `select!` не
-/// крутился вхолостую).
-async fn recv_any(live: &mut HashMap<Origin, Live>) -> Option<(Origin, InstanceEvent)> {
-    if live.is_empty() {
-        return std::future::pending::<Option<(Origin, InstanceEvent)>>().await;
-    }
-    Some(recv_from_any(live).await)
-}
-
-/// Опрашивает все подписки; для этого используется `select_all` поверх
-/// фьючей `recv`, каждый из которых помечен origin-ом.
-async fn recv_from_any(live: &mut HashMap<Origin, Live>) -> (Origin, InstanceEvent) {
-    let futures: Vec<_> = live
-        .iter_mut()
-        .map(|(origin, entry)| {
-            let origin = origin.clone();
-            Box::pin(async move {
-                let event = entry.sub.recv().await;
-                (origin, event)
-            })
-        })
-        .collect();
-    let ((origin, event), _, _) = futures_util::future::select_all(futures).await;
-    let event = event.unwrap_or_else(|err| {
+/// Пока инстанса нет, ветка «спит», чтобы `select!` не крутился вхолостую.
+async fn recv_live(live: &mut Option<Live>) -> (Origin, InstanceEvent) {
+    let Some(entry) = live.as_mut() else {
+        return std::future::pending().await;
+    };
+    let event = entry.sub.recv().await.unwrap_or_else(|err| {
         // Закрытый/отставший поток трактуем как потерю связи: диспетчер
         // инстанса сам решит, переподключаться ли.
         tracing::warn!(?err, "поток событий инстанса прерван");
         InstanceEvent::StateChanged(ConnectionState::Stopped)
     });
-    (origin, event)
+    (entry.origin.clone(), event)
 }
 
 /// Пересылает событие инстанса в TUI. [`ControlFlow::Break`] — пора завершаться.
