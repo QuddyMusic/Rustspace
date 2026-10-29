@@ -44,9 +44,15 @@ impl SocialScreen {
     /// Перезапрашивает данные активной вкладки.
     fn reload(&self, bridge: &Bridge) {
         match self.tab {
-            SocialTab::Friends => bridge.request(BridgeRequest::Friends),
-            SocialTab::Requests => bridge.request(BridgeRequest::FriendRequests),
-            SocialTab::Dms => bridge.request(BridgeRequest::DmChannels),
+            SocialTab::Friends => {
+                bridge.request(BridgeRequest::Friends);
+            }
+            SocialTab::Requests => {
+                bridge.request(BridgeRequest::FriendRequests);
+            }
+            SocialTab::Dms => {
+                bridge.request(BridgeRequest::DmChannels);
+            }
             SocialTab::Search => self.search(bridge),
         }
     }

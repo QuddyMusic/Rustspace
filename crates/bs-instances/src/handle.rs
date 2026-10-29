@@ -295,11 +295,22 @@ impl InstanceHandle {
     }
 
     /// Останавливает диспетчер и дожидается его завершения.
-    pub async fn shutdown(self) -> Result<(), InstanceError> {
+    pub async fn shutdown(mut self) -> Result<(), InstanceError> {
         // Игнорируем ошибку, если диспетчер уже завершился сам.
         let _ = self.commands.send(Command::Shutdown).await;
-        self.task.await?;
+        (&mut self.task).await?;
         Ok(())
+    }
+}
+
+impl Drop for InstanceHandle {
+    /// Уничтожение handle завершает диспетчер немедленно.
+    ///
+    /// Иначе выход из инстанса (или `abort()` задачи, владеющей handle) оставил
+    /// бы фоновое соединение жить до ближайшей проверки токена или backoff:
+    /// формально сессия закрыта, а сокет ещё открыт.
+    fn drop(&mut self) {
+        self.task.abort();
     }
 }
 

@@ -109,6 +109,40 @@ pub(crate) const fn should_wake(busy: bool, has_cache: bool) -> bool {
     busy || has_cache
 }
 
+/// Понятный текст отказа сервера на действие пользователя.
+///
+/// Известные коды получают русскую формулировку. Неизвестный код показывает
+/// текст сервера, но очищенный от управляющих символов и обрезанный: он
+/// приходит с чужого инстанса и не должен ломать интерфейс.
+pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String {
+    let known = match code {
+        Some("rate_limited") => "Слишком часто: подождите несколько секунд",
+        Some("content_too_long") => "Сообщение слишком длинное",
+        Some("content_required") => "Нельзя отправить пустое сообщение",
+        Some("not_dm_member") => "Вы не участник этого личного канала",
+        Some("recipient_deleted") => "Собеседник удалён: переписка доступна только для чтения",
+        Some("missing_permission") => "Недостаточно прав",
+        Some("not_message_author") => "Править и удалять можно только свои сообщения",
+        Some("system_message_immutable") => "Системное сообщение изменить нельзя",
+        Some("reply_target_invalid") => "На это сообщение нельзя ответить",
+        Some("attachment_invalid" | "attachment_not_owned") => "Вложение недоступно",
+        _ => "",
+    };
+    if !known.is_empty() {
+        return known.to_owned();
+    }
+    let cleaned: String = message
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect();
+    if cleaned.trim().is_empty() {
+        "Сервер отклонил действие".to_owned()
+    } else {
+        cleaned
+    }
+}
+
 /// Расстояние до верха ленты (px), с которого подгружается более старая страница.
 pub(crate) const LOAD_OLDER_THRESHOLD_PX: f32 = 40.0;
 
@@ -136,8 +170,8 @@ mod tests {
     use bs_types::ChannelId;
 
     use super::{
-        author_name, can_manage_message, can_send, connection_label, message_actions, next_screen,
-        outgoing_text, should_ack, should_load_older, should_wake,
+        author_name, can_manage_message, can_send, connection_label, describe_server_error,
+        message_actions, next_screen, outgoing_text, should_ack, should_load_older, should_wake,
     };
     use crate::app::Screen;
 
@@ -274,5 +308,32 @@ mod tests {
         assert!(should_load_older(10.0, 2000.0, 400.0, true));
         // Читаем середину: подгружать рано.
         assert!(!should_load_older(500.0, 2000.0, 400.0, true));
+    }
+
+    #[test]
+    fn server_error_known_codes_are_localised() {
+        assert_eq!(
+            describe_server_error(Some("rate_limited"), "Too many"),
+            "Слишком часто: подождите несколько секунд"
+        );
+        assert_eq!(
+            describe_server_error(Some("not_dm_member"), "x"),
+            "Вы не участник этого личного канала"
+        );
+    }
+
+    #[test]
+    fn server_error_unknown_code_is_sanitised_and_truncated() {
+        let shown = describe_server_error(None, "плохо\u{1b}[31m\n\u{7}");
+        assert!(!shown.chars().any(char::is_control), "{shown:?}");
+        let long = "x".repeat(1000);
+        assert_eq!(
+            describe_server_error(Some("weird"), &long).chars().count(),
+            200
+        );
+        assert_eq!(
+            describe_server_error(None, "\u{1b}\u{7}"),
+            "Сервер отклонил действие"
+        );
     }
 }

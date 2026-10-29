@@ -1,7 +1,7 @@
 //! Основной экран: сайдбар пространств/каналов/личных сообщений, лента, ввод.
 
-use bs_core::{Cache, MultiCache};
-use bs_types::{ChannelId, Origin};
+use bs_core::Cache;
+use bs_types::ChannelId;
 
 use crate::bridge::{Bridge, ChannelKind, HistoryState};
 use crate::logic::{
@@ -10,14 +10,9 @@ use crate::logic::{
 };
 use crate::social::dm_display_name;
 
-/// Выбранный канал вместе с инстансом, которому он принадлежит.
-///
-/// Без origin выбор был бы неоднозначным: у двух инстансов легко найдутся
-/// каналы с одинаковыми именами и даже id.
+/// Выбранный канал.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SelectedChannel {
-    /// Инстанс-владелец канала.
-    pub(crate) origin: Origin,
     /// Идентификатор канала внутри инстанса.
     pub(crate) channel: ChannelId,
     /// Канал пространства или личный канал: у них разные события и маршруты.
@@ -35,22 +30,18 @@ pub(crate) struct SidebarChannel {
     pub(crate) unread: bool,
 }
 
-/// Пространство в объединённом сайдбаре.
+/// Пространство в сайдбаре.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SidebarSpace {
-    /// Инстанс-владелец.
-    pub(crate) origin: Origin,
     /// Имя пространства.
     pub(crate) name: String,
     /// Каналы пространства.
     pub(crate) channels: Vec<SidebarChannel>,
 }
 
-/// Личный канал в объединённом сайдбаре.
+/// Личный канал в сайдбаре.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SidebarDm {
-    /// Инстанс-владелец.
-    pub(crate) origin: Origin,
     /// Идентификатор личного канала.
     pub(crate) id: String,
     /// Имя собеседника или название группы.
@@ -59,31 +50,14 @@ pub(crate) struct SidebarDm {
     pub(crate) unread: bool,
 }
 
-/// Инстансы в стабильном порядке: домашний первым, затем по адресу.
-fn sorted_origins(multi: &MultiCache) -> Vec<Origin> {
-    let mut origins = multi.origins();
-    origins.sort_by(|a, b| {
-        b.is_home()
-            .cmp(&a.is_home())
-            .then_with(|| a.as_web_str().cmp(&b.as_web_str()))
-    });
-    origins
-}
-
-/// Собирает объединённый сайдбар по всем инстансам.
-///
-/// Порядок стабилен: домашний инстанс первым, затем удалённые по строковому
-/// представлению — так список не «прыгает» между кадрами.
+/// Собирает сайдбар: пространства со своими каналами в стабильном порядке.
 #[must_use]
-pub(crate) fn sidebar_items(multi: &MultiCache) -> Vec<SidebarSpace> {
-    let mut items = Vec::new();
-    for origin in sorted_origins(multi) {
-        let Some(cache) = multi.cache(&origin) else {
-            continue;
-        };
-        let mut spaces: Vec<_> = cache.spaces().collect();
-        spaces.sort_by(|a, b| a.space.id.cmp(&b.space.id));
-        for space in spaces {
+pub(crate) fn sidebar_items(cache: &Cache) -> Vec<SidebarSpace> {
+    let mut spaces: Vec<_> = cache.spaces().collect();
+    spaces.sort_by(|a, b| a.space.id.cmp(&b.space.id));
+    spaces
+        .into_iter()
+        .map(|space| {
             let mut channels: Vec<SidebarChannel> = cache
                 .channels(&space.space.id)
                 .map(|channel| SidebarChannel {
@@ -93,46 +67,27 @@ pub(crate) fn sidebar_items(multi: &MultiCache) -> Vec<SidebarSpace> {
                 })
                 .collect();
             channels.sort_by(|a, b| a.id.cmp(&b.id));
-            items.push(SidebarSpace {
-                origin: origin.clone(),
+            SidebarSpace {
                 name: space.space.name.clone(),
                 channels,
-            });
-        }
-    }
-    items
+            }
+        })
+        .collect()
 }
 
-/// Личные каналы всех инстансов: свежие (больший snowflake) выше.
+/// Личные каналы: свежие (больший snowflake) выше.
 #[must_use]
-pub(crate) fn dm_sidebar_items(multi: &MultiCache) -> Vec<SidebarDm> {
-    let mut items = Vec::new();
-    for origin in sorted_origins(multi) {
-        let Some(cache) = multi.cache(&origin) else {
-            continue;
-        };
-        let me = cache.me().id.clone();
-        let mut dms: Vec<_> = cache.dm_channels().collect();
-        dms.sort_by(|a, b| b.id.len().cmp(&a.id.len()).then_with(|| b.id.cmp(&a.id)));
-        for dm in dms {
-            items.push(SidebarDm {
-                origin: origin.clone(),
-                id: dm.id.clone(),
-                label: dm_display_name(dm, &me),
-                unread: cache.unread_count(&dm.id) > 0,
-            });
-        }
-    }
-    items
-}
-
-/// Короткая метка инстанса для показа рядом с чужими элементами.
-#[must_use]
-pub(crate) fn origin_label(origin: &Origin) -> String {
-    match origin {
-        Origin::Home => "дом".to_owned(),
-        Origin::Remote(url) => url.host_str().unwrap_or(url.as_str()).to_owned(),
-    }
+pub(crate) fn dm_sidebar_items(cache: &Cache) -> Vec<SidebarDm> {
+    let me = cache.me().id.clone();
+    let mut dms: Vec<_> = cache.dm_channels().collect();
+    dms.sort_by(|a, b| b.id.len().cmp(&a.id.len()).then_with(|| b.id.cmp(&a.id)));
+    dms.into_iter()
+        .map(|dm| SidebarDm {
+            id: dm.id.clone(),
+            label: dm_display_name(dm, &me),
+            unread: cache.unread_count(&dm.id) > 0,
+        })
+        .collect()
 }
 
 /// Одна строка ленты: одинаковая для каналов и личных сообщений.
@@ -191,7 +146,7 @@ pub(crate) struct ChatScreen {
     /// Листали ли ленту текущего канала вниз (см. `should_load_older`).
     was_scrolled_down: bool,
     /// Канал, для которого относятся `scroll_anchor` и `was_scrolled_down`.
-    scroll_key: Option<(Origin, String)>,
+    scroll_key: Option<String>,
 }
 
 /// Что именно правим.
@@ -219,9 +174,8 @@ impl ChatScreen {
         self.edit.is_some()
     }
 
-    /// Открывает канал, переключая инстанс при необходимости.
-    pub(crate) fn open_channel(&mut self, selected: SelectedChannel, bridge: &mut Bridge) {
-        bridge.set_active(selected.origin.clone());
+    /// Открывает канал.
+    pub(crate) fn open_channel(&mut self, selected: SelectedChannel) {
         // Правка относилась к прежнему каналу.
         if self.selected_channel.as_ref() != Some(&selected) {
             self.edit = None;
@@ -232,9 +186,9 @@ impl ChatScreen {
     /// Рисует экран. Возвращает `true`, если пользователь попросил соцэкран.
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) -> bool {
         let mut open_social = false;
-        let items = sidebar_items(bridge.multi());
-        let dms = dm_sidebar_items(bridge.multi());
-        let active = bridge.active().clone();
+        let (items, dms) = bridge.cache().map_or_else(Default::default, |cache| {
+            (sidebar_items(cache), dm_sidebar_items(cache))
+        });
         let mut requested: Option<SelectedChannel> = None;
 
         egui::Panel::left("channels")
@@ -253,27 +207,16 @@ impl ChatScreen {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for space in &items {
-                            let mut title = egui::RichText::new(&space.name).strong();
-                            if space.origin != active {
-                                title = title.weak();
-                            }
-                            ui.label(title);
+                            ui.label(egui::RichText::new(&space.name).strong());
                             for channel in &space.channels {
                                 let selected =
                                     self.selected_channel.as_ref().is_some_and(|current| {
                                         current.kind == ChannelKind::Space
-                                            && current.origin == space.origin
                                             && current.channel.as_str() == channel.id
                                     });
-                                let text = sidebar_text(
-                                    &channel.label,
-                                    channel.unread,
-                                    &space.origin,
-                                    &active,
-                                );
+                                let text = sidebar_text(&channel.label, channel.unread);
                                 if ui.selectable_label(selected, text).clicked() {
                                     requested = Some(SelectedChannel {
-                                        origin: space.origin.clone(),
                                         channel: ChannelId::from(channel.id.clone()),
                                         kind: ChannelKind::Space,
                                     });
@@ -289,13 +232,11 @@ impl ChatScreen {
                                 let selected =
                                     self.selected_channel.as_ref().is_some_and(|current| {
                                         current.kind == ChannelKind::Dm
-                                            && current.origin == dm.origin
                                             && current.channel.as_str() == dm.id
                                     });
-                                let text = sidebar_text(&dm.label, dm.unread, &dm.origin, &active);
+                                let text = sidebar_text(&dm.label, dm.unread);
                                 if ui.selectable_label(selected, text).clicked() {
                                     requested = Some(SelectedChannel {
-                                        origin: dm.origin.clone(),
                                         channel: ChannelId::from(dm.id.clone()),
                                         kind: ChannelKind::Dm,
                                     });
@@ -306,7 +247,7 @@ impl ChatScreen {
             });
 
         if let Some(selected) = requested {
-            self.open_channel(selected, bridge);
+            self.open_channel(selected);
         }
 
         self.show_composer(ui, bridge);
@@ -315,19 +256,13 @@ impl ChatScreen {
     }
 }
 
-/// Подпись пункта сайдбара: «•» у непрочитанных, `@хост` у чужих инстансов.
-fn sidebar_text(label: &str, unread: bool, origin: &Origin, active: &Origin) -> egui::RichText {
-    let mut text = String::new();
+/// Подпись пункта сайдбара: «•» и полужирный шрифт у непрочитанных.
+fn sidebar_text(label: &str, unread: bool) -> egui::RichText {
     if unread {
-        text.push_str("• ");
+        egui::RichText::new(format!("• {label}")).strong()
+    } else {
+        egui::RichText::new(label)
     }
-    text.push_str(label);
-    if origin != active {
-        text.push_str(" @");
-        text.push_str(&origin_label(origin));
-    }
-    let rich = egui::RichText::new(text);
-    if unread { rich.strong() } else { rich }
 }
 
 /// Строка состояния истории над лентой. Возвращает `true`, если нажали «Повторить».
@@ -397,7 +332,7 @@ impl ChatScreen {
 
     /// Сбрасывает состояние прокрутки, если открыли другой канал.
     fn sync_scroll_key(&mut self, selected: &SelectedChannel) {
-        let key = (selected.origin.clone(), selected.channel.clone());
+        let key = selected.channel.clone();
         if self.scroll_key.as_ref() != Some(&key) {
             self.scroll_key = Some(key);
             self.scroll_anchor = None;
@@ -437,14 +372,14 @@ impl ChatScreen {
             };
             self.sync_scroll_key(&selected);
             let channel_id = selected.channel.clone();
-            bridge.ensure_history(&selected.origin, selected.kind, &channel_id);
+            bridge.ensure_history(selected.kind, &channel_id);
             let history = bridge
-                .history_state(&selected.origin, &channel_id)
+                .history_state(&channel_id)
                 .cloned()
                 .unwrap_or_default();
 
             let (me, rows) = {
-                let Some(cache) = bridge.multi().cache(&selected.origin) else {
+                let Some(cache) = bridge.cache() else {
                     return;
                 };
                 (
@@ -452,7 +387,7 @@ impl ChatScreen {
                     message_rows(cache, selected.kind, &channel_id),
                 )
             };
-            let ack_key = format!("{}|{channel_id}", selected.origin.as_web_str());
+            let ack_key = channel_id.clone();
             let first_id = rows.first().map(|row| row.id.clone());
             let mut retry = false;
             let mut edit_request = None;
@@ -526,7 +461,7 @@ impl ChatScreen {
                 if self.scroll_anchor.is_none() {
                     self.scroll_anchor.clone_from(&first_id);
                 }
-                bridge.load_older(&selected.origin, selected.kind, &channel_id);
+                bridge.load_older(selected.kind, &channel_id);
             }
 
             self.ack_latest(
@@ -541,10 +476,10 @@ impl ChatScreen {
 
 #[cfg(test)]
 mod tests {
-    use bs_core::MultiCache;
-    use bs_types::{Origin, ReadyPayload};
+    use bs_core::Cache;
+    use bs_types::ReadyPayload;
 
-    use super::{origin_label, sidebar_items};
+    use super::{dm_sidebar_items, sidebar_items};
 
     fn ready(
         space_id: &str,
@@ -575,15 +510,9 @@ mod tests {
     }
 
     #[test]
-    fn empty_multi_gives_empty_sidebar() {
-        assert!(sidebar_items(&MultiCache::new()).is_empty());
-    }
-
-    #[test]
-    fn single_instance_lists_space_and_channel() {
-        let multi =
-            MultiCache::from_ready([(Origin::Home, ready("s1", "Работа", "c1", "general"))]);
-        let items = sidebar_items(&multi);
+    fn sidebar_lists_space_and_channel() {
+        let cache = Cache::from_ready(ready("s1", "Работа", "c1", "general"));
+        let items = sidebar_items(&cache);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name, "Работа");
         assert_eq!(items[0].channels.len(), 1);
@@ -592,39 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn two_instances_keep_home_first() {
-        let remote = Origin::parse_web_str("https://chat.example.com").expect("origin");
-        let multi = MultiCache::from_ready([
-            (remote.clone(), ready("s2", "Чужое", "c2", "random")),
-            (Origin::Home, ready("s1", "Работа", "c1", "general")),
-        ]);
-        let items = sidebar_items(&multi);
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0].origin, Origin::Home, "домашний инстанс первым");
-        assert_eq!(items[1].origin, remote);
-    }
-
-    #[test]
-    fn same_space_names_are_distinguished_by_origin() {
-        let remote = Origin::parse_web_str("https://chat.example.com").expect("origin");
-        let multi = MultiCache::from_ready([
-            (Origin::Home, ready("s1", "Работа", "c1", "general")),
-            (remote, ready("s1", "Работа", "c1", "general")),
-        ]);
-        let items = sidebar_items(&multi);
-        assert_eq!(items.len(), 2, "одинаковые имена не схлопываются");
-        assert_ne!(items[0].origin, items[1].origin);
-    }
-
-    #[test]
-    fn origin_label_prefers_host() {
-        let remote = Origin::parse_web_str("https://chat.example.com").expect("origin");
-        assert_eq!(origin_label(&remote), "chat.example.com");
-        assert_eq!(origin_label(&Origin::Home), "дом");
-    }
-
-    #[test]
-    fn dm_sidebar_lists_private_channels_per_origin() {
+    fn dm_sidebar_lists_private_channels_newest_first() {
         let mut payload = ready("s1", "Работа", "c1", "general");
         payload.dm_channels = serde_json::from_value(serde_json::json!([
             {"id": "100", "federatedId": null, "ownerId": null, "ownerHomeUserId": null,
@@ -635,16 +532,14 @@ mod tests {
              "members": [], "name": "Новая группа"}
         ]))
         .expect("dm_channels");
-        let multi = MultiCache::from_ready([(Origin::Home, payload)]);
-        let dms = super::dm_sidebar_items(&multi);
+        let dms = dm_sidebar_items(&Cache::from_ready(payload));
         let labels: Vec<_> = dms.iter().map(|dm| dm.label.as_str()).collect();
-        assert_eq!(labels, ["Новая группа", "Старая группа"], "свежие выше");
-        assert!(dms.iter().all(|dm| dm.origin == Origin::Home));
+        assert_eq!(labels, ["Новая группа", "Старая группа"]);
     }
 
     #[test]
     fn dm_sidebar_is_empty_without_private_channels() {
-        let multi = MultiCache::from_ready([(Origin::Home, ready("s1", "A", "c1", "g"))]);
-        assert!(super::dm_sidebar_items(&multi).is_empty());
+        let cache = Cache::from_ready(ready("s1", "A", "c1", "g"));
+        assert!(dm_sidebar_items(&cache).is_empty());
     }
 }
