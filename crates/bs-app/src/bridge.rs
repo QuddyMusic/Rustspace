@@ -55,6 +55,17 @@ pub(crate) struct HistoryState {
     pub(crate) error: Option<String>,
 }
 
+impl HistoryState {
+    /// Можно ли запрашивать следующую страницу автоматически (при прокрутке).
+    ///
+    /// После ошибки автоповтора нет: иначе при сбое (например, `429`) клиент
+    /// каждый кадр шлёт новый запрос и сам себя блокирует. Повтор — только по
+    /// кнопке «Повторить».
+    pub(crate) const fn can_auto_load(&self) -> bool {
+        !self.loading && !self.exhausted && self.error.is_none()
+    }
+}
+
 /// Страница истории из REST-ответа.
 #[derive(Debug)]
 pub(crate) enum HistoryItems {
@@ -1566,6 +1577,28 @@ mod tests {
         // Пока страница в пути, второй запрос не уходит.
         bridge.load_older(ChannelKind::Dm, "dm1");
         assert!(requests.try_recv().is_err());
+    }
+
+    #[test]
+    fn failed_history_is_not_auto_retried() {
+        let ok = super::HistoryState::default();
+        assert!(ok.can_auto_load());
+        for state in [
+            super::HistoryState {
+                loading: true,
+                ..Default::default()
+            },
+            super::HistoryState {
+                exhausted: true,
+                ..Default::default()
+            },
+            super::HistoryState {
+                error: Some("429".to_owned()),
+                ..Default::default()
+            },
+        ] {
+            assert!(!state.can_auto_load(), "{state:?}");
+        }
     }
 
     #[test]

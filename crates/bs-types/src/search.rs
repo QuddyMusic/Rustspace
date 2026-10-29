@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::message::{DmMessageWithUser, MessageWithUser};
 
 /// Ответ поиска по каналу пространства.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSearchResponse {
     pub results: Vec<MessageWithUser>,
@@ -13,7 +13,7 @@ pub struct MessageSearchResponse {
 }
 
 /// Ответ поиска по DM-каналу.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DmSearchResponse {
     pub results: Vec<DmMessageWithUser>,

@@ -42,7 +42,7 @@ pub struct Message {
 }
 
 /// Сообщение с автором, вложениями, embeds и реакциями.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageWithUser {
     #[serde(flatten)]
@@ -73,7 +73,7 @@ pub struct Reaction {
 }
 
 /// Вложение (файл, изображение, видео).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Attachment {
     pub id: String,
@@ -89,7 +89,8 @@ pub struct Attachment {
     #[serde(default)]
     pub height: Option<i64>,
     #[serde(default)]
-    pub duration: Option<i64>,
+    /// Длительность в секундах; в БД сервера колонка `real`, поэтому дробная.
+    pub duration: Option<f64>,
     /// Воспроизводимость видео в браузере; `null` — неизвестно (оптимистично).
     #[serde(default)]
     pub playable: Option<bool>,
@@ -205,7 +206,7 @@ pub struct DmMessage {
 }
 
 /// DM-сообщение с автором и вложениями.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DmMessageWithUser {
     #[serde(flatten)]
@@ -222,7 +223,7 @@ pub struct DmMessageWithUser {
 }
 
 /// `lastMessage` в [`DmChannel`]: короткое превью или полное сообщение.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum DmChannelLastMessage {
     Preview(DmLastMessagePreview),
@@ -230,7 +231,7 @@ pub enum DmChannelLastMessage {
 }
 
 /// Личный канал (или группа).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DmChannel {
     pub id: String,
@@ -421,6 +422,17 @@ mod tests {
         assert_eq!(a.size, 1234);
         assert!(a.playable.is_none());
         assert!(a.width.is_none());
+    }
+
+    #[test]
+    fn attachment_with_fractional_duration() {
+        // Сервер хранит `duration` как REAL: у видео и аудио число дробное.
+        let json = r#"{"id":"a1","messageId":"m1","filename":"x.mp4",
+            "originalName":"x.mp4","mimetype":"video/mp4","size":99,
+            "thumbnailFilename":"t.jpg","width":640,"height":360,
+            "duration":12.48,"playable":true,"createdAt":7}"#;
+        let a: Attachment = serde_json::from_str(json).unwrap();
+        assert_eq!(a.duration, Some(12.48));
     }
 
     #[test]

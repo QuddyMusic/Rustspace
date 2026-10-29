@@ -25,7 +25,7 @@ pub const MESSAGES_LIMIT_MIN: u16 = 1;
 pub const MESSAGES_LIMIT_MAX: u16 = 100;
 
 /// Результат страницы истории.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MessagePage {
     /// Сообщения в порядке «старые → новые».
     pub messages: Vec<MessageWithUser>,
@@ -35,7 +35,7 @@ pub struct MessagePage {
 }
 
 /// Страница истории личного канала: те же правила, что у [`MessagePage`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DmMessagePage {
     /// Сообщения в порядке «старые → новые».
     pub messages: Vec<DmMessageWithUser>,

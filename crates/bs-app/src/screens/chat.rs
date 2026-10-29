@@ -457,7 +457,7 @@ impl ChatScreen {
                 output.inner_rect.height(),
                 self.was_scrolled_down,
             );
-            if retry || (wants_older && !history.loading && !history.exhausted) {
+            if retry || (wants_older && history.can_auto_load()) {
                 if self.scroll_anchor.is_none() {
                     self.scroll_anchor.clone_from(&first_id);
                 }

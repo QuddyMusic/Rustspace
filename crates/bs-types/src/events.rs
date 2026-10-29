@@ -193,7 +193,7 @@ pub struct FederationFileAffectedUser {
 }
 
 /// Payload события `ready` — снимок состояния после `auth`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadyPayload {
     pub user: User,
