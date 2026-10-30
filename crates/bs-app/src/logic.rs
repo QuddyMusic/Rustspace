@@ -227,13 +227,11 @@ mod tests {
     fn next_screen_stays_without_ready() {
         assert_eq!(next_screen(Screen::Login, false, false), Screen::Login);
         assert_eq!(next_screen(Screen::Chat, false, false), Screen::Chat);
-        assert_eq!(next_screen(Screen::Social, false, false), Screen::Social);
     }
 
     #[test]
     fn next_screen_keeps_user_choice_within_session() {
         // Повторный `ready` не должен выдёргивать пользователя из соцэкрана.
-        assert_eq!(next_screen(Screen::Social, true, false), Screen::Social);
         assert_eq!(next_screen(Screen::Chat, true, false), Screen::Chat);
     }
 

@@ -19,6 +19,7 @@ mod logic;
 mod screens;
 mod social;
 mod theme;
+mod widgets;
 
 fn main() -> eframe::Result {
     tracing_subscriber::fmt()

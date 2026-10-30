@@ -43,13 +43,77 @@ pub(crate) const ROSE: Color32 = Color32::from_rgb(0xfd, 0xa4, 0xaf);
 pub(crate) const AMBER: Color32 = Color32::from_rgb(0xfc, 0xd3, 0x4d);
 /// Онлайн.
 pub(crate) const GREEN: Color32 = Color32::from_rgb(0x4a, 0xde, 0x80);
+/// Небесный акцент (`--accent-sky`).
+pub(crate) const SKY: Color32 = Color32::from_rgb(0x7d, 0xd3, 0xfc);
 /// Не беспокоить.
 pub(crate) const RED: Color32 = Color32::from_rgb(0xf8, 0x71, 0x71);
 /// Офлайн.
 pub(crate) const GRAY: Color32 = Color32::from_rgb(0x6d, 0x6d, 0x7c);
 
+/// Имя семейства полужирного начертания (Inter SemiBold).
+const BOLD_FAMILY: &str = "inter-semibold";
+
+/// Семейство для заголовков и имён: у `egui` нет синтетического жирного.
+#[must_use]
+pub(crate) fn bold_family() -> egui::FontFamily {
+    egui::FontFamily::Name(BOLD_FAMILY.into())
+}
+
+/// Подключает Inter (латиница и кириллица), как у оригинального клиента
+/// для русского языка. Встроенные шрифты egui остаются запасными — из них
+/// берутся эмодзи и символы.
+fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "inter-regular".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/Inter-Regular.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        BOLD_FAMILY.to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/Inter-SemiBold.ttf"
+        ))),
+    );
+    let fallback = fonts
+        .families
+        .get(&egui::FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
+    let mut regular = vec!["inter-regular".to_owned()];
+    regular.extend(fallback.iter().cloned());
+    fonts
+        .families
+        .insert(egui::FontFamily::Proportional, regular);
+    let mut bold = vec![BOLD_FAMILY.to_owned()];
+    bold.extend(fallback);
+    fonts.families.insert(bold_family(), bold);
+    ctx.set_fonts(fonts);
+}
+
+/// Цвет из палитры аватаров Backspace (`mint`, `sky`, …); `None` для неизвестных.
+#[must_use]
+pub(crate) fn palette(name: &str) -> Option<Color32> {
+    Some(match name {
+        "mint" => Color32::from_rgb(0x10, 0xb9, 0x81),
+        "sky" => Color32::from_rgb(0x5b, 0x7c, 0xf6),
+        "lavender" => Color32::from_rgb(0xb4, 0x84, 0xfa),
+        "coral" => Color32::from_rgb(0xf9, 0x6a, 0x2f),
+        "rose" => Color32::from_rgb(0xf0, 0x4a, 0x8a),
+        "teal" => Color32::from_rgb(0x14, 0xb8, 0xc4),
+        "amber" => Color32::from_rgb(0xf5, 0xa5, 0x0b),
+        _ => return None,
+    })
+}
+
+/// Названия цветов палитры в порядке сервера.
+pub(crate) const PALETTE_NAMES: [&str; 7] =
+    ["mint", "sky", "lavender", "coral", "rose", "teal", "amber"];
+
 /// Применяет тему к контексту `egui`.
 pub(crate) fn apply(ctx: &egui::Context) {
+    install_fonts(ctx);
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = BG_CHAT;
     visuals.window_fill = BG_BUBBLE;
@@ -113,7 +177,7 @@ pub(crate) fn primary_button(text: impl Into<String>) -> egui::Button<'static> {
     egui::Button::new(
         egui::RichText::new(text.into())
             .color(Color32::WHITE)
-            .strong(),
+            .family(bold_family()),
     )
     .fill(ACCENT)
     .corner_radius(CornerRadius::same(8))
@@ -223,9 +287,13 @@ pub(crate) fn paint_avatar(
 
 /// Кнопка позитивного действия: тёмно-мятная подложка и мятный текст.
 pub(crate) fn positive_button(text: impl Into<String>) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(text.into()).color(MINT).strong())
-        .fill(MINT_BG)
-        .corner_radius(CornerRadius::same(8))
+    egui::Button::new(
+        egui::RichText::new(text.into())
+            .color(MINT)
+            .family(bold_family()),
+    )
+    .fill(MINT_BG)
+    .corner_radius(CornerRadius::same(8))
 }
 
 /// Рисует знак бренда — клавишу Backspace со стрелкой и крестиком.
@@ -378,7 +446,7 @@ fn list_row_with(
     };
     let mut text = egui::RichText::new(label).color(color);
     if unread {
-        text = text.strong();
+        text = text.family(bold_family());
     }
     inner.add(egui::Label::new(text).truncate().selectable(false));
     if unread {
@@ -398,19 +466,6 @@ pub(crate) fn list_row(
     unread: bool,
 ) -> egui::Response {
     list_row_with(ui, label, selected, unread, |_| {})
-}
-
-/// Строка личной беседы с аватаром.
-pub(crate) fn dm_row(
-    ui: &mut egui::Ui,
-    label: &str,
-    selected: bool,
-    unread: bool,
-) -> egui::Response {
-    list_row_with(ui, label, selected, unread, |ui| {
-        avatar(ui, label, 28.0, None);
-        ui.add_space(4.0);
-    })
 }
 
 /// Недоступная строка (например, голосовой канал): приглушена, без отклика.
@@ -435,7 +490,7 @@ pub(crate) fn category_header(ui: &mut egui::Ui, name: &str) {
         ui.label(
             egui::RichText::new(name.to_uppercase())
                 .size(11.0)
-                .strong()
+                .family(bold_family())
                 .color(TEXT_FAINT),
         );
     });
@@ -447,7 +502,7 @@ pub(crate) fn category_header(ui: &mut egui::Ui, name: &str) {
 pub(crate) fn section_title(text: &str) -> egui::RichText {
     egui::RichText::new(text.to_uppercase())
         .size(11.0)
-        .strong()
+        .family(bold_family())
         .color(TEXT_FAINT)
 }
 
@@ -492,51 +547,11 @@ pub(crate) fn day_divider(ui: &mut egui::Ui, label: &str) {
         ui.label(
             egui::RichText::new(label)
                 .size(11.5)
-                .strong()
+                .family(bold_family())
                 .color(TEXT_FAINT),
         );
     });
     ui.add_space(6.0);
-}
-
-/// Строка списка людей: плоская, с тонкой линией снизу, как в оригинале.
-pub(crate) fn person_card(
-    ui: &mut egui::Ui,
-    name: &str,
-    subtitle: Option<&str>,
-    buttons: impl FnOnce(&mut egui::Ui),
-) {
-    let width = ui.available_width();
-    let response = ui
-        .allocate_ui_with_layout(
-            egui::vec2(width, 62.0),
-            Layout::left_to_right(Align::Center),
-            |ui| {
-                ui.add_space(8.0);
-                avatar(ui, name, 40.0, None);
-                ui.add_space(4.0);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    ui.label(
-                        egui::RichText::new(name)
-                            .size(15.5)
-                            .strong()
-                            .color(TEXT_BRIGHT),
-                    );
-                    if let Some(subtitle) = subtitle.filter(|s| !s.is_empty()) {
-                        ui.label(muted(subtitle).size(12.5));
-                    }
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.add_space(8.0);
-                    buttons(ui);
-                });
-            },
-        )
-        .response;
-    let y = response.rect.bottom();
-    ui.painter()
-        .hline(response.rect.x_range(), y, Stroke::new(1.0, BORDER));
 }
 
 /// Пустое состояние списка: приглушённая подпись по центру.
@@ -562,6 +577,23 @@ pub(crate) fn stamp(ms: i64, now_ms: i64) -> String {
         0 => format!("Сегодня в {}", at.format("%H:%M")),
         1 => format!("Вчера в {}", at.format("%H:%M")),
         _ => at.format("%d.%m.%Y %H:%M").to_string(),
+    }
+}
+
+/// Короткая подпись для списка бесед: время, «вчера» или дата.
+#[must_use]
+pub(crate) fn short_stamp(ms: i64, now_ms: i64) -> String {
+    use chrono::TimeZone as _;
+    let (Some(at), Some(now)) = (
+        chrono::Local.timestamp_millis_opt(ms).single(),
+        chrono::Local.timestamp_millis_opt(now_ms).single(),
+    ) else {
+        return String::new();
+    };
+    match (now.date_naive() - at.date_naive()).num_days() {
+        0 => at.format("%H:%M").to_string(),
+        1 => "вчера".to_owned(),
+        _ => at.format("%d.%m.%y").to_string(),
     }
 }
 

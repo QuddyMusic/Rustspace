@@ -62,3 +62,8 @@ cargo fc && cargo c && cargo t
 ## Лицензия
 
 AGPL-3.0-only, как и оригинальный Backspace.
+
+### Сторонние ресурсы
+
+- Шрифт [Inter](https://rsms.me/inter/) (Regular и SemiBold, `crates/bs-app/assets/fonts/`) —
+  SIL Open Font License 1.1. Оригинальный клиент использует его для русского языка.

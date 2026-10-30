@@ -2,33 +2,25 @@
 //!
 //! Модуль ничего не знает про `egui` и сеть: только раскладка данных из
 //! [`bs_core::Cache`] и результатов REST в строки и предикаты. Так его легко
-//! покрыть тестами, а [`crate::screens::social`] остаётся тонкой обёрткой.
+//! покрыть тестами, а экраны `home` и `chat` остаются тонкими обёртками.
 
-use bs_types::{DmChannel, DmChannelLastMessage, Friend, FriendRequest, User};
+use bs_types::{DmChannel, DmChannelLastMessage, Friend, FriendRequest, User, UserStatus};
 
-/// Вкладка социального экрана.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum SocialTab {
-    /// Список друзей.
-    #[default]
-    Friends,
-    /// Входящие и исходящие заявки.
-    Requests,
-    /// Поиск пользователей.
-    Search,
-    /// Личные каналы.
-    Dms,
+/// Подпись статуса присутствия.
+pub(crate) const fn status_label(status: UserStatus) -> &'static str {
+    match status {
+        UserStatus::Online => "В сети",
+        UserStatus::Idle => "Нет на месте",
+        UserStatus::DoNotDisturb => "Не беспокоить",
+        UserStatus::Offline => "Не в сети",
+    }
 }
 
-impl SocialTab {
-    /// Подпись вкладки.
-    pub(crate) const fn title(self) -> &'static str {
-        match self {
-            Self::Friends => "Друзья",
-            Self::Requests => "Заявки",
-            Self::Search => "Поиск",
-            Self::Dms => "Личные",
-        }
+/// Время последнего сообщения личного канала (мс), если оно есть.
+pub(crate) fn dm_last_at(channel: &DmChannel) -> Option<i64> {
+    match channel.last_message.as_ref()? {
+        DmChannelLastMessage::Preview(preview) => Some(preview.created_at),
+        DmChannelLastMessage::Full(message) => Some(message.message.created_at),
     }
 }
 
@@ -55,10 +47,7 @@ pub(crate) fn friend_status_text(friend: &Friend) -> String {
         .as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())
-        .map_or_else(
-            || format!("{:?}", friend.status).to_lowercase(),
-            str::to_owned,
-        )
+        .map_or_else(|| status_label(friend.status).to_owned(), str::to_owned)
 }
 
 /// Имя собеседника в заявке (display name, иначе id).

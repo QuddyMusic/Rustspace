@@ -105,6 +105,19 @@ pub(crate) enum BridgeRequest {
     CancelFriendRequest(String),
     /// Удалить друга.
     RemoveFriend(String),
+    /// Создать пространство.
+    CreateSpace(bs_api::CreateSpaceRequest),
+    /// Каталог пространств по подстроке.
+    Explore(String),
+    /// Вступить в пространство: сразу (публичное) или заявкой.
+    JoinSpace {
+        /// Идентификатор пространства.
+        id: String,
+        /// `true` — подать заявку, `false` — вступить сразу.
+        by_request: bool,
+    },
+    /// Изменить свой профиль.
+    UpdateProfile(bs_api::UpdateProfileRequest),
     /// Страница истории: самая новая или старее `before`.
     History {
         /// Канал или личный канал.
@@ -129,6 +142,14 @@ pub(crate) enum BridgeResponse {
     DmChannels(Vec<bs_types::DmChannel>),
     /// Открыт личный канал.
     DmChannel(Box<bs_types::DmChannel>),
+    /// Пришёл каталог пространств.
+    Explore(bs_api::ExplorePage),
+    /// Пространство создано или принято вступление.
+    Space(Box<bs_types::SpaceWithChannelsAndMembers>),
+    /// Профиль сохранён; пришла его новая версия.
+    Profile(Box<bs_types::User>),
+    /// Заявка на вступление отправлена.
+    JoinRequested,
     /// Пришла страница истории.
     History {
         /// Канал, чью историю запрашивали.
@@ -222,6 +243,14 @@ pub(crate) struct Bridge {
     social_error: Option<String>,
     /// Канал, только что открытый по запросу `OpenDm` (нужно переключить чат).
     opened_dm: Option<String>,
+    /// Последняя страница каталога пространств.
+    explore: Option<bs_api::ExplorePage>,
+    /// Идёт ли запрос каталога.
+    explore_loading: bool,
+    /// Пространство, только что созданное или в которое вступили.
+    opened_space: Option<String>,
+    /// Короткое сообщение об успехе («Профиль сохранён»).
+    info: Option<String>,
     /// Загрузка истории по id канала.
     history: HashMap<String, HistoryState>,
     /// Кэш инстанса; `None` до первого `ready`.
@@ -272,6 +301,10 @@ impl Bridge {
             search_results: Vec::new(),
             social_error: None,
             opened_dm: None,
+            explore: None,
+            explore_loading: false,
+            opened_space: None,
+            info: None,
             history: HashMap::new(),
             cache: None,
             ready: false,
@@ -365,6 +398,10 @@ impl Bridge {
         self.search_results.clear();
         self.social_error = None;
         self.opened_dm = None;
+        self.explore = None;
+        self.explore_loading = false;
+        self.opened_space = None;
+        self.info = None;
         self.notice = None;
         self.ready = false;
         self.connection = ConnectionState::Connecting;
@@ -584,11 +621,6 @@ impl Bridge {
         &self.friend_requests
     }
 
-    /// Последние полученные личные каналы.
-    pub(crate) fn dm_channels(&self) -> &[bs_types::DmChannel] {
-        &self.dm_channels
-    }
-
     /// Последние результаты поиска пользователей.
     pub(crate) fn search_results(&self) -> &[bs_types::User] {
         &self.search_results
@@ -597,6 +629,33 @@ impl Bridge {
     /// `true` ровно один раз — если только что открыли личный канал.
     pub(crate) fn take_opened_dm(&mut self) -> Option<String> {
         self.opened_dm.take()
+    }
+
+    /// Последняя страница каталога пространств.
+    pub(crate) fn explore(&self) -> Option<&bs_api::ExplorePage> {
+        self.explore.as_ref()
+    }
+
+    /// Идёт ли запрос каталога.
+    pub(crate) const fn explore_loading(&self) -> bool {
+        self.explore_loading
+    }
+
+    /// Возвращает пространство, которое только что создали или в которое вступили.
+    pub(crate) fn take_opened_space(&mut self) -> Option<String> {
+        self.opened_space.take()
+    }
+
+    /// Короткое сообщение об успехе; читается один раз.
+    pub(crate) fn take_info(&mut self) -> Option<String> {
+        self.info.take()
+    }
+
+    /// Запрашивает каталог и помечает загрузку.
+    pub(crate) fn load_explore(&mut self, query: &str) {
+        if self.request(BridgeRequest::Explore(query.to_owned())) {
+            self.explore_loading = true;
+        }
     }
 
     /// Ошибка последнего REST-запроса.
@@ -734,13 +793,42 @@ impl Bridge {
                 }
                 self.social_error = None;
             }
+            BridgeResponse::Explore(page) => {
+                self.explore = Some(page);
+                self.explore_loading = false;
+                self.social_error = None;
+            }
+            BridgeResponse::Space(space) => {
+                let id = space.space.id.clone();
+                if let Some(cache) = self.cache.as_mut() {
+                    cache.upsert_space(*space);
+                }
+                self.opened_space = Some(id);
+                self.social_error = None;
+                // Каталог помечает вступившие пространства: обновим его.
+                self.explore = None;
+            }
+            BridgeResponse::Profile(user) => {
+                if let Some(cache) = self.cache.as_mut() {
+                    let _ = bs_core::apply(cache, ServerEvent::UserUpdated { user: *user });
+                }
+                self.info = Some("Профиль сохранён".to_owned());
+                self.social_error = None;
+            }
+            BridgeResponse::JoinRequested => {
+                self.info = Some("Заявка отправлена".to_owned());
+                self.social_error = None;
+            }
             BridgeResponse::Done => {
                 self.social_error = None;
                 self.request(BridgeRequest::Friends);
                 self.request(BridgeRequest::FriendRequests);
                 self.request(BridgeRequest::DmChannels);
             }
-            BridgeResponse::Failed(message) => self.social_error = Some(message),
+            BridgeResponse::Failed(message) => {
+                self.explore_loading = false;
+                self.social_error = Some(message);
+            }
         }
     }
 }
@@ -858,6 +946,10 @@ async fn run_session(
 }
 
 /// Выполняет REST-запрос и превращает результат в [`BridgeResponse`].
+#[allow(
+    clippy::too_many_lines,
+    reason = "раскладка egui читается лучше одним блоком"
+)]
 async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> BridgeResponse {
     match request {
         BridgeRequest::Friends => match client.friends().await {
@@ -907,6 +999,31 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
         },
         BridgeRequest::RemoveFriend(user_id) => match client.remove_friend(&user_id).await {
             Ok(()) => BridgeResponse::Done,
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::CreateSpace(body) => match client.create_space(&body).await {
+            Ok(space) => BridgeResponse::Space(Box::new(space)),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::Explore(query) => match client.explore_spaces(&query, 50, 0).await {
+            Ok(page) => BridgeResponse::Explore(page),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::JoinSpace { id, by_request } => {
+            if by_request {
+                match client.request_join_space(&id, None).await {
+                    Ok(()) => BridgeResponse::JoinRequested,
+                    Err(err) => BridgeResponse::Failed(err.to_string()),
+                }
+            } else {
+                match client.join_public_space(&id).await {
+                    Ok(space) => BridgeResponse::Space(Box::new(space)),
+                    Err(err) => BridgeResponse::Failed(err.to_string()),
+                }
+            }
+        }
+        BridgeRequest::UpdateProfile(body) => match client.update_me(&body).await {
+            Ok(user) => BridgeResponse::Profile(Box::new(user)),
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
         BridgeRequest::History {
@@ -1647,6 +1764,48 @@ mod tests {
             items: page_of(3),
         });
         assert_eq!(bridge.cache().map(|c| c.dm_messages("dm1").len()), Some(0));
+    }
+
+    #[test]
+    fn joined_space_is_added_to_cache_and_reported_once() {
+        let (mut bridge, _commands, _requests) = active_bridge();
+        let space: bs_types::SpaceWithChannelsAndMembers =
+            serde_json::from_value(serde_json::json!({
+                "id": "s77", "name": "New", "ownerId": "1", "visibility": "private",
+                "directoryListed": false, "createdAt": 1, "channels": [], "members": []
+            }))
+            .unwrap_or_else(|err| panic!("пространство разбирается: {err}"));
+        bridge.handle_response(BridgeResponse::Space(Box::new(space)));
+        assert!(bridge.cache().is_some_and(|c| c.space("s77").is_some()));
+        assert_eq!(bridge.take_opened_space().as_deref(), Some("s77"));
+        assert_eq!(bridge.take_opened_space(), None);
+    }
+
+    #[test]
+    fn explore_response_ends_loading_and_failure_too() {
+        let (mut bridge, _commands, _requests) = active_bridge();
+        bridge.load_explore("rust");
+        assert!(bridge.explore_loading());
+        let page = bs_api::ExplorePage {
+            spaces: Vec::new(),
+            total: 0,
+            discovery_enabled: true,
+        };
+        bridge.handle_response(BridgeResponse::Explore(page));
+        assert!(!bridge.explore_loading());
+        assert!(bridge.explore().is_some());
+        bridge.load_explore("");
+        bridge.handle_response(BridgeResponse::Failed("нет сети".into()));
+        assert!(!bridge.explore_loading());
+        assert_eq!(bridge.social_error(), Some("нет сети"));
+    }
+
+    #[test]
+    fn join_request_sets_one_shot_info() {
+        let (mut bridge, _commands, _requests) = active_bridge();
+        bridge.handle_response(BridgeResponse::JoinRequested);
+        assert_eq!(bridge.take_info().as_deref(), Some("Заявка отправлена"));
+        assert_eq!(bridge.take_info(), None);
     }
 
     #[test]

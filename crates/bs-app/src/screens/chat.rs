@@ -7,13 +7,16 @@ use bs_core::Cache;
 use bs_types::{ChannelId, UserStatus};
 use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
 
-use crate::bridge::{Bridge, ChannelKind, HistoryState};
+use crate::bridge::{Bridge, BridgeRequest, ChannelKind, HistoryState};
 use crate::logic::{
     DEFAULT_REACTION, author_name, can_send, connection_label, message_actions, outgoing_text,
     should_ack, should_load_older,
 };
-use crate::social::dm_display_name;
+use crate::screens::dialogs::{self, CreateSpaceForm, SettingsAction, SettingsState};
+use crate::screens::home::{self, HomeState};
+use crate::social::{dm_display_name, dm_last_at, dm_last_text};
 use crate::theme;
+use crate::widgets;
 
 /// Что пользователь попросил сделать за пределами чата.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -21,8 +24,6 @@ pub(crate) enum ChatAction {
     /// Ничего.
     #[default]
     None,
-    /// Открыть экран друзей.
-    OpenSocial,
     /// Выйти из инстанса.
     Logout,
 }
@@ -65,6 +66,8 @@ pub(crate) struct SidebarSpace {
     pub(crate) id: String,
     /// Имя пространства.
     pub(crate) name: String,
+    /// Цвет значка из палитры сервера.
+    pub(crate) color: Option<String>,
     /// Каналы по категориям.
     pub(crate) groups: Vec<SidebarGroup>,
 }
@@ -95,6 +98,12 @@ pub(crate) struct SidebarDm {
     pub(crate) label: String,
     /// Есть непрочитанные.
     pub(crate) unread: bool,
+    /// Присутствие собеседника (только для беседы один на один).
+    pub(crate) status: Option<UserStatus>,
+    /// Начало последнего сообщения.
+    pub(crate) preview: Option<String>,
+    /// Время последнего сообщения (мс).
+    pub(crate) at: Option<i64>,
 }
 
 /// Собирает сайдбар: пространства, в них категории и каналы в порядке сервера.
@@ -147,6 +156,7 @@ pub(crate) fn sidebar_items(cache: &Cache) -> Vec<SidebarSpace> {
             SidebarSpace {
                 id: space.space.id.clone(),
                 name: space.space.name.clone(),
+                color: space.space.avatar_color.clone(),
                 groups,
             }
         })
@@ -164,6 +174,17 @@ pub(crate) fn dm_sidebar_items(cache: &Cache) -> Vec<SidebarDm> {
             id: dm.id.clone(),
             label: dm_display_name(dm, &me),
             unread: cache.unread_count(&dm.id) > 0,
+            status: {
+                let mut others = dm.members.iter().filter(|m| m.id != me);
+                match (others.next(), others.next()) {
+                    (Some(other), None) => {
+                        Some(cache.user_status(&other.id).unwrap_or(other.status))
+                    }
+                    _ => None,
+                }
+            },
+            preview: dm_last_text(dm),
+            at: dm_last_at(dm),
         })
         .collect()
 }
@@ -332,19 +353,60 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// Что показано в центральной области.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum View {
+    /// Друзья и «Сейчас онлайн».
+    #[default]
+    Friends,
+    /// Обзор пространств.
+    Explore,
+    /// Лента выбранного канала.
+    Channel,
+}
+
+/// Переход, который пользователь запросил кликом; применяется после отрисовки.
+#[derive(Debug)]
+enum Nav {
+    /// Главная: друзья.
+    Friends,
+    /// Обзор пространств.
+    Explore,
+    /// Открыть пространство.
+    Space(String),
+    /// Открыть канал или беседу.
+    Channel(SelectedChannel),
+    /// Окно «Создать пространство».
+    CreateSpace,
+    /// Экран настроек.
+    Settings,
+    /// Искать людей по строке (вкладка «Добавить»).
+    SearchPeople(String),
+}
+
 /// Состояние экрана чата.
 #[derive(Debug, Default)]
 pub(crate) struct ChatScreen {
     /// Выбранный канал и его инстанс.
     pub(crate) selected_channel: Option<SelectedChannel>,
     pub(crate) draft: String,
-    /// Пространство, открытое в колонке каналов; `None` — личные сообщения.
+    /// Что показано в центре.
+    view: View,
+    /// Состояние друзей и обзора.
+    home: HomeState,
+    /// Пространство, открытое в колонке каналов; `None` — главная.
     active_space: Option<String>,
     /// Последний открытый канал в каждом пространстве.
     last_by_space: HashMap<String, String>,
-    /// Последняя открытая личная беседа.
-    last_dm: Option<String>,
-    /// Первичный выбор канала уже сделан.
+    /// Строка поиска слева сверху: фильтр бесед и каналов.
+    sidebar_filter: String,
+    /// Открытое окно «Создать пространство».
+    create_space: Option<CreateSpaceForm>,
+    /// Открытые настройки.
+    settings: Option<SettingsState>,
+    /// Короткое сообщение внизу экрана и момент, до которого оно видно.
+    toast: Option<(String, f64)>,
+    /// Первичная настройка уже выполнена.
     initialized: bool,
     /// Показывать ли панель участников.
     show_members: bool,
@@ -372,6 +434,7 @@ impl ChatScreen {
     pub(crate) fn reset(&mut self) {
         *self = Self {
             show_members: true,
+            initialized: true,
             ..Self::default()
         };
     }
@@ -394,60 +457,78 @@ impl ChatScreen {
         self.edit.is_some()
     }
 
-    /// Открывает канал.
+    /// Открывает канал и переключает центр на ленту.
     pub(crate) fn open_channel(&mut self, selected: SelectedChannel) {
         // Правка относилась к прежнему каналу.
         if self.selected_channel.as_ref() != Some(&selected) {
             self.edit = None;
         }
-        match selected.kind {
-            ChannelKind::Dm => {
-                self.last_dm = Some(selected.channel.clone());
-                self.active_space = None;
-            }
-            ChannelKind::Space => {
-                if let Some(space) = &self.active_space {
-                    self.last_by_space
-                        .insert(space.clone(), selected.channel.clone());
-                }
-            }
+        if selected.kind == ChannelKind::Dm {
+            self.active_space = None;
+        } else if let Some(space) = &self.active_space {
+            self.last_by_space
+                .insert(space.clone(), selected.channel.clone());
         }
         self.selected_channel = Some(selected);
+        self.view = View::Channel;
     }
 
-    /// Первичный выбор и согласование колонки каналов с выбранным каналом.
-    fn sync_selection(&mut self, spaces: &[SidebarSpace]) {
-        if !self.initialized {
-            self.initialized = true;
-            self.show_members = true;
-            if self.selected_channel.is_none()
-                && let Some(space) = spaces.first()
-            {
-                self.active_space = Some(space.id.clone());
-                if let Some(channel) = space.first_text() {
-                    self.open_channel(SelectedChannel {
-                        channel: channel.id.clone(),
-                        kind: ChannelKind::Space,
-                    });
+    /// Показывает пространство: запомненный канал или первый текстовый.
+    fn open_space(&mut self, space: &SidebarSpace) {
+        self.active_space = Some(space.id.clone());
+        let remembered = self
+            .last_by_space
+            .get(&space.id)
+            .filter(|id| space.channels().any(|c| &c.id == *id))
+            .cloned()
+            .or_else(|| space.first_text().map(|c| c.id.clone()));
+        if let Some(channel) = remembered {
+            self.open_channel(SelectedChannel {
+                channel,
+                kind: ChannelKind::Space,
+            });
+        } else {
+            self.selected_channel = None;
+            self.view = View::Channel;
+        }
+    }
+
+    /// Применяет запрошенный кликом переход.
+    fn apply_nav(
+        &mut self,
+        nav: Nav,
+        items: &[SidebarSpace],
+        bridge: &mut Bridge,
+        ctx: &egui::Context,
+    ) {
+        match nav {
+            Nav::Friends => {
+                self.active_space = None;
+                self.view = View::Friends;
+                bridge.request(BridgeRequest::Friends);
+            }
+            Nav::Explore => {
+                self.active_space = None;
+                self.view = View::Explore;
+                bridge.load_explore(&self.home.explore_query);
+            }
+            Nav::Space(id) => {
+                if let Some(space) = items.iter().find(|s| s.id == id) {
+                    self.open_space(space);
                 }
             }
-        }
-        // Личная беседа, открытая снаружи (из «Друзей»), переключает на ЛС.
-        if let Some(selected) = &self.selected_channel {
-            match selected.kind {
-                ChannelKind::Dm => {
-                    self.last_dm = Some(selected.channel.clone());
-                    self.active_space = None;
+            Nav::Channel(selected) => self.open_channel(selected),
+            Nav::CreateSpace => self.create_space = Some(CreateSpaceForm::default()),
+            Nav::Settings => {
+                if let Some(cache) = bridge.cache() {
+                    self.settings = Some(SettingsState::from_user(cache.me(), ctx.zoom_factor()));
                 }
-                ChannelKind::Space => {
-                    if let Some(space) = spaces
-                        .iter()
-                        .find(|s| s.channels().any(|c| c.id == selected.channel))
-                        && self.active_space.as_deref() != Some(space.id.as_str())
-                    {
-                        self.active_space = Some(space.id.clone());
-                    }
-                }
+            }
+            Nav::SearchPeople(query) => {
+                self.active_space = None;
+                self.view = View::Friends;
+                self.home.start_search(&query, bridge);
+                self.sidebar_filter.clear();
             }
         }
     }
@@ -455,44 +536,119 @@ impl ChatScreen {
     /// Рисует экран. Возвращает действие, которое нужно выполнить снаружи.
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) -> ChatAction {
         let mut action = ChatAction::None;
+        if !self.initialized {
+            self.initialized = true;
+            self.show_members = true;
+        }
+        self.home.ensure_loaded(bridge);
+        let ctx = ui.ctx().clone();
+        let now = ctx.input(|i| i.time);
+        if let Some(info) = bridge.take_info() {
+            self.toast = Some((info, now + 3.0));
+        }
+
         let (items, dms) = bridge.cache().map_or_else(Default::default, |cache| {
             (sidebar_items(cache), dm_sidebar_items(cache))
         });
-        self.sync_selection(&items);
 
-        let mut requested: Option<SelectedChannel> = None;
-        self.show_rail(ui, &items, &dms, &mut requested, &mut action);
-        self.show_channel_column(ui, bridge, &items, &dms, &mut requested, &mut action);
-
-        if let Some(selected) = requested {
-            self.open_channel(selected);
+        if let Some(id) = bridge.take_opened_space() {
+            self.create_space = None;
+            self.apply_nav(Nav::Space(id), &items, bridge, &ctx);
         }
 
-        if self.show_members
-            && let Some(space_id) = self.active_space.clone()
+        if let Some(state) = self.settings.as_mut() {
+            match dialogs::show_settings(ui, state, bridge) {
+                SettingsAction::None => {}
+                SettingsAction::Close => self.settings = None,
+                SettingsAction::Logout => {
+                    self.settings = None;
+                    action = ChatAction::Logout;
+                }
+            }
+            self.show_toast(&ctx, now);
+            return action;
+        }
+
+        let mut nav: Option<Nav> = None;
+        self.show_rail(ui, &items, &dms, &mut nav);
+        self.show_left_column(ui, bridge, &items, &dms, &mut nav);
+
+        match self.view {
+            View::Friends => {
+                home::show_active_now(ui, bridge);
+                home::show_friends(ui, &mut self.home, bridge);
+            }
+            View::Explore => {
+                let mut create = false;
+                if let Some(id) = home::show_explore(ui, &mut self.home, bridge, &mut create) {
+                    nav = Some(Nav::Space(id));
+                }
+                if create {
+                    nav = Some(Nav::CreateSpace);
+                }
+            }
+            View::Channel => {
+                if self.show_members
+                    && let Some(space_id) = self.active_space.clone()
+                {
+                    Self::show_member_panel(ui, bridge, &space_id);
+                }
+                self.show_header(ui, bridge);
+                self.show_composer(ui, bridge);
+                self.show_messages(ui, bridge);
+            }
+        }
+
+        if let Some(form) = self.create_space.as_mut()
+            && !dialogs::show_create_space(&ctx, form, bridge)
         {
-            Self::show_member_panel(ui, bridge, &space_id);
+            self.create_space = None;
         }
-
-        self.show_header(ui, bridge);
-        self.show_composer(ui, bridge);
-        self.show_messages(ui, bridge);
+        self.show_toast(&ctx, now);
+        if let Some(nav) = nav {
+            self.apply_nav(nav, &items, bridge, &ctx);
+        }
         action
     }
 
-    /// Левая колонка: «Личные сообщения», пространства, «Друзья».
+    /// Всплывающее сообщение внизу по центру.
+    fn show_toast(&mut self, ctx: &egui::Context, now: f64) {
+        let Some((text, until)) = &self.toast else {
+            return;
+        };
+        if now >= *until {
+            self.toast = None;
+            return;
+        }
+        egui::Area::new(egui::Id::unique("toast"))
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -28.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(theme::BG_BUBBLE)
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .corner_radius(CornerRadius::same(10))
+                    .inner_margin(Margin::symmetric(16, 10))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(text).color(theme::TEXT_BRIGHT));
+                    });
+            });
+        ctx.request_repaint_after(std::time::Duration::from_millis(200));
+    }
+
+    /// Колонка пространств: «домой», пространства, «создать», «обзор».
     fn show_rail(
-        &mut self,
+        &self,
         ui: &mut egui::Ui,
         items: &[SidebarSpace],
         dms: &[SidebarDm],
-        requested: &mut Option<SelectedChannel>,
-        action: &mut ChatAction,
+        nav: &mut Option<Nav>,
     ) {
         let dm_unread = dms.iter().any(|d| d.unread);
         egui::Panel::left("rail")
             .exact_size(72.0)
             .resizable(false)
+            .show_separator_line(false)
             .frame(
                 egui::Frame::new()
                     .fill(theme::BG_RAIL)
@@ -504,38 +660,25 @@ impl ChatScreen {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 8.0;
-                        let home = self.active_space.is_none();
+                        let home = self.active_space.is_none() && self.view == View::Friends;
                         if theme::rail_home(ui, home, dm_unread)
-                            .on_hover_text("Личные сообщения")
+                            .on_hover_text("Главная")
                             .clicked()
                         {
-                            self.active_space = None;
-                            if let Some(dm) = self
-                                .last_dm
-                                .clone()
-                                .or_else(|| dms.first().map(|d| d.id.clone()))
-                            {
-                                *requested = Some(SelectedChannel {
-                                    channel: dm,
-                                    kind: ChannelKind::Dm,
-                                });
-                            } else {
-                                self.selected_channel = None;
-                            }
-                        }
-                        if theme::rail_button(ui, "👥", theme::BG_ACTIVE, false, false)
-                            .on_hover_text("Друзья и поиск")
-                            .clicked()
-                        {
-                            *action = ChatAction::OpenSocial;
+                            *nav = Some(Nav::Friends);
                         }
                         theme::rail_separator(ui);
                         for space in items {
                             let selected = self.active_space.as_deref() == Some(space.id.as_str());
+                            let color = space
+                                .color
+                                .as_deref()
+                                .and_then(theme::palette)
+                                .unwrap_or_else(|| theme::color_for(&space.name));
                             if theme::rail_button(
                                 ui,
                                 &theme::initials(&space.name),
-                                theme::color_for(&space.name),
+                                color,
                                 selected,
                                 space.has_unread(),
                             )
@@ -543,72 +686,70 @@ impl ChatScreen {
                             .clicked()
                                 && !selected
                             {
-                                self.active_space = Some(space.id.clone());
-                                let remembered = self
-                                    .last_by_space
-                                    .get(&space.id)
-                                    .filter(|id| space.channels().any(|c| &c.id == *id))
-                                    .cloned()
-                                    .or_else(|| space.first_text().map(|c| c.id.clone()));
-                                match remembered {
-                                    Some(channel) => {
-                                        *requested = Some(SelectedChannel {
-                                            channel,
-                                            kind: ChannelKind::Space,
-                                        });
-                                    }
-                                    None => self.selected_channel = None,
-                                }
+                                *nav = Some(Nav::Space(space.id.clone()));
                             }
+                        }
+                        if widgets::rail_action(ui, "＋", theme::MINT, false)
+                            .on_hover_text("Создать пространство")
+                            .clicked()
+                        {
+                            *nav = Some(Nav::CreateSpace);
+                        }
+                        if widgets::rail_action(ui, "🧭", theme::SKY, self.view == View::Explore)
+                            .on_hover_text("Обзор пространств")
+                            .clicked()
+                        {
+                            *nav = Some(Nav::Explore);
                         }
                     });
             });
     }
 
-    /// Вторая колонка: каналы пространства или список бесед, плюс панель пользователя.
-    fn show_channel_column(
-        &self,
+    /// Вторая колонка: поиск, навигация, беседы или каналы, панель пользователя.
+    fn show_left_column(
+        &mut self,
         ui: &mut egui::Ui,
         bridge: &Bridge,
         items: &[SidebarSpace],
         dms: &[SidebarDm],
-        requested: &mut Option<SelectedChannel>,
-        action: &mut ChatAction,
+        nav: &mut Option<Nav>,
     ) {
         egui::Panel::left("channels")
             .resizable(true)
-            .default_size(236.0)
-            .size_range(180.0..=360.0)
+            .default_size(250.0)
+            .size_range(200.0..=360.0)
+            .show_separator_line(false)
             .frame(egui::Frame::new().fill(theme::BG_SIDEBAR))
             .show(ui, |ui| {
-                let title =
-                    self.active_space.as_ref().map_or("Личные сообщения", |id| {
-                        items
-                            .iter()
-                            .find(|s| &s.id == id)
-                            .map_or("Пространство", |s| s.name.as_str())
-                    });
-                egui::Panel::top("channels_header")
+                egui::Panel::top("sidebar_search")
                     .exact_size(52.0)
                     .resizable(false)
+                    .show_separator_line(false)
                     .frame(
                         egui::Frame::new()
                             .fill(theme::BG_SIDEBAR)
-                            .inner_margin(Margin::symmetric(18, 0)),
+                            .inner_margin(Margin::symmetric(10, 10)),
                     )
                     .show(ui, |ui| {
-                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            ui.label(
-                                RichText::new(title)
-                                    .strong()
-                                    .size(16.0)
-                                    .color(theme::TEXT_BRIGHT),
-                            );
-                        });
+                        let hint = if self.active_space.is_some() {
+                            "Найти канал"
+                        } else {
+                            "Найти или начать беседу"
+                        };
+                        let response = widgets::search_box(ui, &mut self.sidebar_filter, hint);
+                        let submitted =
+                            response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if submitted
+                            && self.active_space.is_none()
+                            && !self.sidebar_filter.trim().is_empty()
+                        {
+                            *nav = Some(Nav::SearchPeople(self.sidebar_filter.trim().to_owned()));
+                        }
                     });
 
-                Self::show_user_bar(ui, bridge, action);
+                Self::show_user_bar(ui, bridge, nav);
 
+                let filter = self.sidebar_filter.trim().to_lowercase();
                 egui::ScrollArea::vertical()
                     .id_salt("channel_list")
                     .auto_shrink([false, false])
@@ -619,9 +760,9 @@ impl ChatScreen {
                             .as_ref()
                             .and_then(|id| items.iter().find(|s| &s.id == id))
                         {
-                            self.channel_list(ui, space, requested);
+                            self.channel_list(ui, space, &filter, nav);
                         } else {
-                            self.dm_list(ui, dms, requested, action);
+                            self.home_list(ui, dms, &filter, nav);
                         }
                     });
             });
@@ -632,22 +773,41 @@ impl ChatScreen {
         &self,
         ui: &mut egui::Ui,
         space: &SidebarSpace,
-        requested: &mut Option<SelectedChannel>,
+        filter: &str,
+        nav: &mut Option<Nav>,
     ) {
+        ui.horizontal(|ui| {
+            ui.add_space(14.0);
+            ui.label(
+                RichText::new(theme::truncate_chars(&space.name, 24))
+                    .size(15.5)
+                    .family(theme::bold_family())
+                    .color(theme::TEXT_BRIGHT),
+            );
+        });
         ui.add_space(6.0);
         for group in &space.groups {
+            let visible: Vec<_> = group
+                .channels
+                .iter()
+                .filter(|c| filter.is_empty() || c.name.to_lowercase().contains(filter))
+                .collect();
+            if visible.is_empty() {
+                continue;
+            }
             if let Some(name) = &group.name {
                 theme::category_header(ui, name);
             }
-            for channel in &group.channels {
+            for channel in visible {
                 if channel.voice {
                     theme::disabled_row(ui, &format!("🔊  {}", channel.name))
                         .on_hover_text("Голосовые каналы в этом клиенте пока недоступны");
                     continue;
                 }
-                let selected = self.selected_channel.as_ref().is_some_and(|current| {
-                    current.kind == ChannelKind::Space && current.channel.as_str() == channel.id
-                });
+                let selected = self.view == View::Channel
+                    && self.selected_channel.as_ref().is_some_and(|current| {
+                        current.kind == ChannelKind::Space && current.channel.as_str() == channel.id
+                    });
                 if theme::list_row(
                     ui,
                     &format!("#   {}", channel.name),
@@ -656,48 +816,86 @@ impl ChatScreen {
                 )
                 .clicked()
                 {
-                    *requested = Some(SelectedChannel {
+                    *nav = Some(Nav::Channel(SelectedChannel {
                         channel: channel.id.clone(),
                         kind: ChannelKind::Space,
-                    });
+                    }));
                 }
             }
         }
     }
 
-    /// Личные беседы.
-    fn dm_list(
-        &self,
-        ui: &mut egui::Ui,
-        dms: &[SidebarDm],
-        requested: &mut Option<SelectedChannel>,
-        action: &mut ChatAction,
-    ) {
-        ui.add_space(8.0);
-        if dms.is_empty() {
-            ui.add_space(12.0);
-            ui.vertical_centered(|ui| {
-                ui.label(theme::muted("Бесед пока нет"));
-                if ui.button("Найти друзей").clicked() {
-                    *action = ChatAction::OpenSocial;
+    /// Главная: «Друзья», «Обзор» и личные беседы.
+    fn home_list(&self, ui: &mut egui::Ui, dms: &[SidebarDm], filter: &str, nav: &mut Option<Nav>) {
+        if widgets::nav_row(ui, "👤", "Друзья", self.view == View::Friends).clicked() {
+            *nav = Some(Nav::Friends);
+        }
+        if widgets::nav_row(ui, "🧭", "Обзор", self.view == View::Explore).clicked() {
+            *nav = Some(Nav::Explore);
+        }
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            ui.add_space(14.0);
+            widgets::section_label(ui, "Личные сообщения");
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(10.0);
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new("＋").size(16.0).color(theme::TEXT_MUTED))
+                            .fill(egui::Color32::TRANSPARENT),
+                    )
+                    .on_hover_text("Найти человека")
+                    .clicked()
+                {
+                    *nav = Some(Nav::SearchPeople(String::new()));
                 }
             });
-        }
-        for dm in dms {
-            let selected = self.selected_channel.as_ref().is_some_and(|current| {
-                current.kind == ChannelKind::Dm && current.channel.as_str() == dm.id
-            });
-            if theme::dm_row(ui, &dm.label, selected, dm.unread).clicked() {
-                *requested = Some(SelectedChannel {
+        });
+        ui.add_space(4.0);
+        let now = now_ms();
+        let mut shown = 0;
+        for dm in dms
+            .iter()
+            .filter(|d| filter.is_empty() || d.label.to_lowercase().contains(filter))
+        {
+            shown += 1;
+            let selected = self.view == View::Channel
+                && self.selected_channel.as_ref().is_some_and(|current| {
+                    current.kind == ChannelKind::Dm && current.channel.as_str() == dm.id
+                });
+            let stamp = dm.at.map(|at| theme::short_stamp(at, now));
+            let response = widgets::dm_entry(
+                ui,
+                &widgets::DmEntry {
+                    name: &dm.label,
+                    status: dm.status,
+                    preview: dm.preview.as_deref(),
+                    stamp: stamp.as_deref(),
+                    selected,
+                    unread: dm.unread,
+                },
+            );
+            if response.clicked() {
+                *nav = Some(Nav::Channel(SelectedChannel {
                     channel: dm.id.clone(),
                     kind: ChannelKind::Dm,
-                });
+                }));
             }
+        }
+        if shown == 0 {
+            ui.add_space(8.0);
+            ui.vertical_centered(|ui| {
+                ui.label(theme::muted(if filter.is_empty() {
+                    "Бесед пока нет"
+                } else {
+                    "Нет совпадений — Enter, чтобы искать людей"
+                }));
+            });
         }
     }
 
-    /// Нижняя панель колонки каналов: «я», статус соединения и выход.
-    fn show_user_bar(ui: &mut egui::Ui, bridge: &Bridge, action: &mut ChatAction) {
+    /// Нижняя панель колонки: «я», статус соединения и кнопка настроек.
+    fn show_user_bar(ui: &mut egui::Ui, bridge: &Bridge, nav: &mut Option<Nav>) {
         let (name, handle, status) = bridge.cache().map_or_else(
             || (String::new(), String::new(), UserStatus::Online),
             |cache| {
@@ -711,40 +909,51 @@ impl ChatScreen {
         );
         let connected = *bridge.connection() == bs_instances::ConnectionState::Connected;
         egui::Panel::bottom("user_bar")
-            .exact_size(58.0)
+            .exact_size(66.0)
             .resizable(false)
+            .show_separator_line(false)
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG_RAIL)
-                    .inner_margin(Margin::symmetric(12, 0)),
+                    .fill(theme::BG_SIDEBAR)
+                    .inner_margin(Margin::symmetric(10, 8)),
             )
             .show(ui, |ui| {
-                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    theme::avatar(ui, &name, 36.0, Some(status));
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.add_space(10.0);
-                        ui.label(
-                            RichText::new(theme::truncate_chars(&name, 14))
-                                .strong()
-                                .color(theme::TEXT_BRIGHT),
-                        );
-                        let sub = if connected {
-                            handle
-                        } else {
-                            connection_label(bridge.connection())
-                        };
-                        ui.label(theme::muted(theme::truncate_chars(&sub, 18)).size(11.5));
+                egui::Frame::new()
+                    .fill(theme::BG_RAIL)
+                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .corner_radius(CornerRadius::same(12))
+                    .inner_margin(Margin::symmetric(10, 0))
+                    .show(ui, |ui| {
+                        ui.set_height(48.0);
+                        ui.set_width(ui.available_width());
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            theme::avatar(ui, &name, 32.0, Some(status));
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                ui.add_space(8.0);
+                                ui.label(
+                                    RichText::new(theme::truncate_chars(&name, 13))
+                                        .size(14.0)
+                                        .family(theme::bold_family())
+                                        .color(theme::TEXT_BRIGHT),
+                                );
+                                let sub = if connected {
+                                    handle
+                                } else {
+                                    connection_label(bridge.connection())
+                                };
+                                ui.label(theme::muted(theme::truncate_chars(&sub, 18)).size(11.0));
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if widgets::icon_button(ui, "⚙", 32.0)
+                                    .on_hover_text("Настройки")
+                                    .clicked()
+                                {
+                                    *nav = Some(Nav::Settings);
+                                }
+                            });
+                        });
                     });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let logout = ui
-                            .add_enabled(!bridge.is_busy(), egui::Button::new("Выйти").small())
-                            .on_hover_text("Выйти из инстанса, чтобы войти в другой");
-                        if logout.clicked() {
-                            *action = ChatAction::Logout;
-                        }
-                    });
-                });
             });
     }
 
@@ -825,7 +1034,7 @@ impl ChatScreen {
                     ui.label(RichText::new(prefix).size(20.0).color(theme::TEXT_FAINT));
                     ui.label(
                         RichText::new(&title)
-                            .strong()
+                            .family(theme::bold_family())
                             .size(16.5)
                             .color(theme::TEXT_BRIGHT),
                     );
@@ -880,7 +1089,7 @@ fn show_history_header(ui: &mut egui::Ui, history: &HistoryState) -> bool {
             ui.label(
                 RichText::new("Это начало беседы")
                     .size(18.0)
-                    .strong()
+                    .family(theme::bold_family())
                     .color(theme::TEXT_BRIGHT),
             );
             ui.label(theme::muted("Здесь пока всё, что было написано раньше."));
@@ -1169,7 +1378,7 @@ impl ChatScreen {
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(&row.author)
-                                .strong()
+                                .family(theme::bold_family())
                                 .size(15.5)
                                 .color(theme::TEXT_BRIGHT),
                         );

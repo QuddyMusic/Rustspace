@@ -1,0 +1,769 @@
+//! Диалоги: «Создать пространство» и экран настроек пользователя.
+
+use bs_api::{CreateSpaceRequest, UpdateProfileRequest};
+use bs_types::{ChosenUserStatus, SpaceVisibility, User, UserStatus};
+use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
+
+use crate::bridge::{Bridge, BridgeRequest};
+use crate::social::user_display_name;
+use crate::theme;
+use crate::widgets;
+
+/// Максимальная длина имени пространства (как у сервера).
+const SPACE_NAME_MAX: usize = 100;
+/// Максимальная длина описания пространства.
+const SPACE_DESCRIPTION_MAX: usize = 200;
+
+/// Форма «Создать пространство».
+#[derive(Debug)]
+pub(crate) struct CreateSpaceForm {
+    name: String,
+    description: String,
+    visibility: SpaceVisibility,
+    color: &'static str,
+    /// Форма отправлена: ошибка сервера показывается только после этого.
+    submitted: bool,
+}
+
+impl Default for CreateSpaceForm {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            visibility: SpaceVisibility::Private,
+            color: "lavender",
+            submitted: false,
+        }
+    }
+}
+
+impl CreateSpaceForm {
+    /// Тело запроса, если форму можно отправлять.
+    fn request(&self) -> Option<CreateSpaceRequest> {
+        let name = self.name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        let description = self.description.trim();
+        Some(CreateSpaceRequest {
+            name: name.to_owned(),
+            visibility: Some(self.visibility),
+            description: (!description.is_empty()).then(|| description.to_owned()),
+            avatar_color: Some(self.color.to_owned()),
+        })
+    }
+}
+
+/// Рисует модальное окно создания. Возвращает `false`, когда его нужно закрыть.
+#[allow(
+    clippy::too_many_lines,
+    reason = "раскладка egui читается лучше одним блоком"
+)]
+pub(crate) fn show_create_space(
+    ctx: &egui::Context,
+    form: &mut CreateSpaceForm,
+    bridge: &Bridge,
+) -> bool {
+    let mut keep_open = true;
+    let busy = form.submitted && bridge.social_error().is_none();
+    let response = egui::Modal::new(egui::Id::unique("create_space"))
+        .frame(
+            egui::Frame::new()
+                .fill(theme::BG_BUBBLE)
+                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .corner_radius(CornerRadius::same(16))
+                .inner_margin(Margin::same(22)),
+        )
+        .show(ctx, |ui| {
+            ui.set_width(400.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Создать пространство")
+                        .size(19.0)
+                        .family(theme::bold_family())
+                        .color(theme::TEXT_BRIGHT),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if widgets::icon_button(ui, "✕", 30.0).clicked() {
+                        keep_open = false;
+                    }
+                });
+            });
+            ui.add_space(12.0);
+            ui.vertical_centered(|ui| {
+                let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(76.0), Sense::hover());
+                let color = theme::palette(form.color).unwrap_or(theme::ACCENT);
+                ui.painter().circle_filled(rect.center(), 38.0, color);
+                let letter = form
+                    .name
+                    .trim()
+                    .chars()
+                    .next()
+                    .map_or_else(|| "S".to_owned(), |c| c.to_uppercase().collect());
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    letter,
+                    egui::FontId::new(30.0, theme::bold_family()),
+                    egui::Color32::WHITE,
+                );
+            });
+            widgets::field_label(ui, "Цвет значка");
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for name in theme::PALETTE_NAMES {
+                    let color = theme::palette(name).unwrap_or(theme::ACCENT);
+                    if widgets::color_swatch(ui, color, form.color == name, 30.0).clicked() {
+                        form.color = name;
+                    }
+                }
+            });
+            widgets::field_label(ui, "Название");
+            let name_response = widgets::text_field(
+                ui,
+                &mut form.name,
+                "Моё замечательное пространство",
+                SPACE_NAME_MAX,
+            );
+            widgets::field_label(ui, "Видимость");
+            for (value, title, hint) in [
+                (
+                    SpaceVisibility::Private,
+                    "Приватное",
+                    "Только по ссылке-приглашению",
+                ),
+                (
+                    SpaceVisibility::Request,
+                    "По заявке",
+                    "Видно в обзоре, вступление по запросу",
+                ),
+                (
+                    SpaceVisibility::Public,
+                    "Публичное",
+                    "Видно в обзоре, вступить может любой",
+                ),
+            ] {
+                if widgets::radio_card(ui, title, hint, form.visibility == value).clicked() {
+                    form.visibility = value;
+                }
+            }
+            widgets::field_label(ui, "Описание");
+            widgets::text_area(
+                ui,
+                &mut form.description,
+                "Коротко о вашем пространстве…",
+                SPACE_DESCRIPTION_MAX,
+                3,
+            );
+            if form.submitted
+                && let Some(err) = bridge.social_error()
+            {
+                ui.add_space(6.0);
+                ui.label(RichText::new(err).color(theme::ROSE));
+            }
+            ui.add_space(14.0);
+            let request = form.request();
+            let enter = name_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let create = ui.add_enabled(
+                    request.is_some() && !busy,
+                    theme::primary_button(if busy {
+                        "Создаём…"
+                    } else {
+                        "Создать"
+                    }),
+                );
+                if create.clicked() || (enter && !busy) {
+                    if let Some(request) = request {
+                        form.submitted = true;
+                        bridge.request(BridgeRequest::CreateSpace(request));
+                    }
+                }
+                if ui.button("Отмена").clicked() {
+                    keep_open = false;
+                }
+            });
+        });
+    if response.should_close() {
+        keep_open = false;
+    }
+    keep_open
+}
+
+/// Раздел настроек.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsSection {
+    /// Профиль и статус.
+    Account,
+    /// Масштаб интерфейса.
+    Appearance,
+    /// Голос и видео.
+    Voice,
+    /// Приватность.
+    Privacy,
+    /// Соединение с инстансом.
+    Connections,
+}
+
+impl SettingsSection {
+    const fn title(self) -> &'static str {
+        match self {
+            Self::Account => "Аккаунт",
+            Self::Appearance => "Внешний вид",
+            Self::Voice => "Голос и видео",
+            Self::Privacy => "Приватность",
+            Self::Connections => "Подключение",
+        }
+    }
+}
+
+/// Что пользователь попросил в настройках.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsAction {
+    /// Ничего.
+    None,
+    /// Закрыть настройки.
+    Close,
+    /// Выйти из инстанса.
+    Logout,
+}
+
+/// Редактируемая копия профиля и локальные настройки.
+#[derive(Debug)]
+pub(crate) struct SettingsState {
+    section: SettingsSection,
+    display_name: String,
+    custom_status: String,
+    bio: String,
+    status: ChosenUserStatus,
+    avatar_color: Option<String>,
+    discoverable: bool,
+    show_activity: bool,
+    scale: f32,
+}
+
+/// Выбранный статус из текущего присутствия (`offline` выбрать нельзя).
+const fn chosen_from(status: UserStatus) -> ChosenUserStatus {
+    match status {
+        UserStatus::Idle => ChosenUserStatus::Idle,
+        UserStatus::DoNotDisturb => ChosenUserStatus::DoNotDisturb,
+        UserStatus::Online | UserStatus::Offline => ChosenUserStatus::Online,
+    }
+}
+
+impl SettingsState {
+    /// Копия текущего профиля для редактирования.
+    pub(crate) fn from_user(user: &User, scale: f32) -> Self {
+        Self {
+            section: SettingsSection::Account,
+            display_name: user.display_name.clone().unwrap_or_default(),
+            custom_status: user.custom_status.clone().unwrap_or_default(),
+            bio: user.bio.clone().unwrap_or_default(),
+            status: chosen_from(user.status),
+            avatar_color: user.avatar_color.clone(),
+            discoverable: user.discoverable.unwrap_or(true),
+            show_activity: user.show_activity.unwrap_or(true),
+            scale,
+        }
+    }
+
+    /// Только изменённые относительно `user` поля; `None`, если менять нечего.
+    fn diff(&self, user: &User) -> Option<UpdateProfileRequest> {
+        let mut request = UpdateProfileRequest::default();
+        let mut changed = false;
+        let mut text = |new: &str, old: Option<&str>, slot: &mut Option<String>| {
+            let new = new.trim();
+            if new != old.unwrap_or("").trim() {
+                *slot = Some(new.to_owned());
+                changed = true;
+            }
+        };
+        text(
+            &self.display_name,
+            user.display_name.as_deref(),
+            &mut request.display_name,
+        );
+        text(&self.bio, user.bio.as_deref(), &mut request.bio);
+        text(
+            &self.custom_status,
+            user.custom_status.as_deref(),
+            &mut request.custom_status,
+        );
+        if self.status != chosen_from(user.status) {
+            request.status = Some(self.status);
+            changed = true;
+        }
+        if self.avatar_color != user.avatar_color {
+            request.avatar_color.clone_from(&self.avatar_color);
+            changed = true;
+        }
+        if self.discoverable != user.discoverable.unwrap_or(true) {
+            request.discoverable = Some(self.discoverable);
+            changed = true;
+        }
+        if self.show_activity != user.show_activity.unwrap_or(true) {
+            request.show_activity = Some(self.show_activity);
+            changed = true;
+        }
+        changed.then_some(request)
+    }
+}
+
+/// Рисует экран настроек вместо основного интерфейса.
+pub(crate) fn show_settings(
+    ui: &mut egui::Ui,
+    state: &mut SettingsState,
+    bridge: &Bridge,
+) -> SettingsAction {
+    let mut action = SettingsAction::None;
+    let Some(me) = bridge.cache().map(|cache| cache.me().clone()) else {
+        return SettingsAction::Close;
+    };
+    egui::Panel::left("settings_nav")
+        .exact_size(300.0)
+        .resizable(false)
+        .show_separator_line(false)
+        .frame(
+            egui::Frame::new()
+                .fill(theme::BG_RAIL)
+                .inner_margin(Margin::symmetric(20, 18)),
+        )
+        .show(ui, |ui| {
+            settings_nav(ui, state, &me, &mut action);
+        });
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::new()
+                .fill(theme::BG_RAIL)
+                .inner_margin(Margin::symmetric(24, 22)),
+        )
+        .show(ui, |ui| {
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                if widgets::icon_button(ui, "✕", 38.0)
+                    .on_hover_text("Закрыть (Esc)")
+                    .clicked()
+                {
+                    action = SettingsAction::Close;
+                }
+                ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_max_width(600.0);
+                            section_content(ui, state, &me, bridge);
+                        });
+                });
+            });
+        });
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        action = SettingsAction::Close;
+    }
+    action
+}
+
+/// Левая колонка: карточка профиля и список разделов.
+fn settings_nav(
+    ui: &mut egui::Ui,
+    state: &mut SettingsState,
+    me: &User,
+    action: &mut SettingsAction,
+) {
+    let name = user_display_name(me.display_name.as_deref(), &me.username);
+    egui::Frame::new()
+        .fill(theme::BG_SIDEBAR)
+        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                widgets::big_avatar(ui, &name, 38.0);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.label(
+                        RichText::new(theme::truncate_chars(&name, 18))
+                            .family(theme::bold_family())
+                            .color(theme::TEXT_BRIGHT),
+                    );
+                    ui.label(theme::muted(format!("@{}", me.username)).size(12.0));
+                });
+            });
+        });
+    ui.add_space(10.0);
+    egui::Frame::new()
+        .fill(theme::BG_SIDEBAR)
+        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::symmetric(8, 12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 2.0;
+            let mut group = |ui: &mut egui::Ui, title: &str, items: &[SettingsSection]| {
+                ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    widgets::section_label(ui, title);
+                });
+                ui.add_space(2.0);
+                for &item in items {
+                    if theme::list_row(ui, item.title(), state.section == item, false).clicked() {
+                        state.section = item;
+                    }
+                }
+                ui.add_space(8.0);
+            };
+            group(
+                ui,
+                "Пользователь",
+                &[
+                    SettingsSection::Account,
+                    SettingsSection::Appearance,
+                    SettingsSection::Voice,
+                    SettingsSection::Privacy,
+                ],
+            );
+            group(ui, "Приложение", &[SettingsSection::Connections]);
+            ui.add_space(6.0);
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), Sense::click());
+            if response.hovered() {
+                ui.painter().rect_filled(
+                    rect.shrink2(egui::vec2(8.0, 1.0)),
+                    CornerRadius::same(8),
+                    theme::BG_HOVER,
+                );
+            }
+            ui.painter().text(
+                egui::pos2(rect.left() + 18.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                "Выйти",
+                egui::FontId::proportional(15.0),
+                theme::ROSE,
+            );
+            if response.clicked() {
+                *action = SettingsAction::Logout;
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add_space(8.0);
+                ui.label(theme::muted("Backspace RS · AGPL-3.0").size(11.5));
+            });
+        });
+}
+
+/// Карточка раздела: подложка с тонкой рамкой.
+fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new()
+        .fill(theme::BG_SIDEBAR)
+        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::same(16))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui);
+        });
+}
+
+/// Заголовок страницы настроек.
+fn page_title(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        RichText::new(text)
+            .size(22.0)
+            .family(theme::bold_family())
+            .color(theme::TEXT_BRIGHT),
+    );
+    ui.add_space(14.0);
+}
+
+/// Содержимое выбранного раздела.
+fn section_content(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bridge) {
+    match state.section {
+        SettingsSection::Account => account(ui, state, me, bridge),
+        SettingsSection::Appearance => appearance(ui, state),
+        SettingsSection::Voice => {
+            page_title(ui, "Голос и видео");
+            card(ui, |ui| {
+                ui.label(
+                    "Голосовые и видеоканалы в этом клиенте пока недоступны — \
+                     они появятся вместе с поддержкой LiveKit.",
+                );
+            });
+        }
+        SettingsSection::Privacy => privacy(ui, state, me, bridge),
+        SettingsSection::Connections => connections(ui, bridge),
+    }
+}
+
+/// Панель «Сохранить / Сбросить» под формой.
+fn save_bar(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bridge) {
+    let request = state.diff(me);
+    ui.add_space(14.0);
+    if let Some(err) = bridge.social_error() {
+        ui.label(RichText::new(err).color(theme::ROSE));
+        ui.add_space(6.0);
+    }
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(request.is_some(), theme::primary_button("Сохранить"))
+            .clicked()
+            && let Some(request) = request
+        {
+            bridge.request(BridgeRequest::UpdateProfile(request));
+        }
+        if ui
+            .add_enabled(state.diff(me).is_some(), egui::Button::new("Сбросить"))
+            .clicked()
+        {
+            *state = SettingsState::from_user(me, state.scale);
+            state.section = SettingsSection::Account;
+        }
+    });
+}
+
+/// «Аккаунт»: предпросмотр профиля, цвет, «обо мне», статус и имя.
+#[allow(
+    clippy::too_many_lines,
+    reason = "раскладка egui читается лучше одним блоком"
+)]
+fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bridge) {
+    page_title(ui, "Мой аккаунт");
+    widgets::section_label(ui, "Профиль");
+    ui.add_space(6.0);
+    let shown = if state.display_name.trim().is_empty() {
+        me.username.clone()
+    } else {
+        state.display_name.trim().to_owned()
+    };
+    let banner_color = state
+        .avatar_color
+        .as_deref()
+        .and_then(theme::palette)
+        .unwrap_or(theme::ACCENT);
+    egui::Frame::new()
+        .fill(theme::BG_SIDEBAR)
+        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .corner_radius(CornerRadius::same(10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let (banner, _) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 80.0), Sense::hover());
+            ui.painter().rect_filled(
+                banner,
+                CornerRadius {
+                    nw: 10,
+                    ne: 10,
+                    sw: 0,
+                    se: 0,
+                },
+                banner_color.gamma_multiply(0.5),
+            );
+            let avatar_rect = egui::Rect::from_min_size(
+                banner.left_bottom() + egui::vec2(16.0, -32.0),
+                egui::Vec2::splat(64.0),
+            );
+            ui.painter()
+                .circle_filled(avatar_rect.center(), 35.0, theme::BG_SIDEBAR);
+            theme::paint_avatar(ui.painter(), avatar_rect, &shown, None, false);
+            ui.add_space(38.0);
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    ui.label(
+                        RichText::new(&shown)
+                            .size(16.0)
+                            .family(theme::bold_family())
+                            .color(theme::TEXT_BRIGHT),
+                    );
+                    ui.label(theme::muted(format!("@{}", me.username)).size(12.5));
+                    if !state.bio.trim().is_empty() {
+                        ui.add_space(4.0);
+                        ui.label(theme::muted(theme::truncate_chars(state.bio.trim(), 90)));
+                    }
+                    ui.add_space(12.0);
+                });
+            });
+        });
+    ui.add_space(14.0);
+    card(ui, |ui| {
+        widgets::section_label(ui, "Аватар");
+        ui.add_space(6.0);
+        ui.label(
+            theme::muted("Загрузка аватара и баннера появится в следующем обновлении.").size(13.0),
+        );
+        widgets::field_label(ui, "Цвет аватара");
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for name in theme::PALETTE_NAMES {
+                let color = theme::palette(name).unwrap_or(theme::ACCENT);
+                let selected = state.avatar_color.as_deref() == Some(name);
+                if widgets::color_swatch(ui, color, selected, 32.0).clicked() {
+                    state.avatar_color = Some(name.to_owned());
+                }
+            }
+        });
+        widgets::field_label(ui, "Обо мне");
+        widgets::text_area(ui, &mut state.bio, "Расскажите о себе…", 190, 3);
+    });
+    ui.add_space(14.0);
+    widgets::section_label(ui, "Учётная запись");
+    ui.add_space(6.0);
+    card(ui, |ui| {
+        widgets::section_label(ui, "Статус");
+        ui.add_space(4.0);
+        egui::ComboBox::from_id_salt("settings_status")
+            .width(ui.available_width())
+            .selected_text(chosen_label(state.status))
+            .show_ui(ui, |ui| {
+                for value in [
+                    ChosenUserStatus::Online,
+                    ChosenUserStatus::Idle,
+                    ChosenUserStatus::DoNotDisturb,
+                ] {
+                    ui.selectable_value(&mut state.status, value, chosen_label(value));
+                }
+            });
+        widgets::field_label(ui, "Отображаемое имя");
+        widgets::text_field(ui, &mut state.display_name, &me.username, 32);
+        widgets::field_label(ui, "Пользовательский статус");
+        widgets::text_field(ui, &mut state.custom_status, "Чем занимаетесь?", 128);
+    });
+    save_bar(ui, state, me, bridge);
+    ui.add_space(18.0);
+    card(ui, |ui| {
+        ui.label(
+            theme::muted("Смена пароля и удаление аккаунта пока доступны только в веб-клиенте.")
+                .size(13.0),
+        );
+    });
+}
+
+/// Подпись выбранного статуса.
+const fn chosen_label(status: ChosenUserStatus) -> &'static str {
+    match status {
+        ChosenUserStatus::Online => "В сети",
+        ChosenUserStatus::Idle => "Нет на месте",
+        ChosenUserStatus::DoNotDisturb => "Не беспокоить",
+    }
+}
+
+/// «Внешний вид»: масштаб интерфейса.
+fn appearance(ui: &mut egui::Ui, state: &mut SettingsState) {
+    page_title(ui, "Внешний вид");
+    card(ui, |ui| {
+        widgets::section_label(ui, "Масштаб интерфейса");
+        ui.add_space(6.0);
+        let response = ui.add(
+            egui::Slider::new(&mut state.scale, 0.8..=1.5)
+                .step_by(0.05)
+                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
+        );
+        if response.drag_stopped() || (response.changed() && !response.dragged()) {
+            ui.ctx().set_zoom_factor(state.scale);
+        }
+        ui.add_space(6.0);
+        ui.label(theme::muted("Применяется после того, как вы отпустите ползунок.").size(12.5));
+    });
+}
+
+/// «Приватность»: видимость в поиске и показ активности.
+fn privacy(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bridge) {
+    page_title(ui, "Приватность");
+    card(ui, |ui| {
+        for (value, title, hint) in [
+            (
+                0,
+                "Показывать меня в поиске",
+                "Другие смогут найти вас среди людей инстанса.",
+            ),
+            (1, "Показывать активность", "Друзья увидят, чем вы заняты."),
+        ] {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(ui.available_width() - 60.0);
+                    ui.label(RichText::new(title).color(theme::TEXT_BRIGHT));
+                    ui.label(theme::muted(hint).size(12.5));
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let flag = if value == 0 {
+                        &mut state.discoverable
+                    } else {
+                        &mut state.show_activity
+                    };
+                    widgets::toggle(ui, flag);
+                });
+            });
+            ui.add_space(10.0);
+        }
+    });
+    save_bar(ui, state, me, bridge);
+}
+
+/// «Подключение»: состояние соединения; клиент держит один инстанс.
+fn connections(ui: &mut egui::Ui, bridge: &Bridge) {
+    page_title(ui, "Подключение");
+    card(ui, |ui| {
+        ui.label(
+            RichText::new(format!(
+                "Соединение: {}",
+                crate::logic::connection_label(bridge.connection())
+            ))
+            .color(theme::TEXT_BRIGHT),
+        );
+        ui.add_space(6.0);
+        ui.label(
+            theme::muted(
+                "Клиент работает с одним инстансом за раз. Чтобы войти в другой, \
+                 выйдите и подключитесь заново.",
+            )
+            .size(13.0),
+        );
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CreateSpaceForm, SettingsState};
+    use bs_types::SpaceVisibility;
+
+    #[allow(clippy::expect_used)]
+    fn user() -> bs_types::User {
+        serde_json::from_value(serde_json::json!({
+            "id": "1", "username": "alice", "displayName": "Alice", "avatar": null,
+            "banner": null, "accentColor": null, "avatarColor": "mint", "bio": null,
+            "status": "online", "customStatus": null, "isAdmin": false, "createdAt": 0,
+            "homeInstance": null, "homeUserId": null, "replicatedInstances": []
+        }))
+        .expect("пользователь")
+    }
+
+    #[test]
+    fn unchanged_settings_produce_no_request() {
+        let me = user();
+        assert!(SettingsState::from_user(&me, 1.0).diff(&me).is_none());
+    }
+
+    #[test]
+    fn only_changed_fields_are_sent() {
+        let me = user();
+        let mut state = SettingsState::from_user(&me, 1.0);
+        state.custom_status = "  busy  ".into();
+        state.discoverable = false;
+        let request = state.diff(&me).expect("есть изменения");
+        assert_eq!(request.custom_status.as_deref(), Some("busy"));
+        assert_eq!(request.discoverable, Some(false));
+        assert!(request.display_name.is_none());
+        assert!(request.status.is_none());
+    }
+
+    #[test]
+    fn create_form_needs_a_name() {
+        let mut form = CreateSpaceForm::default();
+        assert!(form.request().is_none());
+        form.name = "  Dev  ".into();
+        form.visibility = SpaceVisibility::Public;
+        let request = form.request().expect("имя задано");
+        assert_eq!(request.name, "Dev");
+        assert_eq!(request.visibility, Some(SpaceVisibility::Public));
+        assert!(request.description.is_none());
+    }
+}

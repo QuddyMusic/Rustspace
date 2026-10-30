@@ -63,7 +63,7 @@ impl LoginScreen {
             ui.label(
                 egui::RichText::new("С возвращением!")
                     .size(24.0)
-                    .strong()
+                    .family(theme::bold_family())
                     .color(theme::TEXT_BRIGHT),
             );
             ui.label(theme::muted("Войдите в свой инстанс Backspace"));

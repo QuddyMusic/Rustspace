@@ -217,6 +217,17 @@ impl Cache {
         self.dm_channels.insert(channel.id.clone(), channel);
     }
 
+    /// Добавляет или обновляет пространство целиком (после создания или
+    /// вступления через REST: событие о нём создателю не гарантировано).
+    pub fn upsert_space(&mut self, space: SpaceWithChannelsAndMembers) {
+        for member in &space.members {
+            self.user_statuses
+                .entry(member.user.id.clone())
+                .or_insert(member.user.status);
+        }
+        self.spaces.insert(space.space.id.clone(), space);
+    }
+
     /// Закэшированные сообщения личного канала (пустой срез, если не загружены).
     #[must_use]
     pub fn dm_messages(&self, dm_channel_id: &str) -> &[DmMessageWithUser] {

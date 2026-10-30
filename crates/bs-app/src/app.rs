@@ -8,7 +8,6 @@ use crate::bridge::{Bridge, ChannelKind};
 use crate::logic::{connection_label, next_screen, should_wake};
 use crate::screens::chat::{ChatAction, ChatScreen, SelectedChannel};
 use crate::screens::login::LoginScreen;
-use crate::screens::social::SocialScreen;
 use crate::theme;
 use bs_instances::ConnectionState;
 
@@ -22,8 +21,6 @@ pub(crate) enum Screen {
     Login,
     /// Основной интерфейс.
     Chat,
-    /// Друзья, заявки, поиск, личные каналы.
-    Social,
 }
 
 /// Состояние приложения целиком.
@@ -32,7 +29,6 @@ pub(crate) struct BackspaceApp {
     pub(crate) bridge: Bridge,
     pub(crate) login: LoginScreen,
     pub(crate) chat: ChatScreen,
-    pub(crate) social: SocialScreen,
 }
 
 impl BackspaceApp {
@@ -43,7 +39,6 @@ impl BackspaceApp {
             bridge: Bridge::new(runtime),
             login: LoginScreen::default(),
             chat: ChatScreen::default(),
-            social: SocialScreen::default(),
         }
     }
 }
@@ -78,7 +73,7 @@ impl BackspaceApp {
                     ui.label(
                         egui::RichText::new(text)
                             .color(egui::Color32::BLACK)
-                            .strong(),
+                            .family(theme::bold_family()),
                     );
                     if self.bridge.notice().is_some() {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -103,14 +98,13 @@ impl eframe::App for BackspaceApp {
         let lost = self.bridge.take_session_lost();
         if lost {
             // Кэш и каналы мост уже сбросил сам, когда сессия закрылась.
-            self.social.reset();
             self.chat.reset();
         }
         self.screen = next_screen(self.screen, ready, lost);
 
         // Только что открытый личный канал — сразу переключаемся в чат.
         if let Some(channel) = self.bridge.take_opened_dm() {
-            self.chat.selected_channel = Some(SelectedChannel {
+            self.chat.open_channel(SelectedChannel {
                 channel,
                 kind: ChannelKind::Dm,
             });
@@ -121,26 +115,8 @@ impl eframe::App for BackspaceApp {
             Screen::Login => self.login.show(ui, &mut self.bridge),
             Screen::Chat => {
                 self.notice_strip(ui);
-                match self.chat.show(ui, &mut self.bridge) {
-                    ChatAction::OpenSocial => {
-                        self.social.reset();
-                        self.screen = Screen::Social;
-                    }
-                    ChatAction::Logout => self.bridge.logout(),
-                    ChatAction::None => {}
-                }
-            }
-            Screen::Social => {
-                self.notice_strip(ui);
-                if self.social.show(ui, &self.bridge) {
-                    self.screen = Screen::Chat;
-                }
-                if let Some(channel) = self.social.take_open_channel() {
-                    self.chat.selected_channel = Some(SelectedChannel {
-                        channel,
-                        kind: ChannelKind::Dm,
-                    });
-                    self.screen = Screen::Chat;
+                if self.chat.show(ui, &mut self.bridge) == ChatAction::Logout {
+                    self.bridge.logout();
                 }
             }
         }
