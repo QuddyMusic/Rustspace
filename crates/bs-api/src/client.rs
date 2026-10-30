@@ -122,9 +122,14 @@ impl ApiClient {
         self.token.is_some()
     }
 
+    /// Внутренний HTTP-клиент: без редиректов, с таймаутом и политикой транспорта.
+    pub(crate) const fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
     /// Собирает абсолютный URL эндпоинта. `path` начинается со `/` и уже
     /// включает `/api` (например, `/api/auth/login`).
-    fn endpoint(&self, path: &str) -> Result<Url, ApiError> {
+    pub(crate) fn endpoint(&self, path: &str) -> Result<Url, ApiError> {
         let joined = format!("{}{}", self.base, path);
         Ok(Url::parse(&joined)?)
     }
@@ -225,7 +230,10 @@ impl ApiClient {
 ///
 /// Лишний `Content-Length` отсекается сразу, а для ответов без него (chunked)
 /// размер считается по мере поступления данных.
-async fn read_limited(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>, ApiError> {
+pub(crate) async fn read_limited(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, ApiError> {
     if response
         .content_length()
         .is_some_and(|len| len > limit as u64)

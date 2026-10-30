@@ -1,0 +1,14 @@
+[package]
+name = "bs-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Безопасное декодирование картинок и анимаций (PNG, JPEG, GIF, WebP) на чистом Rust"
+
+[lints]
+workspace = true
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+thiserror = { workspace = true }

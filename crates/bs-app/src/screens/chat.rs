@@ -12,6 +12,7 @@ use crate::logic::{
     DEFAULT_REACTION, author_name, can_send, connection_label, message_actions, outgoing_text,
     should_ack, should_load_older,
 };
+use crate::media::{self, AttachmentView};
 use crate::screens::dialogs::{self, CreateSpaceForm, SettingsAction, SettingsState};
 use crate::screens::home::{self, HomeState};
 use crate::social::{dm_display_name, dm_last_at, dm_last_text};
@@ -68,6 +69,8 @@ pub(crate) struct SidebarSpace {
     pub(crate) name: String,
     /// Цвет значка из палитры сервера.
     pub(crate) color: Option<String>,
+    /// Значение поля `icon` (картинка значка).
+    pub(crate) icon: Option<String>,
     /// Каналы по категориям.
     pub(crate) groups: Vec<SidebarGroup>,
 }
@@ -104,6 +107,8 @@ pub(crate) struct SidebarDm {
     pub(crate) preview: Option<String>,
     /// Время последнего сообщения (мс).
     pub(crate) at: Option<i64>,
+    /// Аватар собеседника (беседа один на один) или иконка группы.
+    pub(crate) avatar: Option<String>,
 }
 
 /// Собирает сайдбар: пространства, в них категории и каналы в порядке сервера.
@@ -157,6 +162,7 @@ pub(crate) fn sidebar_items(cache: &Cache) -> Vec<SidebarSpace> {
                 id: space.space.id.clone(),
                 name: space.space.name.clone(),
                 color: space.space.avatar_color.clone(),
+                icon: space.space.icon.clone(),
                 groups,
             }
         })
@@ -185,6 +191,13 @@ pub(crate) fn dm_sidebar_items(cache: &Cache) -> Vec<SidebarDm> {
             },
             preview: dm_last_text(dm),
             at: dm_last_at(dm),
+            avatar: {
+                let mut others = dm.members.iter().filter(|m| m.id != me);
+                match (others.next(), others.next()) {
+                    (Some(other), None) => other.avatar.clone(),
+                    _ => dm.icon.clone(),
+                }
+            },
         })
         .collect()
 }
@@ -200,6 +213,8 @@ pub(crate) struct MemberRow {
     pub(crate) status: UserStatus,
     /// Владелец пространства.
     pub(crate) owner: bool,
+    /// Аватар.
+    pub(crate) avatar: Option<String>,
 }
 
 /// Секция правой панели.
@@ -265,6 +280,7 @@ pub(crate) fn member_rows(cache: &Cache, space_id: &str) -> Vec<MemberRow> {
             }),
             status: cache.user_status(&m.user.id).unwrap_or(m.user.status),
             owner: &m.user.id == owner_id,
+            avatar: m.user.avatar.clone(),
         })
         .collect();
     rows.sort_by(|a, b| {
@@ -286,6 +302,10 @@ struct MessageRow {
     edited: bool,
     /// Время создания, мс с эпохи.
     created_at: i64,
+    /// Аватар автора.
+    avatar: Option<String>,
+    /// Вложения.
+    attachments: Vec<AttachmentView>,
 }
 
 /// Окно, в котором подряд идущие сообщения одного автора склеиваются.
@@ -319,6 +339,12 @@ fn message_rows(cache: &Cache, kind: ChannelKind, channel_id: &str) -> Vec<Messa
                 body: msg.message.content.clone().unwrap_or_default(),
                 edited: msg.message.edited_at.is_some(),
                 created_at: msg.message.created_at,
+                avatar: msg.user.avatar.clone(),
+                attachments: msg
+                    .attachments
+                    .iter()
+                    .map(AttachmentView::from_api)
+                    .collect(),
             })
             .collect(),
         ChannelKind::Dm => cache
@@ -332,6 +358,12 @@ fn message_rows(cache: &Cache, kind: ChannelKind, channel_id: &str) -> Vec<Messa
                 body: msg.message.content.clone().unwrap_or_default(),
                 edited: msg.message.edited_at.is_some(),
                 created_at: msg.message.created_at,
+                avatar: msg.user.avatar.clone(),
+                attachments: msg
+                    .attachments
+                    .iter()
+                    .map(AttachmentView::from_api)
+                    .collect(),
             })
             .collect(),
     }
@@ -404,6 +436,8 @@ pub(crate) struct ChatScreen {
     create_space: Option<CreateSpaceForm>,
     /// Открытые настройки.
     settings: Option<SettingsState>,
+    /// Картинка, открытая на весь экран (значение поля).
+    viewer: Option<String>,
     /// Короткое сообщение внизу экрана и момент, до которого оно видно.
     toast: Option<(String, f64)>,
     /// Первичная настройка уже выполнена.
@@ -599,6 +633,11 @@ impl ChatScreen {
             }
         }
 
+        if let Some(value) = self.viewer.clone()
+            && media::viewer(&ctx, &value)
+        {
+            self.viewer = None;
+        }
         if let Some(form) = self.create_space.as_mut()
             && !dialogs::show_create_space(&ctx, form, bridge)
         {
@@ -681,6 +720,7 @@ impl ChatScreen {
                                 color,
                                 selected,
                                 space.has_unread(),
+                                space.icon.as_deref(),
                             )
                             .on_hover_text(&space.name)
                             .clicked()
@@ -873,6 +913,7 @@ impl ChatScreen {
                     stamp: stamp.as_deref(),
                     selected,
                     unread: dm.unread,
+                    avatar: dm.avatar.as_deref(),
                 },
             );
             if response.clicked() {
@@ -896,14 +937,15 @@ impl ChatScreen {
 
     /// Нижняя панель колонки: «я», статус соединения и кнопка настроек.
     fn show_user_bar(ui: &mut egui::Ui, bridge: &Bridge, nav: &mut Option<Nav>) {
-        let (name, handle, status) = bridge.cache().map_or_else(
-            || (String::new(), String::new(), UserStatus::Online),
+        let (name, handle, status, my_avatar) = bridge.cache().map_or_else(
+            || (String::new(), String::new(), UserStatus::Online, None),
             |cache| {
                 let me = cache.me();
                 (
                     author_name(me.display_name.as_deref(), &me.username).to_owned(),
                     format!("@{}", me.username),
                     cache.user_status(&me.id).unwrap_or(me.status),
+                    me.avatar.clone(),
                 )
             },
         );
@@ -927,7 +969,7 @@ impl ChatScreen {
                         ui.set_height(48.0);
                         ui.set_width(ui.available_width());
                         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            theme::avatar(ui, &name, 32.0, Some(status));
+                            theme::avatar(ui, &name, 32.0, Some(status), my_avatar.as_deref());
                             ui.vertical(|ui| {
                                 ui.spacing_mut().item_spacing.y = 0.0;
                                 ui.add_space(8.0);
@@ -994,7 +1036,7 @@ impl ChatScreen {
                                 ui.add_space(4.0);
                                 current = Some(section);
                             }
-                            theme::member_row(ui, &row.name, row.status);
+                            theme::member_row(ui, &row.name, row.status, row.avatar.as_deref());
                         }
                     });
             });
@@ -1364,10 +1406,11 @@ impl ChatScreen {
         edit_request: &mut Option<(String, String)>,
     ) {
         ui.add_space(if show_header { 16.0 } else { 2.0 });
+        let mut hits: Vec<media::Hit> = Vec::new();
         let inner = ui.horizontal_top(|ui| {
             ui.add_space(20.0);
             if show_header {
-                theme::avatar(ui, &row.author, 40.0, None);
+                theme::avatar(ui, &row.author, 40.0, None, row.avatar.as_deref());
             } else {
                 ui.allocate_space(egui::vec2(40.0, 1.0));
             }
@@ -1385,12 +1428,19 @@ impl ChatScreen {
                         ui.label(theme::muted(theme::stamp(row.created_at, now_ms())).size(11.5));
                     });
                 }
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(&row.body).color(theme::TEXT));
-                    if row.edited {
-                        ui.label(theme::muted("(изменено)").size(11.0));
-                    }
-                });
+                if let Some(sticker) = media::sticker_of(&row.body) {
+                    hits.extend(media::show_sticker(ui, sticker));
+                } else if !row.body.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new(&row.body).color(theme::TEXT));
+                        if row.edited {
+                            ui.label(theme::muted("(изменено)").size(11.0));
+                        }
+                    });
+                }
+                for attachment in &row.attachments {
+                    hits.extend(media::show_attachment(ui, attachment));
+                }
             });
         });
         let rect =
@@ -1403,6 +1453,12 @@ impl ChatScreen {
         {
             response.scroll_to_me(Some(egui::Align::TOP));
             self.scroll_anchor = None;
+        }
+        if response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some((_, value)) = hits.iter().find(|(rect, _)| rect.contains(pos))
+        {
+            self.viewer = Some(value.clone());
         }
         let message_id = row.id.clone();
         response.context_menu(|ui| {
@@ -1493,6 +1549,17 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_and_members_carry_image_fields() {
+        let mut payload = ready("s1", "Работа", "c1", "general");
+        let mut value = serde_json::to_value(&payload).unwrap();
+        value["spaces"][0]["icon"] = serde_json::json!("icon.png");
+        payload = serde_json::from_value(value).unwrap();
+        let cache = Cache::from_ready(payload);
+        assert_eq!(sidebar_items(&cache)[0].icon.as_deref(), Some("icon.png"));
+        assert!(member_rows(&cache, "s1").iter().all(|m| m.avatar.is_none()));
+    }
+
+    #[test]
     fn dm_sidebar_is_empty_without_private_channels() {
         let cache = Cache::from_ready(ready("s1", "A", "c1", "g"));
         assert!(dm_sidebar_items(&cache).is_empty());
@@ -1506,6 +1573,8 @@ mod tests {
             body: String::new(),
             edited: false,
             created_at: at,
+            avatar: None,
+            attachments: Vec::new(),
         }
     }
 

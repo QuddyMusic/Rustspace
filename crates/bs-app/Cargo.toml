@@ -16,6 +16,7 @@ path = "src/main.rs"
 bs-api = { workspace = true }
 bs-core = { workspace = true }
 bs-instances = { workspace = true }
+bs-media = { workspace = true }
 bs-identity = { workspace = true }
 bs-types = { workspace = true }
 tokio = { workspace = true }

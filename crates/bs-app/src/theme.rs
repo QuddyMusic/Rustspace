@@ -249,9 +249,10 @@ pub(crate) fn avatar(
     name: &str,
     size: f32,
     status: Option<UserStatus>,
+    image: Option<&str>,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(size), egui::Sense::hover());
-    paint_avatar(ui.painter(), rect, name, status, false);
+    paint_avatar(ui.painter(), rect, name, status, false, image);
     response
 }
 
@@ -262,21 +263,39 @@ pub(crate) fn paint_avatar(
     name: &str,
     status: Option<UserStatus>,
     dim: bool,
+    image: Option<&str>,
 ) {
     let size = rect.width();
-    let fill = if dim {
-        color_for(name).gamma_multiply(0.45)
+    let tint = if dim {
+        Color32::WHITE.gamma_multiply(0.45)
     } else {
-        color_for(name)
+        Color32::WHITE
     };
-    painter.circle_filled(rect.center(), size / 2.0, fill);
-    painter.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        initials(name),
-        FontId::proportional(size * 0.42),
-        if dim { TEXT_MUTED } else { Color32::WHITE },
-    );
+    let drawn = image.is_some_and(|value| {
+        crate::images::paint_value(
+            painter,
+            rect,
+            value,
+            CornerRadius::same(u8::try_from(size.round() as u32 / 2 + 1).unwrap_or(u8::MAX)),
+            false,
+            tint,
+        )
+    });
+    if !drawn {
+        let fill = if dim {
+            color_for(name).gamma_multiply(0.45)
+        } else {
+            color_for(name)
+        };
+        painter.circle_filled(rect.center(), size / 2.0, fill);
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            initials(name),
+            FontId::proportional(size * 0.42),
+            if dim { TEXT_MUTED } else { Color32::WHITE },
+        );
+    }
     if let Some(status) = status {
         let dot = (size * 0.17).max(4.0);
         let center = rect.right_bottom() - egui::vec2(size * 0.12, size * 0.12);
@@ -374,6 +393,7 @@ pub(crate) fn rail_button(
     color: Color32,
     selected: bool,
     unread: bool,
+    image: Option<&str>,
 ) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 50.0), Sense::click());
@@ -381,14 +401,26 @@ pub(crate) fn rail_button(
     let icon = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(46.0));
     let radius: u8 = if selected || hovered { 14 } else { 23 };
     let painter = ui.painter();
-    painter.rect_filled(icon, CornerRadius::same(radius), color);
-    painter.text(
-        icon.center(),
-        egui::Align2::CENTER_CENTER,
-        text,
-        FontId::proportional(16.0),
-        Color32::WHITE,
-    );
+    let drawn = image.is_some_and(|value| {
+        crate::images::paint_value(
+            painter,
+            icon,
+            value,
+            CornerRadius::same(radius),
+            hovered,
+            Color32::WHITE,
+        )
+    });
+    if !drawn {
+        painter.rect_filled(icon, CornerRadius::same(radius), color);
+        painter.text(
+            icon.center(),
+            egui::Align2::CENTER_CENTER,
+            text,
+            FontId::proportional(16.0),
+            Color32::WHITE,
+        );
+    }
     paint_rail_pill(painter, rect, selected, hovered, unread);
     response
 }
@@ -507,7 +539,7 @@ pub(crate) fn section_title(text: &str) -> egui::RichText {
 }
 
 /// Участник в правой панели: аватар со статусом и имя; офлайн — приглушён.
-pub(crate) fn member_row(ui: &mut egui::Ui, name: &str, status: UserStatus) {
+pub(crate) fn member_row(ui: &mut egui::Ui, name: &str, status: UserStatus, image: Option<&str>) {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), Sense::hover());
     if response.hovered() {
@@ -519,7 +551,14 @@ pub(crate) fn member_row(ui: &mut egui::Ui, name: &str, status: UserStatus) {
         rect.left_top() + egui::vec2(8.0, 6.0),
         egui::Vec2::splat(32.0),
     );
-    paint_avatar(ui.painter(), avatar_rect, name, Some(status), offline);
+    paint_avatar(
+        ui.painter(),
+        avatar_rect,
+        name,
+        Some(status),
+        offline,
+        image,
+    );
     ui.painter().text(
         egui::pos2(avatar_rect.right() + 12.0, rect.center().y),
         egui::Align2::LEFT_CENTER,

@@ -206,6 +206,7 @@ fn friends_list(ui: &mut egui::Ui, bridge: &Bridge, online_only: bool) {
                 handle: Some(&handle),
                 subtitle: Some(&subtitle),
                 status: Some(friend.status),
+                avatar: friend.avatar.as_deref(),
             },
             |ui| {
                 if widgets::icon_button(ui, "✕", 34.0)
@@ -252,6 +253,7 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
                     "Исходящая заявка"
                 }),
                 status: None,
+                avatar: request.user.as_ref().and_then(|u| u.avatar.as_deref()),
             },
             |ui| {
                 if incoming {
@@ -334,6 +336,7 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
                 handle: Some(&handle),
                 subtitle: already.then_some("Уже в друзьях"),
                 status: Some(user.status),
+                avatar: user.avatar.as_deref(),
             },
             |ui| {
                 if !already && ui.add(theme::positive_button("В друзья")).clicked() {
@@ -395,9 +398,14 @@ pub(crate) fn show_active_now(ui: &mut egui::Ui, bridge: &Bridge) {
                                 .as_deref()
                                 .map(str::trim)
                                 .filter(|s| !s.is_empty());
-                            let response =
-                                widgets::compact_person(ui, &name, subtitle, friend.status)
-                                    .on_hover_text(status_label(friend.status));
+                            let response = widgets::compact_person(
+                                ui,
+                                &name,
+                                subtitle,
+                                friend.status,
+                                friend.avatar.as_deref(),
+                            )
+                            .on_hover_text(status_label(friend.status));
                             if response.clicked() {
                                 bridge.request(BridgeRequest::OpenDm(friend.id.clone()));
                             }

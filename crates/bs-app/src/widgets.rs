@@ -104,6 +104,8 @@ pub(crate) struct PersonRow<'a> {
     pub(crate) subtitle: Option<&'a str>,
     /// Статус присутствия для индикатора.
     pub(crate) status: Option<UserStatus>,
+    /// Значение поля `avatar` (имя файла или путь).
+    pub(crate) avatar: Option<&'a str>,
 }
 
 /// Строка списка людей: аватар, имя, «@handle», статус; справа — кнопки.
@@ -127,6 +129,7 @@ pub(crate) fn person_row(
         person.name,
         person.status,
         person.status == Some(UserStatus::Offline),
+        person.avatar,
     );
     let mut text_ui = ui.new_child(
         egui::UiBuilder::new()
@@ -174,6 +177,8 @@ pub(crate) struct DmEntry<'a> {
     pub(crate) selected: bool,
     /// Есть ли непрочитанное.
     pub(crate) unread: bool,
+    /// Аватар собеседника (для бесед один на один).
+    pub(crate) avatar: Option<&'a str>,
 }
 
 /// Строка в списке личных сообщений: аватар, имя, время, превью.
@@ -192,7 +197,14 @@ pub(crate) fn dm_entry(ui: &mut egui::Ui, dm: &DmEntry<'_>) -> egui::Response {
         row.left_top() + egui::vec2(8.0, 7.0),
         egui::Vec2::splat(32.0),
     );
-    paint_avatar(ui.painter(), avatar_rect, dm.name, dm.status, false);
+    paint_avatar(
+        ui.painter(),
+        avatar_rect,
+        dm.name,
+        dm.status,
+        false,
+        dm.avatar,
+    );
     let text_left = avatar_rect.right() + 10.0;
     let name_color = if dm.selected || dm.unread {
         TEXT_BRIGHT
@@ -292,6 +304,7 @@ pub(crate) fn compact_person(
     name: &str,
     subtitle: Option<&str>,
     status: UserStatus,
+    image: Option<&str>,
 ) -> egui::Response {
     let height = if subtitle.is_some() { 48.0 } else { 44.0 };
     let (rect, response) =
@@ -308,7 +321,14 @@ pub(crate) fn compact_person(
         egui::pos2(rect.left() + 4.0, rect.center().y - 16.0),
         egui::Vec2::splat(32.0),
     );
-    paint_avatar(ui.painter(), avatar_rect, name, Some(status), offline);
+    paint_avatar(
+        ui.painter(),
+        avatar_rect,
+        name,
+        Some(status),
+        offline,
+        image,
+    );
     let x = avatar_rect.right() + 10.0;
     let color = if offline { TEXT_FAINT } else { TEXT };
     let clip = egui::Rect::from_min_max(
@@ -502,8 +522,8 @@ pub(crate) fn radio_card(
 }
 
 /// Аватар-кружок крупного размера для карточек (без статуса).
-pub(crate) fn big_avatar(ui: &mut egui::Ui, name: &str, size: f32) {
-    avatar(ui, name, size, None);
+pub(crate) fn big_avatar(ui: &mut egui::Ui, name: &str, size: f32, image: Option<&str>) {
+    avatar(ui, name, size, None, image);
 }
 
 /// Выключатель «таблеткой». Возвращает `true`, если значение изменилось.

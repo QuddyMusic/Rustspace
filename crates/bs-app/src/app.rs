@@ -5,6 +5,7 @@ use std::time::Duration;
 use tokio::runtime::Handle;
 
 use crate::bridge::{Bridge, ChannelKind};
+use crate::images::ImageHub;
 use crate::logic::{connection_label, next_screen, should_wake};
 use crate::screens::chat::{ChatAction, ChatScreen, SelectedChannel};
 use crate::screens::login::LoginScreen;
@@ -29,6 +30,8 @@ pub(crate) struct BackspaceApp {
     pub(crate) bridge: Bridge,
     pub(crate) login: LoginScreen,
     pub(crate) chat: ChatScreen,
+    /// Общий кэш картинок.
+    images: ImageHub,
 }
 
 impl BackspaceApp {
@@ -39,6 +42,7 @@ impl BackspaceApp {
             bridge: Bridge::new(runtime),
             login: LoginScreen::default(),
             chat: ChatScreen::default(),
+            images: ImageHub::default(),
         }
     }
 }
@@ -96,6 +100,17 @@ impl eframe::App for BackspaceApp {
 
         let ready = self.bridge.take_ready();
         let lost = self.bridge.take_session_lost();
+        self.images.install(ui.ctx());
+        self.images.begin_frame();
+        if lost {
+            self.images.clear();
+        }
+        if ready && let Some((base, sender)) = self.bridge.session_link() {
+            self.images.set_session(base, sender);
+        }
+        for (path, result) in self.bridge.take_images() {
+            self.images.accept(ui.ctx(), &path, result);
+        }
         if lost {
             // Кэш и каналы мост уже сбросил сам, когда сессия закрылась.
             self.chat.reset();

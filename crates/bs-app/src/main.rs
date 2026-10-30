@@ -15,7 +15,9 @@ mod app;
 mod bridge;
 #[cfg(test)]
 mod fake_instance;
+mod images;
 mod logic;
+mod media;
 mod screens;
 mod social;
 mod theme;

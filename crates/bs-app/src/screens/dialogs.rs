@@ -377,7 +377,7 @@ fn settings_nav(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                widgets::big_avatar(ui, &name, 38.0);
+                widgets::big_avatar(ui, &name, 38.0, me.avatar.as_deref());
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.label(
@@ -556,13 +556,35 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
                 },
                 banner_color.gamma_multiply(0.5),
             );
+            if let Some(value) = me.banner.as_deref() {
+                crate::images::paint_value(
+                    ui.painter(),
+                    banner,
+                    value,
+                    CornerRadius {
+                        nw: 10,
+                        ne: 10,
+                        sw: 0,
+                        se: 0,
+                    },
+                    true,
+                    egui::Color32::WHITE,
+                );
+            }
             let avatar_rect = egui::Rect::from_min_size(
                 banner.left_bottom() + egui::vec2(16.0, -32.0),
                 egui::Vec2::splat(64.0),
             );
             ui.painter()
                 .circle_filled(avatar_rect.center(), 35.0, theme::BG_SIDEBAR);
-            theme::paint_avatar(ui.painter(), avatar_rect, &shown, None, false);
+            theme::paint_avatar(
+                ui.painter(),
+                avatar_rect,
+                &shown,
+                None,
+                false,
+                me.avatar.as_deref(),
+            );
             ui.add_space(38.0);
             ui.horizontal(|ui| {
                 ui.add_space(16.0);

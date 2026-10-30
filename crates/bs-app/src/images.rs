@@ -1,0 +1,355 @@
+//! Картинки интерфейса: аватары, иконки, баннеры, вложения и стикеры.
+//!
+//! [`ImageHub`] — общий кэш текстур. Любой виджет спрашивает у него картинку
+//! по значению поля («имя файла», путь, `sticker:<url>`); хаб проверяет путь
+//! ([`bs_api::resolve_asset`]), один раз просит мост скачать и декодировать
+//! файл и дальше отдаёт готовую текстуру. Пока файла нет — виджет рисует
+//! заглушку (инициалы), так что интерфейс никогда не ждёт сеть.
+//!
+//! Правила, из-за которых хаб не создаёт нагрузку:
+//! - один запрос на путь: пока идёт загрузка, повторных нет;
+//! - **ошибка не повторяется** до смены сессии (иначе битый файл превращается
+//!   в лавину запросов);
+//! - общий бюджет видеопамяти ограничен, лишнее вытесняется по давности.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use bs_api::{AssetPath, resolve_asset};
+use bs_media::Decoded;
+use egui::epaint::RectShape;
+use egui::{Color32, Context, CornerRadius, Id, Rect, TextureHandle, TextureOptions, pos2};
+use tokio::sync::mpsc::UnboundedSender;
+
+use crate::bridge::BridgeRequest;
+
+/// Сколько байт текстур держим в памяти до вытеснения.
+const TEXTURE_BUDGET: usize = 96 * 1024 * 1024;
+
+/// Готовая картинка: размер и кадры-текстуры.
+pub(crate) struct Loaded {
+    /// Ширина кадра.
+    pub(crate) width: u32,
+    /// Высота кадра.
+    pub(crate) height: u32,
+    frames: Vec<(TextureHandle, u32)>,
+    total_ms: u64,
+    bytes: usize,
+}
+
+impl std::fmt::Debug for Loaded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Loaded")
+            .field("size", &(self.width, self.height))
+            .field("frames", &self.frames.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Loaded {
+    /// Есть ли анимация.
+    pub(crate) fn is_animated(&self) -> bool {
+        self.frames.len() > 1
+    }
+
+    /// Кадр на момент `time_ms` (по кругу) и сколько мс он ещё показывается.
+    pub(crate) fn frame_at(&self, time_ms: u64) -> (&TextureHandle, u32) {
+        if self.frames.len() < 2 || self.total_ms == 0 {
+            return (&self.frames[0].0, u32::MAX);
+        }
+        let mut t = time_ms % self.total_ms;
+        for (texture, delay) in &self.frames {
+            let delay_u64 = u64::from(*delay);
+            if t < delay_u64 {
+                return (texture, u32::try_from(delay_u64 - t).unwrap_or(u32::MAX));
+            }
+            t -= delay_u64;
+        }
+        (&self.frames[0].0, u32::MAX)
+    }
+
+    /// Размер кадра для расчётов раскладки. Кадры не больше 2048 пикселей,
+    /// так что потери точности нет.
+    #[allow(clippy::cast_precision_loss, reason = "стороны ограничены 2048 px")]
+    pub(crate) const fn size_f32(&self) -> [f32; 2] {
+        [self.width as f32, self.height as f32]
+    }
+
+    /// Первый кадр: для статичного показа.
+    pub(crate) fn first(&self) -> &TextureHandle {
+        &self.frames[0].0
+    }
+}
+
+#[derive(Debug)]
+enum Entry {
+    Loading,
+    Ready { image: Arc<Loaded>, last_used: u64 },
+    Failed(String),
+}
+
+/// Состояние картинки для виджета.
+#[derive(Debug, Clone)]
+pub(crate) enum ImageState {
+    /// Нет значения, путь недопустим или сессии нет.
+    Absent,
+    /// Идёт загрузка.
+    Loading,
+    /// Не удалось (текст ошибки).
+    Failed(String),
+    /// Готово.
+    Ready(Arc<Loaded>),
+}
+
+#[derive(Debug, Default)]
+struct Inner {
+    base: Option<String>,
+    sender: Option<UnboundedSender<BridgeRequest>>,
+    entries: HashMap<AssetPath, Entry>,
+    bytes: usize,
+    tick: u64,
+}
+
+/// Общий кэш картинок; дёшево клонируется.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ImageHub(Arc<Mutex<Inner>>);
+
+/// Ключ, под которым хаб лежит в памяти контекста `egui`.
+fn hub_id() -> Id {
+    Id::unique("bs_image_hub")
+}
+
+impl ImageHub {
+    fn lock(&self) -> MutexGuard<'_, Inner> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Делает хаб доступным виджетам через контекст.
+    pub(crate) fn install(&self, ctx: &Context) {
+        ctx.data_mut(|d| d.insert_temp(hub_id(), self.clone()));
+    }
+
+    /// Хаб, установленный в контекст.
+    pub(crate) fn of(ctx: &Context) -> Option<Self> {
+        ctx.data(|d| d.get_temp::<Self>(hub_id()))
+    }
+
+    /// Привязывает хаб к живой сессии.
+    pub(crate) fn set_session(&self, base: String, sender: UnboundedSender<BridgeRequest>) {
+        let mut inner = self.lock();
+        inner.base = Some(base);
+        inner.sender = Some(sender);
+    }
+
+    /// Забывает всё, что относилось к прошлой сессии.
+    pub(crate) fn clear(&self) {
+        let mut inner = self.lock();
+        *inner = Inner::default();
+    }
+
+    /// Начало кадра: двигает счётчик давности.
+    pub(crate) fn begin_frame(&self) {
+        self.lock().tick += 1;
+    }
+
+    /// Приводит значение поля к проверенному пути на инстансе сессии.
+    pub(crate) fn resolve(&self, value: &str) -> Option<AssetPath> {
+        let inner = self.lock();
+        resolve_asset(inner.base.as_deref()?, value)
+    }
+
+    /// Состояние картинки по значению поля; при необходимости просит загрузку.
+    pub(crate) fn state(&self, value: &str) -> ImageState {
+        let Some(path) = self.resolve(value) else {
+            return ImageState::Absent;
+        };
+        self.state_for(&path)
+    }
+
+    /// Состояние картинки по проверенному пути.
+    pub(crate) fn state_for(&self, path: &AssetPath) -> ImageState {
+        let mut inner = self.lock();
+        let tick = inner.tick;
+        match inner.entries.get_mut(path) {
+            Some(Entry::Ready { image, last_used }) => {
+                *last_used = tick;
+                return ImageState::Ready(Arc::clone(image));
+            }
+            Some(Entry::Loading) => return ImageState::Loading,
+            Some(Entry::Failed(message)) => return ImageState::Failed(message.clone()),
+            None => {}
+        }
+        let sent = inner
+            .sender
+            .as_ref()
+            .is_some_and(|tx| tx.send(BridgeRequest::Image(path.clone())).is_ok());
+        if sent {
+            inner.entries.insert(path.clone(), Entry::Loading);
+            ImageState::Loading
+        } else {
+            ImageState::Absent
+        }
+    }
+
+    /// Принимает результат загрузки от моста и создаёт текстуры.
+    pub(crate) fn accept(&self, ctx: &Context, path: &AssetPath, result: Result<Decoded, String>) {
+        let tick = self.lock().tick;
+        let entry = match result {
+            Ok(decoded) => Entry::Ready {
+                image: Arc::new(upload(ctx, path, &decoded)),
+                last_used: tick,
+            },
+            Err(message) => Entry::Failed(message),
+        };
+        let mut inner = self.lock();
+        if let Entry::Ready { image, .. } = &entry {
+            inner.bytes += image.bytes;
+        }
+        let replaced = inner.entries.insert(path.clone(), entry);
+        if let Some(Entry::Ready { image, .. }) = replaced {
+            inner.bytes = inner.bytes.saturating_sub(image.bytes);
+        }
+        evict(&mut inner);
+        drop(inner);
+    }
+}
+
+/// Загружает кадры в видеопамять.
+fn upload(ctx: &Context, path: &AssetPath, decoded: &Decoded) -> Loaded {
+    let size = [decoded.width as usize, decoded.height as usize];
+    let frames: Vec<(TextureHandle, u32)> = decoded
+        .frames
+        .iter()
+        .enumerate()
+        .map(|(index, frame)| {
+            let image = egui::ColorImage::from_rgba_unmultiplied(size, &frame.rgba);
+            let texture = ctx.load_texture(
+                format!("{}#{index}", path.as_str()),
+                image,
+                TextureOptions::LINEAR,
+            );
+            (texture, frame.delay_ms)
+        })
+        .collect();
+    let total_ms = frames.iter().map(|(_, d)| u64::from(*d)).sum();
+    Loaded {
+        width: decoded.width,
+        height: decoded.height,
+        frames,
+        total_ms,
+        bytes: decoded.byte_size(),
+    }
+}
+
+/// Вытесняет давно не использованные картинки, пока бюджет превышен.
+/// Картинки, показанные в текущем кадре, не трогаем.
+fn evict(inner: &mut Inner) {
+    while inner.bytes > TEXTURE_BUDGET {
+        let tick = inner.tick;
+        let victim = inner
+            .entries
+            .iter()
+            .filter_map(|(path, entry)| match entry {
+                Entry::Ready { last_used, .. } if *last_used < tick => {
+                    Some((path.clone(), *last_used))
+                }
+                _ => None,
+            })
+            .min_by_key(|(_, last_used)| *last_used)
+            .map(|(path, _)| path);
+        let Some(victim) = victim else {
+            return;
+        };
+        if let Some(Entry::Ready { image, .. }) = inner.entries.remove(&victim) {
+            inner.bytes = inner.bytes.saturating_sub(image.bytes);
+        }
+    }
+}
+
+/// Прямоугольник UV, при котором картинка закрывает `target` без искажений
+/// (обрезка по центру, как `object-fit: cover`).
+pub(crate) fn cover_uv(image: [f32; 2], target: [f32; 2]) -> Rect {
+    let image_ratio = image[0] / image[1].max(1.0);
+    let target_ratio = target[0] / target[1].max(1.0);
+    if image_ratio > target_ratio {
+        let visible = target_ratio / image_ratio;
+        let margin = (1.0 - visible) / 2.0;
+        Rect::from_min_max(pos2(margin, 0.0), pos2(1.0 - margin, 1.0))
+    } else {
+        let visible = image_ratio / target_ratio;
+        let margin = (1.0 - visible) / 2.0;
+        Rect::from_min_max(pos2(0.0, margin), pos2(1.0, 1.0 - margin))
+    }
+}
+
+/// Рисует картинку в `rect` с обрезкой «cover» и скруглением.
+/// Для анимации выбирает кадр по времени и просит перерисовку.
+pub(crate) fn paint_cover(
+    painter: &egui::Painter,
+    rect: Rect,
+    image: &Loaded,
+    radius: impl Into<CornerRadius>,
+    animate: bool,
+    tint: Color32,
+) {
+    let texture = if animate && image.is_animated() {
+        let now_ms = painter.ctx().input(|i| (i.time * 1000.0) as u64);
+        let (texture, remaining) = image.frame_at(now_ms);
+        painter
+            .ctx()
+            .request_repaint_after(std::time::Duration::from_millis(u64::from(remaining)));
+        texture
+    } else {
+        image.first()
+    };
+    let uv = cover_uv(image.size_f32(), [rect.width(), rect.height()]);
+    painter.add(RectShape::filled(rect, radius, tint).with_texture(texture.id(), uv));
+}
+
+/// Рисует картинку по значению поля, если она уже загружена.
+/// Возвращает `true`, если нарисовала (иначе вызывающий рисует заглушку).
+pub(crate) fn paint_value(
+    painter: &egui::Painter,
+    rect: Rect,
+    value: &str,
+    radius: impl Into<CornerRadius>,
+    animate: bool,
+    tint: Color32,
+) -> bool {
+    let Some(hub) = ImageHub::of(painter.ctx()) else {
+        return false;
+    };
+    match hub.state(value) {
+        ImageState::Ready(image) => {
+            paint_cover(painter, rect, &image, radius, animate, tint);
+            true
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cover_uv;
+
+    #[test]
+    fn wide_image_is_cropped_horizontally() {
+        let uv = cover_uv([200.0, 100.0], [100.0, 100.0]);
+        assert!((uv.min.x - 0.25).abs() < 1e-6 && (uv.max.x - 0.75).abs() < 1e-6);
+        assert!((uv.min.y).abs() < 1e-6 && (uv.max.y - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn tall_image_is_cropped_vertically() {
+        let uv = cover_uv([100.0, 200.0], [100.0, 100.0]);
+        assert!((uv.min.y - 0.25).abs() < 1e-6 && (uv.max.y - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn same_ratio_uses_whole_image() {
+        let uv = cover_uv([50.0, 50.0], [100.0, 100.0]);
+        assert!((uv.width() - 1.0).abs() < 1e-6 && (uv.height() - 1.0).abs() < 1e-6);
+    }
+}

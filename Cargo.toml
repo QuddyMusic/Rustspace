@@ -9,6 +9,7 @@ members = [
     "crates/bs-identity",
     "crates/bs-voice",
     "crates/bs-core",
+    "crates/bs-media",
     "crates/bs-app",
     "crates/bs-tui",
     "xtask",
@@ -32,6 +33,7 @@ bs-instances = { path = "crates/bs-instances" }
 bs-identity = { path = "crates/bs-identity" }
 bs-voice = { path = "crates/bs-voice" }
 bs-core = { path = "crates/bs-core" }
+bs-media = { path = "crates/bs-media" }
 
 # сериализация
 serde = { version = "1", features = ["derive"] }

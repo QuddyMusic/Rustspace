@@ -118,6 +118,8 @@ pub(crate) enum BridgeRequest {
     },
     /// Изменить свой профиль.
     UpdateProfile(bs_api::UpdateProfileRequest),
+    /// Скачать и декодировать картинку инстанса.
+    Image(bs_api::AssetPath),
     /// Страница истории: самая новая или старее `before`.
     History {
         /// Канал или личный канал.
@@ -150,6 +152,13 @@ pub(crate) enum BridgeResponse {
     Profile(Box<bs_types::User>),
     /// Заявка на вступление отправлена.
     JoinRequested,
+    /// Картинка скачана и декодирована (или не удалась).
+    Image {
+        /// Путь, который запрашивали.
+        path: bs_api::AssetPath,
+        /// Кадры или текст ошибки.
+        result: Result<bs_media::Decoded, String>,
+    },
     /// Пришла страница истории.
     History {
         /// Канал, чью историю запрашивали.
@@ -243,6 +252,10 @@ pub(crate) struct Bridge {
     social_error: Option<String>,
     /// Канал, только что открытый по запросу `OpenDm` (нужно переключить чат).
     opened_dm: Option<String>,
+    /// Адрес инстанса текущей сессии.
+    base: Option<String>,
+    /// Готовые картинки, которые GUI ещё не превратил в текстуры.
+    images_ready: Vec<(bs_api::AssetPath, Result<bs_media::Decoded, String>)>,
     /// Последняя страница каталога пространств.
     explore: Option<bs_api::ExplorePage>,
     /// Идёт ли запрос каталога.
@@ -301,6 +314,8 @@ impl Bridge {
             search_results: Vec::new(),
             social_error: None,
             opened_dm: None,
+            base: None,
+            images_ready: Vec::new(),
             explore: None,
             explore_loading: false,
             opened_space: None,
@@ -398,6 +413,8 @@ impl Bridge {
         self.search_results.clear();
         self.social_error = None;
         self.opened_dm = None;
+        self.base = None;
+        self.images_ready.clear();
         self.explore = None;
         self.explore_loading = false;
         self.opened_space = None;
@@ -493,6 +510,7 @@ impl Bridge {
         }
 
         self.phase = Phase::Connecting;
+        self.base = Some(base.clone());
         self.last_error = None;
         self.session_lost = false;
         self.connection = ConnectionState::Connecting;
@@ -629,6 +647,20 @@ impl Bridge {
     /// `true` ровно один раз — если только что открыли личный канал.
     pub(crate) fn take_opened_dm(&mut self) -> Option<String> {
         self.opened_dm.take()
+    }
+
+    /// Адрес инстанса и канал запросов живой сессии — для кэша картинок.
+    pub(crate) fn session_link(
+        &self,
+    ) -> Option<(String, tokio_mpsc::UnboundedSender<BridgeRequest>)> {
+        Some((self.base.clone()?, self.requests.clone()?))
+    }
+
+    /// Забирает картинки, пришедшие с прошлого кадра.
+    pub(crate) fn take_images(
+        &mut self,
+    ) -> Vec<(bs_api::AssetPath, Result<bs_media::Decoded, String>)> {
+        std::mem::take(&mut self.images_ready)
     }
 
     /// Последняя страница каталога пространств.
@@ -815,6 +847,9 @@ impl Bridge {
                 self.info = Some("Профиль сохранён".to_owned());
                 self.social_error = None;
             }
+            BridgeResponse::Image { path, result } => {
+                self.images_ready.push((path, result));
+            }
             BridgeResponse::JoinRequested => {
                 self.info = Some("Заявка отправлена".to_owned());
                 self.social_error = None;
@@ -843,6 +878,10 @@ struct SessionParams {
 }
 
 /// Фоновая сессия: логин, затем пересылка событий и команд.
+#[allow(
+    clippy::too_many_lines,
+    reason = "один цикл выбора между источниками событий"
+)]
 async fn run_session(
     params: SessionParams,
     events: std_mpsc::Sender<BridgeEvent>,
@@ -898,8 +937,13 @@ async fn run_session(
     }
 
     let mut sub = handle.subscribe();
+    // Загрузки картинок идут параллельно, но не больше `MAX_IMAGE_JOBS`
+    // сразу; при выходе из сессии `JoinSet` обрывает незавершённые.
+    let mut image_jobs: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+    let image_gate = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_IMAGE_JOBS));
     loop {
         tokio::select! {
+            Some(_) = image_jobs.join_next(), if !image_jobs.is_empty() => {}
             event = sub.recv() => match event {
                 Ok(InstanceEvent::Server(boxed)) => {
                     if events.send(BridgeEvent::Server { event: boxed }).is_err() {
@@ -925,6 +969,18 @@ async fn run_session(
                 }
             },
             request = requests.recv() => match request {
+                Some(BridgeRequest::Image(path)) => {
+                    let client = handle.client().clone();
+                    let gate = std::sync::Arc::clone(&image_gate);
+                    let tx = responses.clone();
+                    image_jobs.spawn(async move {
+                        let Ok(_permit) = gate.acquire_owned().await else {
+                            return;
+                        };
+                        let result = load_image(&client, &path).await;
+                        let _ = tx.send(BridgeResponse::Image { path, result });
+                    });
+                }
                 Some(request) => {
                     let response = handle_request(handle.client(), request).await;
                     if responses.send(response).is_err() {
@@ -943,6 +999,26 @@ async fn run_session(
             },
         }
     }
+}
+
+/// Сколько картинок качается и декодируется одновременно.
+const MAX_IMAGE_JOBS: usize = 6;
+
+/// Скачивает и декодирует картинку; ошибка — готовый текст для показа.
+async fn load_image(
+    client: &bs_api::ApiClient,
+    path: &bs_api::AssetPath,
+) -> Result<bs_media::Decoded, String> {
+    let limits = bs_media::Limits::default();
+    let bytes = client
+        .fetch_asset(path, limits.max_input_bytes)
+        .await
+        .map_err(|err| err.to_string())?;
+    // Декодирование грузит процессор — уводим его с рабочих потоков сети.
+    tokio::task::spawn_blocking(move || bs_media::decode(&bytes, &limits))
+        .await
+        .map_err(|err| format!("декодер упал: {err}"))?
+        .map_err(|err| err.to_string())
 }
 
 /// Выполняет REST-запрос и превращает результат в [`BridgeResponse`].
@@ -1001,6 +1077,8 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
             Ok(()) => BridgeResponse::Done,
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
+        // Картинки обрабатываются отдельно и параллельно (см. `run_session`).
+        BridgeRequest::Image(_) => BridgeResponse::Done,
         BridgeRequest::CreateSpace(body) => match client.create_space(&body).await {
             Ok(space) => BridgeResponse::Space(Box::new(space)),
             Err(err) => BridgeResponse::Failed(err.to_string()),
