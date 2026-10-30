@@ -18,6 +18,7 @@ mod fake_instance;
 mod logic;
 mod screens;
 mod social;
+mod theme;
 
 fn main() -> eframe::Result {
     tracing_subscriber::fmt()
@@ -47,7 +48,10 @@ fn main() -> eframe::Result {
     let result = eframe::run_native(
         "Backspace RS",
         options,
-        Box::new(move |_cc| Ok(Box::new(app::BackspaceApp::new(handle)))),
+        Box::new(move |cc| {
+            theme::apply(&cc.egui_ctx);
+            Ok(Box::new(app::BackspaceApp::new(handle)))
+        }),
     );
 
     runtime.shutdown_timeout(std::time::Duration::from_secs(2));

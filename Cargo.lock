@@ -678,6 +678,7 @@ dependencies = [
  "bs-identity",
  "bs-instances",
  "bs-types",
+ "chrono",
  "eframe",
  "egui",
  "futures-util",

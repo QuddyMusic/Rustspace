@@ -6,9 +6,11 @@ use tokio::runtime::Handle;
 
 use crate::bridge::{Bridge, ChannelKind};
 use crate::logic::{connection_label, next_screen, should_wake};
-use crate::screens::chat::{ChatScreen, SelectedChannel};
+use crate::screens::chat::{ChatAction, ChatScreen, SelectedChannel};
 use crate::screens::login::LoginScreen;
 use crate::screens::social::SocialScreen;
+use crate::theme;
+use bs_instances::ConnectionState;
 
 /// Как часто будить UI, пока идёт логин или есть живое соединение.
 const WAKE_INTERVAL: Duration = Duration::from_millis(200);
@@ -47,39 +49,46 @@ impl BackspaceApp {
 }
 
 impl BackspaceApp {
-    /// Верхняя строка статуса: состояние соединения, выход и отказы сервера.
-    fn status_bar(&mut self, ui: &mut egui::Ui) {
-        let mut logout = false;
+    /// Тонкая полоса над интерфейсом: показывается только если есть что
+    /// сказать — отказ сервера или нестабильное соединение.
+    fn notice_strip(&mut self, ui: &mut egui::Ui) {
+        let notice = self.bridge.notice().map(str::to_owned);
+        let unstable = self.bridge.cache().is_some()
+            && *self.bridge.connection() != ConnectionState::Connected;
+        if notice.is_none() && !unstable {
+            return;
+        }
         let mut dismiss = false;
-        egui::Panel::top("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Backspace RS").strong());
-                ui.separator();
-                ui.label(connection_label(self.bridge.connection()));
-                if self.bridge.is_busy() {
-                    ui.spinner();
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let button = ui
-                        .add_enabled(!self.bridge.is_busy(), egui::Button::new("Выйти"))
-                        .on_hover_text("Выйти из инстанса, чтобы войти в другой");
-                    if button.clicked() {
-                        logout = true;
+        egui::Panel::top("notice")
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(if notice.is_some() {
+                        theme::ROSE
+                    } else {
+                        theme::AMBER
+                    })
+                    .inner_margin(egui::Margin::symmetric(16, 6)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let text = notice.unwrap_or_else(|| {
+                        format!("Соединение: {}", connection_label(self.bridge.connection()))
+                    });
+                    ui.label(
+                        egui::RichText::new(text)
+                            .color(egui::Color32::BLACK)
+                            .strong(),
+                    );
+                    if self.bridge.notice().is_some() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Скрыть").clicked() {
+                                dismiss = true;
+                            }
+                        });
                     }
                 });
             });
-            if let Some(notice) = self.bridge.notice() {
-                ui.horizontal(|ui| {
-                    ui.colored_label(egui::Color32::LIGHT_RED, notice);
-                    if ui.small_button("×").on_hover_text("Скрыть").clicked() {
-                        dismiss = true;
-                    }
-                });
-            }
-        });
-        if logout {
-            self.bridge.logout();
-        }
         if dismiss {
             self.bridge.dismiss_notice();
         }
@@ -95,6 +104,7 @@ impl eframe::App for BackspaceApp {
         if lost {
             // Кэш и каналы мост уже сбросил сам, когда сессия закрылась.
             self.social.reset();
+            self.chat.reset();
         }
         self.screen = next_screen(self.screen, ready, lost);
 
@@ -110,15 +120,18 @@ impl eframe::App for BackspaceApp {
         match self.screen {
             Screen::Login => self.login.show(ui, &mut self.bridge),
             Screen::Chat => {
-                self.status_bar(ui);
-                let open_social = self.chat.show(ui, &mut self.bridge);
-                if open_social {
-                    self.social.reset();
-                    self.screen = Screen::Social;
+                self.notice_strip(ui);
+                match self.chat.show(ui, &mut self.bridge) {
+                    ChatAction::OpenSocial => {
+                        self.social.reset();
+                        self.screen = Screen::Social;
+                    }
+                    ChatAction::Logout => self.bridge.logout(),
+                    ChatAction::None => {}
                 }
             }
             Screen::Social => {
-                self.status_bar(ui);
+                self.notice_strip(ui);
                 if self.social.show(ui, &self.bridge) {
                     self.screen = Screen::Chat;
                 }

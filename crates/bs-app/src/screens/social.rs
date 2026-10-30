@@ -8,6 +8,7 @@ use crate::social::{
     SocialTab, dm_display_name, dm_last_text, friend_display_name, friend_status_text, is_friend,
     request_is_incoming, request_name, search_user_name,
 };
+use crate::theme;
 
 /// Состояние социального экрана.
 #[derive(Debug, Default)]
@@ -66,176 +67,198 @@ impl SocialScreen {
     }
 
     /// Рисует экран. Возвращает `true`, если пользователь попросил вернуться в чат.
-    #[allow(clippy::too_many_lines)]
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, bridge: &Bridge) -> bool {
         self.ensure_loaded(bridge);
         let mut close = false;
-        egui::Panel::left("social_tabs")
-            .resizable(true)
-            .default_size(180.0)
+        self.show_tabs(ui, bridge, &mut close);
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::BG_CHAT)
+                    .inner_margin(egui::Margin::symmetric(28, 20)),
+            )
             .show(ui, |ui| {
-                ui.heading("Социальное");
-                if ui.button("← В чат").clicked() {
-                    close = true;
+                ui.label(
+                    egui::RichText::new(self.tab.title())
+                        .size(20.0)
+                        .strong()
+                        .color(theme::TEXT_BRIGHT),
+                );
+                ui.add_space(10.0);
+                if let Some(err) = bridge.social_error() {
+                    ui.label(egui::RichText::new(err).color(theme::ROSE));
+                    ui.add_space(6.0);
                 }
-                ui.separator();
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| match self.tab {
+                        SocialTab::Friends => Self::show_friends(ui, bridge),
+                        SocialTab::Requests => Self::show_requests(ui, bridge),
+                        SocialTab::Search => self.show_search(ui, bridge),
+                        SocialTab::Dms => self.show_dms(ui, bridge),
+                    });
+            });
+        close
+    }
+
+    /// Левая колонка: возврат в чат и вкладки.
+    fn show_tabs(&mut self, ui: &mut egui::Ui, bridge: &Bridge, close: &mut bool) {
+        egui::Panel::left("social_tabs")
+            .exact_size(220.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::BG_SIDEBAR)
+                    .inner_margin(egui::Margin::symmetric(8, 14)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    if ui.button("← В чат").clicked() {
+                        *close = true;
+                    }
+                });
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0);
+                    ui.label(theme::section_title("Общение"));
+                });
                 for tab in [
                     SocialTab::Friends,
                     SocialTab::Requests,
                     SocialTab::Search,
                     SocialTab::Dms,
                 ] {
-                    if ui.selectable_label(self.tab == tab, tab.title()).clicked()
+                    if theme::list_row(ui, tab.title(), self.tab == tab, false).clicked()
                         && self.tab != tab
                     {
                         self.tab = tab;
                         self.reload(bridge);
                     }
                 }
-                ui.separator();
-                if ui.button("Обновить").clicked() {
-                    self.reload(bridge);
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    if ui.small_button("Обновить").clicked() {
+                        self.reload(bridge);
+                    }
+                });
+            });
+    }
+
+    fn show_friends(ui: &mut egui::Ui, bridge: &Bridge) {
+        let friends = bridge.friends();
+        if friends.is_empty() {
+            theme::empty_state(ui, "Друзей пока нет — найдите их во вкладке «Поиск»");
+        }
+        for friend in friends {
+            let status = friend_status_text(friend);
+            theme::person_card(ui, &friend_display_name(friend), Some(&status), |ui| {
+                if ui.button("Удалить").clicked() {
+                    bridge.request(BridgeRequest::RemoveFriend(friend.id.clone()));
+                }
+                if ui.add(theme::primary_button("Написать")).clicked() {
+                    bridge.request(BridgeRequest::OpenDm(friend.id.clone()));
                 }
             });
+        }
+    }
 
-        egui::CentralPanel::default().show(ui, |ui| {
-            if let Some(err) = bridge.social_error() {
-                ui.colored_label(egui::Color32::RED, err);
-                ui.separator();
-            }
-            match self.tab {
-                SocialTab::Friends => {
-                    let friends = bridge.friends();
-                    if friends.is_empty() {
-                        ui.label("Друзей пока нет");
+    fn show_requests(ui: &mut egui::Ui, bridge: &Bridge) {
+        let me = bridge.cache().map(|cache| cache.me().id.clone());
+        let requests = bridge.friend_requests();
+        if requests.is_empty() {
+            theme::empty_state(ui, "Заявок нет");
+        }
+        for request in requests {
+            let incoming = me
+                .as_deref()
+                .is_some_and(|me| request_is_incoming(request, me));
+            let subtitle = if incoming {
+                "Входящая заявка"
+            } else {
+                "Исходящая заявка"
+            };
+            theme::person_card(ui, &request_name(request), Some(subtitle), |ui| {
+                if incoming {
+                    if ui.button("Отклонить").clicked() {
+                        bridge.request(BridgeRequest::RespondFriendRequest(
+                            request.id.clone(),
+                            false,
+                        ));
                     }
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            for friend in friends {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(friend_display_name(friend)).strong(),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(friend_status_text(friend)).weak(),
-                                    );
-                                    if ui.button("Написать").clicked() {
-                                        bridge.request(BridgeRequest::OpenDm(friend.id.clone()));
-                                    }
-                                    if ui.button("Удалить").clicked() {
-                                        bridge.request(BridgeRequest::RemoveFriend(
-                                            friend.id.clone(),
-                                        ));
-                                    }
-                                });
-                            }
-                        });
-                }
-                SocialTab::Requests => {
-                    let me = bridge.cache().map(|cache| cache.me().id.clone());
-                    let requests = bridge.friend_requests();
-                    if requests.is_empty() {
-                        ui.label("Заявок нет");
+                    if ui.add(theme::positive_button("Принять")).clicked() {
+                        bridge.request(BridgeRequest::RespondFriendRequest(
+                            request.id.clone(),
+                            true,
+                        ));
                     }
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            for request in requests {
-                                let incoming = me
-                                    .as_deref()
-                                    .is_some_and(|me| request_is_incoming(request, me));
-                                ui.horizontal(|ui| {
-                                    ui.label(request_name(request));
-                                    if incoming {
-                                        if ui.button("Принять").clicked() {
-                                            bridge.request(BridgeRequest::RespondFriendRequest(
-                                                request.id.clone(),
-                                                true,
-                                            ));
-                                        }
-                                        if ui.button("Отклонить").clicked() {
-                                            bridge.request(BridgeRequest::RespondFriendRequest(
-                                                request.id.clone(),
-                                                false,
-                                            ));
-                                        }
-                                    } else if ui.button("Отозвать").clicked() {
-                                        bridge.request(BridgeRequest::CancelFriendRequest(
-                                            request.id.clone(),
-                                        ));
-                                    }
-                                });
-                            }
-                        });
+                } else if ui.button("Отозвать").clicked() {
+                    bridge.request(BridgeRequest::CancelFriendRequest(request.id.clone()));
                 }
-                SocialTab::Search => {
-                    ui.horizontal(|ui| {
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut self.query)
-                                .hint_text("имя пользователя"),
-                        );
-                        let submitted =
-                            response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        if ui.button("Найти").clicked() || submitted {
-                            self.search(bridge);
-                            response.request_focus();
-                        }
-                    });
-                    ui.separator();
-                    let friends = bridge.friends();
-                    let results = bridge.search_results();
-                    if results.is_empty() {
-                        ui.label("Ничего не найдено");
+            });
+        }
+    }
+
+    fn show_search(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
+        egui::Frame::new()
+            .fill(theme::BG_INPUT)
+            .corner_radius(egui::CornerRadius::same(8))
+            .inner_margin(egui::Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let width = (ui.available_width() - 96.0).max(80.0);
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.query)
+                            .hint_text("Имя пользователя")
+                            .frame(egui::Frame::NONE)
+                            .align(egui::Align2::LEFT_CENTER)
+                            .desired_width(width),
+                    );
+                    let submitted =
+                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if ui.add(theme::primary_button("Найти")).clicked() || submitted {
+                        self.search(bridge);
+                        response.request_focus();
                     }
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            for user in results {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(search_user_name(user)).strong());
-                                    if is_friend(friends, &user.id) {
-                                        ui.label(egui::RichText::new("в друзьях").weak());
-                                    } else if ui.button("В друзья").clicked() {
-                                        bridge.request(BridgeRequest::SendFriendRequest(
-                                            user.id.clone(),
-                                        ));
-                                    }
-                                    if ui.button("Написать").clicked() {
-                                        bridge.request(BridgeRequest::OpenDm(user.id.clone()));
-                                    }
-                                });
-                            }
-                        });
+                });
+            });
+        ui.add_space(10.0);
+        let friends = bridge.friends();
+        let results = bridge.search_results();
+        if results.is_empty() {
+            theme::empty_state(ui, "Ничего не найдено");
+        }
+        for user in results {
+            let already = is_friend(friends, &user.id);
+            let subtitle = if already { "В друзьях" } else { "" };
+            theme::person_card(ui, &search_user_name(user), Some(subtitle), |ui| {
+                if ui.button("Написать").clicked() {
+                    bridge.request(BridgeRequest::OpenDm(user.id.clone()));
                 }
-                SocialTab::Dms => {
-                    let me = bridge.cache().map(|cache| cache.me().id.clone());
-                    let channels = bridge.dm_channels();
-                    if channels.is_empty() {
-                        ui.label("Личных каналов нет");
-                    }
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            for channel in channels {
-                                let name = me.as_deref().map_or_else(
-                                    || channel.id.clone(),
-                                    |me| dm_display_name(channel, me),
-                                );
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(name).strong());
-                                    if let Some(last) = dm_last_text(channel) {
-                                        ui.label(egui::RichText::new(last).weak());
-                                    }
-                                    if ui.button("Открыть").clicked() {
-                                        self.open_channel = Some(channel.id.clone());
-                                    }
-                                });
-                            }
-                        });
+                if !already && ui.add(theme::positive_button("В друзья")).clicked() {
+                    bridge.request(BridgeRequest::SendFriendRequest(user.id.clone()));
                 }
-            }
-        });
-        close
+            });
+        }
+    }
+
+    fn show_dms(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
+        let me = bridge.cache().map(|cache| cache.me().id.clone());
+        let channels = bridge.dm_channels();
+        if channels.is_empty() {
+            theme::empty_state(ui, "Личных каналов нет");
+        }
+        for channel in channels {
+            let name = me
+                .as_deref()
+                .map_or_else(|| channel.id.clone(), |me| dm_display_name(channel, me));
+            let last = dm_last_text(channel);
+            theme::person_card(ui, &name, last.as_deref(), |ui| {
+                if ui.add(theme::primary_button("Открыть")).clicked() {
+                    self.open_channel = Some(channel.id.clone());
+                }
+            });
+        }
     }
 }
