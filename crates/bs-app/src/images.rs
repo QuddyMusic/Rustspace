@@ -109,7 +109,8 @@ struct Inner {
     /// Подключённые инстансы: адрес и канал запросов его сессии.
     links: Vec<(String, UnboundedSender<BridgeRequest>)>,
     /// Номер инстанса, относительно которого читаются имена файлов без адреса.
-    current: usize,
+    /// Адрес инстанса, которому принадлежат значения без адреса.
+    current: Option<String>,
     entries: HashMap<Key, Entry>,
     bytes: usize,
     tick: u64,
@@ -147,8 +148,12 @@ impl ImageHub {
     }
 
     /// Инстанс, которому принадлежат значения без адреса (имена файлов).
-    pub(crate) fn set_current(&self, index: usize) {
-        self.lock().current = index;
+    ///
+    /// Задаётся адресом, а не номером: в `links` только работающие инстансы,
+    /// и номер слота указывал бы не на тот инстанс, как только один из
+    /// предыдущих отключится.
+    pub(crate) fn set_current(&self, base: Option<&str>) {
+        self.lock().current = base.map(str::to_owned);
     }
 
     /// Забывает всё, что относилось к прошлой сессии.
@@ -175,7 +180,8 @@ impl ImageHub {
         } else {
             inner
                 .links
-                .get(inner.current)
+                .iter()
+                .find(|(base, _)| Some(base) == inner.current.as_ref())
                 .and_then(|(base, _)| Some((base.clone(), resolve_asset(base, value)?)))
         };
         drop(inner);
@@ -370,7 +376,27 @@ pub(crate) fn paint_value(
 
 #[cfg(test)]
 mod tests {
-    use super::{absolute, cover_uv};
+    use super::{ImageHub, absolute, cover_uv};
+
+    #[test]
+    fn bare_names_belong_to_the_focused_instance_not_to_a_list_position() {
+        let hub = ImageHub::default();
+        let (a, _ra) = tokio::sync::mpsc::unbounded_channel();
+        let (b, _rb) = tokio::sync::mpsc::unbounded_channel();
+        // Между домашним и третьим инстансом второй не работает: в списке
+        // ссылок третий стоит вторым.
+        hub.set_links(vec![
+            ("https://home.example".to_owned(), a),
+            ("https://third.example".to_owned(), b),
+        ]);
+        hub.set_current(Some("https://third.example"));
+        let key = hub.resolve("pic.png").expect("resolved");
+        assert_eq!(key.0, "https://third.example");
+        hub.set_current(None);
+        assert!(hub.resolve("pic.png").is_none());
+        let owned = hub.resolve("https://home.example/api/uploads/x.png").expect("abs");
+        assert_eq!(owned.0, "https://home.example");
+    }
 
     #[test]
     fn values_become_absolute_for_their_owner() {

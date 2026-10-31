@@ -615,7 +615,7 @@ impl ChatScreen {
             bridge.focus_on(0);
         }
         if let Some(hub) = crate::images::ImageHub::of(ctx) {
-            hub.set_current(bridge.focus_index());
+            hub.set_current(bridge.base_at(bridge.focus_index()));
         }
     }
 
