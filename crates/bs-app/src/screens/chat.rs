@@ -7,7 +7,8 @@ use bs_core::Cache;
 use bs_types::{ChannelId, UserStatus};
 use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
 
-use crate::bridge::{Bridge, BridgeRequest, ChannelKind, HistoryState};
+use crate::bridge::{BridgeRequest, ChannelKind, HistoryState};
+use crate::fleet::Bridge;
 use crate::logic::{
     DEFAULT_REACTION, author_name, can_send, connection_label, message_actions, outgoing_text,
     should_ack, should_load_older,
@@ -32,6 +33,8 @@ pub(crate) enum ChatAction {
 /// Выбранный канал.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SelectedChannel {
+    /// Инстанс, которому принадлежит канал (номер в мосте).
+    pub(crate) origin: usize,
     /// Идентификатор канала внутри инстанса.
     pub(crate) channel: ChannelId,
     /// Канал пространства или личный канал: у них разные события и маршруты.
@@ -63,7 +66,9 @@ pub(crate) struct SidebarGroup {
 /// Пространство в сайдбаре.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SidebarSpace {
-    /// Идентификатор пространства.
+    /// Инстанс, на котором живёт пространство.
+    pub(crate) origin: usize,
+    /// Идентификатор пространства (уникален только внутри инстанса).
     pub(crate) id: String,
     /// Имя пространства.
     pub(crate) name: String,
@@ -95,6 +100,10 @@ impl SidebarSpace {
 /// Личный канал в сайдбаре.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SidebarDm {
+    /// Инстанс, который доставляет эту беседу.
+    pub(crate) origin: usize,
+    /// Ключ беседы одинаков у всех её копий на разных инстансах.
+    pub(crate) key: Option<String>,
     /// Идентификатор личного канала.
     pub(crate) id: String,
     /// Имя собеседника или название группы.
@@ -159,6 +168,7 @@ pub(crate) fn sidebar_items(cache: &Cache) -> Vec<SidebarSpace> {
                 });
             }
             SidebarSpace {
+                origin: 0,
                 id: space.space.id.clone(),
                 name: space.space.name.clone(),
                 color: space.space.avatar_color.clone(),
@@ -177,6 +187,8 @@ pub(crate) fn dm_sidebar_items(cache: &Cache) -> Vec<SidebarDm> {
     dms.sort_by(|a, b| b.id.len().cmp(&a.id.len()).then_with(|| b.id.cmp(&a.id)));
     dms.into_iter()
         .map(|dm| SidebarDm {
+            origin: 0,
+            key: dm.federated_id.clone(),
             id: dm.id.clone(),
             label: dm_display_name(dm, &me),
             unread: cache.unread_count(&dm.id) > 0,
@@ -200,6 +212,59 @@ pub(crate) fn dm_sidebar_items(cache: &Cache) -> Vec<SidebarDm> {
             },
         })
         .collect()
+}
+
+/// Пространства и личные беседы всех работающих инстансов.
+///
+/// Пространства идут по инстансам (домашний первым). Копии одной беседы на
+/// разных инстансах (одинаковый ключ) сливаются в одну; показывается копия
+/// домашнего инстанса, как в оригинале: туда приходят ответы собеседника.
+/// Файлы получают полный адрес владельца, чтобы их можно было грузить, не
+/// зная, чьё это значение.
+#[must_use]
+pub(crate) fn merged_sidebar(bridge: &Bridge) -> (Vec<SidebarSpace>, Vec<SidebarDm>) {
+    let parts = bridge
+        .live_origins()
+        .into_iter()
+        .filter_map(|origin| {
+            let cache = bridge.cache_at(origin)?;
+            let base = bridge.base_at(origin)?;
+            Some((origin, base, sidebar_items(cache), dm_sidebar_items(cache)))
+        })
+        .collect();
+    merge_origins(parts)
+}
+
+/// Склейка списков нескольких инстансов (см. [`merged_sidebar`]).
+#[must_use]
+fn merge_origins(
+    parts: Vec<(usize, &str, Vec<SidebarSpace>, Vec<SidebarDm>)>,
+) -> (Vec<SidebarSpace>, Vec<SidebarDm>) {
+    let mut spaces = Vec::new();
+    let mut dms: Vec<SidebarDm> = Vec::new();
+    for (origin, base, origin_spaces, origin_dms) in parts {
+        for mut space in origin_spaces {
+            space.origin = origin;
+            space.icon = space.icon.map(|v| crate::images::absolute(base, &v));
+            spaces.push(space);
+        }
+        for mut dm in origin_dms {
+            if let Some(key) = &dm.key
+                && dms.iter().any(|known| known.key.as_ref() == Some(key))
+            {
+                continue;
+            }
+            dm.origin = origin;
+            dm.avatar = dm.avatar.map(|v| crate::images::absolute(base, &v));
+            dms.push(dm);
+        }
+    }
+    dms.sort_by(|a, b| {
+        b.at.cmp(&a.at)
+            .then_with(|| b.id.len().cmp(&a.id.len()))
+            .then_with(|| b.id.cmp(&a.id))
+    });
+    (spaces, dms)
 }
 
 /// Участник в правой панели.
@@ -405,7 +470,7 @@ enum Nav {
     /// Обзор пространств.
     Explore,
     /// Открыть пространство.
-    Space(String),
+    Space((usize, String)),
     /// Открыть канал или беседу.
     Channel(SelectedChannel),
     /// Окно «Создать пространство».
@@ -427,9 +492,9 @@ pub(crate) struct ChatScreen {
     /// Состояние друзей и обзора.
     home: HomeState,
     /// Пространство, открытое в колонке каналов; `None` — главная.
-    active_space: Option<String>,
+    active_space: Option<(usize, String)>,
     /// Последний открытый канал в каждом пространстве.
-    last_by_space: HashMap<String, String>,
+    last_by_space: HashMap<(usize, String), String>,
     /// Строка поиска слева сверху: фильтр бесед и каналов.
     sidebar_filter: String,
     /// Открытое окно «Создать пространство».
@@ -497,9 +562,13 @@ impl ChatScreen {
         if self.selected_channel.as_ref() != Some(&selected) {
             self.edit = None;
         }
+        let space_open = self
+            .active_space
+            .as_ref()
+            .is_some_and(|(origin, _)| *origin == selected.origin);
         if selected.kind == ChannelKind::Dm {
             self.active_space = None;
-        } else if let Some(space) = &self.active_space {
+        } else if let Some(space) = self.active_space.as_ref().filter(|_| space_open) {
             self.last_by_space
                 .insert(space.clone(), selected.channel.clone());
         }
@@ -509,21 +578,44 @@ impl ChatScreen {
 
     /// Показывает пространство: запомненный канал или первый текстовый.
     fn open_space(&mut self, space: &SidebarSpace) {
-        self.active_space = Some(space.id.clone());
+        let key = (space.origin, space.id.clone());
+        self.active_space = Some(key.clone());
         let remembered = self
             .last_by_space
-            .get(&space.id)
+            .get(&key)
             .filter(|id| space.channels().any(|c| &c.id == *id))
             .cloned()
             .or_else(|| space.first_text().map(|c| c.id.clone()));
         if let Some(channel) = remembered {
             self.open_channel(SelectedChannel {
+                origin: space.origin,
                 channel,
                 kind: ChannelKind::Space,
             });
         } else {
             self.selected_channel = None;
             self.view = View::Channel;
+        }
+    }
+
+    /// Выбирает инстанс, которому адресованы действия этого кадра: владельца
+    /// открытого канала или пространства (иначе домашний). Если владелец
+    /// пропал (отключён, потерял соединение), выбор сбрасывается.
+    fn route_actions(&mut self, bridge: &mut Bridge, ctx: &egui::Context) {
+        let wanted = match self.view {
+            View::Channel => self.selected_channel.as_ref().map(|s| s.origin),
+            View::Friends | View::Explore => self.active_space.as_ref().map(|(o, _)| *o),
+        }
+        .unwrap_or(0);
+        bridge.focus_on(wanted);
+        if bridge.focus_index() != wanted {
+            self.selected_channel = None;
+            self.active_space = None;
+            self.view = View::Friends;
+            bridge.focus_on(0);
+        }
+        if let Some(hub) = crate::images::ImageHub::of(ctx) {
+            hub.set_current(bridge.focus_index());
         }
     }
 
@@ -546,8 +638,8 @@ impl ChatScreen {
                 self.view = View::Explore;
                 bridge.load_explore(&self.home.explore_query);
             }
-            Nav::Space(id) => {
-                if let Some(space) = items.iter().find(|s| s.id == id) {
+            Nav::Space((origin, id)) => {
+                if let Some(space) = items.iter().find(|s| s.origin == origin && s.id == id) {
                     self.open_space(space);
                 }
             }
@@ -581,13 +673,13 @@ impl ChatScreen {
             self.toast = Some((info, now + 3.0));
         }
 
-        let (items, dms) = bridge.cache().map_or_else(Default::default, |cache| {
-            (sidebar_items(cache), dm_sidebar_items(cache))
-        });
+        self.route_actions(bridge, &ctx);
+        let (items, dms) = merged_sidebar(bridge);
 
-        if let Some(id) = bridge.take_opened_space() {
+        if let Some(opened) = bridge.take_opened_space() {
             self.create_space = None;
-            self.apply_nav(Nav::Space(id), &items, bridge, &ctx);
+            self.apply_nav(Nav::Space(opened), &items, bridge, &ctx);
+            self.route_actions(bridge, &ctx);
         }
 
         if let Some(state) = self.settings.as_mut() {
@@ -598,13 +690,26 @@ impl ChatScreen {
                     self.settings = None;
                     action = ChatAction::Logout;
                 }
+                SettingsAction::Connect { address, password } => {
+                    bridge.connect_remote(&address, Some(&password));
+                }
+                SettingsAction::Retry(index) => bridge.retry(index),
+                SettingsAction::Disconnect(index) => bridge.disconnect(index),
             }
             self.show_toast(&ctx, now);
             return action;
         }
 
         let mut nav: Option<Nav> = None;
-        self.show_rail(ui, &items, &dms, &mut nav);
+        let hosts: Vec<String> = (0..=bridge.live_origins().last().copied().unwrap_or(0))
+            .map(|i| {
+                bridge
+                    .base_at(i)
+                    .map(bs_identity::identity::host_of)
+                    .unwrap_or_default()
+            })
+            .collect();
+        self.show_rail(ui, &items, &dms, &hosts, &mut nav);
         self.show_left_column(ui, bridge, &items, &dms, &mut nav);
 
         match self.view {
@@ -615,7 +720,7 @@ impl ChatScreen {
             View::Explore => {
                 let mut create = false;
                 if let Some(id) = home::show_explore(ui, &mut self.home, bridge, &mut create) {
-                    nav = Some(Nav::Space(id));
+                    nav = Some(Nav::Space((0, id)));
                 }
                 if create {
                     nav = Some(Nav::CreateSpace);
@@ -625,7 +730,7 @@ impl ChatScreen {
                 if self.show_members
                     && let Some(space_id) = self.active_space.clone()
                 {
-                    Self::show_member_panel(ui, bridge, &space_id);
+                    Self::show_member_panel(ui, bridge, &space_id.1);
                 }
                 self.show_header(ui, bridge);
                 self.show_composer(ui, bridge);
@@ -681,6 +786,7 @@ impl ChatScreen {
         ui: &mut egui::Ui,
         items: &[SidebarSpace],
         dms: &[SidebarDm],
+        bridge_hosts: &[String],
         nav: &mut Option<Nav>,
     ) {
         let dm_unread = dms.iter().any(|d| d.unread);
@@ -708,25 +814,34 @@ impl ChatScreen {
                         }
                         theme::rail_separator(ui);
                         for space in items {
-                            let selected = self.active_space.as_deref() == Some(space.id.as_str());
+                            let selected = self
+                                .active_space
+                                .as_ref()
+                                .is_some_and(|(o, id)| *o == space.origin && *id == space.id);
                             let color = space
                                 .color
                                 .as_deref()
                                 .and_then(theme::palette)
                                 .unwrap_or_else(|| theme::color_for(&space.name));
-                            if theme::rail_button(
+                            let response = theme::rail_button(
                                 ui,
                                 &theme::initials(&space.name),
                                 color,
                                 selected,
                                 space.has_unread(),
                                 space.icon.as_deref(),
-                            )
-                            .on_hover_text(&space.name)
-                            .clicked()
-                                && !selected
-                            {
-                                *nav = Some(Nav::Space(space.id.clone()));
+                            );
+                            let owner = bridge_hosts.get(space.origin).cloned().unwrap_or_default();
+                            if space.origin != 0 {
+                                widgets::origin_badge(ui, response.rect, &owner);
+                            }
+                            let hover = if space.origin == 0 {
+                                space.name.clone()
+                            } else {
+                                format!("{} · {owner}", space.name)
+                            };
+                            if response.on_hover_text(hover).clicked() && !selected {
+                                *nav = Some(Nav::Space((space.origin, space.id.clone())));
                             }
                         }
                         if widgets::rail_action(ui, "＋", theme::MINT, false)
@@ -795,11 +910,9 @@ impl ChatScreen {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 2.0;
-                        if let Some(space) = self
-                            .active_space
-                            .as_ref()
-                            .and_then(|id| items.iter().find(|s| &s.id == id))
-                        {
+                        if let Some(space) = self.active_space.as_ref().and_then(|(origin, id)| {
+                            items.iter().find(|s| s.origin == *origin && &s.id == id)
+                        }) {
                             self.channel_list(ui, space, &filter, nav);
                         } else {
                             self.home_list(ui, dms, &filter, nav);
@@ -846,7 +959,9 @@ impl ChatScreen {
                 }
                 let selected = self.view == View::Channel
                     && self.selected_channel.as_ref().is_some_and(|current| {
-                        current.kind == ChannelKind::Space && current.channel.as_str() == channel.id
+                        current.kind == ChannelKind::Space
+                            && current.origin == space.origin
+                            && current.channel.as_str() == channel.id
                     });
                 if theme::list_row(
                     ui,
@@ -857,6 +972,7 @@ impl ChatScreen {
                 .clicked()
                 {
                     *nav = Some(Nav::Channel(SelectedChannel {
+                        origin: space.origin,
                         channel: channel.id.clone(),
                         kind: ChannelKind::Space,
                     }));
@@ -901,7 +1017,9 @@ impl ChatScreen {
             shown += 1;
             let selected = self.view == View::Channel
                 && self.selected_channel.as_ref().is_some_and(|current| {
-                    current.kind == ChannelKind::Dm && current.channel.as_str() == dm.id
+                    current.kind == ChannelKind::Dm
+                        && current.origin == dm.origin
+                        && current.channel.as_str() == dm.id
                 });
             let stamp = dm.at.map(|at| theme::short_stamp(at, now));
             let response = widgets::dm_entry(
@@ -918,6 +1036,7 @@ impl ChatScreen {
             );
             if response.clicked() {
                 *nav = Some(Nav::Channel(SelectedChannel {
+                    origin: dm.origin,
                     channel: dm.id.clone(),
                     kind: ChannelKind::Dm,
                 }));
@@ -937,7 +1056,7 @@ impl ChatScreen {
 
     /// Нижняя панель колонки: «я», статус соединения и кнопка настроек.
     fn show_user_bar(ui: &mut egui::Ui, bridge: &Bridge, nav: &mut Option<Nav>) {
-        let (name, handle, status, my_avatar) = bridge.cache().map_or_else(
+        let (name, handle, status, my_avatar) = bridge.cache_at(0).map_or_else(
             || (String::new(), String::new(), UserStatus::Online, None),
             |cache| {
                 let me = cache.me();
@@ -945,7 +1064,11 @@ impl ChatScreen {
                     author_name(me.display_name.as_deref(), &me.username).to_owned(),
                     format!("@{}", me.username),
                     cache.user_status(&me.id).unwrap_or(me.status),
-                    me.avatar.clone(),
+                    me.avatar.clone().map(|v| {
+                        bridge
+                            .base_at(0)
+                            .map_or_else(|| v.clone(), |base| crate::images::absolute(base, &v))
+                    }),
                 )
             },
         );
@@ -1261,7 +1384,7 @@ impl ChatScreen {
 
     /// Сбрасывает состояние прокрутки, если открыли другой канал.
     fn sync_scroll_key(&mut self, selected: &SelectedChannel) {
-        let key = selected.channel.clone();
+        let key = format!("{}:{}", selected.origin, selected.channel);
         if self.scroll_key.as_ref() != Some(&key) {
             self.scroll_key = Some(key);
             self.scroll_anchor = None;
@@ -1324,7 +1447,7 @@ impl ChatScreen {
                         message_rows(cache, selected.kind, &channel_id),
                     )
                 };
-                let ack_key = channel_id.clone();
+                let ack_key = format!("{}:{channel_id}", selected.origin);
                 let first_id = rows.first().map(|row| row.id.clone());
                 let mut retry = false;
                 let mut edit_request = None;
@@ -1546,6 +1669,79 @@ mod tests {
         let dms = dm_sidebar_items(&Cache::from_ready(payload));
         let labels: Vec<_> = dms.iter().map(|dm| dm.label.as_str()).collect();
         assert_eq!(labels, ["Новая группа", "Старая группа"]);
+    }
+
+    fn space_item(id: &str) -> super::SidebarSpace {
+        super::SidebarSpace {
+            origin: 0,
+            id: id.to_owned(),
+            name: id.to_owned(),
+            color: None,
+            icon: Some("i.png".to_owned()),
+            groups: Vec::new(),
+        }
+    }
+
+    fn dm_item(id: &str, key: Option<&str>, at: i64) -> super::SidebarDm {
+        super::SidebarDm {
+            origin: 0,
+            key: key.map(str::to_owned),
+            id: id.to_owned(),
+            label: id.to_owned(),
+            unread: false,
+            status: None,
+            preview: None,
+            at: Some(at),
+            avatar: Some("a.png".to_owned()),
+        }
+    }
+
+    #[test]
+    fn spaces_of_all_instances_are_listed_with_their_owner() {
+        let parts = vec![
+            (0, "https://home.example", vec![space_item("1")], Vec::new()),
+            (
+                2,
+                "https://orbit.example",
+                vec![space_item("1")],
+                Vec::new(),
+            ),
+        ];
+        let (spaces, _) = super::merge_origins(parts);
+        // Одинаковые id на разных инстансах — разные пространства.
+        assert_eq!(spaces.len(), 2);
+        assert_eq!((spaces[0].origin, spaces[1].origin), (0, 2));
+        assert_eq!(
+            spaces[1].icon.as_deref(),
+            Some("https://orbit.example/api/uploads/i.png")
+        );
+    }
+
+    #[test]
+    fn copies_of_one_dm_collapse_to_the_home_copy() {
+        let parts = vec![
+            (
+                0,
+                "https://home.example",
+                Vec::new(),
+                vec![dm_item("9", Some("k"), 10)],
+            ),
+            (
+                1,
+                "https://orbit.example",
+                Vec::new(),
+                vec![
+                    dm_item("77", Some("k"), 10),
+                    dm_item("78", None, 20),
+                    dm_item("79", None, 5),
+                ],
+            ),
+        ];
+        let (_, dms) = super::merge_origins(parts);
+        let ids: Vec<_> = dms.iter().map(|d| (d.origin, d.id.as_str())).collect();
+        // Копия с ключом одна (домашняя); беседы без ключа не склеиваются;
+        // порядок — по времени последнего сообщения.
+        assert_eq!(ids, vec![(1, "78"), (0, "9"), (1, "79")]);
     }
 
     #[test]

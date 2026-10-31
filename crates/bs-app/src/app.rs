@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use tokio::runtime::Handle;
 
-use crate::bridge::{Bridge, ChannelKind};
+use crate::bridge::ChannelKind;
+use crate::fleet::Bridge;
 use crate::images::ImageHub;
 use crate::logic::{connection_label, next_screen, should_wake};
 use crate::screens::chat::{ChatAction, ChatScreen, SelectedChannel};
@@ -100,16 +101,17 @@ impl eframe::App for BackspaceApp {
 
         let ready = self.bridge.take_ready();
         let lost = self.bridge.take_session_lost();
+        if let Some(message) = self.bridge.take_message() {
+            self.bridge.set_info(message);
+        }
         self.images.install(ui.ctx());
         self.images.begin_frame();
         if lost {
             self.images.clear();
         }
-        if ready && let Some((base, sender)) = self.bridge.session_link() {
-            self.images.set_session(base, sender);
-        }
-        for (path, result) in self.bridge.take_images() {
-            self.images.accept(ui.ctx(), &path, result);
+        self.images.set_links(self.bridge.image_links());
+        for (base, path, result) in self.bridge.take_images() {
+            self.images.accept(ui.ctx(), &(base, path), result);
         }
         if lost {
             // Кэш и каналы мост уже сбросил сам, когда сессия закрылась.
@@ -118,8 +120,9 @@ impl eframe::App for BackspaceApp {
         self.screen = next_screen(self.screen, ready, lost);
 
         // Только что открытый личный канал — сразу переключаемся в чат.
-        if let Some(channel) = self.bridge.take_opened_dm() {
+        if let Some((origin, channel)) = self.bridge.take_opened_dm() {
             self.chat.open_channel(SelectedChannel {
+                origin,
                 channel,
                 kind: ChannelKind::Dm,
             });

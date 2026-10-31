@@ -25,6 +25,7 @@ pub mod client;
 pub mod community;
 pub mod error;
 pub mod federation;
+pub mod instance;
 pub mod read;
 pub mod write;
 
@@ -37,6 +38,9 @@ pub use error::ApiError;
 pub use federation::{
     AttachProofResponse, ChangePasswordRequest, ChangePasswordResponse,
     FederationCredentialRequest, FederationCredentialResponse, ReattachRequest, ReattachResponse,
+};
+pub use instance::{
+    InstanceInfo, PeerEnsureResponse, RegisterRequest, ReplicatedEntry, VerifyPasswordResponse,
 };
 pub use read::{
     DmMessagePage, MESSAGES_LIMIT_DEFAULT, MESSAGES_LIMIT_MAX, MESSAGES_LIMIT_MIN, MessagePage,

@@ -3,7 +3,7 @@
 use bs_types::TransportPolicy;
 use zeroize::Zeroize as _;
 
-use crate::bridge::Bridge;
+use crate::fleet::Bridge;
 use crate::theme;
 
 /// Форма логина и её состояние.

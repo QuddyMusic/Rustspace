@@ -101,11 +101,16 @@ pub(crate) enum ImageState {
     Ready(Arc<Loaded>),
 }
 
+/// Ключ картинки: инстанс-владелец и путь на нём.
+pub(crate) type Key = (String, AssetPath);
+
 #[derive(Debug, Default)]
 struct Inner {
-    base: Option<String>,
-    sender: Option<UnboundedSender<BridgeRequest>>,
-    entries: HashMap<AssetPath, Entry>,
+    /// Подключённые инстансы: адрес и канал запросов его сессии.
+    links: Vec<(String, UnboundedSender<BridgeRequest>)>,
+    /// Номер инстанса, относительно которого читаются имена файлов без адреса.
+    current: usize,
+    entries: HashMap<Key, Entry>,
     bytes: usize,
     tick: u64,
 }
@@ -136,11 +141,14 @@ impl ImageHub {
         ctx.data(|d| d.get_temp::<Self>(hub_id()))
     }
 
-    /// Привязывает хаб к живой сессии.
-    pub(crate) fn set_session(&self, base: String, sender: UnboundedSender<BridgeRequest>) {
-        let mut inner = self.lock();
-        inner.base = Some(base);
-        inner.sender = Some(sender);
+    /// Обновляет список живых инстансов (каждый кадр).
+    pub(crate) fn set_links(&self, links: Vec<(String, UnboundedSender<BridgeRequest>)>) {
+        self.lock().links = links;
+    }
+
+    /// Инстанс, которому принадлежат значения без адреса (имена файлов).
+    pub(crate) fn set_current(&self, index: usize) {
+        self.lock().current = index;
     }
 
     /// Забывает всё, что относилось к прошлой сессии.
@@ -154,25 +162,39 @@ impl ImageHub {
         self.lock().tick += 1;
     }
 
-    /// Приводит значение поля к проверенному пути на инстансе сессии.
-    pub(crate) fn resolve(&self, value: &str) -> Option<AssetPath> {
+    /// Приводит значение поля к проверенному пути на одном из подключённых
+    /// инстансов. Полный адрес подходит только своему инстансу; имя файла
+    /// без адреса читается относительно текущего.
+    pub(crate) fn resolve(&self, value: &str) -> Option<Key> {
         let inner = self.lock();
-        resolve_asset(inner.base.as_deref()?, value)
+        let key = if value.contains("://") {
+            inner
+                .links
+                .iter()
+                .find_map(|(base, _)| Some((base.clone(), resolve_asset(base, value)?)))
+        } else {
+            inner
+                .links
+                .get(inner.current)
+                .and_then(|(base, _)| Some((base.clone(), resolve_asset(base, value)?)))
+        };
+        drop(inner);
+        key
     }
 
     /// Состояние картинки по значению поля; при необходимости просит загрузку.
     pub(crate) fn state(&self, value: &str) -> ImageState {
-        let Some(path) = self.resolve(value) else {
+        let Some(key) = self.resolve(value) else {
             return ImageState::Absent;
         };
-        self.state_for(&path)
+        self.state_for(&key)
     }
 
-    /// Состояние картинки по проверенному пути.
-    pub(crate) fn state_for(&self, path: &AssetPath) -> ImageState {
+    /// Состояние картинки по проверенному ключу.
+    pub(crate) fn state_for(&self, key: &Key) -> ImageState {
         let mut inner = self.lock();
         let tick = inner.tick;
-        match inner.entries.get_mut(path) {
+        match inner.entries.get_mut(key) {
             Some(Entry::Ready { image, last_used }) => {
                 *last_used = tick;
                 return ImageState::Ready(Arc::clone(image));
@@ -182,11 +204,12 @@ impl ImageHub {
             None => {}
         }
         let sent = inner
-            .sender
-            .as_ref()
-            .is_some_and(|tx| tx.send(BridgeRequest::Image(path.clone())).is_ok());
+            .links
+            .iter()
+            .find(|(base, _)| *base == key.0)
+            .is_some_and(|(_, tx)| tx.send(BridgeRequest::Image(key.1.clone())).is_ok());
         if sent {
-            inner.entries.insert(path.clone(), Entry::Loading);
+            inner.entries.insert(key.clone(), Entry::Loading);
             ImageState::Loading
         } else {
             ImageState::Absent
@@ -194,11 +217,11 @@ impl ImageHub {
     }
 
     /// Принимает результат загрузки от моста и создаёт текстуры.
-    pub(crate) fn accept(&self, ctx: &Context, path: &AssetPath, result: Result<Decoded, String>) {
+    pub(crate) fn accept(&self, ctx: &Context, key: &Key, result: Result<Decoded, String>) {
         let tick = self.lock().tick;
         let entry = match result {
             Ok(decoded) => Entry::Ready {
-                image: Arc::new(upload(ctx, path, &decoded)),
+                image: Arc::new(upload(ctx, key, &decoded)),
                 last_used: tick,
             },
             Err(message) => Entry::Failed(message),
@@ -207,7 +230,7 @@ impl ImageHub {
         if let Entry::Ready { image, .. } = &entry {
             inner.bytes += image.bytes;
         }
-        let replaced = inner.entries.insert(path.clone(), entry);
+        let replaced = inner.entries.insert(key.clone(), entry);
         if let Some(Entry::Ready { image, .. }) = replaced {
             inner.bytes = inner.bytes.saturating_sub(image.bytes);
         }
@@ -216,8 +239,23 @@ impl ImageHub {
     }
 }
 
+/// Делает значение поля полным адресом на инстансе `base`: так оно однозначно
+/// указывает владельца, даже когда его читает код другого инстанса.
+/// Полные адреса и значения со схемой не трогаются.
+#[must_use]
+pub(crate) fn absolute(base: &str, value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.contains("://") || trimmed.is_empty() {
+        trimmed.to_owned()
+    } else if trimmed.starts_with('/') {
+        format!("{base}{trimmed}")
+    } else {
+        format!("{base}/api/uploads/{trimmed}")
+    }
+}
+
 /// Загружает кадры в видеопамять.
-fn upload(ctx: &Context, path: &AssetPath, decoded: &Decoded) -> Loaded {
+fn upload(ctx: &Context, key: &Key, decoded: &Decoded) -> Loaded {
     let size = [decoded.width as usize, decoded.height as usize];
     let frames: Vec<(TextureHandle, u32)> = decoded
         .frames
@@ -226,7 +264,7 @@ fn upload(ctx: &Context, path: &AssetPath, decoded: &Decoded) -> Loaded {
         .map(|(index, frame)| {
             let image = egui::ColorImage::from_rgba_unmultiplied(size, &frame.rgba);
             let texture = ctx.load_texture(
-                format!("{}#{index}", path.as_str()),
+                format!("{}{}#{index}", key.0, key.1.as_str()),
                 image,
                 TextureOptions::LINEAR,
             );
@@ -332,7 +370,25 @@ pub(crate) fn paint_value(
 
 #[cfg(test)]
 mod tests {
-    use super::cover_uv;
+    use super::{absolute, cover_uv};
+
+    #[test]
+    fn values_become_absolute_for_their_owner() {
+        let base = "https://orbit.example";
+        assert_eq!(
+            absolute(base, "a.png"),
+            "https://orbit.example/api/uploads/a.png"
+        );
+        assert_eq!(
+            absolute(base, "/api/stickers/assets/s.webp"),
+            "https://orbit.example/api/stickers/assets/s.webp"
+        );
+        assert_eq!(
+            absolute(base, "https://x.example/a.png"),
+            "https://x.example/a.png"
+        );
+        assert_eq!(absolute(base, "  "), "");
+    }
 
     #[test]
     fn wide_image_is_cropped_horizontally() {

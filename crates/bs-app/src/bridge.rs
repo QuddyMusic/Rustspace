@@ -7,17 +7,21 @@
 //! Так GUI никогда не блокируется на сети, а `Cache` (не `Clone`) не
 //! приходится копировать между потоками.
 //!
-//! # Одна сессия за раз
+//! # Жизненный цикл одной сессии
 //! Вход в инстанс — это переход `Idle → Connecting → Active`. Новый вход
 //! возможен только из `Idle`, а выход (`Active → Closing`) прерывает
 //! фоновую задачу и ждёт её фактического завершения (событие `Ended`), и
-//! лишь потом возвращает мост в `Idle`. Поэтому два инстанса одновременно
-//! не живут: ни повторным нажатием «Войти», ни входом в другой инстанс
-//! сразу после выхода из прежнего.
+//! лишь потом сессия возвращается в `Idle`: повторное нажатие «Войти» или
+//! вход в другой инстанс не создаёт второго соединения в той же сессии.
+//!
+//! [`Session`] — это один инстанс. Несколько инстансов одновременно держит
+//! [`crate::fleet::Bridge`]: у каждого своя `Session`, но активна (то есть
+//! показана в интерфейсе) только одна.
 
 use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
 
+use bs_api::{ApiClient, FederationCredentialRequest, RegisterRequest, ReplicatedEntry};
 use bs_core::{Cache, apply};
 use bs_identity::CredentialStore;
 use bs_instances::{ConnectionState, InstanceEvent, InstanceHandle, ReconnectPolicy};
@@ -84,6 +88,46 @@ impl HistoryItems {
     }
 }
 
+/// Секрет, который нельзя случайно напечатать: `Debug` скрывает значение,
+/// память затирается при уничтожении.
+#[derive(Clone)]
+pub(crate) struct Secret(Zeroizing<String>);
+
+impl Secret {
+    /// Оборачивает строку.
+    pub(crate) fn new(value: impl Into<String>) -> Self {
+        Self(Zeroizing::new(value.into()))
+    }
+
+    /// Значение для передачи в запрос.
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(<redacted>)")
+    }
+}
+
+/// То, что домашний инстанс выдал для входа на другой инстанс.
+#[derive(Debug, Clone)]
+pub(crate) struct IssuedCredential {
+    /// Имя вида `alice@home.example`.
+    pub(crate) username: String,
+    /// Секрет для входа и регистрации.
+    pub(crate) secret: Secret,
+    /// Хост домашнего инстанса.
+    pub(crate) home_host: String,
+    /// Идентификатор пользователя на домашнем инстансе.
+    pub(crate) home_user_id: String,
+    /// Отображаемое имя для нового аккаунта.
+    pub(crate) display_name: Option<String>,
+    /// Секрет уже записан в удалённый аккаунт.
+    pub(crate) provisioned: bool,
+}
+
 /// REST-запрос, который GUI отправляет фоновой сессии.
 #[derive(Debug, Clone)]
 pub(crate) enum BridgeRequest {
@@ -120,6 +164,20 @@ pub(crate) enum BridgeRequest {
     UpdateProfile(bs_api::UpdateProfileRequest),
     /// Скачать и декодировать картинку инстанса.
     Image(bs_api::AssetPath),
+    /// Только для домашней сессии: проверить пароль (если он есть) и
+    /// получить секрет для входа на `origin`.
+    IssueCredential {
+        /// Куда собираемся входить.
+        origin: String,
+        /// Пароль от домашнего аккаунта; `None` при автоподключении.
+        password: Option<Secret>,
+    },
+    /// Только для домашней сессии: попросить домашний инстанс о пиринге.
+    EnsurePeered(String),
+    /// Только для домашней сессии: отметить, что секрет принят на `origin`.
+    MarkProvisioned(String),
+    /// Сообщить инстансу список связанных инстансов.
+    SyncInstances(Vec<ReplicatedEntry>),
     /// Страница истории: самая новая или старее `before`.
     History {
         /// Канал или личный канал.
@@ -159,6 +217,20 @@ pub(crate) enum BridgeResponse {
         /// Кадры или текст ошибки.
         result: Result<bs_media::Decoded, String>,
     },
+    /// Домашний инстанс выдал (или отказал выдать) секрет для входа.
+    Credential {
+        /// Куда собирались входить.
+        origin: String,
+        /// Секрет или текст ошибки.
+        result: Result<IssuedCredential, String>,
+    },
+    /// Ответ о пиринге.
+    Peering {
+        /// С кем пиринг.
+        origin: String,
+        /// Статус сервера или текст ошибки.
+        result: Result<String, String>,
+    },
     /// Пришла страница истории.
     History {
         /// Канал, чью историю запрашивали.
@@ -175,6 +247,8 @@ pub(crate) enum BridgeResponse {
     },
     /// Запись прошла успешно.
     Done,
+    /// Список связанных инстансов отправлен (или секрет отмечен).
+    Synced,
     /// Запрос не удался.
     Failed(String),
 }
@@ -234,7 +308,12 @@ pub(crate) enum Phase {
 
 /// Мост GUI ↔ tokio.
 #[derive(Debug)]
-pub(crate) struct Bridge {
+#[allow(
+    clippy::struct_field_names,
+    clippy::struct_excessive_bools,
+    reason = "флаги состояния одной сессии; `session` — её фоновая задача"
+)]
+pub(crate) struct Session {
     runtime: Handle,
     phase: Phase,
     events: Option<std_mpsc::Receiver<BridgeEvent>>,
@@ -254,6 +333,12 @@ pub(crate) struct Bridge {
     opened_dm: Option<String>,
     /// Адрес инстанса текущей сессии.
     base: Option<String>,
+    /// Секреты для входа, выданные домашним инстансом (только у домашней сессии).
+    issued: Vec<(String, Result<IssuedCredential, String>)>,
+    /// Ответы о пиринге (только у домашней сессии).
+    peering: Vec<(String, Result<String, String>)>,
+    /// Удалось ли отправить список инстансов.
+    synced: bool,
     /// Готовые картинки, которые GUI ещё не превратил в текстуры.
     images_ready: Vec<(bs_api::AssetPath, Result<bs_media::Decoded, String>)>,
     /// Последняя страница каталога пространств.
@@ -297,7 +382,7 @@ fn normalize_base(raw: &str) -> Option<String> {
     Some(with_scheme)
 }
 
-impl Bridge {
+impl Session {
     /// Создаёт мост над данным runtime.
     pub(crate) fn new(runtime: Handle) -> Self {
         Self {
@@ -315,6 +400,9 @@ impl Bridge {
             social_error: None,
             opened_dm: None,
             base: None,
+            issued: Vec::new(),
+            peering: Vec::new(),
+            synced: false,
             images_ready: Vec::new(),
             explore: None,
             explore_loading: false,
@@ -414,6 +502,8 @@ impl Bridge {
         self.social_error = None;
         self.opened_dm = None;
         self.base = None;
+        self.issued.clear();
+        self.peering.clear();
         self.images_ready.clear();
         self.explore = None;
         self.explore_loading = false;
@@ -439,6 +529,52 @@ impl Bridge {
     /// Идёт ли логин или выход: форму и кнопки надо заблокировать.
     pub(crate) const fn is_busy(&self) -> bool {
         matches!(self.phase, Phase::Connecting | Phase::Closing)
+    }
+
+    /// Сессия работает и получила первый снимок состояния.
+    pub(crate) fn is_live(&self) -> bool {
+        self.phase == Phase::Active && self.cache.is_some()
+    }
+
+    /// Сессия не запущена (нет ни входа, ни выхода в процессе).
+    pub(crate) const fn is_idle(&self) -> bool {
+        matches!(self.phase, Phase::Idle)
+    }
+
+    /// Показывает, что вход начат, ещё до запуска фоновой задачи
+    /// (пока дом выдаёт секрет).
+    pub(crate) fn mark_connecting(&mut self, base: &str) {
+        self.phase = Phase::Connecting;
+        self.base = Some(base.to_owned());
+        self.last_error = None;
+        self.connection = ConnectionState::Connecting;
+    }
+
+    /// Запоминает ошибку и возвращает сессию в покой.
+    pub(crate) fn fail(&mut self, message: impl Into<String>) {
+        self.last_error = Some(message.into());
+        self.phase = Phase::Idle;
+        self.connection = ConnectionState::Connecting;
+    }
+
+    /// Показывает короткое сообщение в интерфейсе (однократно).
+    pub(crate) fn set_info(&mut self, message: String) {
+        self.info = Some(message);
+    }
+
+    /// Сколько каналов и бесед с непрочитанным.
+    pub(crate) fn unread_total(&self) -> usize {
+        self.cache.as_ref().map_or(0, |cache| {
+            let channels = cache
+                .all_channels()
+                .filter(|c| cache.unread_count(&c.id) > 0)
+                .count();
+            let dms = cache
+                .dm_channels()
+                .filter(|d| cache.unread_count(&d.id) > 0)
+                .count();
+            channels + dms
+        })
     }
 
     /// Последняя ошибка, если была.
@@ -509,8 +645,60 @@ impl Bridge {
             }
         }
 
+        self.launch(SessionParams {
+            origin: Origin::Home,
+            base,
+            username: username.trim().to_owned(),
+            password: Zeroizing::new(password.to_owned()),
+            register: None,
+            transport,
+        });
+    }
+
+    /// Запускает вход на другой инстанс по секрету, выданному домом.
+    ///
+    /// Если аккаунта там ещё нет, он создаётся (`register`); отказ
+    /// регистрации не ошибка: аккаунт мог уже существовать.
+    pub(crate) fn start_remote(
+        &mut self,
+        credential: &IssuedCredential,
+        base: &str,
+        display_name: Option<String>,
+        transport: TransportPolicy,
+    ) {
+        // Сессия могла быть помечена «подключается» (ждали секрет), но
+        // фоновая задача ещё не запущена: только в этом случае входим.
+        if self.session.is_some() {
+            return;
+        }
+        let Ok(url) = url::Url::parse(base) else {
+            self.fail("некорректный адрес инстанса");
+            return;
+        };
+        if let Err(err) = transport.check(&url) {
+            self.fail(err.to_string());
+            return;
+        }
+        self.launch(SessionParams {
+            origin: Origin::Remote(url),
+            base: base.to_owned(),
+            username: credential.username.clone(),
+            password: Zeroizing::new(credential.secret.expose().to_owned()),
+            register: Some(RegisterRequest {
+                username: credential.username.clone(),
+                password: credential.secret.expose().to_owned(),
+                display_name,
+                home_instance: Some(credential.home_host.clone()),
+                home_user_id: Some(credential.home_user_id.clone()),
+            }),
+            transport,
+        });
+    }
+
+    /// Общий запуск фоновой сессии.
+    fn launch(&mut self, params: SessionParams) {
         self.phase = Phase::Connecting;
-        self.base = Some(base.clone());
+        self.base = Some(params.base.clone());
         self.last_error = None;
         self.session_lost = false;
         self.connection = ConnectionState::Connecting;
@@ -524,12 +712,6 @@ impl Bridge {
         self.requests = Some(requests_tx);
         self.responses = Some(responses_rx);
 
-        let params = SessionParams {
-            base,
-            username: username.trim().to_owned(),
-            password: Zeroizing::new(password.to_owned()),
-            transport,
-        };
         self.session = Some(self.runtime.spawn(run_session(
             params,
             events_tx,
@@ -537,6 +719,21 @@ impl Bridge {
             requests_rx,
             responses_tx,
         )));
+    }
+
+    /// Адрес инстанса этой сессии.
+    pub(crate) fn base(&self) -> Option<&str> {
+        self.base.as_deref()
+    }
+
+    /// Забирает выданные секреты (у домашней сессии).
+    pub(crate) fn take_issued(&mut self) -> Vec<(String, Result<IssuedCredential, String>)> {
+        std::mem::take(&mut self.issued)
+    }
+
+    /// Забирает ответы о пиринге (у домашней сессии).
+    pub(crate) fn take_peering(&mut self) -> Vec<(String, Result<String, String>)> {
+        std::mem::take(&mut self.peering)
     }
 
     /// Выходит из инстанса: прерывает фоновую сессию.
@@ -854,6 +1051,15 @@ impl Bridge {
                 self.info = Some("Заявка отправлена".to_owned());
                 self.social_error = None;
             }
+            BridgeResponse::Credential { origin, result } => {
+                self.issued.push((origin, result));
+            }
+            BridgeResponse::Peering { origin, result } => {
+                self.peering.push((origin, result));
+            }
+            BridgeResponse::Synced => {
+                self.synced = true;
+            }
             BridgeResponse::Done => {
                 self.social_error = None;
                 self.request(BridgeRequest::Friends);
@@ -870,10 +1076,13 @@ impl Bridge {
 
 /// Параметры входа, переданные фоновой сессии.
 struct SessionParams {
+    origin: Origin,
     base: String,
     username: String,
     /// Пароль затирается в памяти, как только логин выполнен.
     password: Zeroizing<String>,
+    /// Регистрация перед входом (федеративный аккаунт на чужом инстансе).
+    register: Option<RegisterRequest>,
     transport: TransportPolicy,
 }
 
@@ -893,15 +1102,24 @@ async fn run_session(
     let _end = EndGuard(events.clone());
 
     let SessionParams {
+        origin,
         base,
         username,
         password,
+        register,
         transport,
     } = params;
+    let mut refusal = None;
+    if let Some(request) = register {
+        refusal = try_register(&origin, &base, &request, transport, &events).await;
+        if refusal == Some(RegisterOutcome::Failed) {
+            return;
+        }
+    }
     let mut store = CredentialStore::new();
     let login = InstanceHandle::login_with_transport(
         &mut store,
-        Origin::Home,
+        origin,
         &base,
         &username,
         &password,
@@ -915,9 +1133,12 @@ async fn run_session(
     let (handle, ready) = match login {
         Ok(pair) => pair,
         Err(err) => {
-            let _ = events.send(BridgeEvent::Error {
-                message: err.to_string(),
-            });
+            let message = if refusal.is_some() {
+                remote_login_refused(refusal, &err.to_string())
+            } else {
+                err.to_string()
+            };
+            let _ = events.send(BridgeEvent::Error { message });
             return;
         }
     };
@@ -1001,6 +1222,70 @@ async fn run_session(
     }
 }
 
+/// Чем закончилась попытка регистрации на чужом инстансе.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RegisterOutcome {
+    /// Аккаунт создан.
+    Created,
+    /// Имя занято: аккаунт, возможно, уже есть.
+    Taken,
+    /// Инстанс не принимает новых федеративных аккаунтов.
+    Closed,
+    /// Другая ошибка; текст уже отправлен в GUI.
+    Failed,
+}
+
+/// Пытается создать аккаунт; отказ «занято/закрыто» не ошибка, дальше идёт вход.
+async fn try_register(
+    origin: &Origin,
+    base: &str,
+    request: &RegisterRequest,
+    transport: TransportPolicy,
+    events: &std_mpsc::Sender<BridgeEvent>,
+) -> Option<RegisterOutcome> {
+    let client = match ApiClient::with_policy(origin.clone(), base, transport) {
+        Ok(client) => client,
+        Err(err) => {
+            let _ = events.send(BridgeEvent::Error {
+                message: err.to_string(),
+            });
+            return Some(RegisterOutcome::Failed);
+        }
+    };
+    match client.register(request).await {
+        Ok(_) => Some(RegisterOutcome::Created),
+        Err(bs_api::ApiError::Server { status, .. }) if status.as_u16() == 409 => {
+            Some(RegisterOutcome::Taken)
+        }
+        Err(bs_api::ApiError::Server { status, .. }) if status.as_u16() == 403 => {
+            Some(RegisterOutcome::Closed)
+        }
+        Err(err) => {
+            let _ = events.send(BridgeEvent::Error {
+                message: err.to_string(),
+            });
+            Some(RegisterOutcome::Failed)
+        }
+    }
+}
+
+/// Объяснение отказа входа на чужой инстанс: что именно можно утверждать.
+///
+/// Про существующий аккаунт говорим только после ответа «имя занято»:
+/// закрытый инстанс одинаково отвечает на вход и за несуществующий
+/// аккаунт, и за аккаунт с другим паролем.
+fn remote_login_refused(outcome: Option<RegisterOutcome>, raw: &str) -> String {
+    match outcome {
+        Some(RegisterOutcome::Taken) => "На этом инстансе уже есть аккаунт с таким именем, \
+            но он не принимает пароль, выданный вашим домашним инстансом."
+            .to_owned(),
+        Some(RegisterOutcome::Closed) => "Инстанс не принимает новые аккаунты с других \
+            инстансов. Если аккаунт у вас там уже есть, он не принял выданный пароль."
+            .to_owned(),
+        _ => raw.to_owned(),
+    }
+}
+
 /// Сколько картинок качается и декодируется одновременно.
 const MAX_IMAGE_JOBS: usize = 6;
 
@@ -1026,6 +1311,56 @@ async fn load_image(
     clippy::too_many_lines,
     reason = "раскладка egui читается лучше одним блоком"
 )]
+/// Проверяет пароль (если он есть) и просит у дома секрет для входа на `origin`.
+async fn issue_credential(
+    client: &ApiClient,
+    origin: &str,
+    password: Option<&Secret>,
+) -> BridgeResponse {
+    let result = issue_credential_inner(client, origin, password).await;
+    BridgeResponse::Credential {
+        origin: origin.to_owned(),
+        result,
+    }
+}
+
+async fn issue_credential_inner(
+    client: &ApiClient,
+    origin: &str,
+    password: Option<&Secret>,
+) -> Result<IssuedCredential, String> {
+    let me = client.me().await.map_err(|err| err.to_string())?;
+    let home_host = me
+        .home_instance
+        .clone()
+        .unwrap_or_else(|| bs_identity::identity::host_of(client.base()));
+    if bs_identity::identity::host_of(origin) == home_host {
+        return Err("Это ваш домашний инстанс: он уже подключён".to_owned());
+    }
+    if let Some(password) = password
+        && !client
+            .verify_password(password.expose())
+            .await
+            .map_err(|err| err.to_string())?
+    {
+        return Err("Неверный пароль".to_owned());
+    }
+    let issued = client
+        .federation_credential(&FederationCredentialRequest::new(origin))
+        .await
+        .map_err(|err| err.to_string())?;
+    let bare = me.username.split('@').next().unwrap_or(&me.username);
+    Ok(IssuedCredential {
+        username: format!("{bare}@{home_host}"),
+        secret: Secret::new(issued.secret),
+        home_host,
+        home_user_id: me.home_user_id.clone().unwrap_or_else(|| me.id.clone()),
+        display_name: me.display_name.clone(),
+        provisioned: issued.provisioned,
+    })
+}
+
+#[allow(clippy::too_many_lines, reason = "по ветке на каждый вид запроса")]
 async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> BridgeResponse {
     match request {
         BridgeRequest::Friends => match client.friends().await {
@@ -1079,6 +1414,30 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
         },
         // Картинки обрабатываются отдельно и параллельно (см. `run_session`).
         BridgeRequest::Image(_) => BridgeResponse::Done,
+        BridgeRequest::IssueCredential { origin, password } => {
+            issue_credential(client, &origin, password.as_ref()).await
+        }
+        BridgeRequest::EnsurePeered(origin) => BridgeResponse::Peering {
+            result: client
+                .ensure_peered(&origin)
+                .await
+                .map(|answer| answer.peering_status)
+                .map_err(|err| err.to_string()),
+            origin,
+        },
+        BridgeRequest::MarkProvisioned(origin) => {
+            let request = FederationCredentialRequest::marking_provisioned(origin);
+            match client.federation_credential(&request).await {
+                Ok(_) => BridgeResponse::Synced,
+                Err(err) => BridgeResponse::Failed(err.to_string()),
+            }
+        }
+        BridgeRequest::SyncInstances(entries) => {
+            match client.set_replicated_instances(&entries).await {
+                Ok(_) => BridgeResponse::Synced,
+                Err(err) => BridgeResponse::Failed(err.to_string()),
+            }
+        }
         BridgeRequest::CreateSpace(body) => match client.create_space(&body).await {
             Ok(space) => BridgeResponse::Space(Box::new(space)),
             Err(err) => BridgeResponse::Failed(err.to_string()),
@@ -1140,8 +1499,9 @@ mod tests {
     use tokio::sync::mpsc as tokio_mpsc;
 
     use super::{
-        Bridge, BridgeEvent, BridgeRequest, BridgeResponse, ChannelKind, HISTORY_PAGE,
-        HistoryItems, Phase, SessionParams, normalize_base, run_session, std_mpsc,
+        BridgeEvent, BridgeRequest, BridgeResponse, ChannelKind, HISTORY_PAGE, HistoryItems, Phase,
+        RegisterOutcome, Secret, Session, SessionParams, normalize_base, remote_login_refused,
+        run_session, std_mpsc,
     };
 
     /// Минимальный `ready`, достаточный для создания кэша.
@@ -1172,7 +1532,7 @@ mod tests {
     /// Пустой runtime нужен только как держатель `Handle`; задачи в этих
     /// тестах не запускаются, сети нет.
     #[allow(clippy::expect_used, reason = "в тестах паника допустима")]
-    fn new_bridge() -> Bridge {
+    fn new_bridge() -> Session {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("runtime");
@@ -1180,12 +1540,12 @@ mod tests {
         // Runtime намеренно утекает: `Handle` должен оставаться валидным
         // на всё время теста, а дропать его вручную ради этого не нужно.
         std::mem::forget(runtime);
-        Bridge::new(handle)
+        Session::new(handle)
     }
 
     /// Мост с живой сессией: кэш и каналы есть, сети нет.
     fn active_bridge() -> (
-        Bridge,
+        Session,
         tokio_mpsc::UnboundedReceiver<ClientEvent>,
         tokio_mpsc::UnboundedReceiver<BridgeRequest>,
     ) {
@@ -1203,11 +1563,48 @@ mod tests {
 
     fn params() -> SessionParams {
         SessionParams {
+            origin: bs_types::Origin::Home,
             base: "http://127.0.0.1:1".to_owned(),
             username: "alice".to_owned(),
             password: zeroize::Zeroizing::new("secret".to_owned()),
+            register: None,
             transport: TransportPolicy::Strict,
         }
+    }
+
+    #[test]
+    fn secrets_never_print() {
+        let secret = Secret::new("очень-секретно");
+        assert!(!format!("{secret:?}").contains("секретно"));
+        let request = BridgeRequest::IssueCredential {
+            origin: "https://o.example".into(),
+            password: Some(secret),
+        };
+        assert!(!format!("{request:?}").contains("секретно"));
+    }
+
+    #[test]
+    fn refusals_say_only_what_is_known() {
+        let taken = remote_login_refused(Some(RegisterOutcome::Taken), "x");
+        assert!(taken.contains("уже есть аккаунт"));
+        // Закрытый инстанс не выдаёт, есть ли там аккаунт: утверждать нельзя.
+        let closed = remote_login_refused(Some(RegisterOutcome::Closed), "x");
+        assert!(closed.contains("Если аккаунт"));
+        assert!(!closed.contains("уже есть аккаунт"));
+        assert_eq!(
+            remote_login_refused(None, "сеть недоступна"),
+            "сеть недоступна"
+        );
+    }
+
+    #[test]
+    fn remote_start_requires_a_waiting_session() {
+        let mut session = new_bridge();
+        session.mark_connecting("https://orbit.example");
+        assert_eq!(session.phase(), Phase::Connecting);
+        session.fail("нет");
+        assert_eq!(session.phase(), Phase::Idle);
+        assert_eq!(session.last_error(), Some("нет"));
     }
 
     // ─── Жизненный цикл сессии ───────────────────────────────────────────

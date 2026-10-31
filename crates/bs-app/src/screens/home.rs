@@ -7,7 +7,8 @@
 use bs_types::{ExploreSpace, SpaceVisibility, UserStatus};
 use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
 
-use crate::bridge::{Bridge, BridgeRequest};
+use crate::bridge::BridgeRequest;
+use crate::fleet::Bridge;
 use crate::social::{
     friend_display_name, friend_status_text, is_friend, request_is_incoming, request_name,
     search_user_name, status_label,

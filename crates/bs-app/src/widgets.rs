@@ -450,6 +450,30 @@ pub(crate) fn text_field(
         .inner
 }
 
+/// Поле для пароля: символы скрыты.
+pub(crate) fn secret_field(
+    ui: &mut egui::Ui,
+    text: &mut String,
+    hint: &str,
+    max_chars: usize,
+) -> egui::Response {
+    egui::Frame::new()
+        .fill(BG_INPUT)
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::symmetric(12, 9))
+        .show(ui, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(text)
+                    .password(true)
+                    .hint_text(egui::RichText::new(hint).color(TEXT_FAINT))
+                    .frame(egui::Frame::NONE)
+                    .char_limit(max_chars)
+                    .desired_width(ui.available_width()),
+            )
+        })
+        .inner
+}
+
 /// Многострочное поле формы со счётчиком символов.
 pub(crate) fn text_area(
     ui: &mut egui::Ui,
@@ -543,4 +567,21 @@ pub(crate) fn toggle(ui: &mut egui::Ui, value: &mut bool) -> bool {
         return true;
     }
     false
+}
+
+/// Метка «чужого инстанса» на значке пространства: кружок с буквой хоста.
+pub(crate) fn origin_badge(ui: &egui::Ui, rect: egui::Rect, host: &str) {
+    let center = rect.center() + egui::vec2(17.0, 17.0);
+    let painter = ui.painter();
+    painter.circle_filled(center, 9.0, crate::theme::BG_RAIL);
+    painter.circle_filled(center, 7.5, crate::theme::SKY);
+    painter.text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        host.chars()
+            .next()
+            .map_or_else(String::new, |c| c.to_uppercase().to_string()),
+        egui::FontId::proportional(10.0),
+        egui::Color32::BLACK,
+    );
 }
