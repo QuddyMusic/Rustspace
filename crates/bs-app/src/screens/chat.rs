@@ -690,11 +690,7 @@ impl ChatScreen {
                     self.settings = None;
                     action = ChatAction::Logout;
                 }
-                SettingsAction::Connect { address, password } => {
-                    bridge.connect_remote(&address, Some(&password));
-                }
-                SettingsAction::Retry(index) => bridge.retry(index),
-                SettingsAction::Disconnect(index) => bridge.disconnect(index),
+                SettingsAction::Connections(chosen) => route_connection(bridge, chosen),
             }
             self.show_toast(&ctx, now);
             return action;
@@ -1602,6 +1598,36 @@ impl ChatScreen {
                 ui.close();
             }
         });
+    }
+}
+
+/// Выполняет действие из панели «Подключения».
+fn route_connection(bridge: &mut Bridge, action: super::connections::ConnAction) {
+    use super::connections::ConnAction;
+    match action {
+        ConnAction::None => {}
+        ConnAction::Connect { address, password } => {
+            bridge.connect_remote(&address, Some(&password));
+        }
+        ConnAction::Reconnect(origin) => bridge.reconnect(&origin),
+        ConnAction::Reauthenticate { origin, password } => {
+            bridge.reauthenticate(&origin, &password);
+        }
+        ConnAction::OwnLogin {
+            origin,
+            username,
+            password,
+        } => bridge.own_login(&origin, &username, &password),
+        ConnAction::Disconnect(origin) => bridge.disconnect(&origin),
+        ConnAction::ForceRemove(origin) => bridge.force_remove(&origin),
+        ConnAction::Delete { origins, mode } => {
+            let targets = if origins.is_empty() {
+                bridge.rows().into_iter().map(|r| r.origin).collect()
+            } else {
+                origins
+            };
+            bridge.delete_identity(&targets, mode);
+        }
     }
 }
 

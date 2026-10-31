@@ -27,6 +27,7 @@ pub mod error;
 pub mod federation;
 pub mod instance;
 pub mod read;
+pub mod registry;
 pub mod write;
 
 pub use assets::{AssetPath, STICKER_PREFIX, resolve_asset};
@@ -41,6 +42,9 @@ pub use federation::{
 };
 pub use instance::{
     InstanceInfo, PeerEnsureResponse, RegisterRequest, ReplicatedEntry, VerifyPasswordResponse,
+};
+pub use registry::{
+    IdentityDeleteMode, IdentityDeleteResult, RegistryEntry, RegistryResponse, RegistryStatus,
 };
 pub use read::{
     DmMessagePage, MESSAGES_LIMIT_DEFAULT, MESSAGES_LIMIT_MAX, MESSAGES_LIMIT_MIN, MessagePage,

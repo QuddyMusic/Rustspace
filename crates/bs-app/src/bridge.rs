@@ -21,7 +21,10 @@
 use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
 
-use bs_api::{ApiClient, FederationCredentialRequest, RegisterRequest, ReplicatedEntry};
+use bs_api::{
+    ApiClient, ChangePasswordRequest, FederationCredentialRequest, IdentityDeleteMode,
+    IdentityDeleteResult, RegisterRequest, RegistryEntry, RegistryResponse, ReplicatedEntry,
+};
 use bs_core::{Cache, apply};
 use bs_identity::CredentialStore;
 use bs_instances::{ConnectionState, InstanceEvent, InstanceHandle, ReconnectPolicy};
@@ -178,6 +181,25 @@ pub(crate) enum BridgeRequest {
     MarkProvisioned(String),
     /// Сообщить инстансу список связанных инстансов.
     SyncInstances(Vec<ReplicatedEntry>),
+    /// Только для домашней сессии: прочитать серверный реестр подключений.
+    LoadRegistry,
+    /// Только для домашней сессии: записать реестр (последний пишет).
+    PutRegistry {
+        /// Записи.
+        entries: Vec<RegistryEntry>,
+        /// Метка времени записи, мс.
+        updated_at: i64,
+    },
+    /// Только для домашней сессии: удалить учётку на удалённых инстансах.
+    DeleteIdentity {
+        /// Инстансы.
+        origins: Vec<String>,
+        /// Что делать с данными.
+        mode: IdentityDeleteMode,
+    },
+    /// Только для сессии удалённого инстанса: сменить пароль аккаунта на
+    /// секрет, выданный домом (так аккаунт переводят на выданные данные).
+    AdoptSecret(Secret),
     /// Страница истории: самая новая или старее `before`.
     History {
         /// Канал или личный канал.
@@ -249,13 +271,41 @@ pub(crate) enum BridgeResponse {
     Done,
     /// Список связанных инстансов отправлен (или секрет отмечен).
     Synced,
+    /// Реестр подключений с сервера.
+    Registry(Result<RegistryResponse, String>),
+    /// Реестр записан.
+    RegistrySaved(Result<(), String>),
+    /// Итоги удаления учётки по инстансам.
+    IdentityDeleted(Result<HashMap<String, IdentityDeleteResult>, String>),
+    /// Пароль удалённого аккаунта заменён выданным секретом.
+    Adopted(Result<(), String>),
     /// Запрос не удался.
     Failed(String),
+}
+
+/// Почему не удался вход в инстанс.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailureKind {
+    /// Инстанс не ответил: сеть, DNS, TLS, таймаут.
+    Network,
+    /// Аккаунт на инстансе есть, но он не принял выданный домом секрет.
+    CredentialRefused,
+    /// Инстанс не принимает новые аккаунты с других инстансов и отказал во входе.
+    RegistrationClosed,
+    /// Остальные отказы: токен или пароль не приняты, ошибка сервера.
+    Auth,
 }
 
 /// Событие из фоновой задачи в GUI-поток.
 #[derive(Debug)]
 enum BridgeEvent {
+    /// Вход не удался; `kind` решает, что показать в списке подключений.
+    LoginFailed {
+        /// Готовый текст для показа.
+        message: String,
+        /// Причина.
+        kind: FailureKind,
+    },
     /// Первый снимок состояния инстанса.
     Ready {
         /// Сам снимок.
@@ -339,6 +389,16 @@ pub(crate) struct Session {
     peering: Vec<(String, Result<String, String>)>,
     /// Удалось ли отправить список инстансов.
     synced: bool,
+    /// Причина последнего неудачного входа.
+    failure: Option<FailureKind>,
+    /// Ответ на `LoadRegistry` (только у домашней сессии).
+    registry_in: Option<Result<RegistryResponse, String>>,
+    /// Итоги `PutRegistry` (только у домашней сессии).
+    saved_in: Vec<Result<(), String>>,
+    /// Итоги `DeleteIdentity` (только у домашней сессии).
+    deleted_in: Vec<Result<HashMap<String, IdentityDeleteResult>, String>>,
+    /// Итог смены пароля удалённого аккаунта на выданный секрет.
+    adopted_in: Option<Result<(), String>>,
     /// Готовые картинки, которые GUI ещё не превратил в текстуры.
     images_ready: Vec<(bs_api::AssetPath, Result<bs_media::Decoded, String>)>,
     /// Последняя страница каталога пространств.
@@ -402,6 +462,11 @@ impl Session {
             base: None,
             issued: Vec::new(),
             peering: Vec::new(),
+            failure: None,
+            registry_in: None,
+            saved_in: Vec::new(),
+            deleted_in: Vec::new(),
+            adopted_in: None,
             synced: false,
             images_ready: Vec::new(),
             explore: None,
@@ -458,6 +523,10 @@ impl Session {
             BridgeEvent::Server { event } => self.apply_server_event(*event),
             BridgeEvent::State { state } => self.connection = state,
             BridgeEvent::Error { message } => self.last_error = Some(message),
+            BridgeEvent::LoginFailed { message, kind } => {
+                self.last_error = Some(message);
+                self.failure = Some(kind);
+            }
             BridgeEvent::Disconnected => {
                 self.connection = ConnectionState::Stopped;
                 self.last_error = Some("соединение закрыто".to_owned());
@@ -504,6 +573,10 @@ impl Session {
         self.base = None;
         self.issued.clear();
         self.peering.clear();
+        self.registry_in = None;
+        self.saved_in.clear();
+        self.deleted_in.clear();
+        self.adopted_in = None;
         self.images_ready.clear();
         self.explore = None;
         self.explore_loading = false;
@@ -665,6 +738,7 @@ impl Session {
         base: &str,
         display_name: Option<String>,
         transport: TransportPolicy,
+        register: bool,
     ) {
         // Сессия могла быть помечена «подключается» (ждали секрет), но
         // фоновая задача ещё не запущена: только в этом случае входим.
@@ -684,7 +758,7 @@ impl Session {
             base: base.to_owned(),
             username: credential.username.clone(),
             password: Zeroizing::new(credential.secret.expose().to_owned()),
-            register: Some(RegisterRequest {
+            register: register.then(|| RegisterRequest {
                 username: credential.username.clone(),
                 password: credential.secret.expose().to_owned(),
                 display_name,
@@ -695,11 +769,42 @@ impl Session {
         });
     }
 
+    /// Входит на чужой инстанс **собственным** паролем аккаунта там (без
+    /// регистрации): запасной путь, когда инстанс не принял выданный секрет.
+    pub(crate) fn start_remote_login(
+        &mut self,
+        base: &str,
+        username: &str,
+        password: &Secret,
+        transport: TransportPolicy,
+    ) {
+        if self.session.is_some() {
+            return;
+        }
+        let Ok(url) = url::Url::parse(base) else {
+            self.fail("некорректный адрес инстанса");
+            return;
+        };
+        if let Err(err) = transport.check(&url) {
+            self.fail(err.to_string());
+            return;
+        }
+        self.launch(SessionParams {
+            origin: Origin::Remote(url),
+            base: base.to_owned(),
+            username: username.to_owned(),
+            password: Zeroizing::new(password.expose().to_owned()),
+            register: None,
+            transport,
+        });
+    }
+
     /// Общий запуск фоновой сессии.
     fn launch(&mut self, params: SessionParams) {
         self.phase = Phase::Connecting;
         self.base = Some(params.base.clone());
         self.last_error = None;
+        self.failure = None;
         self.session_lost = false;
         self.connection = ConnectionState::Connecting;
 
@@ -729,6 +834,33 @@ impl Session {
     /// Забирает выданные секреты (у домашней сессии).
     pub(crate) fn take_issued(&mut self) -> Vec<(String, Result<IssuedCredential, String>)> {
         std::mem::take(&mut self.issued)
+    }
+
+    /// Причина последнего неудачного входа.
+    pub(crate) const fn failure(&self) -> Option<FailureKind> {
+        self.failure
+    }
+
+    /// Забирает реестр подключений (у домашней сессии).
+    pub(crate) fn take_registry(&mut self) -> Option<Result<RegistryResponse, String>> {
+        self.registry_in.take()
+    }
+
+    /// Забирает итоги записи реестра (у домашней сессии).
+    pub(crate) fn take_saved(&mut self) -> Vec<Result<(), String>> {
+        std::mem::take(&mut self.saved_in)
+    }
+
+    /// Забирает итоги удаления учёток (у домашней сессии).
+    pub(crate) fn take_deleted(
+        &mut self,
+    ) -> Vec<Result<HashMap<String, IdentityDeleteResult>, String>> {
+        std::mem::take(&mut self.deleted_in)
+    }
+
+    /// Забирает итог смены пароля на выданный секрет.
+    pub(crate) fn take_adopted(&mut self) -> Option<Result<(), String>> {
+        self.adopted_in.take()
     }
 
     /// Забирает ответы о пиринге (у домашней сессии).
@@ -1060,6 +1192,10 @@ impl Session {
             BridgeResponse::Synced => {
                 self.synced = true;
             }
+            BridgeResponse::Registry(result) => self.registry_in = Some(result),
+            BridgeResponse::RegistrySaved(result) => self.saved_in.push(result),
+            BridgeResponse::IdentityDeleted(result) => self.deleted_in.push(result),
+            BridgeResponse::Adopted(result) => self.adopted_in = Some(result),
             BridgeResponse::Done => {
                 self.social_error = None;
                 self.request(BridgeRequest::Friends);
@@ -1138,7 +1274,13 @@ async fn run_session(
             } else {
                 err.to_string()
             };
-            let _ = events.send(BridgeEvent::Error { message });
+            let kind = match refusal {
+                Some(RegisterOutcome::Taken) => FailureKind::CredentialRefused,
+                Some(RegisterOutcome::Closed) => FailureKind::RegistrationClosed,
+                _ if is_network_error(&err) => FailureKind::Network,
+                _ => FailureKind::Auth,
+            };
+            let _ = events.send(BridgeEvent::LoginFailed { message, kind });
             return;
         }
     };
@@ -1235,6 +1377,19 @@ enum RegisterOutcome {
     Failed,
 }
 
+/// Сетевая ли это ошибка (инстанс не ответил), а не отказ сервера.
+fn is_network_error(err: &bs_instances::InstanceError) -> bool {
+    use bs_api::ApiError;
+    use bs_identity::IdentityError;
+    use bs_instances::InstanceError;
+    matches!(
+        err,
+        InstanceError::Api(ApiError::Transport(_))
+            | InstanceError::Identity(IdentityError::Api(ApiError::Transport(_)))
+            | InstanceError::Ws(_)
+    )
+}
+
 /// Пытается создать аккаунт; отказ «занято/закрыто» не ошибка, дальше идёт вход.
 async fn try_register(
     origin: &Origin,
@@ -1261,8 +1416,14 @@ async fn try_register(
             Some(RegisterOutcome::Closed)
         }
         Err(err) => {
-            let _ = events.send(BridgeEvent::Error {
+            let kind = if matches!(err, bs_api::ApiError::Transport(_)) {
+                FailureKind::Network
+            } else {
+                FailureKind::Auth
+            };
+            let _ = events.send(BridgeEvent::LoginFailed {
                 message: err.to_string(),
+                kind,
             });
             Some(RegisterOutcome::Failed)
         }
@@ -1432,6 +1593,31 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                 Err(err) => BridgeResponse::Failed(err.to_string()),
             }
         }
+        BridgeRequest::LoadRegistry => {
+            BridgeResponse::Registry(client.federation_registry().await.map_err(|e| e.to_string()))
+        }
+        BridgeRequest::PutRegistry {
+            entries,
+            updated_at,
+        } => BridgeResponse::RegistrySaved(
+            client
+                .put_federation_registry(&entries, updated_at)
+                .await
+                .map_err(|e| e.to_string()),
+        ),
+        BridgeRequest::DeleteIdentity { origins, mode } => BridgeResponse::IdentityDeleted(
+            client
+                .delete_federation_identity(&origins, mode)
+                .await
+                .map_err(|e| e.to_string()),
+        ),
+        BridgeRequest::AdoptSecret(secret) => BridgeResponse::Adopted(
+            client
+                .change_password(&ChangePasswordRequest::new(secret.expose()))
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+        ),
         BridgeRequest::SyncInstances(entries) => {
             match client.set_replicated_instances(&entries).await {
                 Ok(_) => BridgeResponse::Synced,
@@ -1869,9 +2055,10 @@ mod tests {
         let event = events_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("run_session должен прислать событие об ошибке");
-        let BridgeEvent::Error { message } = event else {
-            unreachable!("ожидалась ошибка, пришло {event:?}");
+        let BridgeEvent::LoginFailed { message, kind } = event else {
+            unreachable!("ожидалась ошибка входа, пришло {event:?}");
         };
+        assert_eq!(kind, super::FailureKind::Auth, "отказ сервера не сетевая ошибка");
         assert!(message.contains("401"), "текст ошибки: {message}");
         assert!(message.contains("Invalid credentials"), "{message}");
         assert!(

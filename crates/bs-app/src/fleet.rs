@@ -20,11 +20,12 @@
 
 use std::ops::{Deref, DerefMut};
 
-use bs_api::ReplicatedEntry;
+use bs_api::{IdentityDeleteMode, RegistryEntry, RegistryStatus, ReplicatedEntry};
 use bs_types::TransportPolicy;
 use tokio::runtime::Handle;
 
-use crate::bridge::{BridgeRequest, Secret, Session};
+use crate::bridge::{BridgeRequest, FailureKind, IssuedCredential, Secret, Session};
+use crate::registry::{self, Registry, now_ms};
 
 /// Сколько чужих инстансов можно подключить: домашний сервер сам присылает
 /// список связанных инстансов, и бесконечно ходить по нему клиент не должен.
@@ -32,6 +33,10 @@ pub(crate) const MAX_REMOTES: usize = 8;
 
 /// Слот: один инстанс.
 #[derive(Debug)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "независимые признаки этапов подключения"
+)]
 struct Slot {
     session: Session,
     /// Адрес инстанса (`https://host`), как его вводил пользователь.
@@ -46,6 +51,33 @@ struct Slot {
     was_live: bool,
     /// Ответ сервера о пиринге.
     peering: Option<String>,
+    /// Можно ли создать аккаунт на инстансе, если его там нет. Автоподключение
+    /// только входит: аккаунты заводит лишь явное действие пользователя.
+    register: bool,
+    /// Что об этом слоте уже записано в реестр.
+    recorded: Recorded,
+    /// Вход собственным паролем аккаунта на инстансе (запасной путь): логин,
+    /// пароль и секрет, на который затем сменим пароль.
+    manual: Option<Manual>,
+    /// Ждём ответа на смену пароля удалённого аккаунта на выданный секрет.
+    adopting: Option<IssuedCredential>,
+    /// Пароль сменён: после закрытия временной сессии входим выданным секретом.
+    restart: Option<IssuedCredential>,
+}
+
+/// Что слот уже сообщил реестру.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Recorded {
+    Nothing,
+    Connected,
+    Failed,
+}
+
+/// Собственные данные аккаунта на удалённом инстансе.
+#[derive(Debug)]
+struct Manual {
+    username: String,
+    password: Secret,
 }
 
 impl Slot {
@@ -58,40 +90,70 @@ impl Slot {
             provisioned: true,
             was_live: false,
             peering: None,
+            register: false,
+            recorded: Recorded::Nothing,
+            manual: None,
+            adopting: None,
+            restart: None,
         }
     }
 }
 
-/// Состояние инстанса для списка в интерфейсе.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum InstanceState {
-    /// Работает.
-    Live,
-    /// Подключается.
+/// Состояние подключения в списке.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowState {
+    /// Сессия работает.
+    Connected,
+    /// Идёт подключение.
     Connecting,
-    /// Не подключён (с причиной, если известна).
-    Failed(Option<String>),
+    /// Отключён пользователем.
+    Disconnected,
+    /// Инстанс не отвечал.
+    Unreachable,
+    /// Нужен вход заново.
+    AuthExpired,
 }
 
-/// Строка списка инстансов.
+/// Строка списка подключений.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct InstanceView {
-    /// Номер слота.
-    pub(crate) index: usize,
+pub(crate) struct ConnectionRow {
+    /// Адрес инстанса.
+    pub(crate) origin: String,
     /// Название для показа.
-    pub(crate) name: String,
-    /// Адрес.
-    pub(crate) base: String,
+    pub(crate) label: String,
     /// Имя пользователя на инстансе.
-    pub(crate) username: Option<String>,
-    /// Домашний ли это инстанс.
-    pub(crate) home: bool,
-    /// Состояние соединения.
-    pub(crate) state: InstanceState,
+    pub(crate) username: String,
+    /// Идентификатор пользователя на инстансе.
+    pub(crate) remote_user_id: String,
+    /// Состояние.
+    pub(crate) state: RowState,
+    /// Код причины из реестра.
+    pub(crate) reason: Option<String>,
+    /// Текст последней ошибки этого запуска (для подробностей).
+    pub(crate) detail: Option<String>,
+    /// Когда добавлен, мс.
+    pub(crate) added_at: i64,
+    /// Последнее подключение, мс.
+    pub(crate) last_connected_at: Option<i64>,
+    /// Когда отключён вручную, мс.
+    pub(crate) disconnected_at: Option<i64>,
     /// Число каналов и бесед с непрочитанным.
     pub(crate) unread: usize,
     /// Статус пиринга, как его назвал сервер.
     pub(crate) peering: Option<String>,
+    /// Инстанс отказал выданному секрету: можно войти своим паролем там.
+    pub(crate) offer_own_login: bool,
+}
+
+/// Домашний инстанс в шапке списка.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HomeRow {
+    /// Адрес.
+    pub(crate) base: String,
+    /// Имя пользователя.
+    pub(crate) username: String,
+    /// Работает ли сессия.
+    pub(crate) live: bool,
 }
 
 /// Мост GUI ↔ tokio для всех инстансов.
@@ -111,6 +173,12 @@ pub(crate) struct Bridge {
     leaving: bool,
     /// Короткое сообщение о подключении инстансов.
     message: Option<String>,
+    /// Реестр подключений (источник списка «Подключения»).
+    registry: Registry,
+    /// Запрос реестра отправлен, ответа ещё нет.
+    registry_requested: bool,
+    /// Инстансы, на которых просили удалить учётную запись.
+    deleting: Vec<String>,
 }
 
 impl Deref for Bridge {
@@ -167,6 +235,9 @@ impl Bridge {
             lost: false,
             leaving: false,
             message: None,
+            registry: Registry::default(),
+            registry_requested: false,
+            deleting: Vec::new(),
         }
     }
 
@@ -211,10 +282,58 @@ impl Bridge {
         for slot in &mut self.slots {
             slot.session.poll();
         }
+        self.deliver_registry();
         self.deliver_credentials();
         self.deliver_peering();
+        self.drive_adoption();
         self.track_liveness();
+        self.record_outcomes();
+        self.deliver_deletions();
+        self.flush_registry();
         self.collect_losses();
+    }
+
+    /// Серверный реестр пришёл: собираем список и поднимаем подключения.
+    fn deliver_registry(&mut self) {
+        let Some(answer) = self.slots[0].session.take_registry() else {
+            return;
+        };
+        self.registry_requested = false;
+        let known: Vec<(String, String)> = self.slots[0]
+            .session
+            .cache()
+            .map(|cache| {
+                cache
+                    .me()
+                    .replicated_instances
+                    .iter()
+                    .filter_map(|r| Some((canonical_base(&r.origin)?, r.username.clone())))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let home_base = self.slots[0].base.clone();
+        let known: Vec<(String, String)> = known
+            .into_iter()
+            .filter(|(origin, _)| home_base.as_deref() != Some(origin.as_str()))
+            .collect();
+        match answer {
+            Ok(server) => self.registry.load(Some(server), &known, now_ms()),
+            Err(message) => {
+                tracing::warn!(%message, "реестр подключений не прочитан");
+                self.message =
+                    Some("Не удалось прочитать список подключений с сервера".to_owned());
+                self.registry.load(None, &known, now_ms());
+            }
+        }
+        for (origin, username) in self.registry.auto_targets() {
+            let Some(base) = canonical_base(&origin) else {
+                continue;
+            };
+            if home_base.as_deref() == Some(base.as_str()) {
+                continue;
+            }
+            self.add_remote(&base, None, Some(username), false);
+        }
     }
 
     fn deliver_credentials(&mut self) {
@@ -233,8 +352,20 @@ impl Bridge {
                     slot.username = Some(credential.username.clone());
                     slot.provisioned = credential.provisioned;
                     let name = credential.display_name.clone();
-                    slot.session
-                        .start_remote(&credential, &base, name, transport);
+                    if let Some(manual) = slot.manual.as_ref() {
+                        // Запасной путь: входим своим паролем на инстансе и
+                        // потом переводим аккаунт на выданный секрет.
+                        slot.session.start_remote_login(
+                            &base,
+                            &manual.username,
+                            &manual.password,
+                            transport,
+                        );
+                        slot.adopting = Some(credential);
+                    } else {
+                        slot.session
+                            .start_remote(&credential, &base, name, transport, slot.register);
+                    }
                 }
                 Err(message) => slot.session.fail(message),
             }
@@ -274,6 +405,49 @@ impl Bridge {
         }
     }
 
+    /// Вход своим паролем удался: просим инстанс принять выданный секрет и
+    /// затем входим уже им. Так аккаунт переводится на выданные данные.
+    fn drive_adoption(&mut self) {
+        let transport = self.transport;
+        for slot in self.slots.iter_mut().skip(1) {
+            if slot.session.is_live()
+                && let Some(credential) = slot.adopting.take()
+            {
+                slot.session
+                    .request(BridgeRequest::AdoptSecret(credential.secret.clone()));
+                slot.restart = Some(credential);
+            }
+            if slot.restart.is_some()
+                && let Some(answer) = slot.session.take_adopted()
+            {
+                match answer {
+                    Ok(()) => slot.session.logout(),
+                    Err(message) => {
+                        tracing::warn!(%message, "пароль на инстансе не заменён выданным");
+                        slot.restart = None;
+                        slot.manual = None;
+                        self.message = Some(
+                            "Вход выполнен, но перевести аккаунт на выданный пароль не удалось"
+                                .to_owned(),
+                        );
+                    }
+                }
+            }
+            if slot.restart.is_some()
+                && slot.session.is_idle()
+                && let Some(credential) = slot.restart.take()
+                && let Some(base) = slot.base.clone()
+            {
+                slot.manual = None;
+                slot.recorded = Recorded::Nothing;
+                slot.provisioned = false;
+                let name = credential.display_name.clone();
+                slot.session
+                    .start_remote(&credential, &base, name, transport, false);
+            }
+        }
+    }
+
     /// Реагирует на переход слота в рабочее состояние.
     fn track_liveness(&mut self) {
         let mut newly_live = Vec::new();
@@ -293,29 +467,114 @@ impl Bridge {
         }
     }
 
-    /// Домашний инстанс заработал: поднимаем связанные с ним инстансы.
-    fn on_home_live(&mut self) {
-        let home_base = self.slots[0].base.clone();
-        let entries: Vec<(String, String)> = self.slots[0]
-            .session
-            .cache()
-            .map(|cache| {
-                cache
-                    .me()
-                    .replicated_instances
-                    .iter()
-                    .map(|r| (r.origin.clone(), r.username.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        for (origin, username) in entries {
-            let Some(base) = canonical_base(&origin) else {
+    /// Записывает в реестр итог каждой попытки: подключились или нет и почему.
+    fn record_outcomes(&mut self) {
+        if !self.registry.is_settled() {
+            return;
+        }
+        let now = now_ms();
+        for slot in self.slots.iter_mut().skip(1) {
+            let Some(base) = slot.base.clone() else {
                 continue;
             };
-            if home_base.as_deref() == Some(base.as_str()) {
-                continue;
+            if slot.session.is_live() {
+                if slot.recorded != Recorded::Connected
+                    && slot.adopting.is_none()
+                    && slot.restart.is_none()
+                    && let Some(cache) = slot.session.cache()
+                {
+                    let me = cache.me();
+                    self.registry
+                        .mark_connected(&base, "", &me.username, &me.id, now);
+                    slot.recorded = Recorded::Connected;
+                }
+            } else if slot.session.is_idle()
+                && !slot.awaiting_credential
+                && slot.restart.is_none()
+                && slot.recorded != Recorded::Failed
+            {
+                match slot.session.failure() {
+                    Some(FailureKind::Network) => self.registry.mark_unreachable(&base, now),
+                    Some(FailureKind::CredentialRefused | FailureKind::RegistrationClosed) => {
+                        self.registry
+                            .mark_auth_expired(&base, registry::reason::REAUTHENTICATE, now);
+                    }
+                    Some(FailureKind::Auth) => {
+                        self.registry
+                            .mark_auth_expired(&base, registry::reason::SESSION_EXPIRED, now);
+                    }
+                    None => {}
+                }
+                slot.recorded = Recorded::Failed;
             }
-            self.add_remote(&base, None, Some(username));
+        }
+    }
+
+    /// Итоги удаления учётных записей на инстансах.
+    fn deliver_deletions(&mut self) {
+        for answer in self.slots[0].session.take_deleted() {
+            let origins = std::mem::take(&mut self.deleting);
+            match answer {
+                Ok(results) => {
+                    let mut removed = 0_usize;
+                    let mut problems = Vec::new();
+                    for origin in origins {
+                        match results.get(&origin) {
+                            Some(result) if result.success => {
+                                self.forget(&origin);
+                                removed += 1;
+                            }
+                            Some(result) => problems.push(format!(
+                                "{}: {}",
+                                host_label(&origin),
+                                delete_error(result.error.as_deref())
+                            )),
+                            None => problems.push(format!(
+                                "{}: сервер не ответил по этому инстансу",
+                                host_label(&origin)
+                            )),
+                        }
+                    }
+                    self.message = Some(if problems.is_empty() {
+                        match removed {
+                            0 | 1 => "Учётная запись удалена".to_owned(),
+                            n => format!("Учётная запись удалена на {n} инстансах"),
+                        }
+                    } else {
+                        problems.join("\n")
+                    });
+                }
+                Err(message) => {
+                    self.message = Some(format!("Не удалось удалить учётную запись: {message}"));
+                }
+            }
+        }
+    }
+
+    /// Пишет изменённый реестр на домашний сервер.
+    fn flush_registry(&mut self) {
+        for answer in self.slots[0].session.take_saved() {
+            if let Err(message) = answer {
+                tracing::warn!(%message, "реестр подключений не записан");
+            }
+        }
+        if !self.slots[0].session.is_live() {
+            return;
+        }
+        if let Some((entries, updated_at)) = self.registry.take_pending_write() {
+            self.slots[0].session.request(BridgeRequest::PutRegistry {
+                entries,
+                updated_at,
+            });
+        }
+    }
+
+    /// Домашний инстанс заработал: читаем реестр подключений. Остальное
+    /// (подключение инстансов) продолжается, когда реестр придёт.
+    fn on_home_live(&mut self) {
+        if !self.registry_requested {
+            self.registry_requested = true;
+            self.slots[0].session.request(BridgeRequest::LoadRegistry);
         }
     }
 
@@ -324,6 +583,10 @@ impl Bridge {
         let Some(base) = self.slots[index].base.clone() else {
             return;
         };
+        if self.slots[index].adopting.is_some() || self.slots[index].restart.is_some() {
+            // Временная сессия своим паролем: настоящая будет после смены.
+            return;
+        }
         self.slots[0]
             .session
             .request(BridgeRequest::EnsurePeered(base.clone()));
@@ -338,10 +601,10 @@ impl Bridge {
 
     /// Рассылает каждому инстансу список остальных (как `syncInstanceList`).
     ///
-    /// Не подключившиеся инстансы остаются в списке: иначе временный сбой
-    /// стёр бы их с сервера.
+    /// В списке остаются и отключённые, и не подключившиеся записи: иначе
+    /// временный сбой стёр бы их с сервера.
     fn sync_topology(&self) {
-        if self.slots.iter().skip(1).any(|s| s.awaiting_credential) {
+        if !self.registry.is_settled() || !self.slots[0].session.is_live() {
             return;
         }
         let Some(home_base) = self.slots[0].base.clone() else {
@@ -359,17 +622,7 @@ impl Bridge {
                     .to_owned()
             })
             .unwrap_or_default();
-        let remotes: Vec<ReplicatedEntry> = self
-            .slots
-            .iter()
-            .skip(1)
-            .filter_map(|s| {
-                Some(ReplicatedEntry {
-                    origin: s.base.clone()?,
-                    username: s.username.clone()?,
-                })
-            })
-            .collect();
+        let remotes = self.registry.replicated();
         self.slots[0]
             .session
             .request(BridgeRequest::SyncInstances(remotes.clone()));
@@ -408,6 +661,8 @@ impl Bridge {
             self.leaving = false;
             self.slots.truncate(1);
             self.focus = 0;
+            self.registry.clear();
+            self.registry_requested = false;
         }
     }
 
@@ -416,20 +671,27 @@ impl Bridge {
             slot.session.logout();
         }
         self.slots.truncate(1);
+        self.registry.clear();
+        self.registry_requested = false;
     }
 
-    /// Подключает чужой инстанс. `password` — пароль домашнего аккаунта:
-    /// проверяется домом, на чужой инстанс не уходит. Без пароля (автоподключение)
-    /// достаточно живой сессии дома.
+    /// Подключает новый инстанс. `password` — пароль домашнего аккаунта:
+    /// проверяется домом, на чужой инстанс не уходит.
     pub(crate) fn connect_remote(&mut self, raw_base: &str, password: Option<&str>) {
         let Some(base) = canonical_base(raw_base) else {
             self.message = Some("Некорректный адрес инстанса".to_owned());
             return;
         };
-        self.add_remote(&base, password, None);
+        self.add_remote(&base, password, None, true);
     }
 
-    fn add_remote(&mut self, base: &str, password: Option<&str>, username: Option<String>) {
+    fn add_remote(
+        &mut self,
+        base: &str,
+        password: Option<&str>,
+        username: Option<String>,
+        register: bool,
+    ) {
         if !self.slots[0].session.is_live() {
             self.message = Some("Сначала войдите в домашний инстанс".to_owned());
             return;
@@ -467,6 +729,7 @@ impl Bridge {
         let mut slot = Slot::new(&self.runtime);
         slot.base = Some(base.to_owned());
         slot.username = username;
+        slot.register = register;
         slot.awaiting_credential = true;
         slot.session.mark_connecting(base);
         self.slots.push(slot);
@@ -478,28 +741,99 @@ impl Bridge {
             });
     }
 
-    /// Повторяет подключение к инстансу, который не поднялся.
-    pub(crate) fn retry(&mut self, index: usize) {
-        if index == 0 || index >= self.slots.len() || !self.slots[index].session.is_idle() {
-            return;
-        }
-        let Some(base) = self.slots[index].base.clone() else {
+    /// Подключает отключённый или недоступный инстанс заново (без пароля:
+    /// секрет выдаёт домашний инстанс по живой сессии).
+    pub(crate) fn reconnect(&mut self, origin: &str) {
+        let Some(base) = canonical_base(origin) else {
             return;
         };
-        let username = self.slots[index].username.clone();
-        self.slots.remove(index);
-        self.focus = 0;
-        self.add_remote(&base, None, username);
+        let username = self.registry.get(&base).map(|e| e.username.clone());
+        self.add_remote(&base, None, username, false);
     }
 
-    /// Отключает чужой инстанс и забывает его.
-    pub(crate) fn disconnect(&mut self, index: usize) {
-        if index == 0 || index >= self.slots.len() {
+    /// Входит заново с паролем домашнего аккаунта (проверяет дом).
+    pub(crate) fn reauthenticate(&mut self, origin: &str, home_password: &str) {
+        let Some(base) = canonical_base(origin) else {
+            return;
+        };
+        let username = self.registry.get(&base).map(|e| e.username.clone());
+        self.add_remote(&base, Some(home_password), username, true);
+    }
+
+    /// Входит собственным паролем аккаунта на инстансе, который не принял
+    /// выданный секрет; после входа аккаунт переводится на выданный секрет.
+    pub(crate) fn own_login(&mut self, origin: &str, username: &str, password: &str) {
+        let Some(base) = canonical_base(origin) else {
+            return;
+        };
+        let username = username.trim();
+        if username.is_empty() || password.is_empty() {
+            self.message = Some("Введите имя и пароль на этом инстансе".to_owned());
             return;
         }
-        self.slots[index].session.logout();
-        self.slots.remove(index);
-        self.focus = 0;
+        self.add_remote(&base, None, Some(username.to_owned()), false);
+        if let Some(slot) = self
+            .slots
+            .iter_mut()
+            .skip(1)
+            .find(|s| s.base.as_deref() == Some(base.as_str()))
+        {
+            slot.manual = Some(Manual {
+                username: username.to_owned(),
+                password: Secret::new(password),
+            });
+        }
+    }
+
+    /// Отключает инстанс по просьбе пользователя: запись остаётся в списке и
+    /// больше не подключается сама.
+    pub(crate) fn disconnect(&mut self, origin: &str) {
+        let Some(base) = canonical_base(origin) else {
+            return;
+        };
+        self.drop_slot(&base);
+        self.registry.mark_disconnected(&base, now_ms());
+        self.sync_topology();
+    }
+
+    /// Убирает запись о недоступном инстансе, не уведомляя его.
+    pub(crate) fn force_remove(&mut self, origin: &str) {
+        let Some(base) = canonical_base(origin) else {
+            return;
+        };
+        self.forget(&base);
+    }
+
+    /// Просит домашний инстанс удалить учётную запись на этих инстансах.
+    pub(crate) fn delete_identity(&mut self, origins: &[String], mode: IdentityDeleteMode) {
+        if origins.is_empty() || !self.slots[0].session.is_live() {
+            return;
+        }
+        self.deleting = origins.to_vec();
+        self.slots[0].session.request(BridgeRequest::DeleteIdentity {
+            origins: origins.to_vec(),
+            mode,
+        });
+    }
+
+    /// Закрывает сессию инстанса и убирает слот.
+    fn drop_slot(&mut self, base: &str) {
+        if let Some(position) = self
+            .slots
+            .iter()
+            .skip(1)
+            .position(|s| s.base.as_deref() == Some(base))
+        {
+            self.slots[position + 1].session.logout();
+            self.slots.remove(position + 1);
+            self.focus = 0;
+        }
+    }
+
+    /// Полностью забывает инстанс: сессия, слот, запись реестра.
+    fn forget(&mut self, base: &str) {
+        self.drop_slot(base);
+        self.registry.remove(base, now_ms());
         self.sync_topology();
     }
 
@@ -621,38 +955,123 @@ impl Bridge {
         self.slots[0].session.last_error()
     }
 
-    /// Описание всех инстансов для интерфейса.
-    pub(crate) fn instances(&self) -> Vec<InstanceView> {
-        self.slots
+    /// Домашний инстанс для шапки списка подключений.
+    pub(crate) fn home_row(&self) -> Option<HomeRow> {
+        let slot = &self.slots[0];
+        let base = slot
+            .base
+            .clone()
+            .or_else(|| slot.session.base().map(str::to_owned))?;
+        Some(HomeRow {
+            base,
+            username: slot
+                .session
+                .cache()
+                .map(|c| c.me().username.clone())
+                .unwrap_or_default(),
+            live: slot.session.is_live(),
+        })
+    }
+
+    /// Строки списка подключений: записи реестра с живым состоянием слотов.
+    pub(crate) fn rows(&self) -> Vec<ConnectionRow> {
+        let mut rows: Vec<ConnectionRow> = self
+            .registry
+            .entries()
             .iter()
-            .enumerate()
-            .filter_map(|(index, slot)| {
-                let base = slot
-                    .base
-                    .clone()
-                    .or_else(|| slot.session.base().map(str::to_owned))?;
-                let state = if slot.session.is_live() {
-                    InstanceState::Live
-                } else if slot.awaiting_credential || !slot.session.is_idle() {
-                    InstanceState::Connecting
-                } else {
-                    InstanceState::Failed(slot.session.last_error().map(str::to_owned))
-                };
-                Some(InstanceView {
-                    index,
-                    name: host_label(&base),
-                    base,
-                    username: slot
-                        .username
-                        .clone()
-                        .or_else(|| slot.session.cache().map(|c| c.me().username.clone())),
-                    home: index == 0,
-                    state,
-                    unread: slot.session.unread_total(),
-                    peering: slot.peering.clone(),
-                })
-            })
-            .collect()
+            .map(|entry| self.row_for(entry))
+            .collect();
+        // Слоты, которых в реестре ещё нет (идёт первое подключение).
+        for slot in self.slots.iter().skip(1) {
+            let Some(base) = slot.base.as_deref() else {
+                continue;
+            };
+            if self.registry.get(base).is_some() {
+                continue;
+            }
+            rows.push(ConnectionRow {
+                origin: base.to_owned(),
+                label: host_label(base),
+                username: slot.username.clone().unwrap_or_default(),
+                remote_user_id: String::new(),
+                state: Self::slot_state(slot).unwrap_or(RowState::AuthExpired),
+                reason: None,
+                detail: slot.session.last_error().map(str::to_owned),
+                added_at: now_ms(),
+                last_connected_at: None,
+                disconnected_at: None,
+                unread: slot.session.unread_total(),
+                peering: slot.peering.clone(),
+                offer_own_login: Self::offers_own_login(slot),
+            });
+        }
+        rows
+    }
+
+    fn row_for(&self, entry: &RegistryEntry) -> ConnectionRow {
+        let slot = self
+            .slots
+            .iter()
+            .skip(1)
+            .find(|s| s.base.as_deref() == Some(entry.origin.as_str()));
+        let state = slot.and_then(Self::slot_state).unwrap_or(match entry.status {
+            RegistryStatus::Connected | RegistryStatus::Unreachable => RowState::Unreachable,
+            RegistryStatus::Disconnected => RowState::Disconnected,
+            RegistryStatus::AuthExpired => RowState::AuthExpired,
+        });
+        let detail = slot
+            .filter(|s| s.session.is_idle())
+            .and_then(|s| s.session.last_error().map(str::to_owned));
+        ConnectionRow {
+            origin: entry.origin.clone(),
+            label: if entry.label.is_empty() {
+                host_label(&entry.origin)
+            } else {
+                entry.label.clone()
+            },
+            username: entry.username.clone(),
+            remote_user_id: entry.remote_user_id.clone(),
+            state,
+            reason: entry.error_message.clone(),
+            detail,
+            added_at: entry.added_at,
+            last_connected_at: entry.last_connected_at,
+            disconnected_at: entry.disconnected_at,
+            unread: slot.map_or(0, |s| s.session.unread_total()),
+            peering: slot.and_then(|s| s.peering.clone()),
+            offer_own_login: slot.is_some_and(Self::offers_own_login),
+        }
+    }
+
+    /// Живое состояние слота; `None` — слот ничего не говорит (нет сессии
+    /// или она закончилась), решает реестр.
+    fn slot_state(slot: &Slot) -> Option<RowState> {
+        if slot.session.is_live() {
+            Some(RowState::Connected)
+        } else if slot.awaiting_credential || !slot.session.is_idle() || slot.restart.is_some() {
+            Some(RowState::Connecting)
+        } else {
+            None
+        }
+    }
+
+    fn offers_own_login(slot: &Slot) -> bool {
+        slot.session.is_idle()
+            && matches!(
+                slot.session.failure(),
+                Some(FailureKind::CredentialRefused | FailureKind::RegistrationClosed)
+            )
+    }
+}
+
+/// Понятный текст ошибки удаления учётной записи.
+fn delete_error(code: Option<&str>) -> String {
+    match code {
+        Some("owns_spaces" | "user_owns_spaces") => {
+            "сначала передайте владение пространствами".to_owned()
+        }
+        Some(other) if !other.is_empty() => other.to_owned(),
+        _ => "не удалось".to_owned(),
     }
 }
 
@@ -668,7 +1087,7 @@ mod tests {
         let mut bridge = Bridge::new(runtime.handle().clone());
         bridge.connect_remote("orbit.example", Some("pw"));
         assert!(bridge.take_message().unwrap().contains("домашний"));
-        assert_eq!(bridge.instances().len(), 0);
+        assert_eq!(bridge.rows().len(), 0);
         bridge.focus_on(5);
         assert_eq!(bridge.focus_index(), 0);
     }

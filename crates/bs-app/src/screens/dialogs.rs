@@ -227,17 +227,8 @@ pub(crate) enum SettingsAction {
     Close,
     /// Выйти из всех инстансов.
     Logout,
-    /// Подключить инстанс: адрес и пароль от домашнего аккаунта.
-    Connect {
-        /// Адрес инстанса.
-        address: String,
-        /// Пароль, который проверит домашний инстанс.
-        password: String,
-    },
-    /// Повторить подключение.
-    Retry(usize),
-    /// Отключить и забыть инстанс.
-    Disconnect(usize),
+    /// Действие в панели «Подключения».
+    Connections(super::connections::ConnAction),
 }
 
 /// Редактируемая копия профиля и локальные настройки.
@@ -252,10 +243,8 @@ pub(crate) struct SettingsState {
     discoverable: bool,
     show_activity: bool,
     scale: f32,
-    /// Адрес в форме «Добавить инстанс».
-    add_address: String,
-    /// Пароль в той же форме (затирается после отправки).
-    add_password: String,
+    /// Состояние панели «Подключения».
+    connections: super::connections::ConnectionsUi,
 }
 
 /// Выбранный статус из текущего присутствия (`offline` выбрать нельзя).
@@ -280,8 +269,7 @@ impl SettingsState {
             discoverable: user.discoverable.unwrap_or(true),
             show_activity: user.show_activity.unwrap_or(true),
             scale,
-            add_address: String::new(),
-            add_password: String::new(),
+            connections: super::connections::ConnectionsUi::default(),
         }
     }
 
@@ -744,131 +732,18 @@ fn privacy(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
     save_bar(ui, state, me, bridge);
 }
 
-/// «Подключение»: состояние соединения; клиент держит один инстанс.
-/// Подпись статуса пиринга по ответу сервера.
-fn peering_label(status: &str) -> &'static str {
-    match status {
-        "active" => "пиринг установлен",
-        "pending" | "awaiting_approval" => "пиринг ожидает подтверждения",
-        "admin_required" => "нужно одобрение администратора",
-        "rejected" => "пиринг отклонён",
-        "unreachable" => "инстанс не отвечает",
-        "revoked" => "пиринг отозван",
-        _ => "пиринг: статус неизвестен",
-    }
-}
-
-/// Панель «Подключения»: список инстансов и форма добавления.
+/// Панель «Подключения».
 fn connections(
     ui: &mut egui::Ui,
     state: &mut SettingsState,
     bridge: &Bridge,
     action: &mut SettingsAction,
 ) {
-    page_title(ui, "Подключения");
-    ui.label(
-        theme::muted(
-            "Можно подключить несколько инстансов сразу: пространства и личные \
-             сообщения всех серверов показываются в одном интерфейсе, а каждое \
-             действие уходит на сервер, которому принадлежит канал.",
-        )
-        .size(13.0),
-    );
-    ui.add_space(12.0);
-    for view in bridge.instances() {
-        card(ui, |ui| instance_row(ui, &view, action));
-        ui.add_space(8.0);
+    page_title(ui, "Подключённые серверы");
+    let chosen = super::connections::show(ui, &mut state.connections, bridge);
+    if chosen != super::connections::ConnAction::None {
+        *action = SettingsAction::Connections(chosen);
     }
-
-    ui.add_space(6.0);
-    widgets::section_label(ui, "Добавить инстанс");
-    ui.add_space(6.0);
-    card(ui, |ui| {
-        widgets::field_label(ui, "Адрес");
-        widgets::text_field(ui, &mut state.add_address, "orbit.example.com", 200);
-        widgets::field_label(ui, "Пароль от домашнего аккаунта");
-        let password = widgets::secret_field(ui, &mut state.add_password, "пароль", 200);
-        ui.add_space(4.0);
-        ui.label(
-            theme::muted(
-                "Пароль проверит ваш домашний инстанс. На другой сервер он не \
-                 отправляется: ему выдаётся отдельный ключ только для него.",
-            )
-            .size(12.0),
-        );
-        ui.add_space(10.0);
-        let ready = !state.add_address.trim().is_empty() && !state.add_password.is_empty();
-        let enter = password.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        let clicked = ui
-            .add_enabled(ready, theme::primary_button("Подключить"))
-            .clicked();
-        if ready && (clicked || enter) {
-            *action = SettingsAction::Connect {
-                address: std::mem::take(&mut state.add_address),
-                password: std::mem::take(&mut state.add_password),
-            };
-        }
-    });
-}
-
-/// Одна строка списка инстансов.
-fn instance_row(ui: &mut egui::Ui, view: &crate::fleet::InstanceView, action: &mut SettingsAction) {
-    use crate::fleet::InstanceState;
-    let (dot, state_text) = match &view.state {
-        InstanceState::Live => (theme::GREEN, "подключён".to_owned()),
-        InstanceState::Connecting => (theme::AMBER, "подключается…".to_owned()),
-        InstanceState::Failed(reason) => (
-            theme::RED,
-            reason.clone().unwrap_or_else(|| "не подключён".to_owned()),
-        ),
-    };
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(12.0), Sense::hover());
-        ui.painter().circle_filled(rect.center(), 5.0, dot);
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 1.0;
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(&view.name)
-                        .family(theme::bold_family())
-                        .size(15.5)
-                        .color(theme::TEXT_BRIGHT),
-                );
-                if view.home {
-                    ui.label(theme::muted("домашний").size(12.0));
-                }
-                if view.unread > 0 {
-                    ui.label(
-                        RichText::new(format!("● {}", view.unread))
-                            .size(12.0)
-                            .color(theme::ROSE),
-                    )
-                    .on_hover_text("Каналов и бесед с непрочитанным");
-                }
-            });
-            let who = view
-                .username
-                .as_deref()
-                .map_or_else(|| view.base.clone(), |u| format!("{} · @{u}", view.base));
-            ui.label(theme::muted(who).size(12.0));
-            ui.label(theme::muted(state_text).size(12.0));
-            if let Some(status) = &view.peering {
-                ui.label(theme::muted(peering_label(status)).size(12.0));
-            }
-        });
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if !view.home && ui.button("Отключить").clicked() {
-                *action = SettingsAction::Disconnect(view.index);
-            }
-            match view.state {
-                InstanceState::Failed(_) if !view.home && ui.button("Повторить").clicked() =>
-                {
-                    *action = SettingsAction::Retry(view.index);
-                }
-                _ => {}
-            }
-        });
-    });
 }
 
 #[cfg(test)]

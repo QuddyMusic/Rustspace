@@ -220,6 +220,15 @@ impl ApiClient {
         self.request(Method::PATCH, path, Some(body)).await
     }
 
+    /// PUT с JSON-телом и разбором JSON-ответа.
+    pub(crate) async fn put_json<T: DeserializeOwned, B: Serialize + Sync + ?Sized>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T, ApiError> {
+        self.request(Method::PUT, path, Some(body)).await
+    }
+
     /// DELETE без тела с разбором JSON-ответа.
     pub(crate) async fn delete_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
         self.request::<T, ()>(Method::DELETE, path, None).await

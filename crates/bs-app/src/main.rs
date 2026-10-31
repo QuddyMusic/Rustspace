@@ -19,6 +19,7 @@ mod fleet;
 mod images;
 mod logic;
 mod media;
+mod registry;
 mod screens;
 mod social;
 mod theme;
