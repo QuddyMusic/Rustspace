@@ -12,10 +12,12 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 mod app;
+mod brand;
 mod bridge;
 #[cfg(test)]
 mod fake_instance;
 mod fleet;
+mod icons;
 mod images;
 mod logic;
 mod media;

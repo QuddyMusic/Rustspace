@@ -9,6 +9,7 @@ use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
 
 use crate::bridge::BridgeRequest;
 use crate::fleet::Bridge;
+use crate::icons::Icon;
 use crate::social::{
     friend_display_name, friend_status_text, is_friend, request_is_incoming, request_name,
     search_user_name, status_label,
@@ -88,7 +89,7 @@ pub(crate) fn show_friends(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Br
         .frame(header_frame())
         .show(ui, |ui| {
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.label(RichText::new("👤").size(17.0).color(theme::TEXT_FAINT));
+                ui.add(widgets::flat_icon(Icon::User, 20.0, theme::TEXT_FAINT));
                 ui.label(
                     RichText::new("Друзья")
                         .size(16.0)
@@ -210,13 +211,13 @@ fn friends_list(ui: &mut egui::Ui, bridge: &Bridge, online_only: bool) {
                 avatar: friend.avatar.as_deref(),
             },
             |ui| {
-                if widgets::icon_button(ui, "✕", 34.0)
+                if widgets::icon_button(ui, Icon::Close, 34.0)
                     .on_hover_text("Удалить из друзей")
                     .clicked()
                 {
                     bridge.request(BridgeRequest::RemoveFriend(friend.id.clone()));
                 }
-                if widgets::icon_button(ui, "💬", 34.0)
+                if widgets::icon_button(ui, Icon::Chat, 34.0)
                     .on_hover_text("Написать")
                     .clicked()
                 {
@@ -258,7 +259,7 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
             },
             |ui| {
                 if incoming {
-                    if widgets::icon_button(ui, "✕", 34.0)
+                    if widgets::icon_button(ui, Icon::Close, 34.0)
                         .on_hover_text("Отклонить")
                         .clicked()
                     {
@@ -267,7 +268,7 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
                             false,
                         ));
                     }
-                    if widgets::icon_button(ui, "✓", 34.0)
+                    if widgets::icon_button(ui, Icon::Check, 34.0)
                         .on_hover_text("Принять")
                         .clicked()
                     {
@@ -276,7 +277,7 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
                             true,
                         ));
                     }
-                } else if widgets::icon_button(ui, "✕", 34.0)
+                } else if widgets::icon_button(ui, Icon::Close, 34.0)
                     .on_hover_text("Отозвать")
                     .clicked()
                 {
@@ -343,7 +344,7 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
                 if !already && ui.add(theme::positive_button("В друзья")).clicked() {
                     bridge.request(BridgeRequest::SendFriendRequest(user.id.clone()));
                 }
-                if widgets::icon_button(ui, "💬", 34.0)
+                if widgets::icon_button(ui, Icon::Chat, 34.0)
                     .on_hover_text("Написать")
                     .clicked()
                 {
@@ -435,7 +436,7 @@ pub(crate) fn show_explore(
         .frame(header_frame())
         .show(ui, |ui| {
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.label(RichText::new("🧭").size(17.0).color(theme::TEXT_FAINT));
+                ui.add(widgets::flat_icon(Icon::Compass, 20.0, theme::TEXT_FAINT));
                 ui.label(
                     RichText::new("Обзор")
                         .size(16.0)
@@ -608,7 +609,7 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                             |text| theme::muted(theme::truncate_chars(text, 70)).size(12.5),
                         ));
                         ui.label(
-                            theme::muted(format!("👥 {}", members_text(space.member_count)))
+                            theme::muted(members_text(space.member_count))
                                 .size(12.0)
                                 .color(theme::TEXT_FAINT),
                         );

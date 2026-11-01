@@ -264,11 +264,11 @@ pub(crate) fn viewer(ctx: &egui::Context, value: &str) -> bool {
             } else {
                 theme::TEXT_MUTED
             };
-            ui.painter().text(
+            crate::icons::paint(
+                ui.painter(),
                 close_rect.center(),
-                Align2::CENTER_CENTER,
-                "✕",
-                FontId::proportional(20.0),
+                24.0,
+                crate::icons::Icon::Close,
                 color,
             );
             if backdrop.clicked() || close_resp.clicked() {

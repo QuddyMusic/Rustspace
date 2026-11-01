@@ -73,9 +73,37 @@ impl std::fmt::Debug for Frame {
     }
 }
 
+/// Уменьшенная копия статичной картинки для маленьких мест.
+///
+/// Нужна для аватарок и значков: видеокарта берёт образцы без усреднения,
+/// поэтому большая картинка в 40 пикселях выглядит рваной, а заранее
+/// уменьшенная — чёткой.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Thumb {
+    /// Ширина.
+    pub width: u32,
+    /// Высота.
+    pub height: u32,
+    /// Пиксели RGBA.
+    pub rgba: Vec<u8>,
+}
+
+impl std::fmt::Debug for Thumb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Thumb")
+            .field("size", &(self.width, self.height))
+            .finish_non_exhaustive()
+    }
+}
+
+/// Длинная сторона миниатюры.
+pub const THUMB_SIDE: u32 = 256;
+
 /// Результат декодирования.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Decoded {
+    /// Уменьшенная копия: есть у статичных картинок заметно больше миниатюры.
+    pub thumb: Option<Thumb>,
     /// Ширина всех кадров.
     pub width: u32,
     /// Высота всех кадров.
@@ -224,13 +252,30 @@ fn still_from(
     } else {
         image::imageops::resize(&image.into_rgba8(), nw, nh, FilterType::Triangle)
     };
+    let thumb = make_thumb(&rgba);
     Ok(Decoded {
+        thumb,
         width: nw,
         height: nh,
         frames: vec![Frame {
             rgba: rgba.into_raw(),
             delay_ms: 0,
         }],
+    })
+}
+
+/// Миниатюра, если картинка заметно больше неё.
+fn make_thumb(image: &image::RgbaImage) -> Option<Thumb> {
+    let (w, h) = image.dimensions();
+    if w.max(h) <= THUMB_SIDE * 3 / 2 {
+        return None;
+    }
+    let (tw, th) = fit(w, h, THUMB_SIDE);
+    let small = image::imageops::resize(image, tw, th, FilterType::Lanczos3);
+    Some(Thumb {
+        width: tw,
+        height: th,
+        rgba: small.into_raw(),
     })
 }
 
@@ -277,6 +322,7 @@ fn animated(
         out[0].delay_ms = 0;
     }
     Ok(Decoded {
+        thumb: None,
         width: nw,
         height: nh,
         frames: out,
@@ -285,7 +331,7 @@ fn animated(
 
 #[cfg(test)]
 mod tests {
-    use super::{Limits, MediaError, decode, fit};
+    use super::{Limits, MediaError, THUMB_SIDE, decode, fit};
     use image::{
         Delay, Frame as ImgFrame, ImageEncoder as _, Rgba, RgbaImage,
         codecs::{gif::GifEncoder, png::PngEncoder},
@@ -428,5 +474,15 @@ mod tests {
     fn fit_never_returns_zero() {
         assert_eq!(fit(1, 4000, 100), (1, 100));
         assert_eq!(fit(10, 10, 100), (10, 10));
+    }
+
+    #[test]
+    fn large_still_gets_a_sharp_thumbnail_and_small_one_does_not() {
+        let big = decode(&png(1000, 500), &Limits::default()).unwrap();
+        let thumb = big.thumb.expect("thumb");
+        assert_eq!((thumb.width, thumb.height), (THUMB_SIDE, THUMB_SIDE / 2));
+        assert_eq!(thumb.rgba.len(), (thumb.width * thumb.height * 4) as usize);
+        let small = decode(&png(100, 100), &Limits::default()).unwrap();
+        assert!(small.thumb.is_none());
     }
 }

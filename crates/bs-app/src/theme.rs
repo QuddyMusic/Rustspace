@@ -315,32 +315,6 @@ pub(crate) fn positive_button(text: impl Into<String>) -> egui::Button<'static> 
     .corner_radius(CornerRadius::same(8))
 }
 
-/// Рисует знак бренда — клавишу Backspace со стрелкой и крестиком.
-fn paint_brand_mark(
-    painter: &egui::Painter,
-    center: egui::Pos2,
-    size: f32,
-    fill: Color32,
-    cut: Color32,
-) {
-    let u = size / 24.0;
-    let p = |x: f32, y: f32| center + egui::vec2((x - 12.0) * u, (y - 12.0) * u);
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            p(2.0, 12.0),
-            p(8.5, 5.0),
-            p(21.5, 5.0),
-            p(21.5, 19.0),
-            p(8.5, 19.0),
-        ],
-        fill,
-        Stroke::NONE,
-    ));
-    let stroke = Stroke::new((2.0 * u).max(1.5), cut);
-    painter.line_segment([p(11.5, 9.0), p(16.5, 15.0)], stroke);
-    painter.line_segment([p(16.5, 9.0), p(11.5, 15.0)], stroke);
-}
-
 /// Плитка «домой» (личные сообщения) в колонке пространств: лавандовый
 /// квадрат со знаком бренда.
 pub(crate) fn rail_home(ui: &mut egui::Ui, selected: bool, unread: bool) -> egui::Response {
@@ -354,7 +328,7 @@ pub(crate) fn rail_home(ui: &mut egui::Ui, selected: bool, unread: bool) -> egui
     };
     let painter = ui.painter();
     painter.rect_filled(icon, CornerRadius::same(radius), ACCENT);
-    paint_brand_mark(painter, icon.center(), 26.0, Color32::WHITE, ACCENT);
+    crate::brand::paint(painter, icon.center(), 26.0, Color32::WHITE);
     paint_rail_pill(painter, rect, selected, response.hovered(), unread);
     response
 }
@@ -504,8 +478,15 @@ pub(crate) fn list_row(
 pub(crate) fn disabled_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), Sense::hover());
+    crate::icons::paint(
+        ui.painter(),
+        egui::pos2(rect.left() + 28.0, rect.center().y),
+        16.0,
+        crate::icons::Icon::Speaker,
+        TEXT_FAINT,
+    );
     ui.painter().text(
-        egui::pos2(rect.left() + 20.0, rect.center().y),
+        egui::pos2(rect.left() + 46.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
         FontId::proportional(15.0),

@@ -5,6 +5,7 @@
 use bs_types::UserStatus;
 use egui::{Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, Sense, Stroke};
 
+use crate::icons::Icon;
 use crate::theme::{
     ACCENT, BG_ACTIVE, BG_HOVER, BG_INPUT, BORDER, MINT, ROSE, TEXT, TEXT_BRIGHT, TEXT_FAINT,
     TEXT_MUTED, avatar, bold_family, muted, paint_avatar, truncate_chars,
@@ -28,19 +29,30 @@ pub(crate) fn search_box(ui: &mut egui::Ui, text: &mut String, hint: &str) -> eg
 }
 
 /// Квадратная кнопка с символом (написать, удалить, настройки…).
-pub(crate) fn icon_button(ui: &mut egui::Ui, glyph: &str, size: f32) -> egui::Response {
+pub(crate) fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(size), Sense::click());
     let hovered = response.hovered();
     let fill = if hovered { BG_ACTIVE } else { BG_HOVER };
     ui.painter().rect_filled(rect, CornerRadius::same(9), fill);
-    ui.painter().text(
+    crate::icons::paint(
+        ui.painter(),
         rect.center(),
-        Align2::CENTER_CENTER,
-        glyph,
-        FontId::proportional(size * 0.46),
+        size * 0.5,
+        icon,
         if hovered { TEXT_BRIGHT } else { TEXT_MUTED },
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Значок без подложки как виджет: занимает квадрат и рисуется на месте.
+pub(crate) fn flat_icon(icon: Icon, size: f32, color: Color32) -> impl egui::Widget {
+    move |ui: &mut egui::Ui| {
+        let (rect, response) =
+            ui.allocate_exact_size(egui::Vec2::splat(size + 6.0), Sense::click());
+        let tint = if response.hovered() { TEXT_BRIGHT } else { color };
+        crate::icons::paint(ui.painter(), rect.center(), size, icon, tint);
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    }
 }
 
 /// Вкладка-«таблетка» в шапке: выбранная получает подложку.
@@ -266,7 +278,7 @@ pub(crate) fn dm_entry(ui: &mut egui::Ui, dm: &DmEntry<'_>) -> egui::Response {
 /// Пункт навигации в левой колонке («Друзья», «Обзор»).
 pub(crate) fn nav_row(
     ui: &mut egui::Ui,
-    glyph: &str,
+    glyph: Icon,
     label: &str,
     selected: bool,
 ) -> egui::Response {
@@ -281,11 +293,11 @@ pub(crate) fn nav_row(
             .rect_filled(row, CornerRadius::same(8), BG_HOVER);
     }
     let color = if selected { TEXT_BRIGHT } else { TEXT_MUTED };
-    ui.painter().text(
+    crate::icons::paint(
+        ui.painter(),
         egui::pos2(row.left() + 22.0, row.center().y),
-        Align2::CENTER_CENTER,
+        19.0,
         glyph,
-        FontId::proportional(17.0),
         color,
     );
     ui.painter().text(
@@ -366,7 +378,7 @@ pub(crate) fn compact_person(
 /// Круглая кнопка в колонке пространств («создать», «обзор»).
 pub(crate) fn rail_action(
     ui: &mut egui::Ui,
-    glyph: &str,
+    glyph: Icon,
     color: Color32,
     selected: bool,
 ) -> egui::Response {
@@ -382,13 +394,7 @@ pub(crate) fn rail_action(
     };
     ui.painter()
         .rect_filled(icon, CornerRadius::same(radius), fill);
-    ui.painter().text(
-        icon.center(),
-        Align2::CENTER_CENTER,
-        glyph,
-        FontId::proportional(20.0),
-        color,
-    );
+    crate::icons::paint(ui.painter(), icon.center(), 22.0, glyph, color);
     if selected {
         let pill = egui::Rect::from_center_size(
             egui::pos2(rect.left() + 2.0, rect.center().y),

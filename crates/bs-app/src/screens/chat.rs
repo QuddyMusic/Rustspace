@@ -9,6 +9,7 @@ use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
 
 use crate::bridge::{BridgeRequest, ChannelKind, HistoryState};
 use crate::fleet::Bridge;
+use crate::icons::Icon;
 use crate::logic::{
     DEFAULT_REACTION, author_name, can_send, connection_label, message_actions, outgoing_text,
     should_ack, should_load_older,
@@ -840,13 +841,13 @@ impl ChatScreen {
                                 *nav = Some(Nav::Space((space.origin, space.id.clone())));
                             }
                         }
-                        if widgets::rail_action(ui, "＋", theme::MINT, false)
+                        if widgets::rail_action(ui, Icon::Plus, theme::MINT, false)
                             .on_hover_text("Создать пространство")
                             .clicked()
                         {
                             *nav = Some(Nav::CreateSpace);
                         }
-                        if widgets::rail_action(ui, "🧭", theme::SKY, self.view == View::Explore)
+                        if widgets::rail_action(ui, Icon::Compass, theme::SKY, self.view == View::Explore)
                             .on_hover_text("Обзор пространств")
                             .clicked()
                         {
@@ -949,7 +950,7 @@ impl ChatScreen {
             }
             for channel in visible {
                 if channel.voice {
-                    theme::disabled_row(ui, &format!("🔊  {}", channel.name))
+                    theme::disabled_row(ui, &channel.name)
                         .on_hover_text("Голосовые каналы в этом клиенте пока недоступны");
                     continue;
                 }
@@ -979,10 +980,10 @@ impl ChatScreen {
 
     /// Главная: «Друзья», «Обзор» и личные беседы.
     fn home_list(&self, ui: &mut egui::Ui, dms: &[SidebarDm], filter: &str, nav: &mut Option<Nav>) {
-        if widgets::nav_row(ui, "👤", "Друзья", self.view == View::Friends).clicked() {
+        if widgets::nav_row(ui, Icon::User, "Друзья", self.view == View::Friends).clicked() {
             *nav = Some(Nav::Friends);
         }
-        if widgets::nav_row(ui, "🧭", "Обзор", self.view == View::Explore).clicked() {
+        if widgets::nav_row(ui, Icon::Compass, "Обзор", self.view == View::Explore).clicked() {
             *nav = Some(Nav::Explore);
         }
         ui.add_space(12.0);
@@ -992,10 +993,7 @@ impl ChatScreen {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(10.0);
                 if ui
-                    .add(
-                        egui::Button::new(RichText::new("＋").size(16.0).color(theme::TEXT_MUTED))
-                            .fill(egui::Color32::TRANSPARENT),
-                    )
+                    .add(widgets::flat_icon(Icon::Plus, 18.0, theme::TEXT_MUTED))
                     .on_hover_text("Найти человека")
                     .clicked()
                 {
@@ -1106,7 +1104,7 @@ impl ChatScreen {
                                 ui.label(theme::muted(theme::truncate_chars(&sub, 18)).size(11.0));
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if widgets::icon_button(ui, "⚙", 32.0)
+                                if widgets::icon_button(ui, Icon::Gear, 32.0)
                                     .on_hover_text("Настройки")
                                     .clicked()
                                 {
@@ -1210,11 +1208,8 @@ impl ChatScreen {
                             } else {
                                 theme::TEXT_FAINT
                             };
-                            let button =
-                                egui::Button::new(RichText::new("👥").size(18.0).color(color))
-                                    .fill(egui::Color32::TRANSPARENT);
                             if ui
-                                .add(button)
+                                .add(widgets::flat_icon(Icon::Users, 22.0, color))
                                 .on_hover_text(if self.show_members {
                                     "Скрыть участников"
                                 } else {
@@ -1329,7 +1324,7 @@ impl ChatScreen {
                     .inner_margin(Margin::symmetric(16, 11))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("+").size(22.0).color(theme::TEXT_FAINT))
+                            ui.add(widgets::flat_icon(Icon::Plus, 22.0, theme::TEXT_FAINT))
                                 .on_hover_text("Вложения появятся в одном из следующих этапов");
                             let send_width = if can_send_now { 110.0 } else { 0.0 };
                             let width = (ui.available_width() - send_width).max(80.0);

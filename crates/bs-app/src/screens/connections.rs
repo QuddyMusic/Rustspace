@@ -333,8 +333,11 @@ fn row_card(
                     );
                     status_badge(ui, row.state);
                     if row.unread > 0 {
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::Vec2::splat(8.0), Sense::hover());
+                        ui.painter().circle_filled(rect.center(), 3.5, theme::ROSE);
                         ui.label(
-                            RichText::new(format!("● {}", row.unread))
+                            RichText::new(row.unread.to_string())
                                 .size(12.0)
                                 .color(theme::ROSE),
                         )

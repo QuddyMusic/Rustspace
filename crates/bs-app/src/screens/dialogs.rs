@@ -6,6 +6,7 @@ use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
 
 use crate::bridge::BridgeRequest;
 use crate::fleet::Bridge;
+use crate::icons::Icon;
 use crate::social::user_display_name;
 use crate::theme;
 use crate::widgets;
@@ -85,7 +86,7 @@ pub(crate) fn show_create_space(
                         .color(theme::TEXT_BRIGHT),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if widgets::icon_button(ui, "✕", 30.0).clicked() {
+                    if widgets::icon_button(ui, Icon::Close, 30.0).clicked() {
                         keep_open = false;
                     }
                 });
@@ -345,7 +346,7 @@ pub(crate) fn show_settings(
         )
         .show(ui, |ui| {
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                if widgets::icon_button(ui, "✕", 38.0)
+                if widgets::icon_button(ui, Icon::Close, 38.0)
                     .on_hover_text("Закрыть (Esc)")
                     .clicked()
                 {

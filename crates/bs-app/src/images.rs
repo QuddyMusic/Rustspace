@@ -33,6 +33,8 @@ pub(crate) struct Loaded {
     /// Высота кадра.
     pub(crate) height: u32,
     frames: Vec<(TextureHandle, u32)>,
+    /// Заранее уменьшенная копия для мелких мест.
+    thumb: Option<TextureHandle>,
     total_ms: u64,
     bytes: usize,
 }
@@ -278,12 +280,25 @@ fn upload(ctx: &Context, key: &Key, decoded: &Decoded) -> Loaded {
         })
         .collect();
     let total_ms = frames.iter().map(|(_, d)| u64::from(*d)).sum();
+    let thumb = decoded.thumb.as_ref().map(|thumb| {
+        let image = egui::ColorImage::from_rgba_unmultiplied(
+            [thumb.width as usize, thumb.height as usize],
+            &thumb.rgba,
+        );
+        ctx.load_texture(
+            format!("{}{}#thumb", key.0, key.1.as_str()),
+            image,
+            TextureOptions::LINEAR,
+        )
+    });
     Loaded {
+        thumb,
         width: decoded.width,
         height: decoded.height,
         frames,
         total_ms,
-        bytes: decoded.byte_size(),
+        bytes: decoded.byte_size()
+            + decoded.thumb.as_ref().map_or(0, |t| t.rgba.len()),
     }
 }
 
@@ -346,7 +361,13 @@ pub(crate) fn paint_cover(
             .request_repaint_after(std::time::Duration::from_millis(u64::from(remaining)));
         texture
     } else {
-        image.first()
+        // Для мелких мест берём заранее уменьшенную копию: без усреднения
+        // большая картинка в десятках пикселей выглядит рваной.
+        let wanted = rect.width().max(rect.height()) * painter.ctx().pixels_per_point();
+        match &image.thumb {
+            Some(thumb) if wanted <= f32::from(u16::try_from(bs_media::THUMB_SIDE).unwrap_or(u16::MAX)) => thumb,
+            _ => image.first(),
+        }
     };
     let uv = cover_uv(image.size_f32(), [rect.width(), rect.height()]);
     painter.add(RectShape::filled(rect, radius, tint).with_texture(texture.id(), uv));
