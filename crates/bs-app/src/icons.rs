@@ -35,6 +35,16 @@ pub(crate) enum Icon {
     Users,
     /// Динамик с волнами.
     Speaker,
+    /// Улыбающееся лицо.
+    Smile,
+    /// Лист с загнутым углом.
+    File,
+    /// Картинка: рамка, солнце, горы.
+    Image,
+    /// Наклейка с загнутым углом и улыбкой.
+    Sticker,
+    /// Бумажный самолётик.
+    Send,
 }
 
 /// Точки дуги окружности: углы в градусах, 0° — вправо, по часовой на экране.
@@ -48,6 +58,7 @@ fn arc(center: Pos2, radius: f32, from: f32, to: f32, steps: usize) -> Vec<Pos2>
         .collect()
 }
 
+#[allow(clippy::too_many_lines, reason = "по ветке на значок")]
 /// Рисует значок по центру `center`; `size` — сторона квадрата в пикселях.
 pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: Color32) {
     let unit = size / 24.0;
@@ -120,6 +131,55 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
             ]);
             line(arc(p(13.0, 12.0), 4.5 * unit, -45.0, 45.0, 8));
             line(arc(p(13.0, 12.0), 8.0 * unit, -45.0, 45.0, 10));
+        }
+        Icon::Smile => {
+            ring(arc(p(12.0, 12.0), 9.0 * unit, 0.0, 360.0, 32));
+            line(arc(p(12.0, 12.5), 5.0 * unit, 25.0, 155.0, 10));
+            painter.circle_filled(p(9.0, 9.5), unit * 1.3, color);
+            painter.circle_filled(p(15.0, 9.5), unit * 1.3, color);
+        }
+        Icon::File => {
+            ring(vec![
+                p(6.0, 3.5),
+                p(14.0, 3.5),
+                p(19.0, 8.5),
+                p(19.0, 20.5),
+                p(6.0, 20.5),
+            ]);
+            line(vec![p(14.0, 3.5), p(14.0, 8.5), p(19.0, 8.5)]);
+        }
+        Icon::Image => {
+            ring(vec![p(3.5, 5.0), p(20.5, 5.0), p(20.5, 19.0), p(3.5, 19.0)]);
+            painter.circle_filled(p(8.5, 9.5), unit * 1.8, color);
+            line(vec![
+                p(3.5, 17.0),
+                p(9.0, 12.5),
+                p(13.0, 16.0),
+                p(16.0, 13.5),
+                p(20.5, 17.5),
+            ]);
+        }
+        Icon::Sticker => {
+            ring(vec![
+                p(4.0, 4.0),
+                p(20.0, 4.0),
+                p(20.0, 13.0),
+                p(13.0, 20.0),
+                p(4.0, 20.0),
+            ]);
+            line(vec![
+                p(20.0, 13.0),
+                p(14.0, 13.0),
+                p(13.0, 14.0),
+                p(13.0, 20.0),
+            ]);
+            painter.circle_filled(p(9.0, 9.5), unit * 1.2, color);
+            painter.circle_filled(p(14.5, 9.5), unit * 1.2, color);
+            line(arc(p(11.5, 11.0), 4.0 * unit, 30.0, 150.0, 8));
+        }
+        Icon::Send => {
+            ring(vec![p(3.5, 4.5), p(21.0, 12.0), p(3.5, 19.5), p(6.5, 12.0)]);
+            line(vec![p(6.5, 12.0), p(13.0, 12.0)]);
         }
     }
 }

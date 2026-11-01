@@ -122,6 +122,11 @@ impl ApiClient {
         self.token.is_some()
     }
 
+    /// Токен для запросов, которые собирает не `request` (загрузка файлов).
+    pub(crate) fn bearer(&self) -> Option<&str> {
+        self.token.as_ref().map(|token| token.as_str())
+    }
+
     /// Внутренний HTTP-клиент: без редиректов, с таймаутом и политикой транспорта.
     pub(crate) const fn http(&self) -> &reqwest::Client {
         &self.http

@@ -320,8 +320,7 @@ impl Bridge {
             Ok(server) => self.registry.load(Some(server), &known, now_ms()),
             Err(message) => {
                 tracing::warn!(%message, "реестр подключений не прочитан");
-                self.message =
-                    Some("Не удалось прочитать список подключений с сервера".to_owned());
+                self.message = Some("Не удалось прочитать список подключений с сервера".to_owned());
                 self.registry.load(None, &known, now_ms());
             }
         }
@@ -363,8 +362,13 @@ impl Bridge {
                         );
                         slot.adopting = Some(credential);
                     } else {
-                        slot.session
-                            .start_remote(&credential, &base, name, transport, slot.register);
+                        slot.session.start_remote(
+                            &credential,
+                            &base,
+                            name,
+                            transport,
+                            slot.register,
+                        );
                     }
                 }
                 Err(message) => slot.session.fail(message),
@@ -496,12 +500,18 @@ impl Bridge {
                 match slot.session.failure() {
                     Some(FailureKind::Network) => self.registry.mark_unreachable(&base, now),
                     Some(FailureKind::CredentialRefused | FailureKind::RegistrationClosed) => {
-                        self.registry
-                            .mark_auth_expired(&base, registry::reason::REAUTHENTICATE, now);
+                        self.registry.mark_auth_expired(
+                            &base,
+                            registry::reason::REAUTHENTICATE,
+                            now,
+                        );
                     }
                     Some(FailureKind::Auth) => {
-                        self.registry
-                            .mark_auth_expired(&base, registry::reason::SESSION_EXPIRED, now);
+                        self.registry.mark_auth_expired(
+                            &base,
+                            registry::reason::SESSION_EXPIRED,
+                            now,
+                        );
                     }
                     None => {}
                 }
@@ -810,10 +820,12 @@ impl Bridge {
             return;
         }
         self.deleting = origins.to_vec();
-        self.slots[0].session.request(BridgeRequest::DeleteIdentity {
-            origins: origins.to_vec(),
-            mode,
-        });
+        self.slots[0]
+            .session
+            .request(BridgeRequest::DeleteIdentity {
+                origins: origins.to_vec(),
+                mode,
+            });
     }
 
     /// Закрывает сессию инстанса и убирает слот.
@@ -1014,11 +1026,13 @@ impl Bridge {
             .iter()
             .skip(1)
             .find(|s| s.base.as_deref() == Some(entry.origin.as_str()));
-        let state = slot.and_then(Self::slot_state).unwrap_or(match entry.status {
-            RegistryStatus::Connected | RegistryStatus::Unreachable => RowState::Unreachable,
-            RegistryStatus::Disconnected => RowState::Disconnected,
-            RegistryStatus::AuthExpired => RowState::AuthExpired,
-        });
+        let state = slot
+            .and_then(Self::slot_state)
+            .unwrap_or(match entry.status {
+                RegistryStatus::Connected | RegistryStatus::Unreachable => RowState::Unreachable,
+                RegistryStatus::Disconnected => RowState::Disconnected,
+                RegistryStatus::AuthExpired => RowState::AuthExpired,
+            });
         let detail = slot
             .filter(|s| s.session.is_idle())
             .and_then(|s| s.session.last_error().map(str::to_owned));

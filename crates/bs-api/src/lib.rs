@@ -23,6 +23,7 @@ pub mod assets;
 pub mod auth;
 pub mod client;
 pub mod community;
+pub mod compose;
 pub mod error;
 pub mod federation;
 pub mod instance;
@@ -30,11 +31,12 @@ pub mod read;
 pub mod registry;
 pub mod write;
 
-pub use assets::{AssetPath, STICKER_PREFIX, resolve_asset};
+pub use assets::{AssetPath, GIF_HOSTS, STICKER_PREFIX, fetch_external, resolve_asset};
 pub use auth::AuthResponse;
 pub use bs_types::{LiveKitTokenRequest, LiveKitTokenResponse};
 pub use client::{ApiClient, DEFAULT_TIMEOUT, MAX_RESPONSE_BYTES, USER_AGENT};
 pub use community::{CreateSpaceRequest, ExplorePage, UpdateProfileRequest};
+pub use compose::{GifItem, GifPage, MAX_UPLOAD_CHUNK, PersonalSticker, SendMessageBody};
 pub use error::ApiError;
 pub use federation::{
     AttachProofResponse, ChangePasswordRequest, ChangePasswordResponse,
@@ -43,12 +45,12 @@ pub use federation::{
 pub use instance::{
     InstanceInfo, PeerEnsureResponse, RegisterRequest, ReplicatedEntry, VerifyPasswordResponse,
 };
-pub use registry::{
-    IdentityDeleteMode, IdentityDeleteResult, RegistryEntry, RegistryResponse, RegistryStatus,
-};
 pub use read::{
     DmMessagePage, MESSAGES_LIMIT_DEFAULT, MESSAGES_LIMIT_MAX, MESSAGES_LIMIT_MIN, MessagePage,
     PagingCursor,
+};
+pub use registry::{
+    IdentityDeleteMode, IdentityDeleteResult, RegistryEntry, RegistryResponse, RegistryStatus,
 };
 pub use write::{
     CreateDmRequest, FriendRequestDecision, MessageSearchQuery, SEARCH_LIMIT_DEFAULT,

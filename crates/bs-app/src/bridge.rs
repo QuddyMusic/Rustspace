@@ -167,6 +167,44 @@ pub(crate) enum BridgeRequest {
     UpdateProfile(bs_api::UpdateProfileRequest),
     /// Скачать и декодировать картинку инстанса.
     Image(bs_api::AssetPath),
+    /// Загрузить файл на инстанс (tus); идёт параллельно с остальным.
+    Upload {
+        /// Локальный номер загрузки (задаёт композер).
+        id: u64,
+        /// Имя файла.
+        name: String,
+        /// Тип содержимого.
+        mime: String,
+        /// Содержимое.
+        bytes: std::sync::Arc<Vec<u8>>,
+    },
+    /// Включён ли поиск GIF.
+    GifEnabled,
+    /// Популярные GIF или поиск.
+    Gifs {
+        /// Запрос; пустой — популярное.
+        query: String,
+        /// Курсор страницы; пустой — первая.
+        pos: String,
+    },
+    /// Личные стикеры.
+    Stickers,
+    /// Загрузить личный стикер.
+    UploadSticker {
+        /// Имя.
+        name: String,
+        /// Файл.
+        bytes: std::sync::Arc<Vec<u8>>,
+    },
+    /// Удалить личный стикер.
+    DeleteSticker(String),
+    /// Отправить сообщение в канал пространства с вложениями.
+    SendRest {
+        /// Канал.
+        channel_id: String,
+        /// Тело.
+        body: bs_api::SendMessageBody,
+    },
     /// Только для домашней сессии: проверить пароль (если он есть) и
     /// получить секрет для входа на `origin`.
     IssueCredential {
@@ -211,6 +249,44 @@ pub(crate) enum BridgeRequest {
     },
 }
 
+/// Что пришло для композера; GUI забирает через [`Session::take_compose_events`].
+#[derive(Debug)]
+pub(crate) enum ComposeEvent {
+    /// Ход загрузки файла.
+    Progress {
+        /// Номер загрузки.
+        id: u64,
+        /// Отправлено байт.
+        sent: u64,
+        /// Всего байт.
+        total: u64,
+    },
+    /// Загрузка закончилась.
+    Uploaded {
+        /// Номер загрузки.
+        id: u64,
+        /// Вложение или текст ошибки.
+        result: Result<Box<bs_types::Attachment>, String>,
+    },
+    /// Доступность GIF.
+    GifEnabled(bool),
+    /// Страница GIF.
+    Gifs {
+        /// Запрос, для которого пришло.
+        query: String,
+        /// Курсор, с которого запрашивали.
+        pos: String,
+        /// Страница или текст ошибки.
+        result: Result<bs_api::GifPage, String>,
+    },
+    /// Личные стикеры.
+    Stickers(Result<Vec<bs_api::PersonalSticker>, String>),
+    /// Итог загрузки или удаления стикера.
+    StickerChanged(Result<(), String>),
+    /// Не удалось отправить сообщение.
+    SendFailed(String),
+}
+
 /// Ответ фоновой сессии на [`BridgeRequest`].
 #[derive(Debug)]
 pub(crate) enum BridgeResponse {
@@ -239,6 +315,8 @@ pub(crate) enum BridgeResponse {
         /// Кадры или текст ошибки.
         result: Result<bs_media::Decoded, String>,
     },
+    /// События композера (загрузки, GIF, стикеры).
+    Compose(ComposeEvent),
     /// Домашний инстанс выдал (или отказал выдать) секрет для входа.
     Credential {
         /// Куда собирались входить.
@@ -399,6 +477,8 @@ pub(crate) struct Session {
     deleted_in: Vec<Result<HashMap<String, IdentityDeleteResult>, String>>,
     /// Итог смены пароля удалённого аккаунта на выданный секрет.
     adopted_in: Option<Result<(), String>>,
+    /// События композера, которые GUI ещё не забрал.
+    compose_in: Vec<ComposeEvent>,
     /// Готовые картинки, которые GUI ещё не превратил в текстуры.
     images_ready: Vec<(bs_api::AssetPath, Result<bs_media::Decoded, String>)>,
     /// Последняя страница каталога пространств.
@@ -464,6 +544,7 @@ impl Session {
             peering: Vec::new(),
             failure: None,
             registry_in: None,
+            compose_in: Vec::new(),
             saved_in: Vec::new(),
             deleted_in: Vec::new(),
             adopted_in: None,
@@ -578,6 +659,7 @@ impl Session {
         self.deleted_in.clear();
         self.adopted_in = None;
         self.images_ready.clear();
+        self.compose_in.clear();
         self.explore = None;
         self.explore_loading = false;
         self.opened_space = None;
@@ -958,6 +1040,35 @@ impl Session {
             .is_some_and(|requests| requests.send(request).is_ok())
     }
 
+    /// Забирает накопленные события композера.
+    pub(crate) fn take_compose_events(&mut self) -> Vec<ComposeEvent> {
+        std::mem::take(&mut self.compose_in)
+    }
+
+    /// Отправляет сообщение в канал пространства (REST, нужен для вложений).
+    pub(crate) fn send_rest(&self, channel_id: String, body: bs_api::SendMessageBody) {
+        self.request(BridgeRequest::SendRest { channel_id, body });
+    }
+
+    /// Отправляет личное сообщение с вложениями и ответом.
+    pub(crate) fn send_dm_with(
+        &self,
+        channel_id: String,
+        content: Option<String>,
+        attachments: Vec<String>,
+    ) {
+        self.send(ClientEvent::DmMessageCreate {
+            dm_channel_id: channel_id,
+            content,
+            attachments: if attachments.is_empty() {
+                None
+            } else {
+                Some(attachments)
+            },
+            reply_to_id: None,
+        });
+    }
+
     /// Последние полученные друзья.
     pub(crate) fn friends(&self) -> &[bs_types::Friend] {
         &self.friends
@@ -1179,6 +1290,7 @@ impl Session {
             BridgeResponse::Image { path, result } => {
                 self.images_ready.push((path, result));
             }
+            BridgeResponse::Compose(event) => self.compose_in.push(event),
             BridgeResponse::JoinRequested => {
                 self.info = Some("Заявка отправлена".to_owned());
                 self.social_error = None;
@@ -1342,6 +1454,26 @@ async fn run_session(
                         };
                         let result = load_image(&client, &path).await;
                         let _ = tx.send(BridgeResponse::Image { path, result });
+                    });
+                }
+                Some(BridgeRequest::Upload { id, name, mime, bytes }) => {
+                    let client = handle.client().clone();
+                    let tx = responses.clone();
+                    image_jobs.spawn(async move {
+                        let progress_tx = tx.clone();
+                        let result = client
+                            .upload_file(&name, &mime, &bytes, move |sent, total| {
+                                let _ = progress_tx.send(BridgeResponse::Compose(
+                                    ComposeEvent::Progress { id, sent, total },
+                                ));
+                            })
+                            .await
+                            .map(Box::new)
+                            .map_err(|err| upload_message(&err));
+                        let _ = tx.send(BridgeResponse::Compose(ComposeEvent::Uploaded {
+                            id,
+                            result,
+                        }));
                     });
                 }
                 Some(request) => {
@@ -1521,6 +1653,25 @@ async fn issue_credential_inner(
     })
 }
 
+/// Понятный текст отказа сервера для композера.
+fn upload_message(err: &bs_api::ApiError) -> String {
+    use bs_api::ApiError;
+    match err {
+        ApiError::Unexpected { status, .. } if status.as_u16() == 413 => {
+            "Файл больше лимита сервера".to_owned()
+        }
+        ApiError::Unexpected { status, .. } if status.as_u16() == 429 => {
+            "Слишком много загрузок, подождите минуту".to_owned()
+        }
+        ApiError::Unexpected { status, .. } | ApiError::Server { status, .. }
+            if status.as_u16() == 403 =>
+        {
+            "Нет права прикреплять файлы".to_owned()
+        }
+        other => other.to_string(),
+    }
+}
+
 #[allow(clippy::too_many_lines, reason = "по ветке на каждый вид запроса")]
 async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> BridgeResponse {
     match request {
@@ -1574,7 +1725,42 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
         // Картинки обрабатываются отдельно и параллельно (см. `run_session`).
-        BridgeRequest::Image(_) => BridgeResponse::Done,
+        BridgeRequest::Image(_) | BridgeRequest::Upload { .. } => BridgeResponse::Done,
+        BridgeRequest::GifEnabled => BridgeResponse::Compose(ComposeEvent::GifEnabled(
+            client.gif_enabled().await.unwrap_or(false),
+        )),
+        BridgeRequest::Gifs { query, pos } => {
+            let result = client
+                .gifs(&query, 30, &pos)
+                .await
+                .map_err(|err| err.to_string());
+            BridgeResponse::Compose(ComposeEvent::Gifs { query, pos, result })
+        }
+        BridgeRequest::Stickers => BridgeResponse::Compose(ComposeEvent::Stickers(
+            client.stickers().await.map_err(|err| upload_message(&err)),
+        )),
+        BridgeRequest::UploadSticker { name, bytes } => {
+            BridgeResponse::Compose(ComposeEvent::StickerChanged(
+                client
+                    .upload_sticker(&name, &bytes)
+                    .await
+                    .map(|_| ())
+                    .map_err(|err| upload_message(&err)),
+            ))
+        }
+        BridgeRequest::DeleteSticker(id) => BridgeResponse::Compose(ComposeEvent::StickerChanged(
+            client
+                .delete_sticker(&id)
+                .await
+                .map(|_| ())
+                .map_err(|err| upload_message(&err)),
+        )),
+        BridgeRequest::SendRest { channel_id, body } => {
+            match client.send_channel_message(&channel_id, &body).await {
+                Ok(_) => BridgeResponse::Done,
+                Err(err) => BridgeResponse::Compose(ComposeEvent::SendFailed(upload_message(&err))),
+            }
+        }
         BridgeRequest::IssueCredential { origin, password } => {
             issue_credential(client, &origin, password.as_ref()).await
         }
@@ -1593,9 +1779,12 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                 Err(err) => BridgeResponse::Failed(err.to_string()),
             }
         }
-        BridgeRequest::LoadRegistry => {
-            BridgeResponse::Registry(client.federation_registry().await.map_err(|e| e.to_string()))
-        }
+        BridgeRequest::LoadRegistry => BridgeResponse::Registry(
+            client
+                .federation_registry()
+                .await
+                .map_err(|e| e.to_string()),
+        ),
         BridgeRequest::PutRegistry {
             entries,
             updated_at,
@@ -2058,7 +2247,11 @@ mod tests {
         let BridgeEvent::LoginFailed { message, kind } = event else {
             unreachable!("ожидалась ошибка входа, пришло {event:?}");
         };
-        assert_eq!(kind, super::FailureKind::Auth, "отказ сервера не сетевая ошибка");
+        assert_eq!(
+            kind,
+            super::FailureKind::Auth,
+            "отказ сервера не сетевая ошибка"
+        );
         assert!(message.contains("401"), "текст ошибки: {message}");
         assert!(message.contains("Invalid credentials"), "{message}");
         assert!(

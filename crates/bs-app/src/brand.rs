@@ -78,7 +78,11 @@ fn flatten(path: &str) -> Vec<Pos2> {
         value
     };
     while index < tokens.len() {
-        if let Some(letter) = tokens[index].chars().next().filter(char::is_ascii_alphabetic) {
+        if let Some(letter) = tokens[index]
+            .chars()
+            .next()
+            .filter(char::is_ascii_alphabetic)
+        {
             command = letter;
             index += 1;
             if command == 'Z' {

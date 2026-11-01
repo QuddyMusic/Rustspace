@@ -4,7 +4,6 @@
 //! юнит-тестами, тогда как сами экраны остаются тонкими обёртками.
 
 use bs_instances::ConnectionState;
-use bs_types::ChannelId;
 
 use crate::app::Screen;
 
@@ -14,13 +13,6 @@ use crate::app::Screen;
 /// на каждый кадр отрисовки.
 pub(crate) fn author_name<'a>(display_name: Option<&'a str>, username: &'a str) -> &'a str {
     display_name.unwrap_or(username)
-}
-
-/// Можно ли отправить сообщение в текущем состоянии экрана.
-///
-/// Нужен выбранный канал и непустой (после `trim`) черновик.
-pub(crate) fn can_send(channel: Option<&ChannelId>, draft: &str) -> bool {
-    channel.is_some() && !draft.trim().is_empty()
 }
 
 /// Текст для отправки: черновик без ведущих и хвостовых пробелов.
@@ -167,11 +159,10 @@ pub(crate) fn should_load_older(
 #[cfg(test)]
 mod tests {
     use bs_instances::ConnectionState;
-    use bs_types::ChannelId;
 
     use super::{
-        author_name, can_manage_message, can_send, connection_label, describe_server_error,
-        message_actions, next_screen, outgoing_text, should_ack, should_load_older, should_wake,
+        author_name, can_manage_message, connection_label, describe_server_error, message_actions,
+        next_screen, outgoing_text, should_ack, should_load_older, should_wake,
     };
     use crate::app::Screen;
 
@@ -189,15 +180,6 @@ mod tests {
     fn author_name_keeps_empty_display_name() {
         // Пустая строка — валидное значение поля, не повод подменять его.
         assert_eq!(author_name(Some(""), "alice42"), "");
-    }
-
-    #[test]
-    fn can_send_requires_channel_and_text() {
-        let channel = ChannelId::from("chan-1");
-        assert!(can_send(Some(&channel), "привет"));
-        assert!(!can_send(None, "привет"), "без канала отправлять некуда");
-        assert!(!can_send(Some(&channel), ""), "пустой черновик");
-        assert!(!can_send(Some(&channel), "   \n\t "), "пробелы — не текст");
     }
 
     #[test]

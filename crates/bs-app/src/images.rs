@@ -26,6 +26,9 @@ use crate::bridge::BridgeRequest;
 /// Сколько байт текстур держим в памяти до вытеснения.
 const TEXTURE_BUDGET: usize = 96 * 1024 * 1024;
 
+/// Условный «адрес» для файлов не с инстанса (GIF с CDN).
+pub(crate) const EXTERNAL: &str = "external";
+
 /// Готовая картинка: размер и кадры-текстуры.
 pub(crate) struct Loaded {
     /// Ширина кадра.
@@ -173,6 +176,10 @@ impl ImageHub {
     /// инстансов. Полный адрес подходит только своему инстансу; имя файла
     /// без адреса читается относительно текущего.
     pub(crate) fn resolve(&self, value: &str) -> Option<Key> {
+        // GIF живут на CDN сервиса, а не на инстансе: общий ключ «внешние».
+        if let Some(path) = bs_api::AssetPath::external(value) {
+            return Some((EXTERNAL.to_owned(), path));
+        }
         let inner = self.lock();
         let key = if value.contains("://") {
             inner
@@ -211,10 +218,12 @@ impl ImageHub {
             Some(Entry::Failed(message)) => return ImageState::Failed(message.clone()),
             None => {}
         }
+        // Внешний файл качает любая живая сессия (без токена); ссылка
+        // домашнего инстанса стоит первой.
         let sent = inner
             .links
             .iter()
-            .find(|(base, _)| *base == key.0)
+            .find(|(base, _)| key.0 == EXTERNAL || *base == key.0)
             .is_some_and(|(_, tx)| tx.send(BridgeRequest::Image(key.1.clone())).is_ok());
         if sent {
             inner.entries.insert(key.clone(), Entry::Loading);
@@ -297,8 +306,7 @@ fn upload(ctx: &Context, key: &Key, decoded: &Decoded) -> Loaded {
         height: decoded.height,
         frames,
         total_ms,
-        bytes: decoded.byte_size()
-            + decoded.thumb.as_ref().map_or(0, |t| t.rgba.len()),
+        bytes: decoded.byte_size() + decoded.thumb.as_ref().map_or(0, |t| t.rgba.len()),
     }
 }
 
@@ -365,7 +373,11 @@ pub(crate) fn paint_cover(
         // большая картинка в десятках пикселей выглядит рваной.
         let wanted = rect.width().max(rect.height()) * painter.ctx().pixels_per_point();
         match &image.thumb {
-            Some(thumb) if wanted <= f32::from(u16::try_from(bs_media::THUMB_SIDE).unwrap_or(u16::MAX)) => thumb,
+            Some(thumb)
+                if wanted <= f32::from(u16::try_from(bs_media::THUMB_SIDE).unwrap_or(u16::MAX)) =>
+            {
+                thumb
+            }
             _ => image.first(),
         }
     };
@@ -415,7 +427,9 @@ mod tests {
         assert_eq!(key.0, "https://third.example");
         hub.set_current(None);
         assert!(hub.resolve("pic.png").is_none());
-        let owned = hub.resolve("https://home.example/api/uploads/x.png").expect("abs");
+        let owned = hub
+            .resolve("https://home.example/api/uploads/x.png")
+            .expect("abs");
         assert_eq!(owned.0, "https://home.example");
     }
 

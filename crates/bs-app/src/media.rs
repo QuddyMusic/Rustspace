@@ -76,6 +76,14 @@ pub(crate) fn sticker_of(body: &str) -> Option<&str> {
     value.starts_with(STICKER_PREFIX).then_some(value)
 }
 
+/// Если сообщение — ссылка на GIF (так отправляет выбор из поиска), возвращает её.
+#[must_use]
+pub(crate) fn gif_of(body: &str) -> Option<&str> {
+    let value = body.trim();
+    (!value.contains(char::is_whitespace) && bs_api::AssetPath::external(value).is_some())
+        .then_some(value)
+}
+
 /// Вписывает `size` в `max`, не увеличивая.
 #[must_use]
 pub(crate) fn fit(size: [f32; 2], max: Vec2) -> Vec2 {
@@ -175,6 +183,36 @@ pub(crate) fn show_sticker(ui: &mut egui::Ui, value: &str) -> Option<Hit> {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     ready.then(|| (rect, value.to_owned()))
+}
+
+/// GIF-сообщение в ленте.
+pub(crate) fn show_gif(ui: &mut egui::Ui, url: &str) -> Option<Hit> {
+    let state = ImageHub::of(ui.ctx()).map_or(ImageState::Absent, |h| h.state(url));
+    let size = match &state {
+        ImageState::Ready(image) => fit(image.size_f32(), MAX_BOX),
+        _ => Vec2::new(240.0, 160.0),
+    };
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let mut ready = false;
+    match state {
+        ImageState::Ready(image) => {
+            ready = true;
+            paint_cover(
+                ui.painter(),
+                rect,
+                &image,
+                CornerRadius::same(10),
+                true,
+                Color32::WHITE,
+            );
+        }
+        ImageState::Loading => placeholder(ui, rect, "GIF…"),
+        _ => placeholder(ui, rect, "GIF недоступен"),
+    }
+    if ready && response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    ready.then(|| (rect, url.to_owned()))
 }
 
 fn placeholder(ui: &egui::Ui, rect: Rect, text: &str) {

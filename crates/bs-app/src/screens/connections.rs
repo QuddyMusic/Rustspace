@@ -150,8 +150,7 @@ pub(crate) fn show(ui: &mut egui::Ui, state: &mut ConnectionsUi, bridge: &Bridge
     }
     if rows.is_empty() {
         ui.label(
-            theme::muted("Другие серверы не подключены. Добавьте сервер, чтобы начать.")
-                .size(13.0),
+            theme::muted("Другие серверы не подключены. Добавьте сервер, чтобы начать.").size(13.0),
         );
     } else if shown.is_empty() {
         ui.label(theme::muted("Нет серверов, подходящих под фильтр.").size(13.0));
@@ -208,7 +207,14 @@ fn home_card(ui: &mut egui::Ui, home: &crate::fleet::HomeRow) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                dot(ui, if home.live { theme::GREEN } else { theme::AMBER });
+                dot(
+                    ui,
+                    if home.live {
+                        theme::GREEN
+                    } else {
+                        theme::AMBER
+                    },
+                );
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.label(
@@ -236,8 +242,7 @@ fn filter_bar(ui: &mut egui::Ui, state: &mut ConnectionsUi, counts: &Counts) {
             (Filter::Disconnected, "Отключённые", counts.disconnected),
             (Filter::Issues, "С проблемами", counts.issues),
         ] {
-            if widgets::pill_tab(ui, &format!("{title}  {count}"), state.filter == filter)
-                .clicked()
+            if widgets::pill_tab(ui, &format!("{title}  {count}"), state.filter == filter).clicked()
             {
                 state.filter = filter;
             }
@@ -276,18 +281,13 @@ const fn badge(state: RowState) -> (Color32, &'static str) {
 
 fn status_badge(ui: &mut egui::Ui, state: RowState) {
     let (color, text) = badge(state);
-    let galley = ui.painter().layout_no_wrap(
-        text.to_owned(),
-        egui::FontId::proportional(11.5),
-        color,
-    );
+    let galley =
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), egui::FontId::proportional(11.5), color);
     let size = galley.size() + egui::vec2(14.0, 6.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    ui.painter().rect_filled(
-        rect,
-        CornerRadius::same(5),
-        color.gamma_multiply(0.16),
-    );
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(5), color.gamma_multiply(0.16));
     ui.painter()
         .galley(rect.center() - galley.size() / 2.0, galley, color);
 }
@@ -527,12 +527,20 @@ fn small_button(text: &str, tint: Color32) -> egui::Button<'static> {
         .min_size(egui::vec2(0.0, 28.0))
 }
 
-fn actions(ui: &mut egui::Ui, state: &mut ConnectionsUi, row: &ConnectionRow, action: &mut ConnAction) {
+fn actions(
+    ui: &mut egui::Ui,
+    state: &mut ConnectionsUi,
+    row: &ConnectionRow,
+    action: &mut ConnAction,
+) {
     ui.horizontal_wrapped(|ui| {
         let origin = row.origin.clone();
         match row.state {
             RowState::Connected => {
-                if ui.add(small_button("Отключиться", theme::TEXT_MUTED)).clicked() {
+                if ui
+                    .add(small_button("Отключиться", theme::TEXT_MUTED))
+                    .clicked()
+                {
                     *action = ConnAction::Disconnect(origin.clone());
                 }
                 ui.add_enabled(false, small_button("Удалить учётную запись", theme::ROSE))
@@ -542,7 +550,10 @@ fn actions(ui: &mut egui::Ui, state: &mut ConnectionsUi, row: &ConnectionRow, ac
                 ui.add_enabled(false, small_button("Подключается…", theme::TEXT_MUTED));
             }
             RowState::Disconnected => {
-                if ui.add(small_button("Переподключиться", theme::ACCENT)).clicked() {
+                if ui
+                    .add(small_button("Переподключиться", theme::ACCENT))
+                    .clicked()
+                {
                     *action = ConnAction::Reconnect(origin.clone());
                 }
                 reauth_button(ui, state, &origin);
@@ -550,7 +561,9 @@ fn actions(ui: &mut egui::Ui, state: &mut ConnectionsUi, row: &ConnectionRow, ac
             }
             RowState::Unreachable | RowState::AuthExpired => {
                 if matches!(row.state, RowState::Unreachable)
-                    && ui.add(small_button("Переподключиться", theme::ACCENT)).clicked()
+                    && ui
+                        .add(small_button("Переподключиться", theme::ACCENT))
+                        .clicked()
                 {
                     *action = ConnAction::Reconnect(origin.clone());
                 }
@@ -595,7 +608,12 @@ fn delete_button(ui: &mut egui::Ui, state: &mut ConnectionsUi, origin: &str) {
 
 /// Встроенная форма под кнопками карточки.
 #[allow(clippy::too_many_lines, reason = "по ветке на каждую форму")]
-fn dialog(ui: &mut egui::Ui, state: &mut ConnectionsUi, row: &ConnectionRow, action: &mut ConnAction) {
+fn dialog(
+    ui: &mut egui::Ui,
+    state: &mut ConnectionsUi,
+    row: &ConnectionRow,
+    action: &mut ConnAction,
+) {
     if state.dialog.as_ref().map(Dialog::origin) != Some(row.origin.as_str()) {
         if row.offer_own_login && state.dialog.is_none() {
             own_login_hint(ui, state, row);
@@ -820,17 +838,19 @@ fn delete_form(
 
 fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnAction) {
     if !state.add_open {
-        let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), 40.0),
-            Sense::click(),
-        );
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), Sense::click());
         let hovered = response.hovered();
         ui.painter().rect_stroke(
             rect,
             CornerRadius::same(10),
             Stroke::new(
                 1.0,
-                if hovered { theme::ACCENT } else { theme::BORDER },
+                if hovered {
+                    theme::ACCENT
+                } else {
+                    theme::BORDER
+                },
             ),
             egui::StrokeKind::Inside,
         );
@@ -869,7 +889,8 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
             widgets::field_label(ui, "Адрес сервера");
             widgets::text_field(ui, &mut state.address, "https://instance.example.com", 200);
             widgets::field_label(ui, "Пароль учётной записи на домашнем сервере");
-            let field = widgets::secret_field(ui, &mut state.password, "тот же, что при входе", 200);
+            let field =
+                widgets::secret_field(ui, &mut state.password, "тот же, что при входе", 200);
             ui.add_space(4.0);
             ui.label(
                 theme::muted(
@@ -903,21 +924,25 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
 }
 
 const MONTHS: [&str; 12] = [
-    "янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек.",
+    "янв.",
+    "февр.",
+    "мар.",
+    "апр.",
+    "мая",
+    "июн.",
+    "июл.",
+    "авг.",
+    "сент.",
+    "окт.",
+    "нояб.",
+    "дек.",
 ];
 
 /// Дата вида «2 окт. 2026».
 fn date(ms: i64) -> String {
     chrono::Local.timestamp_millis_opt(ms).single().map_or_else(
         || "—".to_owned(),
-        |d| {
-            format!(
-                "{} {} {}",
-                d.day(),
-                MONTHS[d.month0() as usize],
-                d.year()
-            )
-        },
+        |d| format!("{} {} {}", d.day(), MONTHS[d.month0() as usize], d.year()),
     )
 }
 

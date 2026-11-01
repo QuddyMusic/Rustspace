@@ -24,7 +24,16 @@ const MAX_VALUE_LEN: usize = 512;
 /// Самое длинное допустимое имя файла.
 const MAX_NAME_LEN: usize = 128;
 
-/// Проверенный путь к файлу на своём инстансе.
+/// Хосты, с которых клиент согласен скачивать GIF напрямую.
+///
+/// Это CDN сервиса Klipy (и прежний Tenor): GIF в сообщении — это ссылка на
+/// такой файл, а поиск идёт через свой инстанс, который хранит ключ сервиса.
+pub const GIF_HOSTS: [&str; 2] = ["static.klipy.com", "media.tenor.com"];
+/// Самая длинная допустимая внешняя ссылка.
+const MAX_EXTERNAL_LEN: usize = 300;
+
+/// Проверенный путь к файлу: на своём инстансе (`/api/uploads/…`) или
+/// полная ссылка `https` на хост из [`GIF_HOSTS`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AssetPath(String);
 
@@ -45,11 +54,81 @@ impl AssetPath {
         valid.then(|| Self(path.to_owned()))
     }
 
+    /// Разбирает ссылку на GIF: только `https`, только хосты из
+    /// [`GIF_HOSTS`], без логина, порта, параметров и фрагмента.
+    #[must_use]
+    pub fn external(value: &str) -> Option<Self> {
+        let value = value.trim();
+        if value.is_empty() || value.len() > MAX_EXTERNAL_LEN {
+            return None;
+        }
+        let url = Url::parse(value).ok()?;
+        let allowed = url.scheme() == "https"
+            && url.host_str().is_some_and(|h| GIF_HOSTS.contains(&h))
+            && url.port().is_none()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none()
+            && url.path().len() > 1
+            && url.path().bytes().all(|b| {
+                b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'_' | b'-' | b'%' | b'~')
+            });
+        allowed.then(|| Self(url.to_string()))
+    }
+
+    /// Это внешняя ссылка, а не путь на инстансе.
+    #[must_use]
+    pub fn is_external(&self) -> bool {
+        self.0.starts_with("https://")
+    }
+
     /// Путь для запроса.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Клиент для внешних хостов: без редиректов, только `https`, без токенов.
+fn external_client() -> Result<&'static reqwest::Client, ApiError> {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .user_agent(crate::client::USER_AGENT)
+        .redirect(reqwest::redirect::Policy::none())
+        .https_only(true)
+        .build()?;
+    Ok(CLIENT.get_or_init(|| client))
+}
+
+/// Скачивает внешний файл (GIF), но не больше `limit` байт.
+///
+/// Принимает только пути, прошедшие [`AssetPath::external`]: никакого токена,
+/// перенаправлений и посторонних адресов.
+///
+/// # Errors
+/// Сетевые ошибки, не-2xx ответ, превышение `limit`, путь не внешний.
+pub async fn fetch_external(asset: &AssetPath, limit: usize) -> Result<Vec<u8>, ApiError> {
+    if !asset.is_external() {
+        return Err(ApiError::Url(url::ParseError::RelativeUrlWithoutBase));
+    }
+    let response = external_client()?
+        .get(asset.as_str())
+        .header(header::ACCEPT, "image/*")
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(ApiError::Unexpected {
+            status,
+            body: String::new(),
+        });
+    }
+    read_limited(response, limit).await
 }
 
 /// Приводит значение поля (аватар, баннер, иконка, `filename` вложения,
@@ -92,6 +171,9 @@ impl ApiClient {
     /// # Errors
     /// Сетевые ошибки, не-2xx ответ или превышение `limit`.
     pub async fn fetch_asset(&self, asset: &AssetPath, limit: usize) -> Result<Vec<u8>, ApiError> {
+        if asset.is_external() {
+            return fetch_external(asset, limit).await;
+        }
         let url = self.endpoint(asset.as_str())?;
         let response = self
             .http()
@@ -113,6 +195,25 @@ impl ApiClient {
 #[cfg(test)]
 mod tests {
     use super::{AssetPath, resolve_asset};
+
+    #[test]
+    fn gif_links_only_from_allowed_hosts_over_https() {
+        let ok = AssetPath::external("https://static.klipy.com/ii/abc/def.gif");
+        assert!(ok.is_some_and(|p| p.is_external()));
+        assert!(AssetPath::external("https://media.tenor.com/xyz/cat.gif").is_some());
+        for bad in [
+            "http://static.klipy.com/a.gif",
+            "https://evil.example/a.gif",
+            "https://static.klipy.com.evil.example/a.gif",
+            "https://static.klipy.com:8443/a.gif",
+            "https://user@static.klipy.com/a.gif",
+            "https://static.klipy.com/a.gif?x=1",
+            "https://static.klipy.com/",
+            "/api/uploads/a.png",
+        ] {
+            assert!(AssetPath::external(bad).is_none(), "{bad}");
+        }
+    }
 
     const BASE: &str = "https://chat.example.com";
 

@@ -49,7 +49,11 @@ pub(crate) fn flat_icon(icon: Icon, size: f32, color: Color32) -> impl egui::Wid
     move |ui: &mut egui::Ui| {
         let (rect, response) =
             ui.allocate_exact_size(egui::Vec2::splat(size + 6.0), Sense::click());
-        let tint = if response.hovered() { TEXT_BRIGHT } else { color };
+        let tint = if response.hovered() {
+            TEXT_BRIGHT
+        } else {
+            color
+        };
         crate::icons::paint(ui.painter(), rect.center(), size, icon, tint);
         response.on_hover_cursor(egui::CursorIcon::PointingHand)
     }

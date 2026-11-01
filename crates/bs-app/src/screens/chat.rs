@@ -11,8 +11,8 @@ use crate::bridge::{BridgeRequest, ChannelKind, HistoryState};
 use crate::fleet::Bridge;
 use crate::icons::Icon;
 use crate::logic::{
-    DEFAULT_REACTION, author_name, can_send, connection_label, message_actions, outgoing_text,
-    should_ack, should_load_older,
+    DEFAULT_REACTION, author_name, connection_label, message_actions, outgoing_text, should_ack,
+    should_load_older,
 };
 use crate::media::{self, AttachmentView};
 use crate::screens::dialogs::{self, CreateSpaceForm, SettingsAction, SettingsState};
@@ -488,6 +488,8 @@ pub(crate) struct ChatScreen {
     /// Выбранный канал и его инстанс.
     pub(crate) selected_channel: Option<SelectedChannel>,
     pub(crate) draft: String,
+    /// Вложения, эмодзи, GIF и стикеры.
+    composer: super::composer::Composer,
     /// Что показано в центре.
     view: View,
     /// Состояние друзей и обзора.
@@ -847,9 +849,14 @@ impl ChatScreen {
                         {
                             *nav = Some(Nav::CreateSpace);
                         }
-                        if widgets::rail_action(ui, Icon::Compass, theme::SKY, self.view == View::Explore)
-                            .on_hover_text("Обзор пространств")
-                            .clicked()
+                        if widgets::rail_action(
+                            ui,
+                            Icon::Compass,
+                            theme::SKY,
+                            self.view == View::Explore,
+                        )
+                        .on_hover_text("Обзор пространств")
+                        .clicked()
                         {
                             *nav = Some(Nav::Explore);
                         }
@@ -1256,7 +1263,7 @@ fn show_history_header(ui: &mut egui::Ui, history: &HistoryState) -> bool {
 }
 
 impl ChatScreen {
-    fn show_composer(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
+    fn show_composer(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) {
         let hint = match (&self.selected_channel, bridge.cache()) {
             (Some(selected), Some(cache)) => match selected.kind {
                 ChannelKind::Space => cache.channel(&selected.channel).map_or_else(
@@ -1311,66 +1318,59 @@ impl ChatScreen {
                     }
                 });
                 let enabled = self.selected_channel.is_some();
-                let can_send_now = can_send(
-                    self.selected_channel.as_ref().map(|s| &s.channel),
-                    &self.draft,
-                );
-                let mut submitted = false;
-                let mut response = None;
-                egui::Frame::new()
-                    .fill(theme::BG_BUBBLE)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
-                    .corner_radius(CornerRadius::same(16))
-                    .inner_margin(Margin::symmetric(16, 11))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.add(widgets::flat_icon(Icon::Plus, 22.0, theme::TEXT_FAINT))
-                                .on_hover_text("Вложения появятся в одном из следующих этапов");
-                            let send_width = if can_send_now { 110.0 } else { 0.0 };
-                            let width = (ui.available_width() - send_width).max(80.0);
-                            let edit = ui.add_enabled(
-                                enabled,
-                                egui::TextEdit::singleline(&mut self.draft)
-                                    .hint_text(hint)
-                                    .frame(egui::Frame::NONE)
-                                    .align(egui::Align2::LEFT_CENTER)
-                                    .desired_width(width),
-                            );
-                            submitted =
-                                edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            if can_send_now && ui.add(theme::primary_button("Отправить")).clicked()
-                            {
-                                submitted = true;
-                            }
-                            response = Some(edit);
-                        });
-                    });
-                if self.is_editing() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                let editing = self.is_editing();
+                let outgoing =
+                    self.composer
+                        .show(ui, bridge, &mut self.draft, &hint, enabled, editing);
+                if editing && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     self.cancel_edit();
                 }
-                if submitted {
-                    self.submit(bridge);
-                    if let Some(edit) = response {
-                        edit.request_focus();
-                    }
+                if let Some(outgoing) = outgoing {
+                    self.submit(bridge, outgoing);
+                    ui.memory_mut(|m| m.request_focus(super::composer::edit_id()));
                 }
             });
     }
 
     /// Отправляет черновик: новое сообщение или правку.
-    fn submit(&mut self, bridge: &Bridge) {
-        let Some(content) = outgoing_text(&self.draft) else {
-            return;
-        };
+    fn submit(&mut self, bridge: &Bridge, outgoing: super::composer::Outgoing) {
         let Some(selected) = self.selected_channel.clone() else {
             return;
         };
-        if let Some(edit) = self.edit.take() {
-            bridge.edit_message(selected.kind, edit.message_id, content);
-        } else {
-            bridge.send_message(selected.kind, selected.channel, content);
+        let content = outgoing.content;
+        if !outgoing.keep_draft
+            && let Some(edit) = self.edit.take()
+        {
+            if let Some(text) = outgoing_text(&content) {
+                bridge.edit_message(selected.kind, edit.message_id, text);
+            }
+            self.draft.clear();
+            return;
         }
-        self.draft.clear();
+        let text = outgoing_text(&content);
+        match selected.kind {
+            ChannelKind::Space if outgoing.attachments.is_empty() => {
+                if let Some(text) = text {
+                    bridge.send_message(selected.kind, selected.channel, text);
+                }
+            }
+            ChannelKind::Space => bridge.send_rest(
+                selected.channel,
+                bs_api::SendMessageBody {
+                    content: text.unwrap_or_default(),
+                    attachments: outgoing.attachments,
+                    reply_to_id: None,
+                },
+            ),
+            ChannelKind::Dm => {
+                if text.is_some() || !outgoing.attachments.is_empty() {
+                    bridge.send_dm_with(selected.channel, text, outgoing.attachments);
+                }
+            }
+        }
+        if !outgoing.keep_draft {
+            self.draft.clear();
+        }
     }
 
     /// Сбрасывает состояние прокрутки, если открыли другой канал.
@@ -1544,6 +1544,8 @@ impl ChatScreen {
                 }
                 if let Some(sticker) = media::sticker_of(&row.body) {
                     hits.extend(media::show_sticker(ui, sticker));
+                } else if let Some(gif) = media::gif_of(&row.body) {
+                    hits.extend(media::show_gif(ui, gif));
                 } else if !row.body.is_empty() {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(RichText::new(&row.body).color(theme::TEXT));

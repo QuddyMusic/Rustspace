@@ -14,6 +14,7 @@
 mod app;
 mod brand;
 mod bridge;
+mod emoji_data;
 #[cfg(test)]
 mod fake_instance;
 mod fleet;
