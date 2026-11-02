@@ -49,6 +49,47 @@ impl BackspaceApp {
 }
 
 impl BackspaceApp {
+    /// Завершает скачивания: картинка в буфер обмена или стикер в коллекцию.
+    fn finish_raw(&mut self, ctx: &egui::Context) {
+        for (purpose, result) in self.images.take_raw_done() {
+            let bytes = match result {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    self.bridge.set_info(format!("Не удалось скачать: {err}"));
+                    continue;
+                }
+            };
+            match purpose {
+                crate::images::RawPurpose::Copy => {
+                    let image = bs_media::decode(&bytes, &bs_media::Limits::default())
+                        .ok()
+                        .and_then(|d| {
+                            let frame = d.frames.into_iter().next()?;
+                            Some(egui::ColorImage::from_rgba_unmultiplied(
+                                [d.width as usize, d.height as usize],
+                                &frame.rgba,
+                            ))
+                        });
+                    if let Some(image) = image {
+                        ctx.copy_image(image);
+                        self.bridge.set_info("Картинка скопирована".to_owned());
+                    } else {
+                        self.bridge
+                            .set_info("Не удалось прочитать картинку".to_owned());
+                    }
+                }
+                crate::images::RawPurpose::Sticker(name) => {
+                    self.bridge
+                        .request(crate::bridge::BridgeRequest::UploadSticker {
+                            name,
+                            bytes: bytes.into(),
+                        });
+                    self.bridge.set_info("Стикер сохраняется…".to_owned());
+                }
+            }
+        }
+    }
+
     /// Тонкая полоса над интерфейсом: показывается только если есть что
     /// сказать — отказ сервера или нестабильное соединение.
     fn notice_strip(&mut self, ui: &mut egui::Ui) {
@@ -113,6 +154,10 @@ impl eframe::App for BackspaceApp {
         for (base, path, result) in self.bridge.take_images() {
             self.images.accept(ui.ctx(), &(base, path), result);
         }
+        for (tag, result) in self.bridge.take_raw() {
+            self.images.accept_raw(tag, result);
+        }
+        self.finish_raw(ui.ctx());
         if lost {
             // Кэш и каналы мост уже сбросил сам, когда сессия закрылась.
             self.chat.reset();

@@ -592,6 +592,8 @@ pub(crate) struct ChatScreen {
     was_scrolled_down: bool,
     /// Канал, для которого относятся `scroll_anchor` и `was_scrolled_down`.
     scroll_key: Option<String>,
+    /// Картинка под курсором при открытии меню: сообщение и значение поля.
+    menu_image: Option<(String, String)>,
     /// Открытое окно профиля.
     profile: Option<super::profile::ProfileState>,
     /// Сообщение, на которое пишется ответ.
@@ -1762,9 +1764,43 @@ impl ChatScreen {
                 &row.author,
             ));
         }
+        if response.secondary_clicked() {
+            self.menu_image = response.interact_pointer_pos().and_then(|pos| {
+                hits.iter()
+                    .find(|(rect, _)| rect.contains(pos))
+                    .map(|(_, value)| (row.id.clone(), value.clone()))
+            });
+        }
+        let image = self
+            .menu_image
+            .clone()
+            .filter(|(id, _)| *id == row.id)
+            .map(|(_, value)| value);
+        let can_collect = image
+            .as_deref()
+            .is_some_and(|v| !v.starts_with("https://") || v.starts_with("sticker:"));
         let mut open_picker = false;
         let mut reply_request = false;
         response.context_menu(|ui| {
+            if let Some(value) = &image {
+                if ui.button("Копировать картинку").clicked() {
+                    if let Some(hub) = crate::images::ImageHub::of(ui.ctx()) {
+                        hub.request_raw(value, crate::images::RawPurpose::Copy);
+                    }
+                    ui.close();
+                }
+                if can_collect && ui.button("Сохранить в мои стикеры").clicked()
+                {
+                    if let Some(hub) = crate::images::ImageHub::of(ui.ctx()) {
+                        hub.request_raw(
+                            value,
+                            crate::images::RawPurpose::Sticker("Стикер".to_owned()),
+                        );
+                    }
+                    ui.close();
+                }
+                ui.separator();
+            }
             if ui.button("Ответить").clicked() {
                 reply_request = true;
                 ui.close();
@@ -1773,7 +1809,11 @@ impl ChatScreen {
                 open_picker = true;
                 ui.close();
             }
-            if !row.body.is_empty() && ui.button("Копировать текст").clicked() {
+            if !row.body.is_empty()
+                && media::sticker_of(&row.body).is_none()
+                && media::gif_of(&row.body).is_none()
+                && ui.button("Копировать текст").clicked()
+            {
                 ui.ctx().copy_text(row.body.clone());
                 ui.close();
             }

@@ -203,6 +203,13 @@ pub(crate) enum BridgeRequest {
     Stickers,
     /// Профиль другого пользователя и общие связи.
     Profile(String),
+    /// Скачать файл как есть (копирование картинки, сохранение стикера).
+    Raw {
+        /// Номер запроса.
+        tag: u64,
+        /// Что скачать.
+        path: bs_api::AssetPath,
+    },
     /// Загрузить личный стикер.
     UploadSticker {
         /// Имя.
@@ -444,6 +451,13 @@ pub(crate) enum BridgeResponse {
     Admin(AdminEvent),
     /// Профиль другого пользователя.
     UserProfile(ProfileEvent),
+    /// Скачанный файл.
+    Raw {
+        /// Номер запроса.
+        tag: u64,
+        /// Байты или текст ошибки.
+        result: Result<Vec<u8>, String>,
+    },
     /// Домашний инстанс выдал (или отказал выдать) секрет для входа.
     Credential {
         /// Куда собирались входить.
@@ -607,6 +621,7 @@ pub(crate) struct Session {
     /// События композера, которые GUI ещё не забрал.
     compose_in: Vec<ComposeEvent>,
     profile_in: Vec<ProfileEvent>,
+    raw_ready: Vec<(u64, Result<Vec<u8>, String>)>,
     /// Ответы настроек, которые GUI ещё не забрал.
     admin_in: Vec<AdminEvent>,
     /// Готовые картинки, которые GUI ещё не превратил в текстуры.
@@ -676,6 +691,7 @@ impl Session {
             registry_in: None,
             compose_in: Vec::new(),
             profile_in: Vec::new(),
+            raw_ready: Vec::new(),
             admin_in: Vec::new(),
             saved_in: Vec::new(),
             deleted_in: Vec::new(),
@@ -1185,6 +1201,11 @@ impl Session {
         std::mem::take(&mut self.admin_in)
     }
 
+    /// Забирает скачанные файлы.
+    pub(crate) fn take_raw(&mut self) -> Vec<(u64, Result<Vec<u8>, String>)> {
+        std::mem::take(&mut self.raw_ready)
+    }
+
     /// Забирает накопленные ответы профилей.
     pub(crate) fn take_profile_events(&mut self) -> Vec<ProfileEvent> {
         std::mem::take(&mut self.profile_in)
@@ -1444,6 +1465,7 @@ impl Session {
             BridgeResponse::Compose(event) => self.compose_in.push(event),
             BridgeResponse::Admin(event) => self.admin_in.push(event),
             BridgeResponse::UserProfile(event) => self.profile_in.push(event),
+            BridgeResponse::Raw { tag, result } => self.raw_ready.push((tag, result)),
             BridgeResponse::JoinRequested => {
                 self.info = Some("Заявка отправлена".to_owned());
                 self.social_error = None;
@@ -1607,6 +1629,17 @@ async fn run_session(
                         };
                         let result = load_image(&client, &path).await;
                         let _ = tx.send(BridgeResponse::Image { path, result });
+                    });
+                }
+                Some(BridgeRequest::Raw { tag, path }) => {
+                    let client = handle.client().clone();
+                    let tx = responses.clone();
+                    image_jobs.spawn(async move {
+                        let result = client
+                            .fetch_asset(&path, bs_media::Limits::default().max_input_bytes)
+                            .await
+                            .map_err(|err| err.to_string());
+                        let _ = tx.send(BridgeResponse::Raw { tag, result });
                     });
                 }
                 Some(BridgeRequest::Upload { id, name, mime, bytes }) => {
@@ -2002,9 +2035,10 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
         // Картинки обрабатываются отдельно и параллельно (см. `run_session`).
-        BridgeRequest::Image(_) | BridgeRequest::Upload { .. } | BridgeRequest::SetImage { .. } => {
-            BridgeResponse::Done
-        }
+        BridgeRequest::Image(_)
+        | BridgeRequest::Raw { .. }
+        | BridgeRequest::Upload { .. }
+        | BridgeRequest::SetImage { .. } => BridgeResponse::Done,
         BridgeRequest::Admin(request) => BridgeResponse::Admin(handle_admin(client, request).await),
         BridgeRequest::GifEnabled => BridgeResponse::Compose(ComposeEvent::GifEnabled(
             client.gif_enabled().await.unwrap_or(false),

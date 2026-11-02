@@ -914,6 +914,14 @@ impl Bridge {
         all
     }
 
+    /// Скачанные файлы со всех инстансов.
+    pub(crate) fn take_raw(&mut self) -> Vec<(u64, Result<Vec<u8>, String>)> {
+        self.slots
+            .iter_mut()
+            .flat_map(|slot| slot.session.take_raw())
+            .collect()
+    }
+
     /// Личный канал, только что открытый по запросу: инстанс и id.
     pub(crate) fn take_opened_dm(&mut self) -> Option<(usize, String)> {
         self.slots

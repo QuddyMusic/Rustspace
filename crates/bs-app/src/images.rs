@@ -119,6 +119,9 @@ struct Inner {
     entries: HashMap<Key, Entry>,
     bytes: usize,
     tick: u64,
+    next_tag: u64,
+    raw_pending: HashMap<u64, RawPurpose>,
+    raw_done: Vec<(RawPurpose, Result<Vec<u8>, String>)>,
 }
 
 /// Общий кэш картинок; дёшево клонируется.
@@ -130,7 +133,54 @@ fn hub_id() -> Id {
     Id::unique("bs_image_hub")
 }
 
+/// Зачем скачивается файл целиком.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RawPurpose {
+    /// Положить картинку в буфер обмена.
+    Copy,
+    /// Добавить в личные стикеры под этим именем.
+    Sticker(String),
+}
+
 impl ImageHub {
+    /// Просит владельца инстанса скачать файл как есть; `false`, если не удалось.
+    pub(crate) fn request_raw(&self, value: &str, purpose: RawPurpose) -> bool {
+        let Some(key) = self.resolve(value) else {
+            return false;
+        };
+        let mut inner = self.lock();
+        inner.next_tag += 1;
+        let tag = inner.next_tag;
+        let sent = inner
+            .links
+            .iter()
+            .find(|(base, _)| key.0 == EXTERNAL || *base == key.0)
+            .is_some_and(|(_, tx)| {
+                tx.send(BridgeRequest::Raw {
+                    tag,
+                    path: key.1.clone(),
+                })
+                .is_ok()
+            });
+        if sent {
+            inner.raw_pending.insert(tag, purpose);
+        }
+        sent
+    }
+
+    /// Принимает скачанный файл.
+    pub(crate) fn accept_raw(&self, tag: u64, result: Result<Vec<u8>, String>) {
+        let mut inner = self.lock();
+        if let Some(purpose) = inner.raw_pending.remove(&tag) {
+            inner.raw_done.push((purpose, result));
+        }
+    }
+
+    /// Забирает готовые скачивания.
+    pub(crate) fn take_raw_done(&self) -> Vec<(RawPurpose, Result<Vec<u8>, String>)> {
+        std::mem::take(&mut self.lock().raw_done)
+    }
+
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.0
             .lock()
