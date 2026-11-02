@@ -103,7 +103,7 @@ pub const THUMB_SIDE: u32 = 256;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Decoded {
     /// Уменьшенная копия: есть у статичных картинок заметно больше миниатюры.
-    pub thumb: Option<Thumb>,
+    pub thumbs: Vec<Thumb>,
     /// Ширина всех кадров.
     pub width: u32,
     /// Высота всех кадров.
@@ -122,7 +122,8 @@ impl Decoded {
     /// Объём пикселей всех кадров в байтах.
     #[must_use]
     pub fn byte_size(&self) -> usize {
-        self.frames.iter().map(|f| f.rgba.len()).sum()
+        self.frames.iter().map(|f| f.rgba.len()).sum::<usize>()
+            + self.thumbs.iter().map(|t| t.rgba.len()).sum::<usize>()
     }
 }
 
@@ -252,9 +253,9 @@ fn still_from(
     } else {
         image::imageops::resize(&image.into_rgba8(), nw, nh, FilterType::Triangle)
     };
-    let thumb = make_thumb(&rgba);
+    let thumbs = make_thumbs(&rgba);
     Ok(Decoded {
-        thumb,
+        thumbs,
         width: nw,
         height: nh,
         frames: vec![Frame {
@@ -264,19 +265,26 @@ fn still_from(
     })
 }
 
-/// Миниатюра, если картинка заметно больше неё.
-fn make_thumb(image: &image::RgbaImage) -> Option<Thumb> {
+/// Стороны уменьшенных копий, по возрастанию.
+const THUMB_STEPS: [u32; 3] = [64, 128, THUMB_SIDE];
+
+/// Цепочка уменьшенных копий: у каждой своя сторона, пока картинка заметно
+/// больше неё. Мелкие места (аватары) берут ближайшую копию — так нет «рваности».
+fn make_thumbs(image: &image::RgbaImage) -> Vec<Thumb> {
     let (w, h) = image.dimensions();
-    if w.max(h) <= THUMB_SIDE * 3 / 2 {
-        return None;
-    }
-    let (tw, th) = fit(w, h, THUMB_SIDE);
-    let small = image::imageops::resize(image, tw, th, FilterType::Lanczos3);
-    Some(Thumb {
-        width: tw,
-        height: th,
-        rgba: small.into_raw(),
-    })
+    THUMB_STEPS
+        .iter()
+        .filter(|side| w.max(h) > **side * 3 / 2)
+        .map(|side| {
+            let (tw, th) = fit(w, h, *side);
+            let small = image::imageops::resize(image, tw, th, FilterType::Lanczos3);
+            Thumb {
+                width: tw,
+                height: th,
+                rgba: small.into_raw(),
+            }
+        })
+        .collect()
 }
 
 /// Анимация: кадры собираются, пока не исчерпан лимит кадров и памяти.
@@ -322,7 +330,7 @@ fn animated(
         out[0].delay_ms = 0;
     }
     Ok(Decoded {
-        thumb: None,
+        thumbs: Vec::new(),
         width: nw,
         height: nh,
         frames: out,
@@ -479,10 +487,16 @@ mod tests {
     #[test]
     fn large_still_gets_a_sharp_thumbnail_and_small_one_does_not() {
         let big = decode(&png(1000, 500), &Limits::default()).unwrap();
-        let thumb = big.thumb.expect("thumb");
+        let thumb = big.thumbs.last().expect("thumb");
         assert_eq!((thumb.width, thumb.height), (THUMB_SIDE, THUMB_SIDE / 2));
+        assert_eq!(big.thumbs.len(), 3);
         assert_eq!(thumb.rgba.len(), (thumb.width * thumb.height * 4) as usize);
         let small = decode(&png(100, 100), &Limits::default()).unwrap();
-        assert!(small.thumb.is_none());
+        assert!(
+            small
+                .thumbs
+                .iter()
+                .all(|t| t.width.max(t.height) < THUMB_SIDE)
+        );
     }
 }

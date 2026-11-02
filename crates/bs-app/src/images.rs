@@ -37,7 +37,7 @@ pub(crate) struct Loaded {
     pub(crate) height: u32,
     frames: Vec<(TextureHandle, u32)>,
     /// Заранее уменьшенная копия для мелких мест.
-    thumb: Option<TextureHandle>,
+    thumbs: Vec<TextureHandle>,
     total_ms: u64,
     bytes: usize,
 }
@@ -289,24 +289,28 @@ fn upload(ctx: &Context, key: &Key, decoded: &Decoded) -> Loaded {
         })
         .collect();
     let total_ms = frames.iter().map(|(_, d)| u64::from(*d)).sum();
-    let thumb = decoded.thumb.as_ref().map(|thumb| {
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [thumb.width as usize, thumb.height as usize],
-            &thumb.rgba,
-        );
-        ctx.load_texture(
-            format!("{}{}#thumb", key.0, key.1.as_str()),
-            image,
-            TextureOptions::LINEAR,
-        )
-    });
+    let thumbs = decoded
+        .thumbs
+        .iter()
+        .map(|thumb| {
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [thumb.width as usize, thumb.height as usize],
+                &thumb.rgba,
+            );
+            ctx.load_texture(
+                format!("{}{}#thumb{}", key.0, key.1.as_str(), thumb.width),
+                image,
+                TextureOptions::LINEAR,
+            )
+        })
+        .collect();
     Loaded {
-        thumb,
+        thumbs,
         width: decoded.width,
         height: decoded.height,
         frames,
         total_ms,
-        bytes: decoded.byte_size() + decoded.thumb.as_ref().map_or(0, |t| t.rgba.len()),
+        bytes: decoded.byte_size(),
     }
 }
 
@@ -361,6 +365,13 @@ pub(crate) fn paint_cover(
     animate: bool,
     tint: Color32,
 ) {
+    // Края по границам физических пикселей: иначе картинка «плывёт» и мылится.
+    let ppp = painter.ctx().pixels_per_point();
+    let snap = |v: f32| (v * ppp).round() / ppp;
+    let rect = Rect::from_min_max(
+        pos2(snap(rect.min.x), snap(rect.min.y)),
+        pos2(snap(rect.max.x), snap(rect.max.y)),
+    );
     let texture = if animate && image.is_animated() {
         let now_ms = painter.ctx().input(|i| (i.time * 1000.0) as u64);
         let (texture, remaining) = image.frame_at(now_ms);
@@ -372,14 +383,16 @@ pub(crate) fn paint_cover(
         // Для мелких мест берём заранее уменьшенную копию: без усреднения
         // большая картинка в десятках пикселей выглядит рваной.
         let wanted = rect.width().max(rect.height()) * painter.ctx().pixels_per_point();
-        match &image.thumb {
-            Some(thumb)
-                if wanted <= f32::from(u16::try_from(bs_media::THUMB_SIDE).unwrap_or(u16::MAX)) =>
-            {
-                thumb
-            }
-            _ => image.first(),
-        }
+        // Копия не меньше нужного размера, ближайшая к нему.
+        let side = |t: &TextureHandle| {
+            let [w, h] = t.size();
+            f32::from(u16::try_from(w.max(h)).unwrap_or(u16::MAX))
+        };
+        image
+            .thumbs
+            .iter()
+            .find(|t| side(t) >= wanted)
+            .unwrap_or_else(|| image.first())
     };
     let uv = cover_uv(image.size_f32(), [rect.width(), rect.height()]);
     painter.add(RectShape::filled(rect, radius, tint).with_texture(texture.id(), uv));

@@ -592,6 +592,8 @@ pub(crate) struct ChatScreen {
     was_scrolled_down: bool,
     /// Канал, для которого относятся `scroll_anchor` и `was_scrolled_down`.
     scroll_key: Option<String>,
+    /// Открытое окно профиля.
+    profile: Option<super::profile::ProfileState>,
     /// Сообщение, на которое пишется ответ.
     reply: Option<ReplyTarget>,
     /// Сообщение, для которого открыт выбор реакции, и вкладка выбора.
@@ -814,7 +816,9 @@ impl ChatScreen {
                 if self.show_members
                     && let Some(space_id) = self.active_space.clone()
                 {
-                    Self::show_member_panel(ui, bridge, &space_id.1);
+                    if let Some((id, name)) = Self::show_member_panel(ui, bridge, &space_id.1) {
+                        self.profile = Some(super::profile::ProfileState::open(bridge, &id, &name));
+                    }
                 }
                 self.show_header(ui, bridge);
                 self.show_composer(ui, bridge);
@@ -826,6 +830,18 @@ impl ChatScreen {
             && media::viewer(&ctx, &value)
         {
             self.viewer = None;
+        }
+        if let Some(state) = self.profile.as_mut() {
+            state.poll(bridge);
+            let me = bridge
+                .cache()
+                .map(|cache| cache.me().id.clone())
+                .unwrap_or_default();
+            if super::profile::show(&ctx, state, bridge, &me)
+                == super::profile::ProfileAction::Close
+            {
+                self.profile = None;
+            }
         }
         if let Some(form) = self.create_space.as_mut()
             && !dialogs::show_create_space(&ctx, form, bridge)
@@ -1209,7 +1225,12 @@ impl ChatScreen {
     }
 
     /// Правая панель: участники пространства по секциям.
-    fn show_member_panel(ui: &mut egui::Ui, bridge: &Bridge, space_id: &str) {
+    fn show_member_panel(
+        ui: &mut egui::Ui,
+        bridge: &Bridge,
+        space_id: &str,
+    ) -> Option<(String, String)> {
+        let mut clicked = None;
         let rows = bridge
             .cache()
             .map(|cache| member_rows(cache, space_id))
@@ -1245,10 +1266,15 @@ impl ChatScreen {
                                 ui.add_space(4.0);
                                 current = Some(section);
                             }
-                            theme::member_row(ui, &row.name, row.status, row.avatar.as_deref());
+                            if theme::member_row(ui, &row.name, row.status, row.avatar.as_deref())
+                                .clicked()
+                            {
+                                clicked = Some((row.user_id.clone(), row.name.clone()));
+                            }
                         }
                     });
             });
+        clicked
     }
 
     /// Шапка ленты: название канала, тема, переключатель участников.
@@ -1651,10 +1677,12 @@ impl ChatScreen {
     ) {
         ui.add_space(if show_header { 16.0 } else { 2.0 });
         let mut hits: Vec<media::Hit> = Vec::new();
+        let mut profile_rects: Vec<egui::Rect> = Vec::new();
         let inner = ui.horizontal_top(|ui| {
             ui.add_space(20.0);
             if show_header {
-                theme::avatar(ui, &row.author, 40.0, None, row.avatar.as_deref());
+                let response = theme::avatar(ui, &row.author, 40.0, None, row.avatar.as_deref());
+                profile_rects.push(response.rect);
             } else {
                 ui.allocate_space(egui::vec2(40.0, 1.0));
             }
@@ -1663,12 +1691,13 @@ impl ChatScreen {
                 ui.spacing_mut().item_spacing.y = 3.0;
                 if show_header {
                     ui.horizontal(|ui| {
-                        ui.label(
+                        let name = ui.add(egui::Label::new(
                             RichText::new(&row.author)
                                 .family(theme::bold_family())
                                 .size(15.5)
                                 .color(theme::TEXT_BRIGHT),
-                        );
+                        ));
+                        profile_rects.push(name.rect);
                         ui.label(theme::muted(theme::stamp(row.created_at, now_ms())).size(11.5));
                     });
                 }
@@ -1722,6 +1751,17 @@ impl ChatScreen {
             self.viewer = Some(value.clone());
         }
         let message_id = row.id.clone();
+        let open_profile = response.clicked()
+            && response
+                .interact_pointer_pos()
+                .is_some_and(|pos| profile_rects.iter().any(|rect| rect.contains(pos)));
+        if open_profile {
+            self.profile = Some(super::profile::ProfileState::open(
+                bridge,
+                &row.author_id,
+                &row.author,
+            ));
+        }
         let mut open_picker = false;
         let mut reply_request = false;
         response.context_menu(|ui| {

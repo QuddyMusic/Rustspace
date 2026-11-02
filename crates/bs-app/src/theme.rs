@@ -520,9 +520,14 @@ pub(crate) fn section_title(text: &str) -> egui::RichText {
 }
 
 /// Участник в правой панели: аватар со статусом и имя; офлайн — приглушён.
-pub(crate) fn member_row(ui: &mut egui::Ui, name: &str, status: UserStatus, image: Option<&str>) {
+pub(crate) fn member_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    status: UserStatus,
+    image: Option<&str>,
+) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), Sense::hover());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), Sense::click());
     if response.hovered() {
         ui.painter()
             .rect_filled(rect, CornerRadius::same(8), BG_HOVER);
@@ -547,6 +552,7 @@ pub(crate) fn member_row(ui: &mut egui::Ui, name: &str, status: UserStatus, imag
         FontId::proportional(15.0),
         if offline { TEXT_FAINT } else { TEXT },
     );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Обрезает строку до `max` символов с многоточием.

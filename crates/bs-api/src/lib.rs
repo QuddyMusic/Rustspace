@@ -28,6 +28,7 @@ pub mod compose;
 pub mod error;
 pub mod federation;
 pub mod instance;
+pub mod profile;
 pub mod read;
 pub mod registry;
 pub mod write;
@@ -50,6 +51,7 @@ pub use federation::{
 pub use instance::{
     InstanceInfo, PeerEnsureResponse, RegisterRequest, ReplicatedEntry, VerifyPasswordResponse,
 };
+pub use profile::{MutualSpace, Mutuals};
 pub use read::{
     DmMessagePage, MESSAGES_LIMIT_DEFAULT, MESSAGES_LIMIT_MAX, MESSAGES_LIMIT_MIN, MessagePage,
     PagingCursor,

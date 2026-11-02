@@ -201,6 +201,8 @@ pub(crate) enum BridgeRequest {
     },
     /// Личные стикеры.
     Stickers,
+    /// Профиль другого пользователя и общие связи.
+    Profile(String),
     /// Загрузить личный стикер.
     UploadSticker {
         /// Имя.
@@ -359,6 +361,17 @@ pub(crate) enum AdminDone {
     Image,
 }
 
+/// Ответ на запрос профиля.
+#[derive(Debug)]
+pub(crate) struct ProfileEvent {
+    /// Чей профиль.
+    pub(crate) user_id: String,
+    /// Профиль или текст ошибки.
+    pub(crate) user: Result<Box<bs_types::User>, String>,
+    /// Общие друзья и пространства, если получены.
+    pub(crate) mutuals: Option<bs_api::Mutuals>,
+}
+
 /// Что пришло для композера; GUI забирает через [`Session::take_compose_events`].
 #[derive(Debug)]
 pub(crate) enum ComposeEvent {
@@ -429,6 +442,8 @@ pub(crate) enum BridgeResponse {
     Compose(ComposeEvent),
     /// Ответ настроек.
     Admin(AdminEvent),
+    /// Профиль другого пользователя.
+    UserProfile(ProfileEvent),
     /// Домашний инстанс выдал (или отказал выдать) секрет для входа.
     Credential {
         /// Куда собирались входить.
@@ -591,6 +606,7 @@ pub(crate) struct Session {
     adopted_in: Option<Result<(), String>>,
     /// События композера, которые GUI ещё не забрал.
     compose_in: Vec<ComposeEvent>,
+    profile_in: Vec<ProfileEvent>,
     /// Ответы настроек, которые GUI ещё не забрал.
     admin_in: Vec<AdminEvent>,
     /// Готовые картинки, которые GUI ещё не превратил в текстуры.
@@ -659,6 +675,7 @@ impl Session {
             failure: None,
             registry_in: None,
             compose_in: Vec::new(),
+            profile_in: Vec::new(),
             admin_in: Vec::new(),
             saved_in: Vec::new(),
             deleted_in: Vec::new(),
@@ -775,6 +792,7 @@ impl Session {
         self.adopted_in = None;
         self.images_ready.clear();
         self.compose_in.clear();
+        self.profile_in.clear();
         self.admin_in.clear();
         self.explore = None;
         self.explore_loading = false;
@@ -1167,6 +1185,11 @@ impl Session {
         std::mem::take(&mut self.admin_in)
     }
 
+    /// Забирает накопленные ответы профилей.
+    pub(crate) fn take_profile_events(&mut self) -> Vec<ProfileEvent> {
+        std::mem::take(&mut self.profile_in)
+    }
+
     /// Забирает накопленные события композера.
     pub(crate) fn take_compose_events(&mut self) -> Vec<ComposeEvent> {
         std::mem::take(&mut self.compose_in)
@@ -1420,6 +1443,7 @@ impl Session {
             }
             BridgeResponse::Compose(event) => self.compose_in.push(event),
             BridgeResponse::Admin(event) => self.admin_in.push(event),
+            BridgeResponse::UserProfile(event) => self.profile_in.push(event),
             BridgeResponse::JoinRequested => {
                 self.info = Some("Заявка отправлена".to_owned());
                 self.social_error = None;
@@ -1991,6 +2015,19 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                 .await
                 .map_err(|err| err.to_string());
             BridgeResponse::Compose(ComposeEvent::Gifs { query, pos, result })
+        }
+        BridgeRequest::Profile(user_id) => {
+            let user = client
+                .user(&user_id)
+                .await
+                .map(Box::new)
+                .map_err(|err| upload_message(&err));
+            let mutuals = client.mutuals(&user_id).await.ok();
+            BridgeResponse::UserProfile(ProfileEvent {
+                user_id,
+                user,
+                mutuals,
+            })
         }
         BridgeRequest::Stickers => BridgeResponse::Compose(ComposeEvent::Stickers(
             client.stickers().await.map_err(|err| upload_message(&err)),
