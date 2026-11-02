@@ -157,6 +157,11 @@ pub(crate) fn show_attachment(ui: &mut egui::Ui, att: &AttachmentView) -> Option
     ready.then(|| (rect, att.filename.clone()))
 }
 
+/// Тип содержимого по расширению имени файла.
+pub(crate) fn mime_for_name(name: &str) -> &'static str {
+    crate::screens::composer::mime_for(name)
+}
+
 /// Стикер в ленте.
 pub(crate) fn show_sticker(ui: &mut egui::Ui, value: &str) -> Option<Hit> {
     let state = ImageHub::of(ui.ctx()).map_or(ImageState::Absent, |h| h.state(value));

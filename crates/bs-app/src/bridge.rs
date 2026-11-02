@@ -178,6 +178,18 @@ pub(crate) enum BridgeRequest {
         /// Содержимое.
         bytes: std::sync::Arc<Vec<u8>>,
     },
+    /// Задать или снять аватар/баннер: файл грузится tus, затем профиль
+    /// получает его имя. Пустые `bytes` снимают картинку.
+    SetImage {
+        /// Что менять.
+        kind: ImageKind,
+        /// Имя файла.
+        name: String,
+        /// Содержимое; пусто — снять.
+        bytes: std::sync::Arc<Vec<u8>>,
+    },
+    /// Действие администратора или управление аккаунтом.
+    Admin(AdminRequest),
     /// Включён ли поиск GIF.
     GifEnabled,
     /// Популярные GIF или поиск.
@@ -249,6 +261,104 @@ pub(crate) enum BridgeRequest {
     },
 }
 
+/// Какую картинку профиля меняем.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImageKind {
+    /// Аватар.
+    Avatar,
+    /// Баннер.
+    Banner,
+}
+
+/// Запросы настроек: администрирование и аккаунт.
+#[derive(Debug, Clone)]
+pub(crate) enum AdminRequest {
+    /// Прочитать настройки инстанса.
+    LoadSettings,
+    /// Сохранить настройки инстанса.
+    SaveSettings(bs_api::InstanceSettingsPatch),
+    /// Список пользователей.
+    LoadUsers {
+        /// Подстрока поиска.
+        query: String,
+        /// Страница с 1.
+        page: u32,
+        /// Показывать удалённых.
+        show_deleted: bool,
+    },
+    /// Назначить или снять администратора.
+    SetRole {
+        /// Пользователь.
+        id: String,
+        /// Новое значение.
+        admin: bool,
+    },
+    /// Сбросить пароль пользователя.
+    ResetPassword(String),
+    /// Удалить пользователя.
+    DeleteUser(String),
+    /// Сводка по хранилищу.
+    LoadStorage,
+    /// Очистить осиротевшие файлы.
+    Cleanup {
+        /// Только посчитать.
+        dry_run: bool,
+    },
+    /// Сменить свой пароль.
+    ChangePassword {
+        /// Текущий (для домашнего аккаунта обязателен).
+        current: Option<Secret>,
+        /// Новый.
+        new: Secret,
+    },
+    /// Удалить свой аккаунт.
+    DeleteAccount {
+        /// Пароль.
+        password: Secret,
+        /// Логин для подтверждения.
+        username: String,
+    },
+}
+
+/// Ответы на [`AdminRequest`] и загрузку картинки профиля.
+#[derive(Debug)]
+pub(crate) enum AdminEvent {
+    /// Настройки инстанса.
+    Settings(Result<bs_api::InstanceSettings, String>),
+    /// Итог сохранения настроек.
+    SettingsSaved(Result<bs_api::InstanceSettings, String>),
+    /// Страница пользователей.
+    Users(Result<bs_api::AdminUserPage, String>),
+    /// Сводка по хранилищу.
+    Storage(Result<bs_api::StorageStats, String>),
+    /// Итог очистки.
+    Cleaned(Result<bs_api::CleanupResult, String>),
+    /// Итог простого действия: текст успеха или ошибки.
+    Done {
+        /// Что делали.
+        action: AdminDone,
+        /// Сообщение об успехе или текст ошибки.
+        result: Result<String, String>,
+    },
+}
+
+/// Какое действие завершилось.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AdminDone {
+    /// Роль пользователя.
+    Role,
+    /// Сброс пароля пользователя.
+    Reset,
+    /// Удаление пользователя.
+    Delete,
+    /// Смена своего пароля.
+    Password,
+    /// Удаление своего аккаунта.
+    Account,
+    /// Картинка профиля.
+    Image,
+}
+
 /// Что пришло для композера; GUI забирает через [`Session::take_compose_events`].
 #[derive(Debug)]
 pub(crate) enum ComposeEvent {
@@ -317,6 +427,8 @@ pub(crate) enum BridgeResponse {
     },
     /// События композера (загрузки, GIF, стикеры).
     Compose(ComposeEvent),
+    /// Ответ настроек.
+    Admin(AdminEvent),
     /// Домашний инстанс выдал (или отказал выдать) секрет для входа.
     Credential {
         /// Куда собирались входить.
@@ -479,6 +591,8 @@ pub(crate) struct Session {
     adopted_in: Option<Result<(), String>>,
     /// События композера, которые GUI ещё не забрал.
     compose_in: Vec<ComposeEvent>,
+    /// Ответы настроек, которые GUI ещё не забрал.
+    admin_in: Vec<AdminEvent>,
     /// Готовые картинки, которые GUI ещё не превратил в текстуры.
     images_ready: Vec<(bs_api::AssetPath, Result<bs_media::Decoded, String>)>,
     /// Последняя страница каталога пространств.
@@ -545,6 +659,7 @@ impl Session {
             failure: None,
             registry_in: None,
             compose_in: Vec::new(),
+            admin_in: Vec::new(),
             saved_in: Vec::new(),
             deleted_in: Vec::new(),
             adopted_in: None,
@@ -660,6 +775,7 @@ impl Session {
         self.adopted_in = None;
         self.images_ready.clear();
         self.compose_in.clear();
+        self.admin_in.clear();
         self.explore = None;
         self.explore_loading = false;
         self.opened_space = None;
@@ -1040,6 +1156,11 @@ impl Session {
             .is_some_and(|requests| requests.send(request).is_ok())
     }
 
+    /// Забирает накопленные ответы настроек.
+    pub(crate) fn take_admin_events(&mut self) -> Vec<AdminEvent> {
+        std::mem::take(&mut self.admin_in)
+    }
+
     /// Забирает накопленные события композера.
     pub(crate) fn take_compose_events(&mut self) -> Vec<ComposeEvent> {
         std::mem::take(&mut self.compose_in)
@@ -1291,6 +1412,7 @@ impl Session {
                 self.images_ready.push((path, result));
             }
             BridgeResponse::Compose(event) => self.compose_in.push(event),
+            BridgeResponse::Admin(event) => self.admin_in.push(event),
             BridgeResponse::JoinRequested => {
                 self.info = Some("Заявка отправлена".to_owned());
                 self.social_error = None;
@@ -1476,6 +1598,14 @@ async fn run_session(
                         }));
                     });
                 }
+                Some(BridgeRequest::SetImage { kind, name, bytes }) => {
+                    let client = handle.client().clone();
+                    let tx = responses.clone();
+                    image_jobs.spawn(async move {
+                        let response = set_profile_image(&client, kind, &name, &bytes).await;
+                        let _ = tx.send(response);
+                    });
+                }
                 Some(request) => {
                     let response = handle_request(handle.client(), request).await;
                     if responses.send(response).is_err() {
@@ -1653,6 +1783,122 @@ async fn issue_credential_inner(
     })
 }
 
+/// Загружает картинку профиля и привязывает её к аккаунту.
+async fn set_profile_image(
+    client: &bs_api::ApiClient,
+    kind: ImageKind,
+    name: &str,
+    bytes: &[u8],
+) -> BridgeResponse {
+    let fail = |message: String| {
+        BridgeResponse::Admin(AdminEvent::Done {
+            action: AdminDone::Image,
+            result: Err(message),
+        })
+    };
+    let file = if bytes.is_empty() {
+        String::new()
+    } else {
+        let mime = crate::media::mime_for_name(name);
+        match client.upload_file(name, mime, bytes, |_, _| {}).await {
+            Ok(attachment) => attachment.filename,
+            Err(err) => return fail(upload_message(&err)),
+        }
+    };
+    let mut request = bs_api::UpdateProfileRequest::default();
+    match kind {
+        ImageKind::Avatar => request.avatar = Some(file),
+        ImageKind::Banner => request.banner = Some(file),
+    }
+    match client.update_me(&request).await {
+        Ok(user) => BridgeResponse::Profile(Box::new(user)),
+        Err(err) => fail(upload_message(&err)),
+    }
+}
+
+/// Выполняет запрос настроек.
+#[allow(clippy::too_many_lines, reason = "по ветке на действие")]
+async fn handle_admin(client: &bs_api::ApiClient, request: AdminRequest) -> AdminEvent {
+    let text = |err: &bs_api::ApiError| upload_message(err);
+    let done =
+        |action: AdminDone, result: Result<String, String>| AdminEvent::Done { action, result };
+    match request {
+        AdminRequest::LoadSettings => {
+            AdminEvent::Settings(client.instance_settings().await.map_err(|e| text(&e)))
+        }
+        AdminRequest::SaveSettings(patch) => AdminEvent::SettingsSaved(
+            client
+                .update_instance_settings(&patch)
+                .await
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::LoadUsers {
+            query,
+            page,
+            show_deleted,
+        } => AdminEvent::Users(
+            client
+                .admin_users(&query, page, show_deleted)
+                .await
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::SetRole { id, admin } => done(
+            AdminDone::Role,
+            client
+                .admin_set_role(&id, admin)
+                .await
+                .map(|_| "Роль изменена".to_owned())
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::ResetPassword(id) => done(
+            AdminDone::Reset,
+            client
+                .admin_reset_password(&id)
+                .await
+                .map(|r| r.temporary_password)
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::DeleteUser(id) => done(
+            AdminDone::Delete,
+            client
+                .admin_delete_user(&id)
+                .await
+                .map(|_| "Пользователь удалён".to_owned())
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::LoadStorage => {
+            AdminEvent::Storage(client.storage_stats().await.map_err(|e| text(&e)))
+        }
+        AdminRequest::Cleanup { dry_run } => {
+            AdminEvent::Cleaned(client.storage_cleanup(dry_run).await.map_err(|e| text(&e)))
+        }
+        AdminRequest::ChangePassword { current, new } => {
+            let body = current.map_or_else(
+                || bs_api::ChangePasswordRequest::new(new.expose()),
+                |current| {
+                    bs_api::ChangePasswordRequest::with_current(current.expose(), new.expose())
+                },
+            );
+            done(
+                AdminDone::Password,
+                client
+                    .change_password(&body)
+                    .await
+                    .map(|_| "Пароль изменён".to_owned())
+                    .map_err(|e| text(&e)),
+            )
+        }
+        AdminRequest::DeleteAccount { password, username } => done(
+            AdminDone::Account,
+            client
+                .delete_account(password.expose(), &username)
+                .await
+                .map(|_| "Аккаунт удалён".to_owned())
+                .map_err(|e| text(&e)),
+        ),
+    }
+}
+
 /// Понятный текст отказа сервера для композера.
 fn upload_message(err: &bs_api::ApiError) -> String {
     use bs_api::ApiError;
@@ -1725,7 +1971,10 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
         // Картинки обрабатываются отдельно и параллельно (см. `run_session`).
-        BridgeRequest::Image(_) | BridgeRequest::Upload { .. } => BridgeResponse::Done,
+        BridgeRequest::Image(_) | BridgeRequest::Upload { .. } | BridgeRequest::SetImage { .. } => {
+            BridgeResponse::Done
+        }
+        BridgeRequest::Admin(request) => BridgeResponse::Admin(handle_admin(client, request).await),
         BridgeRequest::GifEnabled => BridgeResponse::Compose(ComposeEvent::GifEnabled(
             client.gif_enabled().await.unwrap_or(false),
         )),

@@ -63,6 +63,12 @@ pub struct UpdateProfileRequest {
     /// Цвет аватара из палитры.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_color: Option<String>,
+    /// Имя файла аватара (загруженного через tus); пустая строка снимает.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
+    /// Имя файла баннера; пустая строка снимает.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner: Option<String>,
     /// Показывать ли пользователя в поиске по инстансу.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discoverable: Option<bool>,

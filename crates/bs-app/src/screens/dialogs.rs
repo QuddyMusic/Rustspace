@@ -205,6 +205,12 @@ pub(crate) enum SettingsSection {
     Privacy,
     /// Соединение с инстансом.
     Connections,
+    /// Администратор: общие настройки инстанса.
+    Instance,
+    /// Администратор: пользователи.
+    Users,
+    /// Администратор: хранилище.
+    Storage,
 }
 
 impl SettingsSection {
@@ -215,6 +221,9 @@ impl SettingsSection {
             Self::Voice => "Голос и видео",
             Self::Privacy => "Приватность",
             Self::Connections => "Подключения",
+            Self::Instance => "Инстанс",
+            Self::Users => "Пользователи",
+            Self::Storage => "Хранилище",
         }
     }
 }
@@ -246,6 +255,8 @@ pub(crate) struct SettingsState {
     scale: f32,
     /// Состояние панели «Подключения».
     connections: super::connections::ConnectionsUi,
+    /// Картинки профиля, пароль и админские разделы.
+    extra: super::settings_extra::ExtraUi,
 }
 
 /// Выбранный статус из текущего присутствия (`offline` выбрать нельзя).
@@ -271,6 +282,7 @@ impl SettingsState {
             show_activity: user.show_activity.unwrap_or(true),
             scale,
             connections: super::connections::ConnectionsUi::default(),
+            extra: super::settings_extra::ExtraUi::default(),
         }
     }
 
@@ -320,9 +332,13 @@ impl SettingsState {
 pub(crate) fn show_settings(
     ui: &mut egui::Ui,
     state: &mut SettingsState,
-    bridge: &Bridge,
+    bridge: &mut Bridge,
 ) -> SettingsAction {
     let mut action = SettingsAction::None;
+    state.extra.poll(bridge);
+    if state.extra.account.logout {
+        return SettingsAction::Logout;
+    }
     let Some(me) = bridge.cache().map(|cache| cache.me().clone()) else {
         return SettingsAction::Close;
     };
@@ -429,6 +445,17 @@ fn settings_nav(
                 ],
             );
             group(ui, "Приложение", &[SettingsSection::Connections]);
+            if me.is_admin {
+                group(
+                    ui,
+                    "Администрирование",
+                    &[
+                        SettingsSection::Instance,
+                        SettingsSection::Users,
+                        SettingsSection::Storage,
+                    ],
+                );
+            }
             ui.add_space(6.0);
             let (rect, response) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), Sense::click());
@@ -458,7 +485,7 @@ fn settings_nav(
 }
 
 /// Карточка раздела: подложка с тонкой рамкой.
-fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+pub(super) fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
         .fill(theme::BG_SIDEBAR)
         .stroke(egui::Stroke::new(1.0, theme::BORDER))
@@ -471,7 +498,7 @@ fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
 }
 
 /// Заголовок страницы настроек.
-fn page_title(ui: &mut egui::Ui, text: &str) {
+pub(super) fn page_title(ui: &mut egui::Ui, text: &str) {
     ui.label(
         RichText::new(text)
             .size(22.0)
@@ -503,6 +530,21 @@ fn section_content(
         }
         SettingsSection::Privacy => privacy(ui, state, me, bridge),
         SettingsSection::Connections => connections(ui, state, bridge, action),
+        SettingsSection::Instance if me.is_admin => {
+            super::settings_extra::instance_panel(ui, &mut state.extra, bridge);
+        }
+        SettingsSection::Users if me.is_admin => {
+            super::settings_extra::users_panel(ui, &mut state.extra, me, bridge);
+        }
+        SettingsSection::Storage if me.is_admin => {
+            super::settings_extra::storage_panel(ui, &mut state.extra, bridge);
+        }
+        SettingsSection::Instance | SettingsSection::Users | SettingsSection::Storage => {
+            page_title(ui, "Недоступно");
+            card(ui, |ui| {
+                ui.label("Этот раздел только для администратора инстанса.");
+            });
+        }
     }
 }
 
@@ -620,11 +662,7 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
         });
     ui.add_space(14.0);
     card(ui, |ui| {
-        widgets::section_label(ui, "Аватар");
-        ui.add_space(6.0);
-        ui.label(
-            theme::muted("Загрузка аватара и баннера появится в следующем обновлении.").size(13.0),
-        );
+        super::settings_extra::images_card(ui, &mut state.extra, me, bridge);
         widgets::field_label(ui, "Цвет аватара");
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -664,12 +702,7 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
     });
     save_bar(ui, state, me, bridge);
     ui.add_space(18.0);
-    card(ui, |ui| {
-        ui.label(
-            theme::muted("Смена пароля и удаление аккаунта пока доступны только в веб-клиенте.")
-                .size(13.0),
-        );
-    });
+    super::settings_extra::security_cards(ui, &mut state.extra, me, bridge);
 }
 
 /// Подпись выбранного статуса.

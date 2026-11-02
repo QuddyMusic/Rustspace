@@ -133,7 +133,7 @@ pub(crate) fn edit_id() -> Id {
 }
 
 /// Тип содержимого по расширению: сервер всё равно определяет его сам.
-fn mime_for(name: &str) -> &'static str {
+pub(crate) fn mime_for(name: &str) -> &'static str {
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     match ext.as_str() {
         "png" => "image/png",

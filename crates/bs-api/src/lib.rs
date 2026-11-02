@@ -19,6 +19,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod admin;
 pub mod assets;
 pub mod auth;
 pub mod client;
@@ -31,6 +32,10 @@ pub mod read;
 pub mod registry;
 pub mod write;
 
+pub use admin::{
+    AdminUser, AdminUserPage, CleanupResult, InstanceSettings, InstanceSettingsPatch,
+    PasswordReset, StorageBreakdown, StorageStats,
+};
 pub use assets::{AssetPath, GIF_HOSTS, STICKER_PREFIX, fetch_external, resolve_asset};
 pub use auth::AuthResponse;
 pub use bs_types::{LiveKitTokenRequest, LiveKitTokenResponse};

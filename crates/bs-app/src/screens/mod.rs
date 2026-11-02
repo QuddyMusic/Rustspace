@@ -6,3 +6,4 @@ pub(crate) mod connections;
 pub(crate) mod dialogs;
 pub(crate) mod home;
 pub(crate) mod login;
+pub(crate) mod settings_extra;
