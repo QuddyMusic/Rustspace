@@ -399,7 +399,7 @@ pub(crate) enum ComposeEvent {
         result: Result<Box<bs_types::Attachment>, String>,
     },
     /// Доступность GIF.
-    GifEnabled(bool),
+    GifEnabled(Result<bool, String>),
     /// Страница GIF.
     Gifs {
         /// Запрос, для которого пришло.
@@ -2041,7 +2041,10 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
         | BridgeRequest::SetImage { .. } => BridgeResponse::Done,
         BridgeRequest::Admin(request) => BridgeResponse::Admin(handle_admin(client, request).await),
         BridgeRequest::GifEnabled => BridgeResponse::Compose(ComposeEvent::GifEnabled(
-            client.gif_enabled().await.unwrap_or(false),
+            client
+                .gif_enabled()
+                .await
+                .map_err(|err| upload_message(&err)),
         )),
         BridgeRequest::Gifs { query, pos } => {
             let result = client

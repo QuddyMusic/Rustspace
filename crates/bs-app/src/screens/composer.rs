@@ -96,6 +96,8 @@ struct Picked {
 struct Gifs {
     enabled: Option<bool>,
     enabled_asked: bool,
+    enabled_error: Option<String>,
+    checked_at: f64,
     query: String,
     asked: Option<String>,
     typed_at: f64,
@@ -116,6 +118,8 @@ struct Stickers {
 #[derive(Debug, Default)]
 pub(crate) struct Composer {
     next_id: u64,
+    /// Время последнего кадра: нужно разбору событий.
+    now: f64,
     staged: Vec<Staged>,
     open: Open,
     gifs: Gifs,
@@ -176,6 +180,7 @@ fn read_paths(paths: Vec<PathBuf>) -> Vec<Picked> {
 impl Composer {
     /// Забирает события моста и результаты выбора файлов.
     pub(crate) fn poll(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
+        self.now = ctx.input(|i| i.time);
         for event in bridge.take_compose_events() {
             match event {
                 ComposeEvent::Progress { id, sent, total } => {
@@ -191,7 +196,17 @@ impl Composer {
                         };
                     }
                 }
-                ComposeEvent::GifEnabled(enabled) => self.gifs.enabled = Some(enabled),
+                ComposeEvent::GifEnabled(result) => {
+                    self.gifs.enabled_asked = false;
+                    self.gifs.checked_at = self.now;
+                    match result {
+                        Ok(enabled) => {
+                            self.gifs.enabled = Some(enabled);
+                            self.gifs.enabled_error = None;
+                        }
+                        Err(message) => self.gifs.enabled_error = Some(message),
+                    }
+                }
                 ComposeEvent::Gifs { query, pos, result } => {
                     if self.gifs.asked.as_deref() != Some(query.as_str()) {
                         continue;
@@ -737,24 +752,41 @@ impl Composer {
 
     #[allow(clippy::too_many_lines, reason = "вкладка: поиск, сетка и дозагрузка")]
     fn gif_tab(&mut self, ui: &mut egui::Ui, bridge: &Bridge) -> Option<Outgoing> {
-        if self.gifs.enabled.is_none() && !self.gifs.enabled_asked {
+        let now = ui.input(|i| i.time);
+        self.now = now;
+        // Пока GIF не подтверждены, спрашиваем снова раз в несколько секунд:
+        // ключ администратор мог добавить позже, а ошибка сети — пройти.
+        if self.gifs.enabled != Some(true)
+            && !self.gifs.enabled_asked
+            && (self.gifs.checked_at == 0.0 || now - self.gifs.checked_at >= 4.0)
+        {
             self.gifs.enabled_asked = bridge.request(BridgeRequest::GifEnabled);
+            if !self.gifs.enabled_asked {
+                self.gifs.checked_at = now;
+            }
+        }
+        if self.gifs.enabled != Some(true) {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(1));
         }
         match self.gifs.enabled {
             None => {
-                theme::empty_state(ui, "Загрузка…");
+                if let Some(error) = &self.gifs.enabled_error {
+                    theme::empty_state(ui, &format!("Не удалось проверить GIF: {error}"));
+                } else {
+                    theme::empty_state(ui, "Загрузка…");
+                }
                 return None;
             }
             Some(false) => {
                 theme::empty_state(
                     ui,
-                    "Поиск GIF не включён на этом инстансе: администратору нужно указать ключ Klipy в настройках.",
+                    "Поиск GIF не включён на этом инстансе: администратору нужно указать ключ Klipy в настройках инстанса (вкладка «Инстанс»).",
                 );
                 return None;
             }
             Some(true) => {}
         }
-        let now = ui.input(|i| i.time);
         let before = self.gifs.query.clone();
         widgets::search_box(ui, &mut self.gifs.query, "Поиск GIF в Klipy");
         if self.gifs.query != before {
@@ -847,7 +879,10 @@ impl Composer {
                 if self.gifs.loading {
                     ui.label(theme::muted("Загрузка…"));
                 } else if self.gifs.items.is_empty() && self.gifs.asked.is_some() {
-                    theme::empty_state(ui, "Ничего не нашлось");
+                    theme::empty_state(
+                        ui,
+                        "Ничего не нашлось. Если пусто даже без запроса — проверьте ключ Klipy в настройках инстанса.",
+                    );
                 }
             });
         let visible_bottom = output.state.clamped_offset().y + output.inner_rect.height();
