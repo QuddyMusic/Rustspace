@@ -11,8 +11,7 @@ use crate::bridge::{BridgeRequest, ChannelKind, HistoryState};
 use crate::fleet::Bridge;
 use crate::icons::Icon;
 use crate::logic::{
-    DEFAULT_REACTION, author_name, connection_label, message_actions, outgoing_text, should_ack,
-    should_load_older,
+    author_name, connection_label, message_actions, outgoing_text, should_ack, should_load_older,
 };
 use crate::media::{self, AttachmentView};
 use crate::screens::dialogs::{self, CreateSpaceForm, SettingsAction, SettingsState};
@@ -372,6 +371,10 @@ struct MessageRow {
     avatar: Option<String>,
     /// Вложения.
     attachments: Vec<AttachmentView>,
+    /// Реакции, сгруппированные по эмодзи.
+    reactions: Vec<super::body::ReactionGroup>,
+    /// Автор и текст сообщения, на которое это — ответ.
+    reply: Option<(String, String)>,
 }
 
 /// Окно, в котором подряд идущие сообщения одного автора склеиваются.
@@ -391,8 +394,64 @@ fn needs_header(prev: Option<&MessageRow>, cur: &MessageRow) -> bool {
         || theme::local_day(prev.created_at) != theme::local_day(cur.created_at)
 }
 
+/// Имена пользователей, известных кэшу: для упоминаний и подсказок реакций.
+fn name_map(cache: &Cache) -> HashMap<String, String> {
+    let mut names = HashMap::new();
+    for space in cache.spaces() {
+        for member in &space.members {
+            names.insert(
+                member.user.id.clone(),
+                author_name(member.user.display_name.as_deref(), &member.user.username).to_owned(),
+            );
+        }
+    }
+    for dm in cache.dm_channels() {
+        for user in &dm.members {
+            names.insert(
+                user.id.clone(),
+                author_name(user.display_name.as_deref(), &user.username).to_owned(),
+            );
+        }
+    }
+    let me = cache.me();
+    names.insert(
+        me.id.clone(),
+        author_name(me.display_name.as_deref(), &me.username).to_owned(),
+    );
+    names
+}
+
+fn reaction_groups(
+    reactions: &[bs_types::Reaction],
+    names: &HashMap<String, String>,
+    me: &str,
+) -> Vec<super::body::ReactionGroup> {
+    super::body::group_reactions(
+        reactions.iter().map(|r| {
+            (
+                r.emoji.as_str(),
+                r.user_id.as_str(),
+                names.get(&r.user_id).map_or("?", String::as_str),
+            )
+        }),
+        me,
+    )
+}
+
 /// Строки ленты канала `channel_id` из кэша (старые → новые).
-fn message_rows(cache: &Cache, kind: ChannelKind, channel_id: &str) -> Vec<MessageRow> {
+fn message_rows(
+    cache: &Cache,
+    kind: ChannelKind,
+    channel_id: &str,
+    names: &HashMap<String, String>,
+) -> Vec<MessageRow> {
+    let me = cache.me().id.as_str();
+    let quote = |user: &bs_types::User, content: Option<&String>| {
+        (
+            author_name(user.display_name.as_deref(), &user.username).to_owned(),
+            content.cloned().unwrap_or_default(),
+        )
+    };
     match kind {
         ChannelKind::Space => cache
             .messages(channel_id)
@@ -411,6 +470,11 @@ fn message_rows(cache: &Cache, kind: ChannelKind, channel_id: &str) -> Vec<Messa
                     .iter()
                     .map(AttachmentView::from_api)
                     .collect(),
+                reactions: reaction_groups(&msg.reactions, names, me),
+                reply: msg
+                    .reply_to
+                    .as_ref()
+                    .map(|r| quote(&r.user, r.message.content.as_ref())),
             })
             .collect(),
         ChannelKind::Dm => cache
@@ -430,6 +494,11 @@ fn message_rows(cache: &Cache, kind: ChannelKind, channel_id: &str) -> Vec<Messa
                     .iter()
                     .map(AttachmentView::from_api)
                     .collect(),
+                reactions: reaction_groups(&msg.reactions, names, me),
+                reply: msg
+                    .reply_to
+                    .as_ref()
+                    .map(|r| quote(&r.user, r.message.content.as_ref())),
             })
             .collect(),
     }
@@ -523,6 +592,20 @@ pub(crate) struct ChatScreen {
     was_scrolled_down: bool,
     /// Канал, для которого относятся `scroll_anchor` и `was_scrolled_down`.
     scroll_key: Option<String>,
+    /// Сообщение, на которое пишется ответ.
+    reply: Option<ReplyTarget>,
+    /// Сообщение, для которого открыт выбор реакции, и вкладка выбора.
+    react_picker: Option<(String, usize)>,
+    /// Имена пользователей для упоминаний (обновляется каждый кадр).
+    names: HashMap<String, String>,
+}
+
+/// На что отвечаем.
+#[derive(Debug, Clone)]
+struct ReplyTarget {
+    message_id: String,
+    author: String,
+    preview: String,
 }
 
 /// Что именно правим.
@@ -564,6 +647,8 @@ impl ChatScreen {
         // Правка относилась к прежнему каналу.
         if self.selected_channel.as_ref() != Some(&selected) {
             self.edit = None;
+            self.reply = None;
+            self.react_picker = None;
         }
         let space_open = self
             .active_space
@@ -1304,7 +1389,23 @@ impl ChatScreen {
                 // Строка над полем: «печатает…» или режим правки; высота постоянна.
                 ui.horizontal(|ui| {
                     ui.set_min_height(20.0);
-                    if self.is_editing() {
+                    if let Some(reply) = self.reply.clone().filter(|_| !self.is_editing()) {
+                        ui.label(
+                            theme::muted(format!(
+                                "Ответ для {}: {}",
+                                reply.author,
+                                theme::truncate_chars(&reply.preview.replace('\n', " "), 60)
+                            ))
+                            .size(12.5),
+                        );
+                        if ui
+                            .small_button("✕")
+                            .on_hover_text("Отменить ответ")
+                            .clicked()
+                        {
+                            self.reply = None;
+                        }
+                    } else if self.is_editing() {
                         ui.label(
                             RichText::new("Правка сообщения")
                                 .color(theme::AMBER)
@@ -1348,10 +1449,11 @@ impl ChatScreen {
             return;
         }
         let text = outgoing_text(&content);
+        let reply_to_id = self.reply.as_ref().map(|r| r.message_id.clone());
         match selected.kind {
             ChannelKind::Space if outgoing.attachments.is_empty() => {
                 if let Some(text) = text {
-                    bridge.send_message(selected.kind, selected.channel, text);
+                    bridge.send_message(selected.kind, selected.channel, text, reply_to_id);
                 }
             }
             ChannelKind::Space => bridge.send_rest(
@@ -1359,17 +1461,18 @@ impl ChatScreen {
                 bs_api::SendMessageBody {
                     content: text.unwrap_or_default(),
                     attachments: outgoing.attachments,
-                    reply_to_id: None,
+                    reply_to_id,
                 },
             ),
             ChannelKind::Dm => {
                 if text.is_some() || !outgoing.attachments.is_empty() {
-                    bridge.send_dm_with(selected.channel, text, outgoing.attachments);
+                    bridge.send_dm_with(selected.channel, text, outgoing.attachments, reply_to_id);
                 }
             }
         }
         if !outgoing.keep_draft {
             self.draft.clear();
+            self.reply = None;
         }
     }
 
@@ -1433,9 +1536,10 @@ impl ChatScreen {
                     let Some(cache) = bridge.cache() else {
                         return;
                     };
+                    self.names = name_map(cache);
                     (
                         cache.me().id.clone(),
-                        message_rows(cache, selected.kind, &channel_id),
+                        message_rows(cache, selected.kind, &channel_id, &self.names),
                     )
                 };
                 let ack_key = format!("{}:{channel_id}", selected.origin);
@@ -1503,11 +1607,37 @@ impl ChatScreen {
                     &channel_id,
                     rows.last().map(|row| row.id.as_str()),
                 );
+                self.show_react_picker(ui, bridge);
             });
     }
 
+    /// Окно выбора эмодзи для реакции.
+    fn show_react_picker(&mut self, ui: &egui::Ui, bridge: &Bridge) {
+        let Some((message_id, mut tab)) = self.react_picker.clone() else {
+            return;
+        };
+        let mut open = true;
+        let mut chosen = None;
+        egui::Window::new("Реакция")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ui.ctx(), |ui| {
+                chosen = super::composer::emoji_picker(ui, &mut tab);
+            });
+        if let Some(glyph) = chosen {
+            bridge.add_reaction(message_id, glyph.to_owned());
+            self.react_picker = None;
+        } else if open {
+            self.react_picker = Some((message_id, tab));
+        } else {
+            self.react_picker = None;
+        }
+    }
+
     /// Одно сообщение: аватар и имя у первого в группе, тело, контекстное меню.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn show_message(
         &mut self,
         ui: &mut egui::Ui,
@@ -1542,20 +1672,35 @@ impl ChatScreen {
                         ui.label(theme::muted(theme::stamp(row.created_at, now_ms())).size(11.5));
                     });
                 }
+                if let Some((author, text)) = &row.reply {
+                    super::body::show_reply_quote(ui, author, text);
+                }
                 if let Some(sticker) = media::sticker_of(&row.body) {
                     hits.extend(media::show_sticker(ui, sticker));
                 } else if let Some(gif) = media::gif_of(&row.body) {
                     hits.extend(media::show_gif(ui, gif));
                 } else if !row.body.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(&row.body).color(theme::TEXT));
-                        if row.edited {
-                            ui.label(theme::muted("(изменено)").size(11.0));
-                        }
-                    });
+                    let names = &self.names;
+                    let blocks = crate::markdown::parse(&row.body, &|id| names.get(id).cloned());
+                    super::body::show_text(ui, &row.id, &blocks, row.edited);
                 }
                 for attachment in &row.attachments {
                     hits.extend(media::show_attachment(ui, attachment));
+                }
+                if !row.reactions.is_empty() {
+                    match super::body::show_reactions(ui, &row.reactions) {
+                        Some(super::body::ReactionClick::Toggle(emoji, mine)) => {
+                            if mine {
+                                bridge.remove_reaction(row.id.clone(), emoji);
+                            } else {
+                                bridge.add_reaction(row.id.clone(), emoji);
+                            }
+                        }
+                        Some(super::body::ReactionClick::OpenPicker) => {
+                            self.react_picker = Some((row.id.clone(), 0));
+                        }
+                        None => {}
+                    }
                 }
             });
         });
@@ -1577,13 +1722,26 @@ impl ChatScreen {
             self.viewer = Some(value.clone());
         }
         let message_id = row.id.clone();
+        let mut open_picker = false;
+        let mut reply_request = false;
         response.context_menu(|ui| {
-            if ui.button("Реакция 👍").clicked() {
-                bridge.add_reaction(message_id.clone(), DEFAULT_REACTION.to_owned());
+            if ui.button("Ответить").clicked() {
+                reply_request = true;
                 ui.close();
             }
-            if ui.button("Убрать реакцию").clicked() {
-                bridge.remove_reaction(message_id.clone(), DEFAULT_REACTION.to_owned());
+            if ui.button("Добавить реакцию…").clicked() {
+                open_picker = true;
+                ui.close();
+            }
+            if !row.body.is_empty() && ui.button("Копировать текст").clicked() {
+                ui.ctx().copy_text(row.body.clone());
+                ui.close();
+            }
+            if ui.button("Отметить непрочитанным").clicked() {
+                bridge.send(bs_types::ClientEvent::MarkUnread {
+                    channel_id: selected.channel.clone(),
+                    message_id: message_id.clone(),
+                });
                 ui.close();
             }
             if manage && ui.button("Изменить").clicked() {
@@ -1595,6 +1753,17 @@ impl ChatScreen {
                 ui.close();
             }
         });
+        if reply_request {
+            self.reply = Some(ReplyTarget {
+                message_id: row.id.clone(),
+                author: row.author.clone(),
+                preview: row.body.clone(),
+            });
+            self.edit = None;
+        }
+        if open_picker {
+            self.react_picker = Some((row.id.clone(), 0));
+        }
     }
 }
 
@@ -1794,6 +1963,8 @@ mod tests {
             created_at: at,
             avatar: None,
             attachments: Vec::new(),
+            reactions: Vec::new(),
+            reply: None,
         }
     }
 

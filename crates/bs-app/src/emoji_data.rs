@@ -4495,3 +4495,12 @@ pub(crate) const CATEGORIES: &[(&str, &str, &[Entry])] = &[
         ],
     ),
 ];
+
+/// Эмодзи по тексту (без селектора вариантов), если есть картинка.
+pub(crate) fn find(glyph: &str) -> Option<&'static Entry> {
+    let wanted = glyph.trim_end_matches('\u{fe0f}');
+    CATEGORIES
+        .iter()
+        .flat_map(|(_, _, entries)| entries.iter())
+        .find(|entry| entry.glyph.trim_end_matches('\u{fe0f}') == wanted)
+}

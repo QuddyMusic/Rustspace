@@ -21,6 +21,7 @@ mod fleet;
 mod icons;
 mod images;
 mod logic;
+mod markdown;
 mod media;
 mod registry;
 mod screens;

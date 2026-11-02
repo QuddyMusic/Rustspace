@@ -65,9 +65,6 @@ pub(crate) fn can_manage_message(author_id: &str, me: &str) -> bool {
     author_id == me
 }
 
-/// Эмодзи, который ставит кнопка быстрой реакции.
-pub(crate) const DEFAULT_REACTION: &str = "👍";
-
 /// Что показать в контекстном меню сообщения.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MessageActions {

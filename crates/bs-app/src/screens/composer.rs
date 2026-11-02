@@ -729,60 +729,10 @@ impl Composer {
     }
 
     fn emoji_tab(&mut self, ui: &mut egui::Ui, draft: &mut String) {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            for (index, (name, tab_glyph, _)) in CATEGORIES.iter().enumerate() {
-                let selected = index == self.emoji_category;
-                let (rect, response) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
-                if selected {
-                    ui.painter()
-                        .rect_filled(rect, CornerRadius::same(8), theme::BG_ACTIVE);
-                } else if response.hovered() {
-                    ui.painter()
-                        .rect_filled(rect, CornerRadius::same(8), theme::BG_HOVER);
-                }
-                paint_emoji(ui, rect.shrink(6.0), tab_glyph, CATEGORIES.get(index));
-                if response.on_hover_text(*name).clicked() {
-                    self.emoji_category = index;
-                }
-            }
-        });
-        ui.add_space(4.0);
-        let Some((name, _, entries)) = CATEGORIES.get(self.emoji_category) else {
-            return;
-        };
-        ui.label(theme::section_title(name));
-        egui::ScrollArea::vertical()
-            .id_salt("emoji_scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let cell = 38.0;
-                let columns = ((ui.available_width() / cell).floor() as usize).max(1);
-                for row in entries.chunks(columns) {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::ZERO;
-                        for entry in row {
-                            let (rect, response) =
-                                ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
-                            if !ui.is_rect_visible(rect) {
-                                continue;
-                            }
-                            if response.hovered() {
-                                ui.painter().rect_filled(
-                                    rect,
-                                    CornerRadius::same(8),
-                                    theme::BG_ACTIVE,
-                                );
-                            }
-                            paint_texture(ui, rect.shrink(5.0), entry);
-                            if response.clicked() {
-                                draft.push_str(entry.glyph);
-                                ui.ctx().memory_mut(|m| m.request_focus(edit_id()));
-                            }
-                        }
-                    });
-                }
-            });
+        if let Some(glyph) = emoji_picker(ui, &mut self.emoji_category) {
+            draft.push_str(glyph);
+            ui.ctx().memory_mut(|m| m.request_focus(edit_id()));
+        }
     }
 
     #[allow(clippy::too_many_lines, reason = "вкладка: поиск, сетка и дозагрузка")]
@@ -1004,6 +954,68 @@ impl Composer {
             keep_draft: true,
         })
     }
+}
+
+/// Сетка эмодзи с вкладками категорий; возвращает выбранный эмодзи.
+pub(crate) fn emoji_picker(ui: &mut egui::Ui, category: &mut usize) -> Option<&'static str> {
+    let mut chosen = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (index, (name, tab_glyph, _)) in CATEGORIES.iter().enumerate() {
+            let selected = index == *category;
+            let (rect, response) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
+            if selected {
+                ui.painter()
+                    .rect_filled(rect, CornerRadius::same(8), theme::BG_ACTIVE);
+            } else if response.hovered() {
+                ui.painter()
+                    .rect_filled(rect, CornerRadius::same(8), theme::BG_HOVER);
+            }
+            paint_emoji(ui, rect.shrink(6.0), tab_glyph, CATEGORIES.get(index));
+            if response.on_hover_text(*name).clicked() {
+                *category = index;
+            }
+        }
+    });
+    ui.add_space(4.0);
+    let (name, _, entries) = CATEGORIES.get(*category)?;
+    ui.label(theme::section_title(name));
+    egui::ScrollArea::vertical()
+        .id_salt("emoji_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let cell = 38.0;
+            let columns = ((ui.available_width() / cell).floor() as usize).max(1);
+            for row in entries.chunks(columns) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+                    for entry in row {
+                        let (rect, response) =
+                            ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
+                        if !ui.is_rect_visible(rect) {
+                            continue;
+                        }
+                        if response.hovered() {
+                            ui.painter()
+                                .rect_filled(rect, CornerRadius::same(8), theme::BG_ACTIVE);
+                        }
+                        paint_texture(ui, rect.shrink(5.0), entry);
+                        if response.clicked() {
+                            chosen = Some(entry.glyph);
+                        }
+                    }
+                });
+            }
+        });
+    chosen
+}
+
+/// Рисует эмодзи картинкой, если она есть; `false` — нужен запасной текст.
+pub(crate) fn paint_glyph(ui: &egui::Ui, rect: Rect, glyph: &str) -> bool {
+    crate::emoji_data::find(glyph).is_some_and(|entry| {
+        paint_texture(ui, rect, entry);
+        true
+    })
 }
 
 /// Текстура эмодзи; декодируется при первом показе и кэшируется.

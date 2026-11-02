@@ -1086,18 +1086,24 @@ impl Session {
     ///
     /// Для ЛС сервер ждёт отдельное событие `dm_message_create`: обычный
     /// `message_create` с id личного канала он молча отбрасывает.
-    pub(crate) fn send_message(&self, kind: ChannelKind, channel_id: String, content: String) {
+    pub(crate) fn send_message(
+        &self,
+        kind: ChannelKind,
+        channel_id: String,
+        content: String,
+        reply_to_id: Option<String>,
+    ) {
         self.send(match kind {
             ChannelKind::Space => ClientEvent::MessageCreate {
                 channel_id,
                 content,
-                reply_to_id: None,
+                reply_to_id,
             },
             ChannelKind::Dm => ClientEvent::DmMessageCreate {
                 dm_channel_id: channel_id,
                 content: Some(content),
                 attachments: None,
-                reply_to_id: None,
+                reply_to_id,
             },
         });
     }
@@ -1177,6 +1183,7 @@ impl Session {
         channel_id: String,
         content: Option<String>,
         attachments: Vec<String>,
+        reply_to_id: Option<String>,
     ) {
         self.send(ClientEvent::DmMessageCreate {
             dm_channel_id: channel_id,
@@ -1186,7 +1193,7 @@ impl Session {
             } else {
                 Some(attachments)
             },
-            reply_to_id: None,
+            reply_to_id,
         });
     }
 
@@ -2417,7 +2424,7 @@ mod tests {
         assert_eq!(bridge.phase(), Phase::Closing);
         assert!(bridge.commands.is_none() && bridge.requests.is_none());
         // Команды после выхода никуда не уходят.
-        bridge.send_message(ChannelKind::Space, "c".to_owned(), "x".to_owned());
+        bridge.send_message(ChannelKind::Space, "c".to_owned(), "x".to_owned(), None);
         assert!(!bridge.request(BridgeRequest::Friends));
         // Повторный выход безвреден.
         bridge.logout();
@@ -2632,14 +2639,19 @@ mod tests {
     #[test]
     fn send_without_session_is_noop() {
         let bridge = new_bridge();
-        bridge.send_message(ChannelKind::Space, "chan-1".to_owned(), "hello".to_owned());
+        bridge.send_message(
+            ChannelKind::Space,
+            "chan-1".to_owned(),
+            "hello".to_owned(),
+            None,
+        );
         assert!(bridge.commands.is_none());
     }
 
     #[test]
     fn dm_send_uses_dm_message_create() {
         let (bridge, mut commands, _requests) = active_bridge();
-        bridge.send_message(ChannelKind::Dm, "dm1".to_owned(), "привет".to_owned());
+        bridge.send_message(ChannelKind::Dm, "dm1".to_owned(), "привет".to_owned(), None);
         match commands.try_recv() {
             Ok(ClientEvent::DmMessageCreate {
                 dm_channel_id,
@@ -2673,7 +2685,7 @@ mod tests {
     #[test]
     fn space_send_keeps_message_create() {
         let (bridge, mut commands, _requests) = active_bridge();
-        bridge.send_message(ChannelKind::Space, "c1".to_owned(), "hi".to_owned());
+        bridge.send_message(ChannelKind::Space, "c1".to_owned(), "hi".to_owned(), None);
         assert!(matches!(
             commands.try_recv(),
             Ok(ClientEvent::MessageCreate { .. })
