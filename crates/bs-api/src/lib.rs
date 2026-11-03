@@ -29,6 +29,7 @@ pub mod compose;
 pub mod error;
 pub mod federation;
 pub mod instance;
+pub mod invites;
 pub mod peers;
 pub mod profile;
 pub mod read;
@@ -56,6 +57,7 @@ pub use federation::{
 pub use instance::{
     InstanceInfo, PeerEnsureResponse, RegisterRequest, ReplicatedEntry, VerifyPasswordResponse,
 };
+pub use invites::{Invite, InvitePatch, NewInvite, Redemption};
 pub use peers::{ApprovalRequest, Peer, Recheck};
 pub use profile::{MutualSpace, Mutuals};
 pub use read::{

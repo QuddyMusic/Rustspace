@@ -320,6 +320,13 @@ pub(crate) enum AdminRequest {
         /// Новый.
         new: Secret,
     },
+    /// Инвайт-ссылки: активные или архивные.
+    LoadInvites {
+        /// Показать архив.
+        archived: bool,
+    },
+    /// Действие с инвайтом.
+    Invite(InviteOp),
     /// Пиры и запросы на одобрение.
     LoadPeers,
     /// Действие с пиром.
@@ -343,6 +350,23 @@ pub(crate) enum AdminRequest {
         /// Логин для подтверждения.
         username: String,
     },
+}
+
+/// Действие администратора с инвайтом.
+#[derive(Debug, Clone)]
+pub(crate) enum InviteOp {
+    /// Создать.
+    Create(bs_api::NewInvite),
+    /// Изменить.
+    Update(String, bs_api::InvitePatch),
+    /// Отозвать.
+    Revoke(String),
+    /// Восстановить.
+    Reinstate(String, bs_api::InvitePatch),
+    /// Удалить.
+    Delete(String),
+    /// Кто воспользовался.
+    Redemptions(String),
 }
 
 /// Действие администратора с пиром.
@@ -377,6 +401,17 @@ pub(crate) enum AdminEvent {
     Users(Result<bs_api::AdminUserPage, String>),
     /// Сводка по хранилищу.
     Storage(Result<bs_api::StorageStats, String>),
+    /// Список инвайтов: архив ли и сами ссылки.
+    Invites(Result<(bool, Vec<bs_api::Invite>), String>),
+    /// Итог действия с инвайтом.
+    InviteDone(Result<String, String>),
+    /// Кто воспользовался инвайтом.
+    Redemptions {
+        /// Инвайт.
+        id: String,
+        /// Список или ошибка.
+        result: Result<Vec<bs_api::Redemption>, String>,
+    },
     /// Пиры и запросы на одобрение.
     Peers(Result<(Vec<bs_api::Peer>, Vec<bs_api::ApprovalRequest>), String>),
     /// Итог действия с пиром: сообщение или текст ошибки.
@@ -1929,6 +1964,45 @@ async fn set_profile_image(
     }
 }
 
+/// Выполняет действие с инвайтом.
+async fn invite_op(client: &bs_api::ApiClient, op: InviteOp) -> Result<String, String> {
+    let fail = |err: bs_api::ApiError| upload_message(&err);
+    match op {
+        InviteOp::Create(new) => client
+            .create_invite(&new)
+            .await
+            .map(|_| "Ссылка создана".to_owned())
+            .map_err(fail),
+        InviteOp::Update(id, patch) => client
+            .update_invite(&id, &patch)
+            .await
+            .map(|_| "Ссылка обновлена".to_owned())
+            .map_err(fail),
+        InviteOp::Revoke(id) => client
+            .revoke_invite(&id)
+            .await
+            .map(|_| "Ссылка отозвана".to_owned())
+            .map_err(fail),
+        InviteOp::Reinstate(id, patch) => client
+            .reinstate_invite(&id, &patch)
+            .await
+            .map(|v| {
+                if v.get("tokenRotated").and_then(serde_json::Value::as_bool) == Some(true) {
+                    "Ссылка восстановлена с новым адресом".to_owned()
+                } else {
+                    "Ссылка восстановлена".to_owned()
+                }
+            })
+            .map_err(fail),
+        InviteOp::Delete(id) => client
+            .delete_invite(&id)
+            .await
+            .map(|_| "Ссылка удалена".to_owned())
+            .map_err(fail),
+        InviteOp::Redemptions(_) => Ok(String::new()),
+    }
+}
+
 /// Выполняет действие с пиром.
 async fn peer_op(client: &bs_api::ApiClient, op: PeerOp) -> Result<String, String> {
     let fail = |err: bs_api::ApiError| upload_message(&err);
@@ -1993,6 +2067,18 @@ async fn handle_admin(client: &bs_api::ApiClient, request: AdminRequest) -> Admi
     let done =
         |action: AdminDone, result: Result<String, String>| AdminEvent::Done { action, result };
     match request {
+        AdminRequest::LoadInvites { archived } => AdminEvent::Invites(
+            client
+                .invites(archived)
+                .await
+                .map(|list| (archived, list))
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::Invite(InviteOp::Redemptions(id)) => {
+            let result = client.invite_redemptions(&id).await.map_err(|e| text(&e));
+            AdminEvent::Redemptions { id, result }
+        }
+        AdminRequest::Invite(op) => AdminEvent::InviteDone(invite_op(client, op).await),
         AdminRequest::LoadPeers => AdminEvent::Peers(
             async {
                 let peers = client.peers().await?;

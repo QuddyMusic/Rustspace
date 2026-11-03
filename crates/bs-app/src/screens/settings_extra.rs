@@ -70,6 +70,7 @@ impl std::fmt::Debug for ReceiverBox {
 #[derive(Debug, Default)]
 pub(crate) struct AdminUi {
     pub(crate) more: super::settings_more::MoreUi,
+    pub(crate) invites: super::settings_invites::InvitesUi,
     settings: Option<InstanceSettings>,
     edit: Option<InstanceSettings>,
     gif_key: String,
@@ -128,11 +129,15 @@ pub(crate) struct ExtraUi {
 
 impl ExtraUi {
     /// Разбирает ответы моста.
+    #[allow(clippy::too_many_lines, reason = "разбор всех админских событий")]
     pub(crate) fn poll(&mut self, bridge: &mut Bridge) {
         for event in bridge.take_admin_events() {
             let admin = &mut self.admin;
             let account = &mut self.account;
             let Some(event) = admin.more.accept(event) else {
+                continue;
+            };
+            let Some(event) = admin.invites.accept(event) else {
                 continue;
             };
             match event {
@@ -164,7 +169,10 @@ impl ExtraUi {
                     Ok(stats) => admin.storage = Some(stats),
                     Err(message) => admin.storage_note = Some(fail(message)),
                 },
-                AdminEvent::Peers(_)
+                AdminEvent::Invites(_)
+                | AdminEvent::InviteDone(_)
+                | AdminEvent::Redemptions { .. }
+                | AdminEvent::Peers(_)
                 | AdminEvent::PeerDone(_)
                 | AdminEvent::Streaming(_)
                 | AdminEvent::Telemetry(_)

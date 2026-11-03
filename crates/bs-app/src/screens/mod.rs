@@ -9,4 +9,5 @@ pub(crate) mod home;
 pub(crate) mod login;
 pub(crate) mod profile;
 pub(crate) mod settings_extra;
+pub(crate) mod settings_invites;
 pub(crate) mod settings_more;

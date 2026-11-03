@@ -211,6 +211,8 @@ pub(crate) enum SettingsSection {
     Users,
     /// Администратор: хранилище.
     Storage,
+    /// Администратор: регистрация и инвайты.
+    Registration,
     /// Администратор: федерация.
     Federation,
     /// Администратор: стриминг.
@@ -232,6 +234,7 @@ impl SettingsSection {
             Self::Instance => "Инстанс",
             Self::Users => "Пользователи",
             Self::Storage => "Хранилище",
+            Self::Registration => "Регистрация",
             Self::Federation => "Федерация",
             Self::Streaming => "Стриминг",
             Self::Telemetry => "Телеметрия",
@@ -246,6 +249,7 @@ impl SettingsSection {
             Self::Instance
                 | Self::Users
                 | Self::Storage
+                | Self::Registration
                 | Self::Federation
                 | Self::Streaming
                 | Self::Telemetry
@@ -540,6 +544,7 @@ fn settings_nav(
                         SettingsSection::Instance,
                         SettingsSection::Users,
                         SettingsSection::Storage,
+                        SettingsSection::Registration,
                         SettingsSection::Federation,
                         SettingsSection::Streaming,
                         SettingsSection::Telemetry,
@@ -630,6 +635,9 @@ fn section_content(
         SettingsSection::Storage if me.is_admin => {
             super::settings_extra::storage_panel(ui, &mut state.extra, bridge);
         }
+        SettingsSection::Registration if me.is_admin => {
+            super::settings_invites::registration_panel(ui, &mut state.extra, bridge);
+        }
         SettingsSection::Federation if me.is_admin => {
             super::settings_more::federation_panel(ui, &mut state.extra, bridge);
         }
@@ -645,6 +653,7 @@ fn section_content(
         SettingsSection::Instance
         | SettingsSection::Users
         | SettingsSection::Storage
+        | SettingsSection::Registration
         | SettingsSection::Federation
         | SettingsSection::Streaming
         | SettingsSection::Telemetry
