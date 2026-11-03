@@ -320,6 +320,10 @@ pub(crate) enum AdminRequest {
         /// Новый.
         new: Secret,
     },
+    /// Пиры и запросы на одобрение.
+    LoadPeers,
+    /// Действие с пиром.
+    Peer(PeerOp),
     /// Ограничения стриминга.
     LoadStreaming,
     /// Сохранить ограничения стриминга.
@@ -341,6 +345,27 @@ pub(crate) enum AdminRequest {
     },
 }
 
+/// Действие администратора с пиром.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PeerOp {
+    /// Перепроверить связь.
+    Recheck(String),
+    /// Сменить секрет.
+    Rotate(String),
+    /// Отозвать.
+    Revoke(String),
+    /// Сбросить.
+    Reset(String),
+    /// Удалить навсегда.
+    Delete(String),
+    /// Интервал автоматической ротации, дней.
+    Interval(String, u32),
+    /// Начать пиринг с адресом.
+    Initiate(String),
+    /// Одобрить или отклонить запрос.
+    Answer(String, bool),
+}
+
 /// Ответы на [`AdminRequest`] и загрузку картинки профиля.
 #[derive(Debug)]
 pub(crate) enum AdminEvent {
@@ -352,6 +377,10 @@ pub(crate) enum AdminEvent {
     Users(Result<bs_api::AdminUserPage, String>),
     /// Сводка по хранилищу.
     Storage(Result<bs_api::StorageStats, String>),
+    /// Пиры и запросы на одобрение.
+    Peers(Result<(Vec<bs_api::Peer>, Vec<bs_api::ApprovalRequest>), String>),
+    /// Итог действия с пиром: сообщение или текст ошибки.
+    PeerDone(Result<String, String>),
     /// Ограничения стриминга (прочитаны или сохранены).
     Streaming(Result<bs_api::StreamingLimits, String>),
     /// Состояние телеметрии.
@@ -1900,6 +1929,63 @@ async fn set_profile_image(
     }
 }
 
+/// Выполняет действие с пиром.
+async fn peer_op(client: &bs_api::ApiClient, op: PeerOp) -> Result<String, String> {
+    let fail = |err: bs_api::ApiError| upload_message(&err);
+    match op {
+        PeerOp::Recheck(id) => {
+            let result = client.recheck_peer(&id).await.map_err(fail)?;
+            Ok(if result.recovered {
+                "Связь восстановлена".to_owned()
+            } else {
+                "Инстанс по-прежнему недоступен".to_owned()
+            })
+        }
+        PeerOp::Rotate(id) => client
+            .rotate_peer_secret(&id)
+            .await
+            .map(|_| "Ротация секрета начата".to_owned())
+            .map_err(fail),
+        PeerOp::Revoke(id) => client
+            .revoke_peer(&id)
+            .await
+            .map(|_| "Пир отозван".to_owned())
+            .map_err(fail),
+        PeerOp::Reset(id) => client
+            .reset_peer(&id)
+            .await
+            .map(|_| "Пир сброшен".to_owned())
+            .map_err(fail),
+        PeerOp::Delete(id) => client
+            .delete_peer_permanently(&id)
+            .await
+            .map(|_| "Пир удалён".to_owned())
+            .map_err(fail),
+        PeerOp::Interval(id, days) => client
+            .set_peer_interval(&id, days)
+            .await
+            .map(|_| "Интервал обновлён".to_owned())
+            .map_err(fail),
+        PeerOp::Initiate(origin) => client
+            .initiate_peering(&origin)
+            .await
+            .map(|_| "Запрос на пиринг отправлен".to_owned())
+            .map_err(fail),
+        PeerOp::Answer(id, approve) => client
+            .answer_approval(&id, approve)
+            .await
+            .map(|_| {
+                if approve {
+                    "Одобрено"
+                } else {
+                    "Отклонено"
+                }
+                .to_owned()
+            })
+            .map_err(fail),
+    }
+}
+
 /// Выполняет запрос настроек.
 #[allow(clippy::too_many_lines, reason = "по ветке на действие")]
 async fn handle_admin(client: &bs_api::ApiClient, request: AdminRequest) -> AdminEvent {
@@ -1907,6 +1993,16 @@ async fn handle_admin(client: &bs_api::ApiClient, request: AdminRequest) -> Admi
     let done =
         |action: AdminDone, result: Result<String, String>| AdminEvent::Done { action, result };
     match request {
+        AdminRequest::LoadPeers => AdminEvent::Peers(
+            async {
+                let peers = client.peers().await?;
+                let requests = client.approval_requests().await.unwrap_or_default();
+                Ok::<_, bs_api::ApiError>((peers, requests))
+            }
+            .await
+            .map_err(|e| text(&e)),
+        ),
+        AdminRequest::Peer(op) => AdminEvent::PeerDone(peer_op(client, op).await),
         AdminRequest::LoadStreaming => {
             AdminEvent::Streaming(client.streaming_limits().await.map_err(|e| text(&e)))
         }

@@ -211,6 +211,8 @@ pub(crate) enum SettingsSection {
     Users,
     /// Администратор: хранилище.
     Storage,
+    /// Администратор: федерация.
+    Federation,
     /// Администратор: стриминг.
     Streaming,
     /// Администратор: телеметрия.
@@ -230,6 +232,7 @@ impl SettingsSection {
             Self::Instance => "Инстанс",
             Self::Users => "Пользователи",
             Self::Storage => "Хранилище",
+            Self::Federation => "Федерация",
             Self::Streaming => "Стриминг",
             Self::Telemetry => "Телеметрия",
             Self::Updates => "Обновления",
@@ -243,6 +246,7 @@ impl SettingsSection {
             Self::Instance
                 | Self::Users
                 | Self::Storage
+                | Self::Federation
                 | Self::Streaming
                 | Self::Telemetry
                 | Self::Updates
@@ -536,6 +540,7 @@ fn settings_nav(
                         SettingsSection::Instance,
                         SettingsSection::Users,
                         SettingsSection::Storage,
+                        SettingsSection::Federation,
                         SettingsSection::Streaming,
                         SettingsSection::Telemetry,
                         SettingsSection::Updates,
@@ -625,6 +630,9 @@ fn section_content(
         SettingsSection::Storage if me.is_admin => {
             super::settings_extra::storage_panel(ui, &mut state.extra, bridge);
         }
+        SettingsSection::Federation if me.is_admin => {
+            super::settings_more::federation_panel(ui, &mut state.extra, bridge);
+        }
         SettingsSection::Streaming if me.is_admin => {
             super::settings_more::streaming_panel(ui, &mut state.extra.admin.more, bridge);
         }
@@ -637,6 +645,7 @@ fn section_content(
         SettingsSection::Instance
         | SettingsSection::Users
         | SettingsSection::Storage
+        | SettingsSection::Federation
         | SettingsSection::Streaming
         | SettingsSection::Telemetry
         | SettingsSection::Updates => {

@@ -219,6 +219,15 @@ pub(crate) fn canonical_base(raw: &str) -> Option<String> {
     Some(base)
 }
 
+/// Один и тот же инстанс, как бы ни был записан адрес.
+#[must_use]
+pub(crate) fn same_instance(a: &str, b: &str) -> bool {
+    match (canonical_base(a), canonical_base(b)) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(&b),
+        _ => a.trim() == b.trim(),
+    }
+}
+
 /// Короткое название инстанса из адреса.
 fn host_label(base: &str) -> String {
     bs_identity::identity::host_of(base)
@@ -995,10 +1004,21 @@ impl Bridge {
 
     /// Строки списка подключений: записи реестра с живым состоянием слотов.
     pub(crate) fn rows(&self) -> Vec<ConnectionRow> {
+        // Домашний инстанс показывается отдельной карточкой, а не в списке
+        // пиринговых: запись реестра, указывающую на него, скрываем.
+        let home = self.slots[0]
+            .base
+            .clone()
+            .or_else(|| self.slots[0].session.base().map(str::to_owned));
         let mut rows: Vec<ConnectionRow> = self
             .registry
             .entries()
             .iter()
+            .filter(|entry| {
+                !home
+                    .as_deref()
+                    .is_some_and(|home| same_instance(home, &entry.origin))
+            })
             .map(|entry| self.row_for(entry))
             .collect();
         // Слоты, которых в реестре ещё нет (идёт первое подключение).
@@ -1099,6 +1119,26 @@ fn delete_error(code: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn same_instance_ignores_case_slash_and_path() {
+        assert!(super::same_instance(
+            "https://Home.example/",
+            "https://home.example"
+        ));
+        assert!(super::same_instance(
+            "home.example",
+            "https://home.example/app"
+        ));
+        assert!(!super::same_instance(
+            "https://a.example",
+            "https://b.example"
+        ));
+        assert!(!super::same_instance(
+            "http://a.example",
+            "https://a.example"
+        ));
+    }
+
     use super::{Bridge, canonical_base};
 
     #[test]

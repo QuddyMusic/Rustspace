@@ -1,10 +1,13 @@
 //! Админские разделы «Стриминг», «Телеметрия» и «Обновления».
 
-use bs_api::{StreamingLimits, StreamingPatch, TelemetryStatus, UpdateStatus};
+use bs_api::{
+    ApprovalRequest, InstanceSettingsPatch, Peer, StreamingLimits, StreamingPatch, TelemetryStatus,
+    UpdateStatus,
+};
 use egui::RichText;
 
 use super::settings_extra::{Note, fail, number_row, setting_row, show_note};
-use crate::bridge::{AdminEvent, AdminRequest, BridgeRequest};
+use crate::bridge::{AdminEvent, AdminRequest, BridgeRequest, PeerOp};
 use crate::fleet::Bridge;
 use crate::screens::dialogs::{card, page_title};
 use crate::theme;
@@ -16,6 +19,10 @@ const RESOLUTIONS: [u32; 5] = [540, 720, 1080, 1440, 2160];
 const FRAMERATES: [u32; 6] = [30, 45, 60, 75, 90, 120];
 
 /// Состояние этих разделов.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "флаги «уже запрашивали» по разделам"
+)]
 #[derive(Debug, Default)]
 pub(crate) struct MoreUi {
     streaming: Option<StreamingLimits>,
@@ -29,12 +36,34 @@ pub(crate) struct MoreUi {
     updates: Option<UpdateStatus>,
     updates_asked: bool,
     updates_note: Option<Note>,
+    peers: Option<Vec<Peer>>,
+    approvals: Vec<ApprovalRequest>,
+    peers_asked: bool,
+    peers_note: Option<Note>,
+    initiate: String,
+    confirm: Option<PeerOp>,
+    show_revoked: bool,
+    intervals: std::collections::HashMap<String, u32>,
 }
 
 impl MoreUi {
     /// Забирает «свои» события; остальные возвращает вызывающему.
     pub(crate) fn accept(&mut self, event: AdminEvent) -> Option<AdminEvent> {
         match event {
+            AdminEvent::Peers(result) => match result {
+                Ok((peers, approvals)) => {
+                    self.peers = Some(peers);
+                    self.approvals = approvals;
+                }
+                Err(message) => self.peers_note = Some(fail(message)),
+            },
+            AdminEvent::PeerDone(result) => {
+                self.peers_note = Some(match result {
+                    Ok(text) => super::settings_extra::ok(text),
+                    Err(message) => fail(message),
+                });
+                self.peers_asked = false;
+            }
             AdminEvent::Streaming(result) => match result {
                 Ok(limits) => {
                     self.edit = Some(limits.clone());
@@ -353,6 +382,282 @@ pub(crate) fn updates_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridg
         };
         ui.label(theme::muted(hint).size(12.5));
     });
+}
+
+fn status_text(peer: &Peer) -> (&'static str, egui::Color32) {
+    match peer.status.as_str() {
+        "active" => ("Активен", theme::GREEN),
+        "pending" => ("Ожидает ответа", theme::AMBER),
+        "awaiting_approval" => ("Ждёт одобрения", theme::AMBER),
+        "unreachable" => ("Недоступен", theme::ROSE),
+        "needs_attention" => ("Требует внимания", theme::ROSE),
+        "rejected" => ("Отклонён", theme::ROSE),
+        "revoked" => ("Отозван", theme::TEXT_FAINT),
+        _ => ("Неизвестно", theme::TEXT_FAINT),
+    }
+}
+
+fn confirm_text(op: &PeerOp) -> &'static str {
+    match op {
+        PeerOp::Rotate(_) => {
+            "Сменить общий секрет с этим инстансом? Старый секрет будет действовать ещё некоторое время."
+        }
+        PeerOp::Revoke(_) => "Отозвать пира? Федерация с этим инстансом прекратится.",
+        PeerOp::Reset(_) => "Сбросить пира? Связь будет установлена заново.",
+        PeerOp::Delete(_) => "Удалить пира навсегда? Запись исчезнет безвозвратно.",
+        _ => "Подтвердите действие.",
+    }
+}
+
+#[allow(clippy::too_many_lines, reason = "карточка пира с действиями")]
+fn peer_card(ui: &mut egui::Ui, more: &mut MoreUi, peer: &Peer, bridge: &Bridge) {
+    let (label, color) = status_text(peer);
+    let revoked = peer.status == "revoked";
+    card(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(peer.instance_name.as_deref().unwrap_or(&peer.origin))
+                    .color(theme::TEXT_BRIGHT),
+            );
+            ui.label(RichText::new(label).color(color).size(12.5));
+        });
+        ui.label(theme::muted(&peer.origin).size(12.5));
+        if let Some(seen) = peer.last_seen_at {
+            ui.label(
+                theme::muted(format!(
+                    "Был на связи: {}",
+                    theme::stamp(seen, chrono::Utc::now().timestamp_millis())
+                ))
+                .size(12.5),
+            );
+        }
+        if peer.consecutive_failures > 0 || peer.consecutive_auth_failures > 0 {
+            ui.label(
+                theme::muted(format!(
+                    "Подряд неудач: связь — {}, аутентификация — {}",
+                    peer.consecutive_failures, peer.consecutive_auth_failures
+                ))
+                .size(12.5),
+            );
+        }
+        if let Some(reason) = &peer.status_reason {
+            ui.label(theme::muted(format!("Причина: {reason}")).size(12.5));
+        }
+        ui.add_space(6.0);
+        if more.confirm.as_ref().is_some_and(|op| match op {
+            PeerOp::Rotate(id) | PeerOp::Revoke(id) | PeerOp::Reset(id) | PeerOp::Delete(id) => {
+                *id == peer.id
+            }
+            _ => false,
+        }) {
+            let op = more.confirm.clone();
+            if let Some(op) = op {
+                ui.label(RichText::new(confirm_text(&op)).color(theme::AMBER));
+                ui.horizontal(|ui| {
+                    if ui.button("Подтвердить").clicked() {
+                        request(bridge, AdminRequest::Peer(op));
+                        more.confirm = None;
+                    }
+                    if ui.button("Отмена").clicked() {
+                        more.confirm = None;
+                    }
+                });
+            }
+            return;
+        }
+        ui.horizontal_wrapped(|ui| {
+            if revoked {
+                if ui.button("Подключить снова").clicked() {
+                    request(
+                        bridge,
+                        AdminRequest::Peer(PeerOp::Initiate(peer.origin.clone())),
+                    );
+                }
+                if ui.button("Удалить навсегда").clicked() {
+                    more.confirm = Some(PeerOp::Delete(peer.id.clone()));
+                }
+                return;
+            }
+            if matches!(peer.status.as_str(), "unreachable" | "needs_attention")
+                && ui.button("Перепроверить").clicked()
+            {
+                request(bridge, AdminRequest::Peer(PeerOp::Recheck(peer.id.clone())));
+            }
+            if peer.status == "active"
+                && !peer.rotation_in_progress
+                && ui.button("Сменить секрет").clicked()
+            {
+                more.confirm = Some(PeerOp::Rotate(peer.id.clone()));
+            }
+            if ui.button("Сбросить").clicked() {
+                more.confirm = Some(PeerOp::Reset(peer.id.clone()));
+            }
+            if ui.button("Отозвать").clicked() {
+                more.confirm = Some(PeerOp::Revoke(peer.id.clone()));
+            }
+        });
+        if !revoked {
+            ui.horizontal(|ui| {
+                ui.label(theme::muted("Ротация секрета каждые, дней").size(12.5));
+                let days = more
+                    .intervals
+                    .entry(peer.id.clone())
+                    .or_insert(peer.auto_rotate_interval_days);
+                ui.add(egui::DragValue::new(days).range(1..=365));
+                if *days != peer.auto_rotate_interval_days && ui.button("Применить").clicked()
+                {
+                    request(
+                        bridge,
+                        AdminRequest::Peer(PeerOp::Interval(peer.id.clone(), *days)),
+                    );
+                }
+            });
+        }
+    });
+    ui.add_space(8.0);
+}
+
+/// «Федерация»: пиры, запросы на одобрение и глобальные параметры.
+#[allow(clippy::too_many_lines, reason = "панель одним блоком")]
+pub(crate) fn federation_panel(
+    ui: &mut egui::Ui,
+    extra: &mut super::settings_extra::ExtraUi,
+    bridge: &Bridge,
+) {
+    let admin = &mut extra.admin;
+    page_title(ui, "Федерация");
+    if !admin.more.peers_asked {
+        admin.more.peers_asked = request(bridge, AdminRequest::LoadPeers);
+    }
+    // Глобальные параметры живут в общих настройках инстанса.
+    super::settings_extra::ensure_settings(admin, bridge);
+    if let Some(edit) = admin.edit_mut() {
+        widgets::section_label(ui, "Глобальные параметры");
+        card(ui, |ui| {
+            setting_row(
+                ui,
+                "Автоматически принимать пиринг",
+                "Запросы от других инстансов принимаются без ручного одобрения.",
+                &mut edit.auto_accept_peering,
+            );
+            setting_row(
+                ui,
+                "Ретрансляция сообщений",
+                "Хранить сообщения для недоступных пиров и доставить позже.",
+                &mut edit.federation_relay_enabled,
+            );
+            number_row(
+                ui,
+                "Хранение ретрансляции, дней",
+                "Сколько дней ждать недоступного пира.",
+                &mut edit.federation_relay_ttl_days,
+                (1, 365),
+            );
+            number_row(
+                ui,
+                "Ротация секрета по умолчанию, дней",
+                "Для новых пиров.",
+                &mut edit.default_auto_rotate_interval_days,
+                (1, 365),
+            );
+        });
+        let patch = admin.settings_patch_only();
+        let changed = patch != InstanceSettingsPatch::default();
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(changed, theme::primary_button("Сохранить"))
+                .clicked()
+            {
+                bridge.request(BridgeRequest::Admin(AdminRequest::SaveSettings(patch)));
+            }
+            if ui
+                .add_enabled(changed, egui::Button::new("Сбросить"))
+                .clicked()
+            {
+                admin.reset_edit();
+            }
+        });
+        ui.add_space(12.0);
+    }
+    let more = &mut admin.more;
+    widgets::section_label(ui, "Подключить инстанс");
+    card(ui, |ui| {
+        ui.horizontal(|ui| {
+            widgets::text_field(ui, &mut more.initiate, "https://example.org", 200);
+            let origin = more.initiate.trim().to_owned();
+            if ui
+                .add_enabled(
+                    !origin.is_empty(),
+                    theme::primary_button("Запросить пиринг"),
+                )
+                .clicked()
+            {
+                request(bridge, AdminRequest::Peer(PeerOp::Initiate(origin)));
+                more.initiate.clear();
+            }
+        });
+    });
+    ui.add_space(8.0);
+    show_note(ui, more.peers_note.as_ref());
+    if !more.approvals.is_empty() {
+        widgets::section_label(ui, "Запросы на одобрение");
+        for req in more.approvals.clone() {
+            card(ui, |ui| {
+                let dir = if req.direction == "inbound" {
+                    "Входящий запрос"
+                } else {
+                    "Исходящий запрос"
+                };
+                ui.label(
+                    RichText::new(req.instance_name.as_deref().unwrap_or(&req.origin))
+                        .color(theme::TEXT_BRIGHT),
+                );
+                ui.label(theme::muted(format!("{dir} · {}", req.origin)).size(12.5));
+                ui.horizontal(|ui| {
+                    if ui.button("Одобрить").clicked() {
+                        request(
+                            bridge,
+                            AdminRequest::Peer(PeerOp::Answer(req.id.clone(), true)),
+                        );
+                    }
+                    if ui.button("Отклонить").clicked() {
+                        request(
+                            bridge,
+                            AdminRequest::Peer(PeerOp::Answer(req.id.clone(), false)),
+                        );
+                    }
+                });
+            });
+            ui.add_space(8.0);
+        }
+    }
+    let Some(peers) = more.peers.clone() else {
+        ui.label(theme::muted("Загрузка…"));
+        return;
+    };
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut more.show_revoked, false, "Активные");
+        ui.selectable_value(&mut more.show_revoked, true, "Отозванные");
+    });
+    ui.add_space(6.0);
+    let mut shown: Vec<&Peer> = peers
+        .iter()
+        .filter(|p| (p.status == "revoked") == more.show_revoked)
+        .collect();
+    shown.sort_by_key(|a| a.origin.to_lowercase());
+    if shown.is_empty() {
+        theme::empty_state(
+            ui,
+            if more.show_revoked {
+                "Отозванных пиров нет"
+            } else {
+                "Пока нет ни одного пира"
+            },
+        );
+    }
+    for peer in shown {
+        peer_card(ui, more, peer, bridge);
+    }
 }
 
 #[cfg(test)]

@@ -92,6 +92,33 @@ pub(crate) struct AdminUi {
     storage_note: Option<Note>,
 }
 
+impl AdminUi {
+    /// Правимая копия настроек инстанса, если они загружены.
+    pub(super) fn edit_mut(&mut self) -> Option<&mut InstanceSettings> {
+        self.edit.as_mut()
+    }
+
+    /// Изменения относительно сохранённых настроек (без ключа GIF).
+    pub(super) fn settings_patch_only(&self) -> InstanceSettingsPatch {
+        match (&self.settings, &self.edit) {
+            (Some(saved), Some(edit)) => settings_patch(saved, edit, ""),
+            _ => InstanceSettingsPatch::default(),
+        }
+    }
+
+    /// Возвращает правки к сохранённому виду.
+    pub(super) fn reset_edit(&mut self) {
+        self.edit.clone_from(&self.settings);
+    }
+}
+
+/// Просит настройки инстанса, если ещё не просили.
+pub(super) fn ensure_settings(admin: &mut AdminUi, bridge: &Bridge) {
+    if !admin.settings_asked {
+        admin.settings_asked = bridge.request(BridgeRequest::Admin(AdminRequest::LoadSettings));
+    }
+}
+
 /// Всё, что хранят разделы этого модуля.
 #[derive(Debug, Default)]
 pub(crate) struct ExtraUi {
@@ -137,7 +164,9 @@ impl ExtraUi {
                     Ok(stats) => admin.storage = Some(stats),
                     Err(message) => admin.storage_note = Some(fail(message)),
                 },
-                AdminEvent::Streaming(_)
+                AdminEvent::Peers(_)
+                | AdminEvent::PeerDone(_)
+                | AdminEvent::Streaming(_)
                 | AdminEvent::Telemetry(_)
                 | AdminEvent::TelemetryPreview(_)
                 | AdminEvent::Updates(_) => {}
