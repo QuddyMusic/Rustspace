@@ -320,6 +320,18 @@ pub(crate) enum AdminRequest {
         /// Новый.
         new: Secret,
     },
+    /// Ограничения стриминга.
+    LoadStreaming,
+    /// Сохранить ограничения стриминга.
+    SaveStreaming(bs_api::StreamingPatch),
+    /// Состояние телеметрии.
+    LoadTelemetry,
+    /// Включить или выключить телеметрию.
+    SetTelemetry(bool),
+    /// Что отправила бы телеметрия.
+    LoadTelemetryPreview,
+    /// Состояние обновлений; `true` — проверить заново.
+    LoadUpdates(bool),
     /// Удалить свой аккаунт.
     DeleteAccount {
         /// Пароль.
@@ -340,6 +352,14 @@ pub(crate) enum AdminEvent {
     Users(Result<bs_api::AdminUserPage, String>),
     /// Сводка по хранилищу.
     Storage(Result<bs_api::StorageStats, String>),
+    /// Ограничения стриминга (прочитаны или сохранены).
+    Streaming(Result<bs_api::StreamingLimits, String>),
+    /// Состояние телеметрии.
+    Telemetry(Result<bs_api::TelemetryStatus, String>),
+    /// Предпросмотр телеметрии (JSON текстом).
+    TelemetryPreview(Result<String, String>),
+    /// Состояние обновлений.
+    Updates(Result<bs_api::UpdateStatus, String>),
     /// Итог очистки.
     Cleaned(Result<bs_api::CleanupResult, String>),
     /// Итог простого действия: текст успеха или ошибки.
@@ -1887,6 +1907,28 @@ async fn handle_admin(client: &bs_api::ApiClient, request: AdminRequest) -> Admi
     let done =
         |action: AdminDone, result: Result<String, String>| AdminEvent::Done { action, result };
     match request {
+        AdminRequest::LoadStreaming => {
+            AdminEvent::Streaming(client.streaming_limits().await.map_err(|e| text(&e)))
+        }
+        AdminRequest::SaveStreaming(patch) => {
+            AdminEvent::Streaming(client.update_streaming(&patch).await.map_err(|e| text(&e)))
+        }
+        AdminRequest::LoadTelemetry => {
+            AdminEvent::Telemetry(client.telemetry().await.map_err(|e| text(&e)))
+        }
+        AdminRequest::SetTelemetry(on) => {
+            AdminEvent::Telemetry(client.set_telemetry(on).await.map_err(|e| text(&e)))
+        }
+        AdminRequest::LoadTelemetryPreview => AdminEvent::TelemetryPreview(
+            client
+                .telemetry_preview()
+                .await
+                .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::LoadUpdates(refresh) => {
+            AdminEvent::Updates(client.update_status(refresh).await.map_err(|e| text(&e)))
+        }
         AdminRequest::LoadSettings => {
             AdminEvent::Settings(client.instance_settings().await.map_err(|e| text(&e)))
         }

@@ -211,6 +211,12 @@ pub(crate) enum SettingsSection {
     Users,
     /// Администратор: хранилище.
     Storage,
+    /// Администратор: стриминг.
+    Streaming,
+    /// Администратор: телеметрия.
+    Telemetry,
+    /// Администратор: обновления.
+    Updates,
 }
 
 impl SettingsSection {
@@ -224,7 +230,23 @@ impl SettingsSection {
             Self::Instance => "Инстанс",
             Self::Users => "Пользователи",
             Self::Storage => "Хранилище",
+            Self::Streaming => "Стриминг",
+            Self::Telemetry => "Телеметрия",
+            Self::Updates => "Обновления",
         }
+    }
+
+    /// Раздел только для администратора.
+    const fn is_admin(self) -> bool {
+        matches!(
+            self,
+            Self::Instance
+                | Self::Users
+                | Self::Storage
+                | Self::Streaming
+                | Self::Telemetry
+                | Self::Updates
+        )
     }
 }
 
@@ -257,6 +279,10 @@ pub(crate) struct SettingsState {
     connections: super::connections::ConnectionsUi,
     /// Картинки профиля, пароль и админские разделы.
     extra: super::settings_extra::ExtraUi,
+    /// Инстансы, где этот пользователь администратор: номер и адрес.
+    admin_slots: Vec<(usize, String)>,
+    /// Выбранный из них.
+    admin_slot: Option<usize>,
 }
 
 /// Выбранный статус из текущего присутствия (`offline` выбрать нельзя).
@@ -283,6 +309,8 @@ impl SettingsState {
             scale,
             connections: super::connections::ConnectionsUi::default(),
             extra: super::settings_extra::ExtraUi::default(),
+            admin_slots: Vec::new(),
+            admin_slot: None,
         }
     }
 
@@ -330,6 +358,34 @@ impl SettingsState {
 
 /// Рисует экран настроек вместо основного интерфейса.
 pub(crate) fn show_settings(
+    ui: &mut egui::Ui,
+    state: &mut SettingsState,
+    bridge: &mut Bridge,
+) -> SettingsAction {
+    // Админские разделы относятся к инстансу, где пользователь администратор,
+    // даже если в чате сейчас открыт другой (например, пиринговый).
+    state.admin_slots = bridge
+        .live_origins()
+        .into_iter()
+        .filter(|i| bridge.cache_at(*i).is_some_and(|c| c.me().is_admin))
+        .map(|i| (i, bridge.base_at(i).unwrap_or("домашний").to_owned()))
+        .collect();
+    let previous = bridge.focus_index();
+    if state.section.is_admin() {
+        let target = state
+            .admin_slot
+            .filter(|i| state.admin_slots.iter().any(|(s, _)| s == i))
+            .or_else(|| state.admin_slots.first().map(|(i, _)| *i));
+        if let Some(target) = target {
+            bridge.focus_on(target);
+        }
+    }
+    let action = show_settings_inner(ui, state, bridge);
+    bridge.focus_on(previous);
+    action
+}
+
+fn show_settings_inner(
     ui: &mut egui::Ui,
     state: &mut SettingsState,
     bridge: &mut Bridge,
@@ -385,6 +441,7 @@ pub(crate) fn show_settings(
 }
 
 /// Левая колонка: карточка профиля и список разделов.
+#[allow(clippy::too_many_lines, reason = "навигация одним блоком")]
 fn settings_nav(
     ui: &mut egui::Ui,
     state: &mut SettingsState,
@@ -445,7 +502,33 @@ fn settings_nav(
                 ],
             );
             group(ui, "Приложение", &[SettingsSection::Connections]);
-            if me.is_admin {
+            if !state.admin_slots.is_empty() {
+                if state.admin_slots.len() > 1 {
+                    let current = state.admin_slot.unwrap_or(state.admin_slots[0].0);
+                    let label = state
+                        .admin_slots
+                        .iter()
+                        .find(|(i, _)| *i == current)
+                        .map_or("", |(_, base)| base.as_str())
+                        .to_owned();
+                    ui.horizontal(|ui| {
+                        ui.add_space(8.0);
+                        egui::ComboBox::from_id_salt("admin_slot")
+                            .selected_text(theme::truncate_chars(&label, 26))
+                            .show_ui(ui, |ui| {
+                                for (index, base) in &state.admin_slots {
+                                    if ui.selectable_label(*index == current, base).clicked()
+                                        && *index != current
+                                    {
+                                        state.admin_slot = Some(*index);
+                                        state.extra.admin =
+                                            super::settings_extra::AdminUi::default();
+                                    }
+                                }
+                            });
+                    });
+                    ui.add_space(4.0);
+                }
                 group(
                     ui,
                     "Администрирование",
@@ -453,6 +536,9 @@ fn settings_nav(
                         SettingsSection::Instance,
                         SettingsSection::Users,
                         SettingsSection::Storage,
+                        SettingsSection::Streaming,
+                        SettingsSection::Telemetry,
+                        SettingsSection::Updates,
                     ],
                 );
             }
@@ -539,7 +625,21 @@ fn section_content(
         SettingsSection::Storage if me.is_admin => {
             super::settings_extra::storage_panel(ui, &mut state.extra, bridge);
         }
-        SettingsSection::Instance | SettingsSection::Users | SettingsSection::Storage => {
+        SettingsSection::Streaming if me.is_admin => {
+            super::settings_more::streaming_panel(ui, &mut state.extra.admin.more, bridge);
+        }
+        SettingsSection::Telemetry if me.is_admin => {
+            super::settings_more::telemetry_panel(ui, &mut state.extra.admin.more, bridge);
+        }
+        SettingsSection::Updates if me.is_admin => {
+            super::settings_more::updates_panel(ui, &mut state.extra.admin.more, bridge);
+        }
+        SettingsSection::Instance
+        | SettingsSection::Users
+        | SettingsSection::Storage
+        | SettingsSection::Streaming
+        | SettingsSection::Telemetry
+        | SettingsSection::Updates => {
             page_title(ui, "Недоступно");
             card(ui, |ui| {
                 ui.label("Этот раздел только для администратора инстанса.");

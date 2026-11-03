@@ -20,6 +20,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod admin;
+pub mod admin_more;
 pub mod assets;
 pub mod auth;
 pub mod client;
@@ -36,6 +37,9 @@ pub mod write;
 pub use admin::{
     AdminUser, AdminUserPage, CleanupResult, InstanceSettings, InstanceSettingsPatch,
     PasswordReset, StorageBreakdown, StorageStats,
+};
+pub use admin_more::{
+    CurrentVersion, LatestRelease, StreamingLimits, StreamingPatch, TelemetryStatus, UpdateStatus,
 };
 pub use assets::{AssetPath, GIF_HOSTS, STICKER_PREFIX, fetch_external, resolve_asset};
 pub use auth::AuthResponse;

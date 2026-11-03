@@ -24,12 +24,12 @@ type Picked = (ImageKind, String, Result<Vec<u8>, String>);
 
 /// Итог последнего действия: успех или ошибка.
 #[derive(Debug, Clone)]
-struct Note {
+pub(super) struct Note {
     text: String,
     ok: bool,
 }
 
-fn show_note(ui: &mut egui::Ui, note: Option<&Note>) {
+pub(super) fn show_note(ui: &mut egui::Ui, note: Option<&Note>) {
     if let Some(note) = note {
         let color = if note.ok { theme::GREEN } else { theme::ROSE };
         ui.label(RichText::new(&note.text).color(color).size(13.0));
@@ -69,6 +69,7 @@ impl std::fmt::Debug for ReceiverBox {
 )]
 #[derive(Debug, Default)]
 pub(crate) struct AdminUi {
+    pub(crate) more: super::settings_more::MoreUi,
     settings: Option<InstanceSettings>,
     edit: Option<InstanceSettings>,
     gif_key: String,
@@ -104,6 +105,9 @@ impl ExtraUi {
         for event in bridge.take_admin_events() {
             let admin = &mut self.admin;
             let account = &mut self.account;
+            let Some(event) = admin.more.accept(event) else {
+                continue;
+            };
             match event {
                 AdminEvent::Settings(result) => match result {
                     Ok(settings) => {
@@ -133,6 +137,10 @@ impl ExtraUi {
                     Ok(stats) => admin.storage = Some(stats),
                     Err(message) => admin.storage_note = Some(fail(message)),
                 },
+                AdminEvent::Streaming(_)
+                | AdminEvent::Telemetry(_)
+                | AdminEvent::TelemetryPreview(_)
+                | AdminEvent::Updates(_) => {}
                 AdminEvent::Cleaned(result) => match result {
                     Ok(done) => {
                         admin.cleanup = Some(done);
@@ -191,14 +199,14 @@ impl ExtraUi {
     }
 }
 
-fn ok(text: impl Into<String>) -> Note {
+pub(super) fn ok(text: impl Into<String>) -> Note {
     Note {
         text: text.into(),
         ok: true,
     }
 }
 
-fn fail(text: impl Into<String>) -> Note {
+pub(super) fn fail(text: impl Into<String>) -> Note {
     Note {
         text: text.into(),
         ok: false,
@@ -371,7 +379,7 @@ fn page_title_small(ui: &mut egui::Ui, text: &str) {
     ui.add_space(6.0);
 }
 
-fn setting_row(ui: &mut egui::Ui, title: &str, hint: &str, value: &mut bool) {
+pub(super) fn setting_row(ui: &mut egui::Ui, title: &str, hint: &str, value: &mut bool) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width() - 60.0);
@@ -385,7 +393,13 @@ fn setting_row(ui: &mut egui::Ui, title: &str, hint: &str, value: &mut bool) {
     ui.add_space(10.0);
 }
 
-fn number_row(ui: &mut egui::Ui, title: &str, hint: &str, value: &mut u32, range: (u32, u32)) {
+pub(super) fn number_row(
+    ui: &mut egui::Ui,
+    title: &str,
+    hint: &str,
+    value: &mut u32,
+    range: (u32, u32),
+) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width() - 120.0);
