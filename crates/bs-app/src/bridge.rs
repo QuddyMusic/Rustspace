@@ -205,6 +205,8 @@ pub(crate) enum BridgeRequest {
     Profile(String),
     /// Токен LiveKit для входа в голосовой канал пространства.
     VoiceToken(String),
+    /// Токен LiveKit для DM-звонка.
+    DmVoiceToken(String),
     /// Скачать файл как есть (копирование картинки, сохранение стикера).
     Raw {
         /// Номер запроса.
@@ -452,6 +454,41 @@ pub(crate) enum AdminDone {
     Account,
     /// Картинка профиля.
     Image,
+}
+
+/// Событие DM-звонка от сервера.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CallEvent {
+    /// Нам звонят.
+    Incoming {
+        dm_channel_id: Option<String>,
+        federated_call_id: Option<String>,
+        caller_id: String,
+        caller_name: String,
+        livekit_url: Option<String>,
+        livekit_token: Option<String>,
+    },
+    /// Собеседник принял звонок.
+    Accepted {
+        dm_channel_id: Option<String>,
+        federated_call_id: Option<String>,
+    },
+    /// Собеседник отклонил звонок.
+    Rejected {
+        dm_channel_id: Option<String>,
+        federated_call_id: Option<String>,
+    },
+    /// Звонок завершён.
+    Ended {
+        dm_channel_id: Option<String>,
+        federated_call_id: Option<String>,
+    },
+    /// Звонок не удалось доставить.
+    Undeliverable {
+        dm_channel_id: Option<String>,
+        federated_call_id: String,
+        terminal: bool,
+    },
 }
 
 /// Ответ на запрос токена LiveKit.
@@ -719,6 +756,7 @@ pub(crate) struct Session {
     compose_in: Vec<ComposeEvent>,
     profile_in: Vec<ProfileEvent>,
     voice_in: Vec<VoiceTokenEvent>,
+    call_in: Vec<CallEvent>,
     raw_ready: Vec<(u64, Result<Vec<u8>, String>)>,
     /// Ответы настроек, которые GUI ещё не забрал.
     admin_in: Vec<AdminEvent>,
@@ -795,6 +833,7 @@ impl Session {
             compose_in: Vec::new(),
             profile_in: Vec::new(),
             voice_in: Vec::new(),
+            call_in: Vec::new(),
             raw_ready: Vec::new(),
             admin_in: Vec::new(),
             saved_in: Vec::new(),
@@ -877,6 +916,69 @@ impl Session {
                 self.notice = Some(describe_server_error(code.as_deref(), message));
                 return;
             }
+            ServerEvent::DmCallIncoming {
+                dm_channel_id,
+                federated_call_id,
+                caller_id,
+                caller_name,
+                livekit_url,
+                livekit_token,
+                ..
+            } => {
+                self.call_in.push(CallEvent::Incoming {
+                    dm_channel_id: dm_channel_id.clone(),
+                    federated_call_id: federated_call_id.clone(),
+                    caller_id: caller_id.clone(),
+                    caller_name: caller_name.clone(),
+                    livekit_url: livekit_url.clone(),
+                    livekit_token: livekit_token.clone(),
+                });
+                return;
+            }
+            ServerEvent::DmCallAccepted {
+                dm_channel_id,
+                federated_call_id,
+                ..
+            } => {
+                self.call_in.push(CallEvent::Accepted {
+                    dm_channel_id: dm_channel_id.clone(),
+                    federated_call_id: federated_call_id.clone(),
+                });
+                return;
+            }
+            ServerEvent::DmCallRejected {
+                dm_channel_id,
+                federated_call_id,
+            } => {
+                self.call_in.push(CallEvent::Rejected {
+                    dm_channel_id: dm_channel_id.clone(),
+                    federated_call_id: federated_call_id.clone(),
+                });
+                return;
+            }
+            ServerEvent::DmCallEnded {
+                dm_channel_id,
+                federated_call_id,
+            } => {
+                self.call_in.push(CallEvent::Ended {
+                    dm_channel_id: dm_channel_id.clone(),
+                    federated_call_id: federated_call_id.clone(),
+                });
+                return;
+            }
+            ServerEvent::DmCallUndeliverable {
+                dm_channel_id,
+                federated_call_id,
+                terminal,
+                ..
+            } => {
+                self.call_in.push(CallEvent::Undeliverable {
+                    dm_channel_id: dm_channel_id.clone(),
+                    federated_call_id: federated_call_id.clone(),
+                    terminal: *terminal,
+                });
+                return;
+            }
             // `ready` после реконнекта пересобирает кэш без сообщений:
             // историю надо загрузить заново.
             ServerEvent::Ready(_) => self.history.clear(),
@@ -914,6 +1016,7 @@ impl Session {
         self.compose_in.clear();
         self.profile_in.clear();
         self.voice_in.clear();
+        self.call_in.clear();
         self.admin_in.clear();
         self.explore = None;
         self.explore_loading = false;
@@ -1309,6 +1412,11 @@ impl Session {
     /// Забирает скачанные файлы.
     pub(crate) fn take_raw(&mut self) -> Vec<(u64, Result<Vec<u8>, String>)> {
         std::mem::take(&mut self.raw_ready)
+    }
+
+    /// Забирает накопленные события DM-звонков.
+    pub(crate) fn take_call_events(&mut self) -> Vec<CallEvent> {
+        std::mem::take(&mut self.call_in)
     }
 
     /// Забирает накопленные ответы на запросы токена голоса.
@@ -2315,6 +2423,16 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                 user_id,
                 user,
                 mutuals,
+            })
+        }
+        BridgeRequest::DmVoiceToken(dm_id) => {
+            let result = client
+                .livekit_token_dm(&dm_id)
+                .await
+                .map_err(|err| upload_message(&err));
+            BridgeResponse::VoiceToken(VoiceTokenEvent {
+                channel_id: dm_id,
+                result,
             })
         }
         BridgeRequest::VoiceToken(channel_id) => {

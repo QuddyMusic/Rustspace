@@ -923,6 +923,20 @@ impl Bridge {
         all
     }
 
+    /// События DM-звонков со всех инстансов: номер инстанса и событие.
+    pub(crate) fn take_call_events(&mut self) -> Vec<(usize, crate::bridge::CallEvent)> {
+        self.slots
+            .iter_mut()
+            .enumerate()
+            .flat_map(|(i, slot)| {
+                slot.session
+                    .take_call_events()
+                    .into_iter()
+                    .map(move |event| (i, event))
+            })
+            .collect()
+    }
+
     /// Токены голоса со всех инстансов: номер инстанса и ответ.
     pub(crate) fn take_voice_tokens(&mut self) -> Vec<(usize, crate::bridge::VoiceTokenEvent)> {
         self.slots

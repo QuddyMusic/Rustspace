@@ -613,6 +613,8 @@ enum Nav {
 /// Состояние экрана чата.
 #[derive(Debug, Default)]
 pub(crate) struct ChatScreen {
+    /// Запрос на звонок из шапки: беседа, федеративный id и имя собеседника.
+    pub(crate) pending_call: Option<(String, Option<String>, String)>,
     /// Голосовой звонок.
     pub(crate) voice: crate::voice::VoiceState,
     /// Выбранный канал и его инстанс.
@@ -834,6 +836,7 @@ impl ChatScreen {
     }
 
     /// Рисует экран. Возвращает действие, которое нужно выполнить снаружи.
+    #[allow(clippy::too_many_lines, reason = "раскладка всего экрана")]
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) -> ChatAction {
         let mut action = ChatAction::None;
         if !self.initialized {
@@ -848,7 +851,18 @@ impl ChatScreen {
         }
 
         self.route_actions(bridge, &ctx);
+        for (origin, event) in bridge.take_call_events() {
+            self.voice.handle_call(bridge, origin, event);
+        }
+        if let Some((dm_id, federated, peer)) = self.pending_call.take() {
+            let origin = bridge.focus_index();
+            self.voice
+                .start_dm(bridge, origin, &dm_id, federated, &peer);
+        }
         self.voice.poll(bridge);
+        if let Some(answer) = crate::dmcall::show_incoming(&ctx, &self.voice) {
+            self.voice.answer(bridge, answer);
+        }
         if let Some(text) = self.voice.notice.take() {
             self.toast = Some((text, now + 3.0));
         }
@@ -1456,6 +1470,27 @@ impl ChatScreen {
                     if let Some(topic) = topic.filter(|t| !t.trim().is_empty()) {
                         ui.add_space(6.0);
                         ui.label(theme::muted(theme::truncate_chars(&topic, 80)).size(13.0));
+                    }
+                    if let Some(selected) = self
+                        .selected_channel
+                        .as_ref()
+                        .filter(|s| s.kind == ChannelKind::Dm)
+                        && self.voice.dm.is_none()
+                    {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui
+                                .add(widgets::flat_icon(Icon::Phone, 22.0, theme::TEXT_FAINT))
+                                .on_hover_text("Позвонить")
+                                .clicked()
+                            {
+                                let federated = bridge
+                                    .cache()
+                                    .and_then(|c| c.dm_channel(&selected.channel))
+                                    .and_then(|dm| dm.federated_id.clone());
+                                self.pending_call =
+                                    Some((selected.channel.clone(), federated, title.clone()));
+                            }
+                        });
                     }
                     if has_members {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

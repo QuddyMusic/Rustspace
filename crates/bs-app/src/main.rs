@@ -14,6 +14,7 @@
 mod app;
 mod brand;
 mod bridge;
+mod dmcall;
 mod emoji_data;
 #[cfg(test)]
 mod fake_instance;

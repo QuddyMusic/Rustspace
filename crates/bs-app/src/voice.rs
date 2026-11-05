@@ -49,6 +49,10 @@ pub(crate) struct VoiceCall {
 /// Состояние голоса в приложении.
 #[derive(Debug, Default)]
 pub(crate) struct VoiceState {
+    /// Исходящий или идущий DM-звонок.
+    pub(crate) dm: Option<crate::dmcall::DmCall>,
+    /// Входящий звонок, на который ещё не ответили.
+    pub(crate) incoming: Option<crate::dmcall::IncomingCall>,
     /// Настройки голоса.
     pub(crate) prefs: VoicePrefs,
     /// Медиа-движок (создаётся при первом использовании).
@@ -111,6 +115,7 @@ impl VoiceState {
         space_id: &str,
     ) {
         self.leave(bridge);
+        self.end_dm(bridge);
         self.notice = None;
         let previous = bridge.focus_index();
         bridge.focus_on(origin);
@@ -154,6 +159,10 @@ impl VoiceState {
 
     /// Применяет действие панели.
     pub(crate) fn apply(&mut self, action: DockAction, bridge: &mut Bridge) {
+        if self.dm.is_some() {
+            self.apply_dm(action, bridge);
+            return;
+        }
         match action {
             DockAction::None => {}
             DockAction::Leave => self.leave(bridge),
@@ -185,7 +194,9 @@ impl VoiceState {
 
     /// Разбирает ответы моста и следит, что сервер нас не отключил.
     pub(crate) fn poll(&mut self, bridge: &mut Bridge) {
+        let mut dm_tokens: Vec<_> = Vec::new();
         for (origin, event) in bridge.take_voice_tokens() {
+            dm_tokens.push((origin, event.channel_id.clone(), event.result.clone()));
             if let Some(call) = self.call.as_mut()
                 && call.origin == origin
                 && call.channel_id == event.channel_id
@@ -193,6 +204,7 @@ impl VoiceState {
                 call.token = Some(event.result);
             }
         }
+        self.poll_dm(bridge, &mut dm_tokens);
         let Some(call) = self.call.as_mut() else {
             return;
         };
@@ -342,9 +354,8 @@ fn send_status(bridge: &mut Bridge, call: &VoiceCall) {
 
 /// Панель над профилем: канал, состояние соединения и кнопки.
 pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction {
-    let media = state.status.clone();
     let mut action = DockAction::None;
-    let Some(call) = state.call.as_ref() else {
+    let Some(info) = state.dock_info() else {
         return action;
     };
     egui::Panel::bottom("voice_dock")
@@ -367,14 +378,9 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
-                            let (text, color) = status_line(call, &media);
-                            ui.label(RichText::new(text).size(12.5).color(color));
+                            ui.label(RichText::new(info.status.0).size(12.5).color(info.status.1));
                             ui.label(
-                                theme::muted(theme::truncate_chars(
-                                    &format!("{} / {}", call.channel_name, call.space_name),
-                                    13,
-                                ))
-                                .size(11.5),
+                                theme::muted(theme::truncate_chars(&info.subtitle, 13)).size(11.5),
                             );
                         });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -384,13 +390,13 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                             {
                                 action = DockAction::Leave;
                             }
-                            let headphones = if call.deafened {
+                            let headphones = if info.deafened {
                                 Icon::HeadphonesOff
                             } else {
                                 Icon::Headphones
                             };
                             if widgets::icon_button(ui, headphones, 30.0)
-                                .on_hover_text(if call.deafened {
+                                .on_hover_text(if info.deafened {
                                     "Включить звук"
                                 } else {
                                     "Выключить звук"
@@ -399,9 +405,9 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                             {
                                 action = DockAction::ToggleDeafen;
                             }
-                            let mic = if call.muted { Icon::MicOff } else { Icon::Mic };
+                            let mic = if info.muted { Icon::MicOff } else { Icon::Mic };
                             if widgets::icon_button(ui, mic, 30.0)
-                                .on_hover_text(if call.muted {
+                                .on_hover_text(if info.muted {
                                     "Включить микрофон"
                                 } else {
                                     "Выключить микрофон"
@@ -415,6 +421,45 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                 });
         });
     action
+}
+
+/// Что показать на панели.
+struct DockInfo {
+    status: (&'static str, egui::Color32),
+    subtitle: String,
+    muted: bool,
+    deafened: bool,
+}
+
+impl VoiceState {
+    fn dock_info(&self) -> Option<DockInfo> {
+        if let Some(dm) = &self.dm {
+            let status = match (dm.phase, &dm.token, &self.status) {
+                (crate::dmcall::DmPhase::Ringing, _, _) => ("Вызываем…", theme::AMBER),
+                (_, Some(Err(_)), _) => ("Нет токена LiveKit", theme::ROSE),
+                (_, _, MediaStatus::Failed(_)) => ("Нет звукового соединения", theme::ROSE),
+                (_, _, MediaStatus::Live) => ("Звонок идёт", theme::GREEN),
+                (_, _, MediaStatus::Unavailable) => ("Без звука (нет LiveKit)", theme::TEXT_MUTED),
+                _ => ("Подключение…", theme::AMBER),
+            };
+            return Some(DockInfo {
+                status,
+                subtitle: theme::truncate_chars(&dm.peer, 13),
+                muted: dm.muted,
+                deafened: dm.deafened,
+            });
+        }
+        let call = self.call.as_ref()?;
+        Some(DockInfo {
+            status: status_line(call, &self.status),
+            subtitle: theme::truncate_chars(
+                &format!("{} / {}", call.channel_name, call.space_name),
+                13,
+            ),
+            muted: call.muted,
+            deafened: call.deafened,
+        })
+    }
 }
 
 fn status_line(call: &VoiceCall, media: &MediaStatus) -> (&'static str, egui::Color32) {

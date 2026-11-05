@@ -53,6 +53,8 @@ pub(crate) enum Icon {
     Headphones,
     /// Наушники, перечёркнутые.
     HeadphonesOff,
+    /// Телефонная трубка.
+    Phone,
     /// Трубка: завершить звонок.
     HangUp,
 }
@@ -216,6 +218,20 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
             if icon == Icon::HeadphonesOff {
                 line(vec![p(4.5, 3.5), p(19.5, 20.5)]);
             }
+        }
+        Icon::Phone => {
+            ring(vec![
+                p(4.5, 5.5),
+                p(8.0, 4.0),
+                p(10.0, 8.5),
+                p(8.0, 10.5),
+                p(13.5, 16.0),
+                p(15.5, 14.0),
+                p(20.0, 16.0),
+                p(18.5, 19.5),
+                p(13.0, 20.0),
+                p(4.5, 11.0),
+            ]);
         }
         Icon::HangUp => {
             line(arc(p(12.0, 17.0), 9.0 * unit, 200.0, 340.0, 14));
