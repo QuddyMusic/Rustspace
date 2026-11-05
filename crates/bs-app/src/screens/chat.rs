@@ -50,8 +50,21 @@ pub(crate) struct SidebarChannel {
     pub(crate) name: String,
     /// Есть непрочитанные.
     pub(crate) unread: bool,
-    /// Голосовой канал: в GUI пока недоступен.
+    /// Голосовой канал.
     pub(crate) voice: bool,
+    /// Кто сейчас в голосовом канале.
+    pub(crate) occupants: Vec<Occupant>,
+}
+
+/// Участник голосового канала в сайдбаре.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Occupant {
+    /// Имя.
+    pub(crate) name: String,
+    /// Микрофон выключен.
+    pub(crate) muted: bool,
+    /// Звук выключен.
+    pub(crate) deafened: bool,
 }
 
 /// Группа каналов: категория или каналы без категории (`name == None`).
@@ -120,19 +133,44 @@ pub(crate) struct SidebarDm {
     pub(crate) avatar: Option<String>,
 }
 
+/// Кто сидит в голосовом канале, с флагами микрофона и звука.
+fn occupants(cache: &Cache, names: &HashMap<String, String>, channel_id: &str) -> Vec<Occupant> {
+    cache
+        .users_in_voice(channel_id)
+        .iter()
+        .map(|id| {
+            let state = cache.voice_user_state(id);
+            Occupant {
+                name: names.get(id).cloned().unwrap_or_else(|| id.clone()),
+                muted: state.is_some_and(|s| s.is_muted),
+                deafened: state.is_some_and(|s| s.is_deafened),
+            }
+        })
+        .collect()
+}
+
 /// Собирает сайдбар: пространства, в них категории и каналы в порядке сервера.
 #[must_use]
 pub(crate) fn sidebar_items(cache: &Cache) -> Vec<SidebarSpace> {
+    let names = name_map(cache);
     let mut spaces: Vec<_> = cache.spaces().collect();
     spaces.sort_by(|a, b| a.space.id.cmp(&b.space.id));
     spaces
         .into_iter()
         .map(|space| {
-            let to_row = |channel: &bs_types::Channel| SidebarChannel {
-                id: channel.id.clone(),
-                name: channel.name.clone(),
-                unread: cache.unread_count(&channel.id) > 0,
-                voice: channel.channel_type == bs_types::ChannelType::Voice,
+            let to_row = |channel: &bs_types::Channel| {
+                let voice = channel.channel_type == bs_types::ChannelType::Voice;
+                SidebarChannel {
+                    id: channel.id.clone(),
+                    name: channel.name.clone(),
+                    unread: cache.unread_count(&channel.id) > 0,
+                    voice,
+                    occupants: if voice {
+                        occupants(cache, &names, &channel.id)
+                    } else {
+                        Vec::new()
+                    },
+                }
             };
             let mut all: Vec<&bs_types::Channel> = cache.channels(&space.space.id).collect();
             all.sort_by(|a, b| a.position.cmp(&b.position).then_with(|| a.id.cmp(&b.id)));
@@ -549,11 +587,22 @@ enum Nav {
     Settings,
     /// Искать людей по строке (вкладка «Добавить»).
     SearchPeople(String),
+    /// Войти в голосовой канал.
+    VoiceJoin {
+        origin: usize,
+        channel_id: String,
+        channel: String,
+        space: String,
+    },
+    /// Действие панели голоса.
+    Voice(crate::voice::DockAction),
 }
 
 /// Состояние экрана чата.
 #[derive(Debug, Default)]
 pub(crate) struct ChatScreen {
+    /// Голосовой звонок.
+    pub(crate) voice: crate::voice::VoiceState,
     /// Выбранный канал и его инстанс.
     pub(crate) selected_channel: Option<SelectedChannel>,
     pub(crate) draft: String,
@@ -742,6 +791,25 @@ impl ChatScreen {
                     self.settings = Some(SettingsState::from_user(cache.me(), ctx.zoom_factor()));
                 }
             }
+            Nav::VoiceJoin {
+                origin,
+                channel_id,
+                channel,
+                space,
+            } => {
+                let same = self
+                    .voice
+                    .call
+                    .as_ref()
+                    .is_some_and(|c| c.origin == origin && c.channel_id == channel_id);
+                if same {
+                    self.voice.leave(bridge);
+                } else {
+                    self.voice
+                        .join(bridge, origin, &channel_id, &channel, &space);
+                }
+            }
+            Nav::Voice(action) => self.voice.apply(action, bridge),
             Nav::SearchPeople(query) => {
                 self.active_space = None;
                 self.view = View::Friends;
@@ -766,6 +834,10 @@ impl ChatScreen {
         }
 
         self.route_actions(bridge, &ctx);
+        self.voice.poll(bridge);
+        if let Some(text) = self.voice.notice.take() {
+            self.toast = Some((text, now + 3.0));
+        }
         let (items, dms) = merged_sidebar(bridge);
 
         if let Some(opened) = bridge.take_opened_space() {
@@ -1010,6 +1082,10 @@ impl ChatScreen {
                     });
 
                 Self::show_user_bar(ui, bridge, nav);
+                let dock = crate::voice::show_dock(ui, &self.voice);
+                if dock != crate::voice::DockAction::None {
+                    *nav = Some(Nav::Voice(dock));
+                }
 
                 let filter = self.sidebar_filter.trim().to_lowercase();
                 egui::ScrollArea::vertical()
@@ -1060,8 +1136,27 @@ impl ChatScreen {
             }
             for channel in visible {
                 if channel.voice {
-                    theme::disabled_row(ui, &channel.name)
-                        .on_hover_text("Голосовые каналы в этом клиенте пока недоступны");
+                    let active = self.voice.call.as_ref().is_some_and(|c| {
+                        (c.origin, c.channel_id.as_str()) == (space.origin, channel.id.as_str())
+                    });
+                    if theme::voice_row(ui, &channel.name, active)
+                        .on_hover_text(if active {
+                            "Нажмите, чтобы отключиться"
+                        } else {
+                            "Нажмите, чтобы подключиться"
+                        })
+                        .clicked()
+                    {
+                        *nav = Some(Nav::VoiceJoin {
+                            origin: space.origin,
+                            channel_id: channel.id.clone(),
+                            channel: channel.name.clone(),
+                            space: space.name.clone(),
+                        });
+                    }
+                    for occupant in &channel.occupants {
+                        theme::occupant_row(ui, &occupant.name, occupant.muted, occupant.deafened);
+                    }
                     continue;
                 }
                 let selected = self.view == View::Channel

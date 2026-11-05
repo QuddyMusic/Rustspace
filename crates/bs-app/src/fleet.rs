@@ -923,6 +923,20 @@ impl Bridge {
         all
     }
 
+    /// Токены голоса со всех инстансов: номер инстанса и ответ.
+    pub(crate) fn take_voice_tokens(&mut self) -> Vec<(usize, crate::bridge::VoiceTokenEvent)> {
+        self.slots
+            .iter_mut()
+            .enumerate()
+            .flat_map(|(i, slot)| {
+                slot.session
+                    .take_voice_tokens()
+                    .into_iter()
+                    .map(move |event| (i, event))
+            })
+            .collect()
+    }
+
     /// Скачанные файлы со всех инстансов.
     pub(crate) fn take_raw(&mut self) -> Vec<(u64, Result<Vec<u8>, String>)> {
         self.slots

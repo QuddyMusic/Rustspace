@@ -203,6 +203,8 @@ pub(crate) enum BridgeRequest {
     Stickers,
     /// Профиль другого пользователя и общие связи.
     Profile(String),
+    /// Токен LiveKit для входа в голосовой канал пространства.
+    VoiceToken(String),
     /// Скачать файл как есть (копирование картинки, сохранение стикера).
     Raw {
         /// Номер запроса.
@@ -452,6 +454,15 @@ pub(crate) enum AdminDone {
     Image,
 }
 
+/// Ответ на запрос токена LiveKit.
+#[derive(Debug)]
+pub(crate) struct VoiceTokenEvent {
+    /// Канал, для которого запрошен токен.
+    pub(crate) channel_id: String,
+    /// Токен и адрес сервера или текст ошибки.
+    pub(crate) result: Result<bs_types::LiveKitTokenResponse, String>,
+}
+
 /// Ответ на запрос профиля.
 #[derive(Debug)]
 pub(crate) struct ProfileEvent {
@@ -535,6 +546,8 @@ pub(crate) enum BridgeResponse {
     Admin(AdminEvent),
     /// Профиль другого пользователя.
     UserProfile(ProfileEvent),
+    /// Токен голосового канала.
+    VoiceToken(VoiceTokenEvent),
     /// Скачанный файл.
     Raw {
         /// Номер запроса.
@@ -705,6 +718,7 @@ pub(crate) struct Session {
     /// События композера, которые GUI ещё не забрал.
     compose_in: Vec<ComposeEvent>,
     profile_in: Vec<ProfileEvent>,
+    voice_in: Vec<VoiceTokenEvent>,
     raw_ready: Vec<(u64, Result<Vec<u8>, String>)>,
     /// Ответы настроек, которые GUI ещё не забрал.
     admin_in: Vec<AdminEvent>,
@@ -775,6 +789,7 @@ impl Session {
             registry_in: None,
             compose_in: Vec::new(),
             profile_in: Vec::new(),
+            voice_in: Vec::new(),
             raw_ready: Vec::new(),
             admin_in: Vec::new(),
             saved_in: Vec::new(),
@@ -893,6 +908,7 @@ impl Session {
         self.images_ready.clear();
         self.compose_in.clear();
         self.profile_in.clear();
+        self.voice_in.clear();
         self.admin_in.clear();
         self.explore = None;
         self.explore_loading = false;
@@ -1290,6 +1306,11 @@ impl Session {
         std::mem::take(&mut self.raw_ready)
     }
 
+    /// Забирает накопленные ответы на запросы токена голоса.
+    pub(crate) fn take_voice_tokens(&mut self) -> Vec<VoiceTokenEvent> {
+        std::mem::take(&mut self.voice_in)
+    }
+
     /// Забирает накопленные ответы профилей.
     pub(crate) fn take_profile_events(&mut self) -> Vec<ProfileEvent> {
         std::mem::take(&mut self.profile_in)
@@ -1549,6 +1570,7 @@ impl Session {
             BridgeResponse::Compose(event) => self.compose_in.push(event),
             BridgeResponse::Admin(event) => self.admin_in.push(event),
             BridgeResponse::UserProfile(event) => self.profile_in.push(event),
+            BridgeResponse::VoiceToken(event) => self.voice_in.push(event),
             BridgeResponse::Raw { tag, result } => self.raw_ready.push((tag, result)),
             BridgeResponse::JoinRequested => {
                 self.info = Some("Заявка отправлена".to_owned());
@@ -2289,6 +2311,13 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                 user,
                 mutuals,
             })
+        }
+        BridgeRequest::VoiceToken(channel_id) => {
+            let result = client
+                .livekit_token_channel(&channel_id)
+                .await
+                .map_err(|err| upload_message(&err));
+            BridgeResponse::VoiceToken(VoiceTokenEvent { channel_id, result })
         }
         BridgeRequest::Stickers => BridgeResponse::Compose(ComposeEvent::Stickers(
             client.stickers().await.map_err(|err| upload_message(&err)),

@@ -474,25 +474,65 @@ pub(crate) fn list_row(
     list_row_with(ui, label, selected, unread, |_| {})
 }
 
-/// Недоступная строка (например, голосовой канал): приглушена, без отклика.
-pub(crate) fn disabled_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
+/// Строка голосового канала; `active` — мы сейчас в нём.
+pub(crate) fn voice_row(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), Sense::hover());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(
+            rect.shrink2(egui::vec2(8.0, 1.0)),
+            CornerRadius::same(8),
+            BG_HOVER,
+        );
+    }
+    let color = if active { GREEN } else { CHANNEL_TEXT };
     crate::icons::paint(
         ui.painter(),
         egui::pos2(rect.left() + 28.0, rect.center().y),
         16.0,
         crate::icons::Icon::Speaker,
-        TEXT_FAINT,
+        color,
     );
     ui.painter().text(
         egui::pos2(rect.left() + 46.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        label,
+        truncate_chars(label, 22),
         FontId::proportional(15.0),
-        TEXT_FAINT,
+        color,
     );
     response
+}
+
+/// Участник голосового канала под его строкой.
+pub(crate) fn occupant_row(ui: &mut egui::Ui, name: &str, muted: bool, deafened: bool) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), Sense::hover());
+    ui.painter().text(
+        egui::pos2(rect.left() + 48.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        truncate_chars(name, 20),
+        FontId::proportional(13.5),
+        TEXT_MUTED,
+    );
+    let mut x = rect.right() - 22.0;
+    if deafened {
+        crate::icons::paint(
+            ui.painter(),
+            egui::pos2(x, rect.center().y),
+            14.0,
+            crate::icons::Icon::HeadphonesOff,
+            ROSE,
+        );
+        x -= 18.0;
+    }
+    if muted || deafened {
+        crate::icons::paint(
+            ui.painter(),
+            egui::pos2(x, rect.center().y),
+            14.0,
+            crate::icons::Icon::MicOff,
+            ROSE,
+        );
+    }
 }
 
 /// Заголовок категории каналов («ТЕКСТОВЫЕ КАНАЛЫ»).

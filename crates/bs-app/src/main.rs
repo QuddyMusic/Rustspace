@@ -27,6 +27,7 @@ mod registry;
 mod screens;
 mod social;
 mod theme;
+mod voice;
 mod widgets;
 
 fn main() -> eframe::Result {

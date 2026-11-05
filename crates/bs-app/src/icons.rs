@@ -45,6 +45,16 @@ pub(crate) enum Icon {
     Sticker,
     /// Бумажный самолётик.
     Send,
+    /// Микрофон.
+    Mic,
+    /// Микрофон, перечёркнутый.
+    MicOff,
+    /// Наушники.
+    Headphones,
+    /// Наушники, перечёркнутые.
+    HeadphonesOff,
+    /// Трубка: завершить звонок.
+    HangUp,
 }
 
 /// Точки дуги окружности: углы в градусах, 0° — вправо, по часовой на экране.
@@ -180,6 +190,37 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
         Icon::Send => {
             ring(vec![p(3.5, 4.5), p(21.0, 12.0), p(3.5, 19.5), p(6.5, 12.0)]);
             line(vec![p(6.5, 12.0), p(13.0, 12.0)]);
+        }
+        Icon::Mic | Icon::MicOff => {
+            let mut body = arc(p(12.0, 8.0), 3.5 * unit, 180.0, 360.0, 8);
+            body.extend(arc(p(12.0, 12.0), 3.5 * unit, 0.0, 180.0, 8));
+            ring(body);
+            line(arc(p(12.0, 11.0), 6.5 * unit, 0.0, 180.0, 12));
+            line(vec![p(12.0, 17.5), p(12.0, 21.0)]);
+            line(vec![p(8.5, 21.0), p(15.5, 21.0)]);
+            if icon == Icon::MicOff {
+                line(vec![p(4.5, 3.5), p(19.5, 20.5)]);
+            }
+        }
+        Icon::Headphones | Icon::HeadphonesOff => {
+            line(arc(p(12.0, 13.0), 8.0 * unit, 180.0, 360.0, 14));
+            line(vec![p(4.0, 13.0), p(4.0, 18.0)]);
+            line(vec![p(20.0, 13.0), p(20.0, 18.0)]);
+            ring(vec![p(4.0, 14.0), p(7.5, 14.0), p(7.5, 19.5), p(4.0, 19.5)]);
+            ring(vec![
+                p(16.5, 14.0),
+                p(20.0, 14.0),
+                p(20.0, 19.5),
+                p(16.5, 19.5),
+            ]);
+            if icon == Icon::HeadphonesOff {
+                line(vec![p(4.5, 3.5), p(19.5, 20.5)]);
+            }
+        }
+        Icon::HangUp => {
+            line(arc(p(12.0, 17.0), 9.0 * unit, 200.0, 340.0, 14));
+            line(vec![p(3.5, 14.5), p(3.5, 17.5)]);
+            line(vec![p(20.5, 14.5), p(20.5, 17.5)]);
         }
     }
 }
