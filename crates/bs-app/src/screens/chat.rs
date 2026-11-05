@@ -59,6 +59,8 @@ pub(crate) struct SidebarChannel {
 /// Участник голосового канала в сайдбаре.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Occupant {
+    /// Это мы сами.
+    pub(crate) me: bool,
     /// Идентификатор пользователя.
     pub(crate) id: String,
     /// Имя.
@@ -147,6 +149,7 @@ fn occupants(cache: &Cache, names: &HashMap<String, String>, channel_id: &str) -
                 name: names.get(id).cloned().unwrap_or_else(|| id.clone()),
                 muted: state.is_some_and(|s| s.is_muted),
                 deafened: state.is_some_and(|s| s.is_deafened),
+                me: *id == cache.me().id,
             }
         })
         .collect()
@@ -596,9 +599,15 @@ enum Nav {
         channel_id: String,
         channel: String,
         space: String,
+        space_id: String,
     },
     /// Действие панели голоса.
     Voice(crate::voice::DockAction),
+    /// Модерация голоса.
+    VoiceMod {
+        origin: usize,
+        op: crate::voice::ModOp,
+    },
 }
 
 /// Состояние экрана чата.
@@ -799,6 +808,7 @@ impl ChatScreen {
                 channel_id,
                 channel,
                 space,
+                space_id,
             } => {
                 let same = self
                     .voice
@@ -809,10 +819,11 @@ impl ChatScreen {
                     self.voice.leave(bridge);
                 } else {
                     self.voice
-                        .join(bridge, origin, &channel_id, &channel, &space);
+                        .join(bridge, origin, &channel_id, &channel, &space, &space_id);
                 }
             }
             Nav::Voice(action) => self.voice.apply(action, bridge),
+            Nav::VoiceMod { origin, op } => crate::voice::moderate(bridge, origin, op),
             Nav::SearchPeople(query) => {
                 self.active_space = None;
                 self.view = View::Friends;
@@ -1155,16 +1166,37 @@ impl ChatScreen {
                             channel_id: channel.id.clone(),
                             channel: channel.name.clone(),
                             space: space.name.clone(),
+                            space_id: space.id.clone(),
                         });
                     }
                     for occupant in &channel.occupants {
-                        theme::occupant_row(
+                        let row = theme::occupant_row(
                             ui,
                             &occupant.name,
                             occupant.muted,
                             occupant.deafened,
                             self.voice.speaking.contains(&occupant.id),
                         );
+                        if !occupant.me {
+                            let others: Vec<(String, String)> = space
+                                .groups
+                                .iter()
+                                .flat_map(|g| g.channels.iter())
+                                .filter(|c| c.voice && c.id != channel.id)
+                                .map(|c| (c.id.clone(), c.name.clone()))
+                                .collect();
+                            row.context_menu(|ui| {
+                                if let Some(op) =
+                                    crate::voice::moderation_menu(ui, &occupant.id, &others)
+                                {
+                                    *nav = Some(Nav::VoiceMod {
+                                        origin: space.origin,
+                                        op,
+                                    });
+                                    ui.close();
+                                }
+                            });
+                        }
                     }
                     continue;
                 }

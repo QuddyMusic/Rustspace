@@ -26,6 +26,12 @@ pub(crate) struct VoiceCall {
     pub(crate) channel_name: String,
     /// Название пространства.
     pub(crate) space_name: String,
+    /// Идентификатор пространства.
+    pub(crate) space_id: String,
+    /// Модератор заглушил нас: микрофон не включить.
+    pub(crate) forced_mute: bool,
+    /// Модератор отключил нам звук.
+    pub(crate) forced_deafen: bool,
     /// Микрофон выключен.
     pub(crate) muted: bool,
     /// Звук выключен (наушники).
@@ -102,6 +108,7 @@ impl VoiceState {
         channel_id: &str,
         channel_name: &str,
         space_name: &str,
+        space_id: &str,
     ) {
         self.leave(bridge);
         self.notice = None;
@@ -117,6 +124,9 @@ impl VoiceState {
             channel_id: channel_id.to_owned(),
             channel_name: channel_name.to_owned(),
             space_name: space_name.to_owned(),
+            space_id: space_id.to_owned(),
+            forced_mute: false,
+            forced_deafen: false,
             muted: false,
             deafened: false,
             token: None,
@@ -148,7 +158,10 @@ impl VoiceState {
             DockAction::None => {}
             DockAction::Leave => self.leave(bridge),
             DockAction::ToggleMute => {
-                if let Some(call) = self.call.as_mut() {
+                if let Some(call) = self.call.as_mut()
+                    && !call.forced_mute
+                    && !call.forced_deafen
+                {
                     (call.muted, call.deafened) = after_mute_toggle(call.muted, call.deafened);
                     send_status(bridge, call);
                     if let Some(media) = self.media.as_ref() {
@@ -157,7 +170,9 @@ impl VoiceState {
                 }
             }
             DockAction::ToggleDeafen => {
-                if let Some(call) = self.call.as_mut() {
+                if let Some(call) = self.call.as_mut()
+                    && !call.forced_deafen
+                {
                     (call.muted, call.deafened) = after_deafen_toggle(call.deafened);
                     send_status(bridge, call);
                     if let Some(media) = self.media.as_ref() {
@@ -191,11 +206,68 @@ impl VoiceState {
         if present {
             call.confirmed = true;
         } else if call.confirmed {
-            self.leave_quietly();
-            self.notice = Some("Вы отключены от голосового канала".to_owned());
-            return;
+            let me = cache.me().id.clone();
+            let moved = cache
+                .all_channels()
+                .find(|c| cache.users_in_voice(&c.id).contains(&me))
+                .map(|c| (c.id.clone(), c.name.clone()));
+            if let Some((id, name)) = moved {
+                self.follow_move(bridge, &id, &name);
+            } else {
+                self.leave_quietly();
+                self.notice = Some("Вы отключены от голосового канала".to_owned());
+                return;
+            }
         }
+        self.sync_forced(bridge);
         self.drive_media(bridge);
+    }
+
+    /// Нас переместили в другой голосовой канал: переподключаем медиа.
+    fn follow_move(&mut self, bridge: &mut Bridge, channel_id: &str, name: &str) {
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
+        channel_id.clone_into(&mut call.channel_id);
+        name.clone_into(&mut call.channel_name);
+        call.token = None;
+        call.media_started = false;
+        call.flags_synced = false;
+        let origin = call.origin;
+        if let Some(media) = self.media.as_mut() {
+            media.disconnect();
+        }
+        let previous = bridge.focus_index();
+        bridge.focus_on(origin);
+        bridge.request(BridgeRequest::VoiceToken(channel_id.to_owned()));
+        bridge.focus_on(previous);
+        self.notice = Some(format!("Вас переместили в «{name}»"));
+    }
+
+    /// Применяет принудительные заглушки от модератора.
+    fn sync_forced(&mut self, bridge: &mut Bridge) {
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
+        let Some(flags) = bridge
+            .cache_at(call.origin)
+            .and_then(|cache| cache.space_voice_state(&call.space_id))
+            .copied()
+        else {
+            call.forced_mute = false;
+            call.forced_deafen = false;
+            return;
+        };
+        call.forced_mute = flags.space_muted || flags.permission_muted == Some(true);
+        call.forced_deafen = flags.space_deafened;
+        let want_muted = call.muted || call.forced_mute || call.forced_deafen;
+        let want_deafened = call.deafened || call.forced_deafen;
+        if (want_muted, want_deafened) != (call.muted, call.deafened) {
+            call.muted = want_muted;
+            call.deafened = want_deafened;
+            send_status(bridge, call);
+            call.flags_synced = false;
+        }
     }
 
     /// Закрывает звонок без сообщения серверу (он сам нас отключил).
@@ -347,12 +419,89 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
 
 fn status_line(call: &VoiceCall, media: &MediaStatus) -> (&'static str, egui::Color32) {
     match (&call.token, media, call.confirmed) {
+        _ if call.forced_deafen => ("Звук отключён модератором", theme::AMBER),
+        _ if call.forced_mute => ("Вас заглушил модератор", theme::AMBER),
         (Some(Err(_)), _, _) => ("Нет токена LiveKit", theme::ROSE),
         (_, MediaStatus::Failed(_), _) => ("Нет звукового соединения", theme::ROSE),
         (_, MediaStatus::Live, _) => ("Голос подключён", theme::GREEN),
         (_, MediaStatus::Unavailable, true) => ("Без звука (нет LiveKit)", theme::TEXT_MUTED),
         _ => ("Подключение…", theme::AMBER),
     }
+}
+
+/// Действие модератора над участником голоса.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ModOp {
+    /// Заглушить или снять заглушку на уровне пространства.
+    Mute(String, bool),
+    /// Отключить или вернуть звук на уровне пространства.
+    Deafen(String, bool),
+    /// Переместить в другой голосовой канал.
+    Move(String, String),
+    /// Отключить от голоса.
+    Disconnect(String),
+}
+
+/// Меню модерации участника; сервер сам проверяет права.
+pub(crate) fn moderation_menu(
+    ui: &mut egui::Ui,
+    user_id: &str,
+    other_channels: &[(String, String)],
+) -> Option<ModOp> {
+    let uid = user_id.to_owned();
+    let mut op = ui
+        .button("Заглушить микрофон (сервер)")
+        .clicked()
+        .then(|| ModOp::Mute(uid.clone(), true));
+    let mut pick = |clicked: bool, value: ModOp| {
+        if clicked {
+            op = Some(value);
+        }
+    };
+    pick(
+        ui.button("Снять заглушку микрофона").clicked(),
+        ModOp::Mute(uid.clone(), false),
+    );
+    pick(
+        ui.button("Отключить звук (сервер)").clicked(),
+        ModOp::Deafen(uid.clone(), true),
+    );
+    pick(
+        ui.button("Вернуть звук").clicked(),
+        ModOp::Deafen(uid.clone(), false),
+    );
+    if !other_channels.is_empty() {
+        ui.menu_button("Переместить в…", |ui| {
+            for (id, name) in other_channels {
+                pick(
+                    ui.button(name).clicked(),
+                    ModOp::Move(uid.clone(), id.clone()),
+                );
+            }
+        });
+    }
+    pick(
+        ui.button("Отключить от канала").clicked(),
+        ModOp::Disconnect(uid),
+    );
+    op
+}
+
+/// Отправляет действие модерации на нужный инстанс.
+pub(crate) fn moderate(bridge: &mut Bridge, origin: usize, op: ModOp) {
+    let event = match op {
+        ModOp::Mute(user_id, muted) => ClientEvent::VoiceSpaceMute { user_id, muted },
+        ModOp::Deafen(user_id, deafened) => ClientEvent::VoiceSpaceDeafen { user_id, deafened },
+        ModOp::Move(user_id, target_channel_id) => ClientEvent::VoiceMove {
+            user_id,
+            target_channel_id,
+        },
+        ModOp::Disconnect(user_id) => ClientEvent::VoiceDisconnect { user_id },
+    };
+    let previous = bridge.focus_index();
+    bridge.focus_on(origin);
+    bridge.send(event);
+    bridge.focus_on(previous);
 }
 
 #[cfg(test)]
