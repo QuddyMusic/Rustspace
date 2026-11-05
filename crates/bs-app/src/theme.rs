@@ -504,15 +504,25 @@ pub(crate) fn voice_row(ui: &mut egui::Ui, label: &str, active: bool) -> egui::R
 }
 
 /// Участник голосового канала под его строкой.
-pub(crate) fn occupant_row(ui: &mut egui::Ui, name: &str, muted: bool, deafened: bool) {
+pub(crate) fn occupant_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    muted: bool,
+    deafened: bool,
+    speaking: bool,
+) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), Sense::hover());
     ui.painter().text(
         egui::pos2(rect.left() + 48.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         truncate_chars(name, 20),
         FontId::proportional(13.5),
-        TEXT_MUTED,
+        if speaking { GREEN } else { TEXT_MUTED },
     );
+    if speaking {
+        ui.painter()
+            .circle_filled(egui::pos2(rect.left() + 38.0, rect.center().y), 3.0, GREEN);
+    }
     let mut x = rect.right() - 22.0;
     if deafened {
         crate::icons::paint(

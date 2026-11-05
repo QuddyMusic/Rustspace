@@ -11,9 +11,11 @@ use crate::bridge::BridgeRequest;
 use crate::fleet::Bridge;
 use crate::icons::Icon;
 use crate::theme;
+use crate::voice_media::{ConnectRequest, MediaEngine, MediaStatus, Speaking, VoicePrefs};
 use crate::widgets;
 
 /// Текущий голосовой звонок.
+#[allow(clippy::struct_excessive_bools, reason = "независимые флаги состояния")]
 #[derive(Debug)]
 pub(crate) struct VoiceCall {
     /// Инстанс, на котором идёт звонок.
@@ -32,11 +34,23 @@ pub(crate) struct VoiceCall {
     pub(crate) token: Option<Result<LiveKitTokenResponse, String>>,
     /// Сервер уже подтвердил наше присутствие в канале.
     pub(crate) confirmed: bool,
+    /// Медиа-соединение запущено.
+    pub(crate) media_started: bool,
+    /// Флаги микрофона и звука переданы живой сессии.
+    pub(crate) flags_synced: bool,
 }
 
 /// Состояние голоса в приложении.
 #[derive(Debug, Default)]
 pub(crate) struct VoiceState {
+    /// Настройки голоса.
+    pub(crate) prefs: VoicePrefs,
+    /// Медиа-движок (создаётся при первом использовании).
+    pub(crate) media: Option<MediaEngine>,
+    /// Кто сейчас говорит (id пользователей).
+    pub(crate) speaking: Speaking,
+    /// Состояние медиа-соединения.
+    pub(crate) status: MediaStatus,
     /// Активный звонок.
     pub(crate) call: Option<VoiceCall>,
     /// Сообщение для пользователя (например, «вас отключили»).
@@ -74,6 +88,12 @@ pub(crate) const fn after_mute_toggle(muted: bool, deafened: bool) -> (bool, boo
 }
 
 impl VoiceState {
+    /// Медиа-движок; создаётся на runtime моста.
+    pub(crate) fn media(&mut self, bridge: &Bridge) -> &mut MediaEngine {
+        self.media
+            .get_or_insert_with(|| MediaEngine::new(bridge.runtime()))
+    }
+
     /// Входит в голосовой канал; предыдущий звонок завершается.
     pub(crate) fn join(
         &mut self,
@@ -101,6 +121,8 @@ impl VoiceState {
             deafened: false,
             token: None,
             confirmed: false,
+            media_started: false,
+            flags_synced: false,
         });
     }
 
@@ -109,6 +131,11 @@ impl VoiceState {
         let Some(call) = self.call.take() else {
             return;
         };
+        if let Some(media) = self.media.as_mut() {
+            media.disconnect();
+        }
+        self.speaking.clear();
+        self.status = MediaStatus::Idle;
         let previous = bridge.focus_index();
         bridge.focus_on(call.origin);
         bridge.send(ClientEvent::VoiceLeave);
@@ -124,12 +151,18 @@ impl VoiceState {
                 if let Some(call) = self.call.as_mut() {
                     (call.muted, call.deafened) = after_mute_toggle(call.muted, call.deafened);
                     send_status(bridge, call);
+                    if let Some(media) = self.media.as_ref() {
+                        media.set_flags(call.muted, call.deafened);
+                    }
                 }
             }
             DockAction::ToggleDeafen => {
                 if let Some(call) = self.call.as_mut() {
                     (call.muted, call.deafened) = after_deafen_toggle(call.deafened);
                     send_status(bridge, call);
+                    if let Some(media) = self.media.as_ref() {
+                        media.set_flags(call.muted, call.deafened);
+                    }
                 }
             }
         }
@@ -158,8 +191,67 @@ impl VoiceState {
         if present {
             call.confirmed = true;
         } else if call.confirmed {
-            self.call = None;
+            self.leave_quietly();
             self.notice = Some("Вы отключены от голосового канала".to_owned());
+            return;
+        }
+        self.drive_media(bridge);
+    }
+
+    /// Закрывает звонок без сообщения серверу (он сам нас отключил).
+    fn leave_quietly(&mut self) {
+        self.call = None;
+        if let Some(media) = self.media.as_mut() {
+            media.disconnect();
+        }
+        self.speaking.clear();
+        self.status = MediaStatus::Idle;
+    }
+
+    /// Запускает медиа, когда есть токен, и подтягивает его состояние.
+    fn drive_media(&mut self, bridge: &Bridge) {
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
+        let start = if call.media_started {
+            None
+        } else {
+            match (&call.token, bridge.cache_at(call.origin)) {
+                (Some(Ok(token)), Some(cache)) => {
+                    let me = cache.me();
+                    Some(ConnectRequest {
+                        url: token.url.clone(),
+                        token: token.token.clone(),
+                        identity: me.id.clone(),
+                        name: me
+                            .display_name
+                            .clone()
+                            .unwrap_or_else(|| me.username.clone()),
+                        muted: call.muted,
+                        deafened: call.deafened,
+                    })
+                }
+                _ => None,
+            }
+        };
+        let (muted, deafened) = (call.muted, call.deafened);
+        let was_synced = call.flags_synced;
+        if let Some(request) = start {
+            call.media_started = true;
+            let prefs = self.prefs.clone();
+            self.media(bridge).connect(request, &prefs);
+        }
+        let Some(media) = self.media.as_ref() else {
+            return;
+        };
+        self.status = media.status();
+        self.speaking = media.speaking();
+        if self.status == MediaStatus::Live
+            && !was_synced
+            && let Some(call) = self.call.as_mut()
+        {
+            call.flags_synced = true;
+            media.set_flags(muted, deafened);
         }
     }
 }
@@ -178,6 +270,7 @@ fn send_status(bridge: &mut Bridge, call: &VoiceCall) {
 
 /// Панель над профилем: канал, состояние соединения и кнопки.
 pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction {
+    let media = state.status.clone();
     let mut action = DockAction::None;
     let Some(call) = state.call.as_ref() else {
         return action;
@@ -202,7 +295,7 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
-                            let (text, color) = status_line(call);
+                            let (text, color) = status_line(call, &media);
                             ui.label(RichText::new(text).size(12.5).color(color));
                             ui.label(
                                 theme::muted(theme::truncate_chars(
@@ -252,10 +345,12 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
     action
 }
 
-fn status_line(call: &VoiceCall) -> (&'static str, egui::Color32) {
-    match (&call.token, call.confirmed) {
-        (Some(Err(_)), _) => ("Нет звукового соединения", theme::ROSE),
-        (Some(Ok(_)), true) => ("Голос подключён", theme::GREEN),
+fn status_line(call: &VoiceCall, media: &MediaStatus) -> (&'static str, egui::Color32) {
+    match (&call.token, media, call.confirmed) {
+        (Some(Err(_)), _, _) => ("Нет токена LiveKit", theme::ROSE),
+        (_, MediaStatus::Failed(_), _) => ("Нет звукового соединения", theme::ROSE),
+        (_, MediaStatus::Live, _) => ("Голос подключён", theme::GREEN),
+        (_, MediaStatus::Unavailable, true) => ("Без звука (нет LiveKit)", theme::TEXT_MUTED),
         _ => ("Подключение…", theme::AMBER),
     }
 }

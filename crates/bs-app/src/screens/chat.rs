@@ -59,6 +59,8 @@ pub(crate) struct SidebarChannel {
 /// Участник голосового канала в сайдбаре.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Occupant {
+    /// Идентификатор пользователя.
+    pub(crate) id: String,
     /// Имя.
     pub(crate) name: String,
     /// Микрофон выключен.
@@ -141,6 +143,7 @@ fn occupants(cache: &Cache, names: &HashMap<String, String>, channel_id: &str) -
         .map(|id| {
             let state = cache.voice_user_state(id);
             Occupant {
+                id: id.clone(),
                 name: names.get(id).cloned().unwrap_or_else(|| id.clone()),
                 muted: state.is_some_and(|s| s.is_muted),
                 deafened: state.is_some_and(|s| s.is_deafened),
@@ -847,7 +850,7 @@ impl ChatScreen {
         }
 
         if let Some(state) = self.settings.as_mut() {
-            match dialogs::show_settings(ui, state, bridge) {
+            match dialogs::show_settings(ui, state, bridge, &mut self.voice) {
                 SettingsAction::None => {}
                 SettingsAction::Close => self.settings = None,
                 SettingsAction::Logout => {
@@ -1155,7 +1158,13 @@ impl ChatScreen {
                         });
                     }
                     for occupant in &channel.occupants {
-                        theme::occupant_row(ui, &occupant.name, occupant.muted, occupant.deafened);
+                        theme::occupant_row(
+                            ui,
+                            &occupant.name,
+                            occupant.muted,
+                            occupant.deafened,
+                            self.voice.speaking.contains(&occupant.id),
+                        );
                     }
                     continue;
                 }

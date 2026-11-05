@@ -679,6 +679,7 @@ dependencies = [
  "bs-instances",
  "bs-media",
  "bs-types",
+ "bs-voice",
  "chrono",
  "eframe",
  "egui",

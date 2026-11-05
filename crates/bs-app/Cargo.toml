@@ -12,7 +12,12 @@ workspace = true
 name = "backspace-rs"
 path = "src/main.rs"
 
+[features]
+# Голос через LiveKit: нужна libwebrtc (скачивается при сборке `webrtc-sys`).
+voice = ["dep:bs-voice"]
+
 [dependencies]
+bs-voice = { workspace = true, optional = true }
 serde_json = { workspace = true }
 bs-api = { workspace = true }
 bs-core = { workspace = true }

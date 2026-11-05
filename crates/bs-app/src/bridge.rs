@@ -766,6 +766,11 @@ fn normalize_base(raw: &str) -> Option<String> {
 }
 
 impl Session {
+    /// Дескриптор runtime для фоновых задач вне моста (голос).
+    pub(crate) fn runtime(&self) -> Handle {
+        self.runtime.clone()
+    }
+
     /// Создаёт мост над данным runtime.
     pub(crate) fn new(runtime: Handle) -> Self {
         Self {

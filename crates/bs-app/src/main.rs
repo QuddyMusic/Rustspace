@@ -28,6 +28,7 @@ mod screens;
 mod social;
 mod theme;
 mod voice;
+mod voice_media;
 mod widgets;
 
 fn main() -> eframe::Result {

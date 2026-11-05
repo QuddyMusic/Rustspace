@@ -291,6 +291,11 @@ pub(crate) struct SettingsState {
     admin_slots: Vec<(usize, String)>,
     /// Выбранный из них.
     admin_slot: Option<usize>,
+    /// Устройства для раздела «Голос и видео»: микрофоны и воспроизведение.
+    voice_devices: Option<(
+        Vec<crate::voice_media::Device>,
+        Vec<crate::voice_media::Device>,
+    )>,
 }
 
 /// Выбранный статус из текущего присутствия (`offline` выбрать нельзя).
@@ -319,6 +324,7 @@ impl SettingsState {
             extra: super::settings_extra::ExtraUi::default(),
             admin_slots: Vec::new(),
             admin_slot: None,
+            voice_devices: None,
         }
     }
 
@@ -369,6 +375,7 @@ pub(crate) fn show_settings(
     ui: &mut egui::Ui,
     state: &mut SettingsState,
     bridge: &mut Bridge,
+    voice: &mut crate::voice::VoiceState,
 ) -> SettingsAction {
     // Админские разделы относятся к инстансу, где пользователь администратор,
     // даже если в чате сейчас открыт другой (например, пиринговый).
@@ -388,7 +395,7 @@ pub(crate) fn show_settings(
             bridge.focus_on(target);
         }
     }
-    let action = show_settings_inner(ui, state, bridge);
+    let action = show_settings_inner(ui, state, bridge, voice);
     bridge.focus_on(previous);
     action
 }
@@ -397,6 +404,7 @@ fn show_settings_inner(
     ui: &mut egui::Ui,
     state: &mut SettingsState,
     bridge: &mut Bridge,
+    voice: &mut crate::voice::VoiceState,
 ) -> SettingsAction {
     let mut action = SettingsAction::None;
     state.extra.poll(bridge);
@@ -437,7 +445,7 @@ fn show_settings_inner(
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             ui.set_max_width(600.0);
-                            section_content(ui, state, &me, bridge, &mut action);
+                            section_content(ui, state, &me, bridge, voice, &mut action);
                         });
                 });
             });
@@ -610,20 +618,13 @@ fn section_content(
     state: &mut SettingsState,
     me: &User,
     bridge: &Bridge,
+    voice: &mut crate::voice::VoiceState,
     action: &mut SettingsAction,
 ) {
     match state.section {
         SettingsSection::Account => account(ui, state, me, bridge),
         SettingsSection::Appearance => appearance(ui, state),
-        SettingsSection::Voice => {
-            page_title(ui, "Голос и видео");
-            card(ui, |ui| {
-                ui.label(
-                    "Голосовые и видеоканалы в этом клиенте пока недоступны — \
-                     они появятся вместе с поддержкой LiveKit.",
-                );
-            });
-        }
+        SettingsSection::Voice => voice_settings(ui, state, bridge, voice),
         SettingsSection::Privacy => privacy(ui, state, me, bridge),
         SettingsSection::Connections => connections(ui, state, bridge, action),
         SettingsSection::Instance if me.is_admin => {
@@ -849,6 +850,118 @@ fn appearance(ui: &mut egui::Ui, state: &mut SettingsState) {
         ui.add_space(6.0);
         ui.label(theme::muted("Применяется после того, как вы отпустите ползунок.").size(12.5));
     });
+}
+
+/// «Голос и видео»: устройства и обработка звука.
+fn voice_settings(
+    ui: &mut egui::Ui,
+    state: &mut SettingsState,
+    bridge: &Bridge,
+    voice: &mut crate::voice::VoiceState,
+) {
+    use crate::voice_media::{DeviceKind, MediaEngine};
+    page_title(ui, "Голос и видео");
+    if !MediaEngine::available() {
+        card(ui, |ui| {
+            ui.label(
+                "Эта сборка клиента без LiveKit: присутствие в голосовых каналах работает, \
+                 а звук — нет. Соберите с флагом `--features voice`.",
+            );
+        });
+        ui.add_space(10.0);
+    }
+    if state.voice_devices.is_none() {
+        let prefs = voice.prefs.clone();
+        let media = voice.media(bridge);
+        let inputs = media.devices(DeviceKind::Input, &prefs);
+        let outputs = media.devices(DeviceKind::Output, &prefs);
+        state.voice_devices = Some((inputs, outputs));
+    }
+    let mut changed = false;
+    let mut refresh = false;
+    if let Some((inputs, outputs)) = state.voice_devices.as_ref() {
+        card(ui, |ui| {
+            changed |= device_picker(
+                ui,
+                "Микрофон",
+                "voice_input",
+                inputs,
+                &mut voice.prefs.input,
+            );
+            ui.add_space(8.0);
+            changed |= device_picker(
+                ui,
+                "Устройство воспроизведения",
+                "voice_output",
+                outputs,
+                &mut voice.prefs.output,
+            );
+            ui.add_space(8.0);
+            if ui.button("Обновить список устройств").clicked() {
+                refresh = true;
+            }
+        });
+    }
+    if refresh {
+        state.voice_devices = None;
+    }
+    ui.add_space(10.0);
+    card(ui, |ui| {
+        let prefs = &mut voice.prefs;
+        for (title, hint, flag) in [
+            (
+                "Эхоподавление",
+                "Убирает эхо ваших колонок из микрофона.",
+                &mut prefs.echo_cancellation,
+            ),
+            (
+                "Шумоподавление",
+                "Приглушает фоновый шум.",
+                &mut prefs.noise_suppression,
+            ),
+            (
+                "Автоусиление микрофона",
+                "Выравнивает громкость вашего голоса.",
+                &mut prefs.auto_gain_control,
+            ),
+        ] {
+            let before = *flag;
+            super::settings_extra::setting_row(ui, title, hint, flag);
+            changed |= before != *flag;
+        }
+    });
+    if changed {
+        let prefs = voice.prefs.clone();
+        voice.media(bridge).apply_prefs(&prefs);
+    }
+}
+
+/// Выпадающий список устройств; `None` — системное по умолчанию.
+fn device_picker(
+    ui: &mut egui::Ui,
+    title: &str,
+    id: &str,
+    devices: &[crate::voice_media::Device],
+    selected: &mut Option<String>,
+) -> bool {
+    let before = selected.clone();
+    widgets::field_label(ui, title);
+    let current = selected
+        .as_ref()
+        .and_then(|id| devices.iter().find(|d| &d.id == id))
+        .map_or("Системное по умолчанию", |d| {
+            d.name.as_str()
+        });
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(theme::truncate_chars(current, 40))
+        .width(320.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(selected, None, "Системное по умолчанию");
+            for device in devices {
+                ui.selectable_value(selected, Some(device.id.clone()), &device.name);
+            }
+        });
+    *selected != before
 }
 
 /// «Приватность»: видимость в поиске и показ активности.
