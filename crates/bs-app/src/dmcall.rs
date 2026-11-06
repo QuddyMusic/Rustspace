@@ -103,8 +103,8 @@ impl VoiceState {
             peer: peer.to_owned(),
             phase: DmPhase::Ringing,
             token: None,
-            muted: false,
-            deafened: false,
+            muted: self.idle_muted,
+            deafened: self.idle_deafened,
             media_started: false,
             flags_synced: false,
         });
@@ -294,8 +294,8 @@ impl VoiceState {
                     peer: incoming.caller,
                     phase: DmPhase::Active,
                     token,
-                    muted: false,
-                    deafened: false,
+                    muted: self.idle_muted,
+                    deafened: self.idle_deafened,
                     media_started: false,
                     flags_synced: false,
                 });

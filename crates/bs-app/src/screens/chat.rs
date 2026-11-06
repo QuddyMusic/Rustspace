@@ -1109,7 +1109,7 @@ impl ChatScreen {
                         }
                     });
 
-                Self::show_user_bar(ui, bridge, nav);
+                Self::show_user_bar(ui, bridge, &self.voice, nav);
                 let dock = crate::voice::show_dock(ui, &self.voice);
                 if dock != crate::voice::DockAction::None {
                     *nav = Some(Nav::Voice(dock));
@@ -1309,7 +1309,13 @@ impl ChatScreen {
     }
 
     /// Нижняя панель колонки: «я», статус соединения и кнопка настроек.
-    fn show_user_bar(ui: &mut egui::Ui, bridge: &Bridge, nav: &mut Option<Nav>) {
+    fn show_user_bar(
+        ui: &mut egui::Ui,
+        bridge: &Bridge,
+        voice: &crate::voice::VoiceState,
+        nav: &mut Option<Nav>,
+    ) {
+        let (muted, deafened) = voice.flags();
         let (name, handle, status, my_avatar) = bridge.cache_at(0).map_or_else(
             || (String::new(), String::new(), UserStatus::Online, None),
             |cache| {
@@ -1369,6 +1375,32 @@ impl ChatScreen {
                                     .clicked()
                                 {
                                     *nav = Some(Nav::Settings);
+                                }
+                                let phones = if deafened {
+                                    Icon::HeadphonesOff
+                                } else {
+                                    Icon::Headphones
+                                };
+                                if widgets::icon_button(ui, phones, 30.0)
+                                    .on_hover_text(if deafened {
+                                        "Включить звук"
+                                    } else {
+                                        "Выключить звук"
+                                    })
+                                    .clicked()
+                                {
+                                    *nav = Some(Nav::Voice(crate::voice::DockAction::ToggleDeafen));
+                                }
+                                let mic = if muted { Icon::MicOff } else { Icon::Mic };
+                                if widgets::icon_button(ui, mic, 30.0)
+                                    .on_hover_text(if muted {
+                                        "Включить микрофон"
+                                    } else {
+                                        "Выключить микрофон"
+                                    })
+                                    .clicked()
+                                {
+                                    *nav = Some(Nav::Voice(crate::voice::DockAction::ToggleMute));
                                 }
                             });
                         });

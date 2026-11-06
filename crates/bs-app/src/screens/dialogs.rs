@@ -2,7 +2,7 @@
 
 use bs_api::{CreateSpaceRequest, UpdateProfileRequest};
 use bs_types::{ChosenUserStatus, SpaceVisibility, User, UserStatus};
-use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
+use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense};
 
 use crate::bridge::BridgeRequest;
 use crate::fleet::Bridge;
@@ -414,22 +414,47 @@ fn show_settings_inner(
     let Some(me) = bridge.cache().map(|cache| cache.me().clone()) else {
         return SettingsAction::Close;
     };
+    // Окно с отступом от краёв, как в оригинале: затемнённый фон и скруглённая рамка.
+    let outer = ui.max_rect();
+    let window = outer.shrink2(egui::vec2(
+        (outer.width() * 0.05).clamp(8.0, 56.0),
+        (outer.height() * 0.07).clamp(8.0, 50.0),
+    ));
+    ui.painter()
+        .rect_filled(outer, 0.0, Color32::from_rgb(0x08, 0x08, 0x0c));
+    ui.painter().rect(
+        window,
+        CornerRadius::same(16),
+        theme::BG_RAIL,
+        egui::Stroke::new(1.0, theme::BORDER),
+        egui::StrokeKind::Inside,
+    );
+    let mut ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(window.shrink(1.0))
+            .layout(Layout::top_down(Align::Min)),
+    );
+    ui.set_clip_rect(window.shrink(1.0));
+    let ui = &mut ui;
     egui::Panel::left("settings_nav")
-        .exact_size(300.0)
+        .exact_size(280.0)
         .resizable(false)
         .show_separator_line(false)
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_RAIL)
-                .inner_margin(Margin::symmetric(20, 18)),
+                .fill(Color32::TRANSPARENT)
+                .inner_margin(Margin::symmetric(16, 16)),
         )
         .show(ui, |ui| {
-            settings_nav(ui, state, &me, &mut action);
+            egui::ScrollArea::vertical()
+                .id_salt("settings_nav_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| settings_nav(ui, state, &me, &mut action));
         });
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_RAIL)
+                .fill(Color32::TRANSPARENT)
                 .inner_margin(Margin::symmetric(24, 22)),
         )
         .show(ui, |ui| {

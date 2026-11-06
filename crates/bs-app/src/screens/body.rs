@@ -198,6 +198,7 @@ pub(crate) fn show_text(ui: &mut egui::Ui, salt: &str, blocks: &[Block], edited:
 /// Цитата сообщения, на которое отвечают.
 pub(crate) fn show_reply_quote(ui: &mut egui::Ui, author: &str, text: &str) -> egui::Response {
     ui.horizontal(|ui| {
+        ui.set_max_width((ui.available_width() - 28.0).max(80.0));
         let (bar, _) = ui.allocate_exact_size(Vec2::new(3.0, 16.0), Sense::hover());
         ui.painter()
             .rect_filled(bar, CornerRadius::same(2), theme::ACCENT);

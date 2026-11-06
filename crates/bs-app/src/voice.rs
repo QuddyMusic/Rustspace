@@ -53,6 +53,10 @@ pub(crate) struct VoiceState {
     pub(crate) dm: Option<crate::dmcall::DmCall>,
     /// Входящий звонок, на который ещё не ответили.
     pub(crate) incoming: Option<crate::dmcall::IncomingCall>,
+    /// Микрофон выключен вне звонка (применяется при входе).
+    pub(crate) idle_muted: bool,
+    /// Звук выключен вне звонка.
+    pub(crate) idle_deafened: bool,
     /// Настройки голоса.
     pub(crate) prefs: VoicePrefs,
     /// Медиа-движок (создаётся при первом использовании).
@@ -98,6 +102,20 @@ pub(crate) const fn after_mute_toggle(muted: bool, deafened: bool) -> (bool, boo
 }
 
 impl VoiceState {
+    /// Текущие флаги (микрофон, звук): из звонка или заданные заранее.
+    pub(crate) fn flags(&self) -> (bool, bool) {
+        self.dm.as_ref().map_or_else(
+            || {
+                self.call
+                    .as_ref()
+                    .map_or((self.idle_muted, self.idle_deafened), |call| {
+                        (call.muted, call.deafened)
+                    })
+            },
+            |dm| (dm.muted, dm.deafened),
+        )
+    }
+
     /// Медиа-движок; создаётся на runtime моста.
     pub(crate) fn media(&mut self, bridge: &Bridge) -> &mut MediaEngine {
         self.media
@@ -124,6 +142,7 @@ impl VoiceState {
         });
         bridge.request(BridgeRequest::VoiceToken(channel_id.to_owned()));
         bridge.focus_on(previous);
+        let flags = (self.idle_muted, self.idle_deafened);
         self.call = Some(VoiceCall {
             origin,
             channel_id: channel_id.to_owned(),
@@ -132,13 +151,18 @@ impl VoiceState {
             space_id: space_id.to_owned(),
             forced_mute: false,
             forced_deafen: false,
-            muted: false,
-            deafened: false,
+            muted: self.idle_muted,
+            deafened: self.idle_deafened,
             token: None,
             confirmed: false,
             media_started: false,
             flags_synced: false,
         });
+        if flags != (false, false)
+            && let Some(call) = self.call.as_ref()
+        {
+            send_status(bridge, call);
+        }
     }
 
     /// Выходит из канала.
@@ -161,6 +185,19 @@ impl VoiceState {
     pub(crate) fn apply(&mut self, action: DockAction, bridge: &mut Bridge) {
         if self.dm.is_some() {
             self.apply_dm(action, bridge);
+            return;
+        }
+        if self.call.is_none() {
+            match action {
+                DockAction::ToggleMute => {
+                    (self.idle_muted, self.idle_deafened) =
+                        after_mute_toggle(self.idle_muted, self.idle_deafened);
+                }
+                DockAction::ToggleDeafen => {
+                    (self.idle_muted, self.idle_deafened) = after_deafen_toggle(self.idle_deafened);
+                }
+                DockAction::Leave | DockAction::None => {}
+            }
             return;
         }
         match action {
