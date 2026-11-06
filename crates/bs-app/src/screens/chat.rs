@@ -939,7 +939,13 @@ impl ChatScreen {
                 .cache()
                 .map(|cache| cache.me().id.clone())
                 .unwrap_or_default();
-            if super::profile::show(&ctx, state, bridge, &me)
+            let right_edge = ctx.content_rect().right()
+                - if self.show_members && self.active_space.is_some() && self.view == View::Channel {
+                    236.0
+                } else {
+                    0.0
+                };
+            if super::profile::show(&ctx, state, bridge, &me, right_edge)
                 == super::profile::ProfileAction::Close
             {
                 self.profile = None;
@@ -1883,6 +1889,7 @@ impl ChatScreen {
         ui.add_space(if show_header { 16.0 } else { 2.0 });
         let mut hits: Vec<media::Hit> = Vec::new();
         let mut profile_rects: Vec<egui::Rect> = Vec::new();
+        let mut reaction_targets: Vec<(egui::Rect, super::body::ReactionClick)> = Vec::new();
         let inner = ui.horizontal_top(|ui| {
             ui.add_space(20.0);
             if show_header {
@@ -1922,19 +1929,7 @@ impl ChatScreen {
                     hits.extend(media::show_attachment(ui, attachment));
                 }
                 if !row.reactions.is_empty() {
-                    match super::body::show_reactions(ui, &row.reactions) {
-                        Some(super::body::ReactionClick::Toggle(emoji, mine)) => {
-                            if mine {
-                                bridge.remove_reaction(row.id.clone(), emoji);
-                            } else {
-                                bridge.add_reaction(row.id.clone(), emoji);
-                            }
-                        }
-                        Some(super::body::ReactionClick::OpenPicker) => {
-                            self.react_picker = Some((row.id.clone(), 0));
-                        }
-                        None => {}
-                    }
+                    reaction_targets = super::body::show_reactions(ui, &row.reactions);
                 }
             });
         });
@@ -1954,6 +1949,29 @@ impl ChatScreen {
             && let Some((_, value)) = hits.iter().find(|(rect, _)| rect.contains(pos))
         {
             self.viewer = Some(value.clone());
+        }
+        let reaction_hit = if response.clicked() {
+            response.interact_pointer_pos().and_then(|pos| {
+                reaction_targets
+                    .iter()
+                    .find(|(rect, _)| rect.contains(pos))
+                    .map(|(_, click)| click.clone())
+            })
+        } else {
+            None
+        };
+        match reaction_hit {
+            Some(super::body::ReactionClick::Toggle(emoji, mine)) => {
+                if mine {
+                    bridge.remove_reaction(row.id.clone(), emoji);
+                } else {
+                    bridge.add_reaction(row.id.clone(), emoji);
+                }
+            }
+            Some(super::body::ReactionClick::OpenPicker) => {
+                self.react_picker = Some((row.id.clone(), 0));
+            }
+            None => {}
         }
         let message_id = row.id.clone();
         let open_profile = response.clicked()

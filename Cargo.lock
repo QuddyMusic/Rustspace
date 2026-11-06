@@ -673,6 +673,7 @@ dependencies = [
 name = "bs-app"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "bs-api",
  "bs-core",
  "bs-identity",

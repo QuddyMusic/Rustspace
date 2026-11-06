@@ -186,12 +186,14 @@ fn body(ui: &mut egui::Ui, state: &ProfileState) {
     }
 }
 
-/// Рисует окно. `me` — свой id (у себя кнопок нет).
+/// Рисует окно справа, вплотную к списку участников (`right_edge` — его левая
+/// граница). `me` — свой id (у себя кнопок нет).
 pub(crate) fn show(
     ctx: &egui::Context,
     state: &ProfileState,
     bridge: &Bridge,
     me: &str,
+    right_edge: f32,
 ) -> ProfileAction {
     let mut action = ProfileAction::None;
     let mut open = true;
@@ -201,7 +203,8 @@ pub(crate) fn show(
         .collapsible(false)
         .resizable(false)
         .fixed_size(Vec2::new(WIDTH, 0.0))
-        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+        .pivot(egui::Align2::RIGHT_TOP)
+        .fixed_pos(egui::pos2(right_edge - 4.0, 56.0))
         .frame(
             egui::Frame::new()
                 .fill(theme::BG_SIDEBAR)

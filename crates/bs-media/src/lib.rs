@@ -236,6 +236,25 @@ pub fn decode(bytes: &[u8], limits: &Limits) -> Result<Decoded, MediaError> {
     }
 }
 
+/// Кодирует RGBA8 в PNG (для картинок из буфера обмена).
+///
+/// # Errors
+/// Размер не совпадает с числом байт или кодировщик отказал.
+pub fn encode_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, MediaError> {
+    use image::ImageEncoder as _;
+    let expected = (width as usize)
+        .saturating_mul(height as usize)
+        .saturating_mul(4);
+    if width == 0 || height == 0 || rgba.len() != expected {
+        return Err(MediaError::Decode("неверный размер пикселей".to_owned()));
+    }
+    let mut out = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut out)
+        .write_image(rgba, width, height, image::ExtendedColorType::Rgba8)
+        .map_err(|err| MediaError::Decode(err.to_string()))?;
+    Ok(out)
+}
+
 /// Статичная картинка из декодера: ориентация EXIF и уменьшение.
 fn still_from(
     mut decoder: impl image::ImageDecoder,
@@ -482,6 +501,16 @@ mod tests {
     fn fit_never_returns_zero() {
         assert_eq!(fit(1, 4000, 100), (1, 100));
         assert_eq!(fit(10, 10, 100), (10, 10));
+    }
+
+    #[test]
+    fn encode_png_roundtrips_and_rejects_bad_sizes() {
+        let rgba = [10u8, 20, 30, 255].repeat(6);
+        let bytes = super::encode_png(&rgba, 3, 2).expect("png");
+        let back = decode(&bytes, &Limits::default()).expect("decode");
+        assert_eq!((back.width, back.height), (3, 2));
+        assert!(super::encode_png(&rgba, 4, 2).is_err());
+        assert!(super::encode_png(&[], 0, 0).is_err());
     }
 
     #[test]

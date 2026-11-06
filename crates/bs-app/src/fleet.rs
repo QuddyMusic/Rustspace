@@ -917,7 +917,16 @@ impl Bridge {
                 slot.session
                     .take_images()
                     .into_iter()
-                    .map(|(path, result)| (base.clone(), path, result)),
+                    .map(|(path, result)| {
+                        // Внешний файл (GIF) не принадлежит инстансу: у него
+                        // общий ключ, под которым его и ищет ImageHub.
+                        let owner = if path.is_external() {
+                            crate::images::EXTERNAL.to_owned()
+                        } else {
+                            base.clone()
+                        };
+                        (owner, path, result)
+                    }),
             );
         }
         all

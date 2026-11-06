@@ -55,6 +55,7 @@ url = { version = "2", features = ["serde"] }
 eframe = "0.37"
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 egui = "0.37"
+arboard = { version = "3", default-features = false }
 
 # TUI
 ratatui = "0.30"

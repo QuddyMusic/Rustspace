@@ -13,6 +13,7 @@
 
 mod app;
 mod brand;
+mod clipboard;
 mod bridge;
 mod dmcall;
 mod emoji_data;

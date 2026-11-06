@@ -215,17 +215,25 @@ pub(crate) fn show_reply_quote(ui: &mut egui::Ui, author: &str, text: &str) -> e
 
 /// Строка реакций с кнопкой «добавить».
 #[allow(clippy::cast_precision_loss)]
-pub(crate) fn show_reactions(ui: &mut egui::Ui, groups: &[ReactionGroup]) -> Option<ReactionClick> {
-    let mut click = None;
+///
+/// Чипы только рисуются и сообщают свои прямоугольники: клик над ними
+/// перехватывает отклик всей строки сообщения (он создан позже и лежит
+/// сверху), поэтому нажатие разбирает вызывающий по этим областям.
+pub(crate) fn show_reactions(
+    ui: &mut egui::Ui,
+    groups: &[ReactionGroup],
+) -> Vec<(egui::Rect, ReactionClick)> {
+    let mut targets = Vec::new();
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
         for group in groups {
             let count = group.count.to_string();
             let width = 7.0f32.mul_add(count.chars().count().min(6) as f32, 42.0);
-            let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::click());
+            let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
+            let hovered = ui.rect_contains_pointer(rect);
             let fill = if group.mine {
                 theme::ACCENT.gamma_multiply(0.35)
-            } else if response.hovered() {
+            } else if hovered {
                 theme::BG_ACTIVE
             } else {
                 theme::BG_HOVER
@@ -263,16 +271,19 @@ pub(crate) fn show_reactions(ui: &mut egui::Ui, groups: &[ReactionGroup]) -> Opt
                     theme::TEXT_MUTED
                 },
             );
-            let response = response
-                .on_hover_text(group.names.join(", "))
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-            if response.clicked() {
-                click = Some(ReactionClick::Toggle(group.emoji.clone(), group.mine));
+            if hovered {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                response.show_tooltip_text(group.names.join(", "));
             }
+            targets.push((
+                rect,
+                ReactionClick::Toggle(group.emoji.clone(), group.mine),
+            ));
         }
         if !groups.is_empty() {
-            let (rect, response) = ui.allocate_exact_size(Vec2::new(30.0, 24.0), Sense::click());
-            if response.hovered() {
+            let (rect, response) = ui.allocate_exact_size(Vec2::new(30.0, 24.0), Sense::hover());
+            let hovered = ui.rect_contains_pointer(rect);
+            if hovered {
                 ui.painter()
                     .rect_filled(rect, CornerRadius::same(12), theme::BG_HOVER);
             }
@@ -283,12 +294,14 @@ pub(crate) fn show_reactions(ui: &mut egui::Ui, groups: &[ReactionGroup]) -> Opt
                 crate::icons::Icon::Smile,
                 theme::TEXT_FAINT,
             );
-            if response.on_hover_text("Добавить реакцию").clicked() {
-                click = Some(ReactionClick::OpenPicker);
+            if hovered {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                response.show_tooltip_text("Добавить реакцию");
             }
+            targets.push((rect, ReactionClick::OpenPicker));
         }
     });
-    click
+    targets
 }
 
 #[cfg(test)]

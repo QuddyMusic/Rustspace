@@ -177,6 +177,40 @@ fn read_paths(paths: Vec<PathBuf>) -> Vec<Picked> {
         .collect()
 }
 
+/// Картинка из буфера обмена как PNG-файл.
+fn png_of(image: &egui::ColorImage) -> Picked {
+    let rgba: Vec<u8> = image
+        .pixels
+        .iter()
+        .flat_map(egui::Color32::to_srgba_unmultiplied)
+        .collect();
+    let width = u32::try_from(image.size[0]).unwrap_or(0);
+    let height = u32::try_from(image.size[1]).unwrap_or(0);
+    Picked {
+        name: "image.png".to_owned(),
+        bytes: bs_media::encode_png(&rgba, width, height).map_err(|err| err.to_string()),
+    }
+}
+
+/// Превью не пришло: рисуем сам GIF и возвращаем причину сбоя.
+fn paint_gif_fallback(ui: &egui::Ui, rect: Rect, item: &GifItem) -> (bool, Option<String>) {
+    let Some(hub) = images::ImageHub::of(ui.ctx()) else {
+        return (false, None);
+    };
+    let images::ImageState::Failed(message) = hub.state(&item.preview_url) else {
+        return (false, None);
+    };
+    let painted = images::paint_value(
+        ui.painter(),
+        rect,
+        &item.url,
+        CornerRadius::same(8),
+        true,
+        Color32::WHITE,
+    );
+    (painted, Some(message))
+}
+
 impl Composer {
     /// Забирает события моста и результаты выбора файлов.
     pub(crate) fn poll(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
@@ -348,6 +382,48 @@ impl Composer {
         self.reading = Some((PickMode::Files, rx));
     }
 
+    /// Картинка или файлы из буфера обмена по Ctrl+V.
+    ///
+    /// Текстовая вставка обрабатывается самим полем. Картинку (скриншот,
+    /// «копировать изображение») оболочка отдаёт готовым событием; файлы из
+    /// проводника она не отдаёт, их читаем сами, если вставки текста не было.
+    fn take_pasted(&mut self, ctx: &egui::Context) {
+        let (images, command, text) = ctx.input(|i| {
+            let mut images = Vec::new();
+            let mut command = false;
+            let mut text = false;
+            for event in &i.events {
+                match event {
+                    egui::Event::PasteImage(image) => images.push(image.clone()),
+                    egui::Event::Paste(value) => text |= !value.is_empty(),
+                    egui::Event::Key {
+                        key: egui::Key::V,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } if modifiers.command => command = true,
+                    _ => {}
+                }
+            }
+            (images, command, text)
+        });
+        let files = command && !text && images.is_empty();
+        if (images.is_empty() && !files) || self.reading.is_some() {
+            return;
+        }
+        let (tx, rx) = channel();
+        let repaint = ctx.clone();
+        std::thread::spawn(move || {
+            let mut picked: Vec<Picked> = images.iter().map(|image| png_of(image)).collect();
+            if files && let Some(paths) = crate::clipboard::files() {
+                picked.extend(read_paths(paths));
+            }
+            let _ = tx.send(picked);
+            repaint.request_repaint();
+        });
+        self.reading = Some((PickMode::Files, rx));
+    }
+
     fn reset_for(&mut self, origin: usize) {
         if self.origin != Some(origin) {
             self.staged.retain(|s| s.origin == origin);
@@ -373,6 +449,7 @@ impl Composer {
         self.poll(&ctx, bridge);
         if enabled && !editing {
             self.take_dropped(&ctx);
+            self.take_pasted(&ctx);
         }
         let dragging = ctx.input(|i| !i.raw.hovered_files.is_empty());
 
@@ -852,7 +929,7 @@ impl Composer {
                     }
                     let response =
                         ui.interact(rect, ui.scope_id().with(("gif", &item.id)), Sense::click());
-                    let painted = images::paint_value(
+                    let mut painted = images::paint_value(
                         ui.painter(),
                         rect,
                         &item.preview_url,
@@ -860,6 +937,10 @@ impl Composer {
                         true,
                         Color32::WHITE,
                     );
+                    let mut failure = None;
+                    if !painted {
+                        (painted, failure) = paint_gif_fallback(ui, rect, item);
+                    }
                     if !painted {
                         ui.painter()
                             .rect_filled(rect, CornerRadius::same(8), theme::BG_HOVER);
@@ -872,7 +953,11 @@ impl Composer {
                             egui::StrokeKind::Inside,
                         );
                     }
-                    if response.on_hover_text(&item.title).clicked() {
+                    let hint = match (&failure, painted) {
+                        (Some(message), false) => format!("{}\nНе загрузилось: {message}", item.title),
+                        _ => item.title.clone(),
+                    };
+                    if response.on_hover_text(hint).clicked() {
                         chosen = Some(item.url.clone());
                     }
                 }

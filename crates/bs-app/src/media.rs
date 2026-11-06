@@ -317,6 +317,14 @@ pub(crate) fn viewer(ctx: &egui::Context, value: &str) -> bool {
             if backdrop.clicked() || close_resp.clicked() {
                 close = true;
             }
+            backdrop.context_menu(|ui| {
+                if ui.button("Копировать картинку").clicked() {
+                    if let Some(hub) = ImageHub::of(ctx) {
+                        hub.request_raw(value, crate::images::RawPurpose::Copy);
+                    }
+                    ui.close();
+                }
+            });
         });
     close
 }
