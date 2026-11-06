@@ -34,6 +34,7 @@ pub mod peers;
 pub mod profile;
 pub mod read;
 pub mod registry;
+pub mod space_manage;
 pub mod write;
 
 pub use admin::{
@@ -50,6 +51,7 @@ pub use client::{ApiClient, DEFAULT_TIMEOUT, MAX_RESPONSE_BYTES, USER_AGENT};
 pub use community::{CreateSpaceRequest, ExplorePage, UpdateProfileRequest};
 pub use compose::{GifItem, GifPage, MAX_UPLOAD_CHUNK, PersonalSticker, SendMessageBody};
 pub use error::ApiError;
+pub use space_manage::{NewChannel, invite_url, parse_invite_input};
 pub use federation::{
     AttachProofResponse, ChangePasswordRequest, ChangePasswordResponse,
     FederationCredentialRequest, FederationCredentialResponse, ReattachRequest, ReattachResponse,

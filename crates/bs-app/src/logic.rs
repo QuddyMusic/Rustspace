@@ -115,6 +115,14 @@ pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String
         Some("system_message_immutable") => "Системное сообщение изменить нельзя",
         Some("reply_target_invalid") => "На это сообщение нельзя ответить",
         Some("attachment_invalid" | "attachment_not_owned") => "Вложение недоступно",
+        Some("user_banned") => "Вы заблокированы в этом пространстве",
+        Some("already_member") => "Вы уже участник этого пространства",
+        Some("join_request_required") => {
+            "Это пространство принимает по заявке: найдите его в «Обзоре»"
+        }
+        Some("join_request_pending") => "Заявка на вступление уже отправлена",
+        Some("invite_not_found" | "invalid_invite") => "Приглашение не найдено или устарело",
+        Some("owner_cannot_leave") => "Владелец не может покинуть пространство",
         _ => "",
     };
     if !known.is_empty() {

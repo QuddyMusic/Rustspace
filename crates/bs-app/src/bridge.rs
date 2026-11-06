@@ -207,6 +207,31 @@ pub(crate) enum BridgeRequest {
     VoiceToken(String),
     /// Токен LiveKit для DM-звонка.
     DmVoiceToken(String),
+    /// Код приглашения в пространство.
+    SpaceInvite(String),
+    /// Вступить по коду (с адресом инстанса, если он указан в ссылке).
+    JoinByCode(String),
+    /// Выйти из пространства.
+    LeaveSpace {
+        /// Пространство.
+        space_id: String,
+        /// Свой id.
+        user_id: String,
+    },
+    /// Создать канал.
+    CreateChannel {
+        /// Пространство.
+        space_id: String,
+        /// Параметры канала.
+        channel: bs_api::NewChannel,
+    },
+    /// Создать категорию.
+    CreateCategory {
+        /// Пространство.
+        space_id: String,
+        /// Название.
+        name: String,
+    },
     /// Скачать файл как есть (копирование картинки, сохранение стикера).
     Raw {
         /// Номер запроса.
@@ -491,6 +516,27 @@ pub(crate) enum CallEvent {
     },
 }
 
+/// Итог действия над пространством.
+#[derive(Debug)]
+pub(crate) enum SpaceEvent {
+    /// Код приглашения (или ошибка).
+    Invite {
+        /// Код или текст ошибки.
+        result: Result<String, String>,
+    },
+    /// Канал или категория созданы (или нет).
+    Created(Result<(), String>),
+    /// Вступление не удалось (успех приходит как `Space`).
+    JoinFailed(String),
+    /// Выход из пространства.
+    Left {
+        /// Пространство.
+        space_id: String,
+        /// Итог.
+        result: Result<(), String>,
+    },
+}
+
 /// Ответ на запрос токена LiveKit.
 #[derive(Debug)]
 pub(crate) struct VoiceTokenEvent {
@@ -585,6 +631,8 @@ pub(crate) enum BridgeResponse {
     UserProfile(ProfileEvent),
     /// Токен голосового канала.
     VoiceToken(VoiceTokenEvent),
+    /// Итог действия над пространством.
+    SpaceAction(SpaceEvent),
     /// Скачанный файл.
     Raw {
         /// Номер запроса.
@@ -756,6 +804,7 @@ pub(crate) struct Session {
     compose_in: Vec<ComposeEvent>,
     profile_in: Vec<ProfileEvent>,
     voice_in: Vec<VoiceTokenEvent>,
+    space_in: Vec<SpaceEvent>,
     call_in: Vec<CallEvent>,
     raw_ready: Vec<(u64, Result<Vec<u8>, String>)>,
     /// Ответы настроек, которые GUI ещё не забрал.
@@ -833,6 +882,7 @@ impl Session {
             compose_in: Vec::new(),
             profile_in: Vec::new(),
             voice_in: Vec::new(),
+            space_in: Vec::new(),
             call_in: Vec::new(),
             raw_ready: Vec::new(),
             admin_in: Vec::new(),
@@ -1016,6 +1066,7 @@ impl Session {
         self.compose_in.clear();
         self.profile_in.clear();
         self.voice_in.clear();
+        self.space_in.clear();
         self.call_in.clear();
         self.admin_in.clear();
         self.explore = None;
@@ -1419,6 +1470,25 @@ impl Session {
         std::mem::take(&mut self.call_in)
     }
 
+    /// Запоминает итог действия над пространством; выход убирает его из кэша.
+    fn apply_space_event(&mut self, event: SpaceEvent) {
+        if let SpaceEvent::Left {
+            space_id,
+            result: Ok(()),
+        } = &event
+            && let Some(cache) = self.cache.as_mut()
+        {
+            cache.remove_space(space_id);
+            self.explore = None;
+        }
+        self.space_in.push(event);
+    }
+
+    /// Забирает итоги действий над пространствами.
+    pub(crate) fn take_space_events(&mut self) -> Vec<SpaceEvent> {
+        std::mem::take(&mut self.space_in)
+    }
+
     /// Забирает накопленные ответы на запросы токена голоса.
     pub(crate) fn take_voice_tokens(&mut self) -> Vec<VoiceTokenEvent> {
         std::mem::take(&mut self.voice_in)
@@ -1684,6 +1754,7 @@ impl Session {
             BridgeResponse::Admin(event) => self.admin_in.push(event),
             BridgeResponse::UserProfile(event) => self.profile_in.push(event),
             BridgeResponse::VoiceToken(event) => self.voice_in.push(event),
+            BridgeResponse::SpaceAction(event) => self.apply_space_event(event),
             BridgeResponse::Raw { tag, result } => self.raw_ready.push((tag, result)),
             BridgeResponse::JoinRequested => {
                 self.info = Some("Заявка отправлена".to_owned());
@@ -2341,6 +2412,12 @@ fn upload_message(err: &bs_api::ApiError) -> String {
     }
 }
 
+/// Текст отказа сервера на действие над пространством.
+fn space_message(err: &bs_api::ApiError) -> String {
+    let message = err.body().map_or_else(|| err.to_string(), |b| b.error.clone());
+    crate::logic::describe_server_error(err.code(), &message)
+}
+
 #[allow(clippy::too_many_lines, reason = "по ветке на каждый вид запроса")]
 async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> BridgeResponse {
     match request {
@@ -2434,6 +2511,44 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                 channel_id: dm_id,
                 result,
             })
+        }
+        BridgeRequest::SpaceInvite(space_id) => {
+            let result = client
+                .space_invite_code(&space_id)
+                .await
+                .map_err(|err| space_message(&err));
+            BridgeResponse::SpaceAction(SpaceEvent::Invite { result })
+        }
+        BridgeRequest::JoinByCode(code) => {
+            let joined = match client.join_by_code(&code).await {
+                Ok(id) => client.space_full(&id).await,
+                Err(err) => Err(err),
+            };
+            match joined {
+                Ok(space) => BridgeResponse::Space(Box::new(space)),
+                Err(err) => BridgeResponse::SpaceAction(SpaceEvent::JoinFailed(space_message(&err))),
+            }
+        }
+        BridgeRequest::LeaveSpace { space_id, user_id } => {
+            let result = client
+                .leave_space(&space_id, &user_id)
+                .await
+                .map_err(|err| space_message(&err));
+            BridgeResponse::SpaceAction(SpaceEvent::Left { space_id, result })
+        }
+        BridgeRequest::CreateChannel { space_id, channel } => {
+            let result = client
+                .create_channel(&space_id, &channel)
+                .await
+                .map_err(|err| space_message(&err));
+            BridgeResponse::SpaceAction(SpaceEvent::Created(result))
+        }
+        BridgeRequest::CreateCategory { space_id, name } => {
+            let result = client
+                .create_category(&space_id, &name)
+                .await
+                .map_err(|err| space_message(&err));
+            BridgeResponse::SpaceAction(SpaceEvent::Created(result))
         }
         BridgeRequest::VoiceToken(channel_id) => {
             let result = client

@@ -679,6 +679,7 @@ dependencies = [
  "bs-identity",
  "bs-instances",
  "bs-media",
+ "bs-permissions",
  "bs-types",
  "bs-voice",
  "chrono",

@@ -228,6 +228,11 @@ impl Cache {
         self.spaces.insert(space.space.id.clone(), space);
     }
 
+    /// Забывает пространство (после выхода из него).
+    pub fn remove_space(&mut self, space_id: &str) {
+        self.spaces.remove(space_id);
+    }
+
     /// Закэшированные сообщения личного канала (пустой срез, если не загружены).
     #[must_use]
     pub fn dm_messages(&self, dm_channel_id: &str) -> &[DmMessageWithUser] {

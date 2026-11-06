@@ -25,6 +25,7 @@ bs-instances = { workspace = true }
 bs-media = { workspace = true }
 bs-identity = { workspace = true }
 bs-types = { workspace = true }
+bs-permissions = { workspace = true }
 tokio = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }

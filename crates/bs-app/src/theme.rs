@@ -548,8 +548,12 @@ pub(crate) fn occupant_row(
 }
 
 /// Заголовок категории каналов («ТЕКСТОВЫЕ КАНАЛЫ»).
-pub(crate) fn category_header(ui: &mut egui::Ui, name: &str) {
+///
+/// С `add` справа появляется «+» (новый канал в категории); возвращает отклик
+/// этой кнопки.
+pub(crate) fn category_header(ui: &mut egui::Ui, name: &str, add: bool) -> Option<egui::Response> {
     ui.add_space(10.0);
+    let mut plus = None;
     ui.horizontal(|ui| {
         ui.add_space(18.0);
         ui.label(
@@ -558,8 +562,18 @@ pub(crate) fn category_header(ui: &mut egui::Ui, name: &str) {
                 .family(bold_family())
                 .color(TEXT_FAINT),
         );
+        if add {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(10.0);
+                plus = Some(
+                    ui.add(crate::widgets::flat_icon(crate::icons::Icon::Plus, 16.0, TEXT_FAINT))
+                        .on_hover_text("Создать канал"),
+                );
+            });
+        }
     });
     ui.add_space(2.0);
+    plus
 }
 
 /// Заголовок секции в правой панели («В СЕТИ — 3»).

@@ -946,6 +946,20 @@ impl Bridge {
             .collect()
     }
 
+    /// Итоги действий над пространствами со всех инстансов.
+    pub(crate) fn take_space_events(&mut self) -> Vec<(usize, crate::bridge::SpaceEvent)> {
+        self.slots
+            .iter_mut()
+            .enumerate()
+            .flat_map(|(i, slot)| {
+                slot.session
+                    .take_space_events()
+                    .into_iter()
+                    .map(move |event| (i, event))
+            })
+            .collect()
+    }
+
     /// Токены голоса со всех инстансов: номер инстанса и ответ.
     pub(crate) fn take_voice_tokens(&mut self) -> Vec<(usize, crate::bridge::VoiceTokenEvent)> {
         self.slots
