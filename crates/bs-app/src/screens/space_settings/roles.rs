@@ -21,7 +21,7 @@ const PRESETS: [&str; 12] = [
 ];
 
 /// Группы прав в порядке оригинала (`permissionGroups.ts`).
-const GROUPS: [(&str, &[(Permissions, &str)]); 3] = [
+pub(crate) const GROUPS: [(&str, &[(Permissions, &str)]); 3] = [
     (
         "Общие",
         &[

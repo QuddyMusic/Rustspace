@@ -1,6 +1,7 @@
 //! Экраны приложения.
 
 pub(crate) mod body;
+pub(crate) mod channel_settings;
 pub(crate) mod chat;
 pub(crate) mod composer;
 pub(crate) mod connections;

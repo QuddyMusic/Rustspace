@@ -627,6 +627,28 @@ pub(crate) enum View {
     Channel,
 }
 
+/// ПКМ по каналу: «Настройки канала».
+fn channel_menu(
+    row: &egui::Response,
+    space: &SidebarSpace,
+    channel: &SidebarChannel,
+    nav: &mut Option<Nav>,
+) {
+    if !space.rights.manage_channels {
+        return;
+    }
+    row.context_menu(|ui| {
+        if ui.button("Настройки канала").clicked() {
+            *nav = Some(Nav::ChannelSettings {
+                origin: space.origin,
+                space_id: space.id.clone(),
+                target: super::channel_settings::Target::Channel(channel.id.clone()),
+            });
+            ui.close();
+        }
+    });
+}
+
 /// Шапка пространства: имя (ПКМ — меню) и кнопка приглашения.
 fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
         ui.horizontal(|ui| {
@@ -785,6 +807,15 @@ enum Nav {
         /// Пространство.
         space_id: String,
     },
+    /// Настройки канала или категории.
+    ChannelSettings {
+        /// Инстанс.
+        origin: usize,
+        /// Пространство.
+        space_id: String,
+        /// Канал или категория.
+        target: super::channel_settings::Target,
+    },
     /// Создать ссылку-приглашение и скопировать её.
     Invite {
         origin: usize,
@@ -826,6 +857,7 @@ pub(crate) struct ChatScreen {
     /// Окно над пространством (вход, новый канал, выход…).
     space_dialog: Option<super::space_dialogs::SpaceDialog>,
     space_settings: Option<super::space_settings::SpaceSettings>,
+    channel_settings: Option<super::channel_settings::ChannelSettings>,
     /// Открытые настройки.
     settings: Option<SettingsState>,
     /// Картинка, открытая на весь экран (значение поля).
@@ -997,6 +1029,15 @@ impl ChatScreen {
                 self.space_settings =
                     super::space_settings::SpaceSettings::open(bridge, origin, &space_id);
             }
+            Nav::ChannelSettings {
+                origin,
+                space_id,
+                target,
+            } => {
+                self.channel_settings = super::channel_settings::ChannelSettings::open(
+                    bridge, origin, &space_id, target,
+                );
+            }
             Nav::Invite { origin, space_id } => {
                 bridge.focus_on(origin);
                 bridge.request(BridgeRequest::SpaceInvite(space_id));
@@ -1074,6 +1115,7 @@ impl ChatScreen {
             self.create_space = None;
             self.space_dialog = None;
             self.space_settings = None;
+            self.channel_settings = None;
             self.apply_nav(Nav::Space(opened), &items, bridge, &ctx);
             self.route_actions(bridge, &ctx);
         }
@@ -1170,6 +1212,11 @@ impl ChatScreen {
         {
             self.space_settings = None;
         }
+        if let Some(settings) = self.channel_settings.as_mut()
+            && !super::channel_settings::show(&ctx, settings, bridge)
+        {
+            self.channel_settings = None;
+        }
         self.show_toast(&ctx, now);
         if let Some(nav) = nav {
             self.apply_nav(nav, &items, bridge, &ctx);
@@ -1221,7 +1268,24 @@ impl ChatScreen {
                         bridge.request(BridgeRequest::Friends);
                     }
                 }
+                SpaceEvent::Admin {
+                    op: SpaceOp::DeleteChannel(id),
+                    result: Ok(()),
+                    ..
+                } if self
+                    .selected_channel
+                    .as_ref()
+                    .is_some_and(|c| c.origin == origin && c.channel.as_str() == id) =>
+                {
+                    self.selected_channel = None;
+                    self.view = View::Friends;
+                }
                 _ => {}
+            }
+            if let Some(settings) = self.channel_settings.as_mut()
+                && !settings.apply(&event)
+            {
+                self.channel_settings = None;
             }
             if let Some(dialog) = self.space_dialog.as_mut()
                 && !dialog.apply(&event)
@@ -1432,14 +1496,13 @@ impl ChatScreen {
             let active = self.voice.call.as_ref().is_some_and(|c| {
                 (c.origin, c.channel_id.as_str()) == (space.origin, channel.id.as_str())
             });
-            if theme::voice_row(ui, &channel.name, active)
-                .on_hover_text(if active {
-                    "Нажмите, чтобы отключиться"
-                } else {
-                    "Нажмите, чтобы подключиться"
-                })
-                .clicked()
-            {
+            let row = theme::voice_row(ui, &channel.name, active).on_hover_text(if active {
+                "Нажмите, чтобы отключиться"
+            } else {
+                "Нажмите, чтобы подключиться"
+            });
+            channel_menu(&row, space, channel, nav);
+            if row.clicked() {
                 *nav = Some(Nav::VoiceJoin {
                     origin: space.origin,
                     channel_id: channel.id.clone(),
@@ -1503,17 +1566,28 @@ impl ChatScreen {
             if visible.is_empty() && (group.name.is_none() || !filter.is_empty()) {
                 continue;
             }
-            if let Some(name) = &group.name
-                && let Some(plus) =
-                    theme::category_header(ui, name, space.rights.manage_channels)
-                && plus.clicked()
-            {
-                *nav = Some(Nav::SpaceDialog(super::space_dialogs::SpaceDialog::channel(
-                    space.origin,
-                    &space.id,
-                    categories.clone(),
-                    group.id.clone(),
-                )));
+            if let Some(name) = &group.name {
+                let header = theme::category_header(ui, name, space.rights.manage_channels);
+                if header.plus.is_some_and(|plus| plus.clicked()) {
+                    *nav = Some(Nav::SpaceDialog(super::space_dialogs::SpaceDialog::channel(
+                        space.origin,
+                        &space.id,
+                        categories.clone(),
+                        group.id.clone(),
+                    )));
+                }
+                if let Some(id) = group.id.as_ref().filter(|_| space.rights.manage_channels) {
+                    header.label.context_menu(|ui| {
+                        if ui.button("Настройки категории").clicked() {
+                            *nav = Some(Nav::ChannelSettings {
+                                origin: space.origin,
+                                space_id: space.id.clone(),
+                                target: super::channel_settings::Target::Category(id.clone()),
+                            });
+                            ui.close();
+                        }
+                    });
+                }
             }
             for channel in visible {
                 if channel.voice {
@@ -1526,14 +1600,14 @@ impl ChatScreen {
                             && current.origin == space.origin
                             && current.channel.as_str() == channel.id
                     });
-                if theme::list_row(
+                let row = theme::list_row(
                     ui,
                     &format!("#   {}", channel.name),
                     selected,
                     channel.unread,
-                )
-                .clicked()
-                {
+                );
+                channel_menu(&row, space, channel, nav);
+                if row.clicked() {
                     *nav = Some(Nav::Channel(SelectedChannel {
                         origin: space.origin,
                         channel: channel.id.clone(),

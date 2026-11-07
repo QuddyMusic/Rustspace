@@ -130,6 +130,58 @@ struct RoleIdBody<'a> {
     role_id: &'a str,
 }
 
+/// К чему относятся переопределения прав.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverrideScope {
+    /// Канал.
+    Channel(String),
+    /// Категория.
+    Category(String),
+}
+
+impl OverrideScope {
+    fn base(&self) -> String {
+        match self {
+            Self::Channel(id) => format!("/api/channels/{id}/overrides"),
+            Self::Category(id) => format!("/api/categories/{id}/overrides"),
+        }
+    }
+}
+
+/// Переопределение прав на канал или категорию для роли либо участника.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionOverride {
+    /// `role` или `member`.
+    pub target_type: bs_types::OverrideTargetType,
+    /// Роль или пользователь.
+    pub target_id: String,
+    /// Разрешённые биты, decimal string.
+    pub allow: String,
+    /// Запрещённые биты, decimal string.
+    pub deny: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OverrideBody<'a> {
+    target_type: &'a str,
+    target_id: &'a str,
+    allow: &'a str,
+    deny: &'a str,
+}
+
+/// Тело `PATCH /api/channels/:id`; пустые поля не отправляются.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ChannelUpdate {
+    /// Новое имя.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Новая тема; пустая строка — убрать.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+}
+
 /// Запись списка блокировок.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -355,6 +407,100 @@ impl ApiClient {
             action: if accept { "accept" } else { "decline" },
         };
         self.patch_json::<serde_json::Value, _>(&path, &body).await?;
+        Ok(())
+    }
+
+    /// `PATCH /api/channels/:id` — имя и тема канала.
+    ///
+    /// # Errors
+    /// Нет `MANAGE_CHANNELS`, неверное имя или тема.
+    pub async fn update_channel(&self, id: &str, update: &ChannelUpdate) -> Result<(), ApiError> {
+        self.patch_json::<serde_json::Value, _>(&format!("/api/channels/{id}"), update)
+            .await?;
+        Ok(())
+    }
+
+    /// `DELETE /api/channels/:id` — удалить канал со всеми сообщениями.
+    ///
+    /// # Errors
+    /// Нет `MANAGE_CHANNELS`.
+    pub async fn delete_channel(&self, id: &str) -> Result<(), ApiError> {
+        self.delete_json::<serde_json::Value>(&format!("/api/channels/{id}"))
+            .await?;
+        Ok(())
+    }
+
+    /// `PATCH /api/categories/:id` — переименовать категорию.
+    ///
+    /// # Errors
+    /// Нет `MANAGE_CHANNELS`, неверное имя.
+    pub async fn rename_category(&self, id: &str, name: &str) -> Result<(), ApiError> {
+        self.patch_json::<serde_json::Value, _>(&format!("/api/categories/{id}"), &NameBody { name })
+            .await?;
+        Ok(())
+    }
+
+    /// `DELETE /api/categories/:id` — удалить категорию (каналы остаются).
+    ///
+    /// # Errors
+    /// Нет `MANAGE_CHANNELS`.
+    pub async fn delete_category(&self, id: &str) -> Result<(), ApiError> {
+        self.delete_json::<serde_json::Value>(&format!("/api/categories/{id}"))
+            .await?;
+        Ok(())
+    }
+
+    /// `GET .../overrides` — переопределения прав (нужна `MANAGE_ROLES`).
+    ///
+    /// # Errors
+    /// Нет права читать права.
+    pub async fn list_overrides(
+        &self,
+        scope: &OverrideScope,
+    ) -> Result<Vec<PermissionOverride>, ApiError> {
+        self.get_json(&scope.base()).await
+    }
+
+    /// `PUT .../overrides` — создать или заменить переопределение.
+    ///
+    /// # Errors
+    /// Нет права, нарушена иерархия или чужие биты.
+    pub async fn put_override(
+        &self,
+        scope: &OverrideScope,
+        entry: &PermissionOverride,
+    ) -> Result<(), ApiError> {
+        let target_type = match entry.target_type {
+            bs_types::OverrideTargetType::Role => "role",
+            bs_types::OverrideTargetType::Member => "member",
+        };
+        let body = OverrideBody {
+            target_type,
+            target_id: &entry.target_id,
+            allow: &entry.allow,
+            deny: &entry.deny,
+        };
+        self.put_json::<serde_json::Value, _>(&scope.base(), &body)
+            .await?;
+        Ok(())
+    }
+
+    /// `DELETE .../overrides/:type/:id` — убрать переопределение.
+    ///
+    /// # Errors
+    /// Нет права, нарушена иерархия или чужие биты.
+    pub async fn delete_override(
+        &self,
+        scope: &OverrideScope,
+        target_type: bs_types::OverrideTargetType,
+        target_id: &str,
+    ) -> Result<(), ApiError> {
+        let kind = match target_type {
+            bs_types::OverrideTargetType::Role => "role",
+            bs_types::OverrideTargetType::Member => "member",
+        };
+        let path = format!("{}/{kind}/{target_id}", scope.base());
+        self.delete_json::<serde_json::Value>(&path).await?;
         Ok(())
     }
 

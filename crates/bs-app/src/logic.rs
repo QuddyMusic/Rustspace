@@ -148,6 +148,23 @@ pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String
         Some("cannot_change_unowned_permissions") => {
             "Изменять можно только те права, которые есть у вас самих."
         }
+        Some("overrides_conflict") => {
+            "Кто-то другой изменил эти права. Проверьте их и сохраните ещё раз."
+        }
+        Some("override_bits_invalid") => "Значения прав указаны неверно.",
+        Some("override_target_invalid") => {
+            "Переопределение прав применяется к роли или к участнику."
+        }
+        Some("override_target_required") => "Выберите роль или участника для переопределения.",
+        Some("channel_not_found") => "Этот канал не найден.",
+        Some("category_not_found") => "Эта категория не найдена.",
+        Some("category_not_in_space") => "Эта категория не относится к данному пространству.",
+        Some("channel_name_required") => "Укажите название канала.",
+        Some("category_name_required") => "Укажите название категории.",
+        Some("channel_name_length") => "Название канала должно содержать от 1 до 100 символов.",
+        Some("category_name_length") => "Название категории должно содержать от 1 до 100 символов.",
+        Some("channel_topic_length") => "Тема канала не может быть длиннее 1024 символов.",
+        Some("no_fields_to_update") => "Нечего сохранять.",
         Some("owner_cannot_leave") => "Владелец не может покинуть пространство",
         _ => "",
     };

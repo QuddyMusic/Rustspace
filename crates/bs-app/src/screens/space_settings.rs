@@ -6,6 +6,8 @@
 mod discovery;
 mod roles;
 
+pub(crate) use roles::GROUPS as PERMISSION_GROUPS;
+
 use bs_api::{Ban, SpaceUpdate};
 use bs_permissions::{Permissions, can_manage_role_at, has_permission_bit, parse_permission_string};
 use bs_types::SpaceVisibility;
@@ -81,16 +83,16 @@ pub(crate) struct SpaceSettings {
 /// Права текущего пользователя в пространстве.
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::struct_excessive_bools, reason = "независимые права")]
-struct Rights {
-    owner: bool,
-    manage_space: bool,
-    kick: bool,
-    ban: bool,
-    manage_roles: bool,
+pub(crate) struct Rights {
+    pub(crate) owner: bool,
+    pub(crate) manage_space: bool,
+    pub(crate) kick: bool,
+    pub(crate) ban: bool,
+    pub(crate) manage_roles: bool,
     /// Все права текущего пользователя (владелец — все).
-    perms: Permissions,
+    pub(crate) perms: Permissions,
     /// Позиция высшей роли (владелец — наивысшая).
-    top: i64,
+    pub(crate) top: i64,
 }
 
 impl SpaceSettings {
@@ -131,6 +133,7 @@ impl SpaceSettings {
     }
 
     /// Учитывает итог действия. `false` — окно надо закрыть.
+    #[allow(clippy::too_many_lines, reason = "плоская таблица итогов по видам действий")]
     pub(crate) fn apply(&mut self, event: &SpaceEvent) -> bool {
         match event {
             SpaceEvent::Admin {
@@ -186,7 +189,14 @@ impl SpaceSettings {
                         | SpaceOp::ListJoinRequests
                         | SpaceOp::UploadImage(..)
                         | SpaceOp::AddMemberRole(_, _)
-                        | SpaceOp::RemoveMemberRole(_, _),
+                        | SpaceOp::RemoveMemberRole(_, _)
+                        | SpaceOp::UpdateChannel(..)
+                        | SpaceOp::DeleteChannel(_)
+                        | SpaceOp::RenameCategory(..)
+                        | SpaceOp::DeleteCategory(_)
+                        | SpaceOp::ListOverrides(_)
+                        | SpaceOp::PutOverride(..)
+                        | SpaceOp::DeleteOverride(..),
                         Ok(()),
                     ) => {}
                 }
@@ -235,33 +245,7 @@ impl SpaceSettings {
     }
 
     fn rights(&self, bridge: &Bridge) -> Option<Rights> {
-        let cache = bridge.cache_at(self.origin)?;
-        let space = cache.space(&self.space_id)?;
-        let owner = space.space.owner_id == cache.me().id;
-        let bits = space
-            .my_permissions
-            .as_deref()
-            .and_then(|raw| parse_permission_string(raw).ok())
-            .unwrap_or(Permissions::empty());
-        let has = |flag| owner || has_permission_bit(bits, flag);
-        Some(Rights {
-            owner,
-            manage_space: has(Permissions::MANAGE_SPACE),
-            kick: has(Permissions::KICK_MEMBERS),
-            ban: has(Permissions::BAN_MEMBERS),
-            manage_roles: has(Permissions::MANAGE_ROLES),
-            perms: if owner { Permissions::all() } else { bits },
-            top: if owner {
-                i64::MAX
-            } else {
-                space
-                    .members
-                    .iter()
-                    .find(|m| m.user.id == cache.me().id)
-                    .and_then(|m| m.roles.iter().map(|r| r.position).max())
-                    .unwrap_or(0)
-            },
-        })
+        rights_for(bridge, self.origin, &self.space_id)
     }
 
     fn request(&mut self, bridge: &mut Bridge, op: SpaceOp) {
@@ -286,6 +270,37 @@ impl SpaceSettings {
             directory_listed: Some(self.fields.directory_listed),
         }
     }
+}
+
+/// Права текущего пользователя в пространстве.
+pub(crate) fn rights_for(bridge: &Bridge, origin: usize, space_id: &str) -> Option<Rights> {
+    let cache = bridge.cache_at(origin)?;
+    let space = cache.space(space_id)?;
+    let owner = space.space.owner_id == cache.me().id;
+    let bits = space
+        .my_permissions
+        .as_deref()
+        .and_then(|raw| parse_permission_string(raw).ok())
+        .unwrap_or(Permissions::empty());
+    let has = |flag| owner || has_permission_bit(bits, flag);
+    Some(Rights {
+        owner,
+        manage_space: has(Permissions::MANAGE_SPACE),
+        kick: has(Permissions::KICK_MEMBERS),
+        ban: has(Permissions::BAN_MEMBERS),
+        manage_roles: has(Permissions::MANAGE_ROLES),
+        perms: if owner { Permissions::all() } else { bits },
+        top: if owner {
+            i64::MAX
+        } else {
+            space
+                .members
+                .iter()
+                .find(|m| m.user.id == cache.me().id)
+                .and_then(|m| m.roles.iter().map(|r| r.position).max())
+                .unwrap_or(0)
+        },
+    })
 }
 
 /// Рисует окно. Возвращает `false`, когда его надо закрыть.

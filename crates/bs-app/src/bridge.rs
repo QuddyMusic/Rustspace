@@ -546,6 +546,20 @@ pub(crate) enum SpaceOp {
     UpdateRole(String, bs_api::RoleUpdate),
     /// Удалить роль.
     DeleteRole(String),
+    /// Имя и тема канала.
+    UpdateChannel(String, bs_api::ChannelUpdate),
+    /// Удалить канал.
+    DeleteChannel(String),
+    /// Переименовать категорию.
+    RenameCategory(String, String),
+    /// Удалить категорию.
+    DeleteCategory(String),
+    /// Загрузить переопределения прав.
+    ListOverrides(bs_api::OverrideScope),
+    /// Создать или заменить переопределение прав.
+    PutOverride(bs_api::OverrideScope, bs_api::PermissionOverride),
+    /// Убрать переопределение прав.
+    DeleteOverride(bs_api::OverrideScope, bs_types::OverrideTargetType, String),
     /// Загрузить значок (`false`) или баннер (`true`): имя файла и содержимое.
     UploadImage(bool, String, Vec<u8>),
     /// Загрузить ожидающие заявки на вступление.
@@ -581,6 +595,15 @@ pub(crate) enum SpaceEvent {
         banner: bool,
         /// Имя файла или ошибка.
         result: Result<String, String>,
+    },
+    /// Переопределения прав канала или категории.
+    Overrides {
+        /// Пространство.
+        space_id: String,
+        /// Канал или категория.
+        scope: bs_api::OverrideScope,
+        /// Список или текст ошибки.
+        result: Result<Vec<bs_api::PermissionOverride>, String>,
     },
     /// Ожидающие заявки.
     Requests {
@@ -2272,6 +2295,17 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
             .map_err(|err| space_message(&err));
         return BridgeResponse::SpaceAction(SpaceEvent::Bans { space_id, result });
     }
+    if let SpaceOp::ListOverrides(scope) = &op {
+        let result = client
+            .list_overrides(scope)
+            .await
+            .map_err(|err| space_message(&err));
+        return BridgeResponse::SpaceAction(SpaceEvent::Overrides {
+            space_id,
+            scope: scope.clone(),
+            result,
+        });
+    }
     if op == SpaceOp::ListJoinRequests {
         let result = client
             .pending_join_requests(&space_id)
@@ -2293,6 +2327,12 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
         });
     }
     let done = match &op {
+        SpaceOp::UpdateChannel(id, update) => client.update_channel(id, update).await,
+        SpaceOp::DeleteChannel(id) => client.delete_channel(id).await,
+        SpaceOp::RenameCategory(id, name) => client.rename_category(id, name).await,
+        SpaceOp::DeleteCategory(id) => client.delete_category(id).await,
+        SpaceOp::PutOverride(scope, entry) => client.put_override(scope, entry).await,
+        SpaceOp::DeleteOverride(scope, kind, id) => client.delete_override(scope, *kind, id).await,
         SpaceOp::DecideRequest(id, accept) => {
             client.decide_join_request(&space_id, id, *accept).await
         }
@@ -2316,7 +2356,10 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
         SpaceOp::RemoveMemberRole(user, role) => {
             client.remove_member_role(&space_id, user, role).await
         }
-        SpaceOp::ListBans | SpaceOp::ListJoinRequests | SpaceOp::UploadImage(..) => Ok(()),
+        SpaceOp::ListBans
+        | SpaceOp::ListJoinRequests
+        | SpaceOp::ListOverrides(_)
+        | SpaceOp::UploadImage(..) => Ok(()),
     };
     let refresh = done.is_ok()
         && !matches!(
