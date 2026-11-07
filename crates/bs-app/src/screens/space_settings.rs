@@ -1,8 +1,9 @@
-//! Настройки пространства: «Основное», «Участники», «Блокировки».
+//! Настройки пространства: «Основное», «Обнаружение», «Участники», «Роли», «Блокировки».
 //!
 //! Тексты — как в `spaceSettingsPanels` и `TransferOwnershipModal`
 //! оригинального веб-клиента. Права лишь решают, что показать; решает сервер.
 
+mod discovery;
 mod roles;
 
 use bs_api::{Ban, SpaceUpdate};
@@ -22,6 +23,7 @@ const DESCRIPTION_MAX: usize = 200;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Overview,
+    Discovery,
     Members,
     Roles,
     Bans,
@@ -42,10 +44,15 @@ struct Fields {
     color: String,
     description: String,
     visibility: SpaceVisibility,
+    /// Имя файла значка на сервере (пусто — нет).
+    icon: String,
+    /// Имя файла баннера на сервере (пусто — нет).
+    banner: String,
+    directory_listed: bool,
 }
 
 /// Состояние окна настроек пространства.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[allow(clippy::struct_excessive_bools, reason = "независимые флаги интерфейса")]
 pub(crate) struct SpaceSettings {
     origin: usize,
@@ -64,6 +71,11 @@ pub(crate) struct SpaceSettings {
     error: Option<String>,
     notice: Option<String>,
     roles: roles::RolesState,
+    requests: Option<Vec<bs_api::JoinRequest>>,
+    requests_requested: bool,
+    picking: Option<discovery::Picking>,
+    /// Что сейчас загружается: `false` — значок, `true` — баннер.
+    uploading: Option<bool>,
 }
 
 /// Права текущего пользователя в пространстве.
@@ -90,6 +102,9 @@ impl SpaceSettings {
             color: space.space.avatar_color.clone().unwrap_or_else(|| "mint".to_owned()),
             description: space.space.description.clone().unwrap_or_default(),
             visibility: space.space.visibility,
+            icon: space.space.icon.clone().unwrap_or_default(),
+            banner: space.space.banner.clone().unwrap_or_default(),
+            directory_listed: space.space.directory_listed,
         };
         Some(Self {
             origin,
@@ -108,6 +123,10 @@ impl SpaceSettings {
             error: None,
             notice: None,
             roles: roles::RolesState::default(),
+            requests: None,
+            requests_requested: false,
+            picking: None,
+            uploading: None,
         })
     }
 
@@ -128,6 +147,11 @@ impl SpaceSettings {
                             self.roles.reload();
                         }
                         self.error = Some(err.clone());
+                    }
+                    (SpaceOp::DecideRequest(id, _), Ok(())) => {
+                        if let Some(list) = self.requests.as_mut() {
+                            list.retain(|r| r.id != *id);
+                        }
                     }
                     (SpaceOp::Update(_), Ok(())) => {
                         self.saved = self.fields.clone();
@@ -159,12 +183,41 @@ impl SpaceSettings {
                     }
                     (
                         SpaceOp::ListBans
+                        | SpaceOp::ListJoinRequests
+                        | SpaceOp::UploadImage(..)
                         | SpaceOp::AddMemberRole(_, _)
                         | SpaceOp::RemoveMemberRole(_, _),
                         Ok(()),
                     ) => {}
                 }
             }
+            SpaceEvent::Uploaded {
+                space_id,
+                banner,
+                result,
+            } if *space_id == self.space_id => {
+                self.busy = false;
+                self.uploading = None;
+                match result {
+                    Ok(file) if *banner => self.fields.banner.clone_from(file),
+                    Ok(file) => self.fields.icon.clone_from(file),
+                    Err(err) => {
+                        let _ = err;
+                        self.error = Some(if *banner {
+                            "Не удалось загрузить баннер".to_owned()
+                        } else {
+                            "Не удалось загрузить значок".to_owned()
+                        });
+                    }
+                }
+            }
+            SpaceEvent::Requests { space_id, result } if *space_id == self.space_id => match result {
+                Ok(list) => self.requests = Some(list.clone()),
+                Err(err) => {
+                    self.requests = Some(Vec::new());
+                    self.error = Some(err.clone());
+                }
+            },
             SpaceEvent::Bans { space_id, result } if *space_id == self.space_id => match result {
                 Ok(list) => self.bans = Some(list.clone()),
                 Err(err) => {
@@ -228,6 +281,9 @@ impl SpaceSettings {
             avatar_color: Some(self.fields.color.clone()),
             description: Some(self.fields.description.trim().to_owned()),
             visibility: Some(self.fields.visibility),
+            icon: (self.fields.icon != self.saved.icon).then(|| self.fields.icon.clone()),
+            banner: (self.fields.banner != self.saved.banner).then(|| self.fields.banner.clone()),
+            directory_listed: Some(self.fields.directory_listed),
         }
     }
 }
@@ -245,6 +301,19 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut SpaceSettings, bridge: &mut 
             op: SpaceOp::ListBans,
         });
     }
+    if state.tab == Tab::Discovery
+        && !state.requests_requested
+        && rights.manage_space
+        && state.fields.visibility == SpaceVisibility::Request
+    {
+        state.requests_requested = true;
+        bridge.focus_on(state.origin);
+        bridge.request(BridgeRequest::SpaceAdmin {
+            space_id: state.space_id.clone(),
+            op: SpaceOp::ListJoinRequests,
+        });
+    }
+    discovery::drain_pick(state, bridge);
     let mut keep_open = true;
     let response = egui::Modal::new(egui::Id::unique("space_settings"))
         .frame(
@@ -268,6 +337,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut SpaceSettings, bridge: &mut 
                             ui.add_space(18.0);
                             match state.tab {
                                 Tab::Overview => overview(ui, state, rights, bridge),
+                                Tab::Discovery => discovery::show(ui, state, rights, bridge),
                                 Tab::Members => members(ui, state, rights, bridge),
                                 Tab::Roles => roles::show(ui, state, rights, bridge),
                                 Tab::Bans => bans(ui, state, bridge),
@@ -290,6 +360,9 @@ fn nav(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, keep_open: 
         });
         ui.add_space(8.0);
         let mut tabs = vec![(Tab::Overview, "Основное", Icon::Gear)];
+        if rights.manage_space {
+            tabs.push((Tab::Discovery, "Обнаружение", Icon::Compass));
+        }
         tabs.push((Tab::Members, "Участники", Icon::Users));
         if rights.manage_roles {
             tabs.push((Tab::Roles, "Роли", Icon::Gear));
@@ -338,6 +411,7 @@ fn status_lines(ui: &mut egui::Ui, state: &SpaceSettings) {
 
 fn overview(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, bridge: &mut Bridge) {
     heading(ui, "Основное");
+    discovery::appearance(ui, state, rights, bridge);
     ui.add_enabled_ui(rights.manage_space, |ui| {
         widgets::field_label(ui, "Цвет значка");
         ui.horizontal(|ui| {
@@ -351,46 +425,9 @@ fn overview(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, bridge
         });
         widgets::field_label(ui, "Название пространства");
         widgets::text_field(ui, &mut state.fields.name, "Название", NAME_MAX);
-        widgets::field_label(ui, "Видимость");
-        for (value, title, hint) in [
-            (SpaceVisibility::Private, "Приватное", "Только по ссылке-приглашению"),
-            (SpaceVisibility::Request, "По заявке", "Видно в обзоре, вступление по запросу"),
-            (SpaceVisibility::Public, "Публичное", "Видно в обзоре, вступить может любой"),
-        ] {
-            if widgets::radio_card(ui, title, hint, state.fields.visibility == value).clicked() {
-                state.fields.visibility = value;
-            }
-        }
-        widgets::field_label(ui, "Описание");
-        widgets::text_area(
-            ui,
-            &mut state.fields.description,
-            "Коротко о вашем пространстве…",
-            DESCRIPTION_MAX,
-            3,
-        );
     });
     status_lines(ui, state);
-    let dirty = state.fields != state.saved;
-    if rights.manage_space && dirty {
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            let valid = !state.fields.name.trim().is_empty();
-            if ui
-                .add_enabled(
-                    valid && !state.busy,
-                    theme::primary_button(if state.busy { "Сохранение…" } else { "Сохранить" }),
-                )
-                .clicked()
-            {
-                let op = SpaceOp::Update(state.update_patch());
-                state.request(bridge, op);
-            }
-            if ui.button("Отменить изменения").clicked() {
-                state.fields = state.saved.clone();
-            }
-        });
-    }
+    discovery::save_bar(ui, state, rights, bridge);
     if rights.owner {
         danger_zone(ui, state, bridge);
     }
@@ -807,6 +844,9 @@ mod tests {
             color: "mint".to_owned(),
             description: String::new(),
             visibility: SpaceVisibility::Private,
+            icon: String::new(),
+            banner: String::new(),
+            directory_listed: false,
         };
         SpaceSettings {
             origin: 0,
@@ -825,6 +865,10 @@ mod tests {
             error: None,
             notice: None,
             roles: roles::RolesState::default(),
+            requests: None,
+            requests_requested: false,
+            picking: None,
+            uploading: None,
         }
     }
 
@@ -862,6 +906,43 @@ mod tests {
         s.fields.name = "Новое".to_owned();
         assert!(s.apply(&admin(SpaceOp::Update(s.update_patch()), Ok(()), "s1")));
         assert_eq!(s.saved.name, "Новое");
+    }
+
+    #[test]
+    fn patch_carries_images_only_when_changed() {
+        let mut s = state();
+        assert_eq!(s.update_patch().icon, None);
+        assert_eq!(s.update_patch().banner, None);
+        s.fields.icon = "new.webp".to_owned();
+        s.fields.banner.clear();
+        s.saved.banner = "old.webp".to_owned();
+        let patch = s.update_patch();
+        assert_eq!(patch.icon.as_deref(), Some("new.webp"));
+        assert_eq!(patch.banner.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn upload_result_fills_the_form_or_reports_failure() {
+        let mut s = state();
+        s.uploading = Some(true);
+        let done = |result| SpaceEvent::Uploaded {
+            space_id: "s1".to_owned(),
+            banner: true,
+            result,
+        };
+        assert!(s.apply(&done(Err("x".to_owned()))));
+        assert_eq!(s.error.as_deref(), Some("Не удалось загрузить баннер"));
+        assert!(s.uploading.is_none());
+        assert!(s.apply(&done(Ok("b.webp".to_owned()))));
+        assert_eq!(s.fields.banner, "b.webp");
+    }
+
+    #[test]
+    fn deciding_a_request_drops_it_from_the_list() {
+        let mut s = state();
+        s.requests = Some(Vec::new());
+        assert!(s.apply(&admin(SpaceOp::DecideRequest("j1".to_owned(), true), Ok(()), "s1")));
+        assert_eq!(s.requests.as_ref().map(Vec::len), Some(0));
     }
 
     #[test]

@@ -51,7 +51,7 @@ pub use client::{ApiClient, DEFAULT_TIMEOUT, MAX_RESPONSE_BYTES, USER_AGENT};
 pub use community::{CreateSpaceRequest, ExplorePage, UpdateProfileRequest};
 pub use compose::{GifItem, GifPage, MAX_UPLOAD_CHUNK, PersonalSticker, SendMessageBody};
 pub use error::ApiError;
-pub use space_manage::{Ban, NewChannel, NewRole, RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input};
+pub use space_manage::{Ban, JoinRequest, NewChannel, NewRole, RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input};
 pub use federation::{
     AttachProofResponse, ChangePasswordRequest, ChangePasswordResponse,
     FederationCredentialRequest, FederationCredentialResponse, ReattachRequest, ReattachResponse,

@@ -546,6 +546,12 @@ pub(crate) enum SpaceOp {
     UpdateRole(String, bs_api::RoleUpdate),
     /// Удалить роль.
     DeleteRole(String),
+    /// Загрузить значок (`false`) или баннер (`true`): имя файла и содержимое.
+    UploadImage(bool, String, Vec<u8>),
+    /// Загрузить ожидающие заявки на вступление.
+    ListJoinRequests,
+    /// Решить заявку: (идентификатор, принять).
+    DecideRequest(String, bool),
     /// Выдать роль участнику: (пользователь, роль).
     AddMemberRole(String, String),
     /// Снять роль с участника: (пользователь, роль).
@@ -566,6 +572,22 @@ pub(crate) enum SpaceEvent {
         result: Result<(), String>,
         /// Обновлённое пространство.
         space: Option<Box<bs_types::SpaceWithChannelsAndMembers>>,
+    },
+    /// Картинка загружена: имя файла на сервере либо текст ошибки.
+    Uploaded {
+        /// Пространство.
+        space_id: String,
+        /// Баннер, а не значок.
+        banner: bool,
+        /// Имя файла или ошибка.
+        result: Result<String, String>,
+    },
+    /// Ожидающие заявки.
+    Requests {
+        /// Пространство.
+        space_id: String,
+        /// Список или текст ошибки.
+        result: Result<Vec<bs_api::JoinRequest>, String>,
     },
     /// Список блокировок.
     Bans {
@@ -2250,7 +2272,30 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
             .map_err(|err| space_message(&err));
         return BridgeResponse::SpaceAction(SpaceEvent::Bans { space_id, result });
     }
+    if op == SpaceOp::ListJoinRequests {
+        let result = client
+            .pending_join_requests(&space_id)
+            .await
+            .map_err(|err| space_message(&err));
+        return BridgeResponse::SpaceAction(SpaceEvent::Requests { space_id, result });
+    }
+    if let SpaceOp::UploadImage(banner, name, bytes) = &op {
+        let mime = crate::media::mime_for_name(name);
+        let result = client
+            .upload_file(name, mime, bytes, |_, _| {})
+            .await
+            .map(|attachment| attachment.filename)
+            .map_err(|err| upload_message(&err));
+        return BridgeResponse::SpaceAction(SpaceEvent::Uploaded {
+            space_id,
+            banner: *banner,
+            result,
+        });
+    }
     let done = match &op {
+        SpaceOp::DecideRequest(id, accept) => {
+            client.decide_join_request(&space_id, id, *accept).await
+        }
         SpaceOp::Update(patch) => client.update_space(&space_id, patch).await,
         SpaceOp::Delete => client.delete_space(&space_id).await,
         SpaceOp::Kick(user) => client.leave_space(&space_id, user).await,
@@ -2271,9 +2316,13 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
         SpaceOp::RemoveMemberRole(user, role) => {
             client.remove_member_role(&space_id, user, role).await
         }
-        SpaceOp::ListBans => Ok(()),
+        SpaceOp::ListBans | SpaceOp::ListJoinRequests | SpaceOp::UploadImage(..) => Ok(()),
     };
-    let refresh = done.is_ok() && !matches!(op, SpaceOp::Delete | SpaceOp::Unban(_));
+    let refresh = done.is_ok()
+        && !matches!(
+            op,
+            SpaceOp::Delete | SpaceOp::Unban(_) | SpaceOp::DecideRequest(_, false)
+        );
     let space = if refresh {
         client.space_full(&space_id).await.ok().map(Box::new)
     } else {

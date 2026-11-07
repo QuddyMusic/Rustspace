@@ -38,9 +38,31 @@ pub struct SpaceUpdate {
     /// Описание.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// `public` или `private`.
+    /// `public`, `request` или `private`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<bs_types::SpaceVisibility>,
+    /// Имя загруженного файла значка; пустая строка — убрать.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// Имя загруженного файла баннера; пустая строка — убрать.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner: Option<String>,
+    /// Показывать во внешнем каталоге.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory_listed: Option<bool>,
+}
+
+/// Заявка на вступление.
+pub use bs_types::JoinRequest;
+
+#[derive(Debug, Deserialize)]
+struct JoinRequestList {
+    requests: Vec<JoinRequest>,
+}
+
+#[derive(Debug, Serialize)]
+struct DecisionBody {
+    action: &'static str,
 }
 
 /// Тело `POST /api/spaces/:id/roles`.
@@ -303,6 +325,36 @@ impl ApiClient {
         let path = format!("/api/spaces/{space_id}/transfer-ownership");
         self.patch_json::<serde_json::Value, _>(&path, &OwnerBody { new_owner_id: new_owner })
             .await?;
+        Ok(())
+    }
+
+    /// `GET /api/spaces/:id/join-requests` — ожидающие заявки.
+    ///
+    /// # Errors
+    /// Нет права `MANAGE_SPACE`.
+    pub async fn pending_join_requests(
+        &self,
+        space_id: &str,
+    ) -> Result<Vec<JoinRequest>, ApiError> {
+        let path = format!("/api/spaces/{space_id}/join-requests?status=pending");
+        Ok(self.get_json::<JoinRequestList>(&path).await?.requests)
+    }
+
+    /// `PATCH /api/spaces/:id/join-requests/:requestId` — принять или отклонить.
+    ///
+    /// # Errors
+    /// Нет права, заявка уже рассмотрена.
+    pub async fn decide_join_request(
+        &self,
+        space_id: &str,
+        request_id: &str,
+        accept: bool,
+    ) -> Result<(), ApiError> {
+        let path = format!("/api/spaces/{space_id}/join-requests/{request_id}");
+        let body = DecisionBody {
+            action: if accept { "accept" } else { "decline" },
+        };
+        self.patch_json::<serde_json::Value, _>(&path, &body).await?;
         Ok(())
     }
 
