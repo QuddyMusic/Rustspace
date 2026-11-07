@@ -114,9 +114,16 @@ pub(crate) struct SpaceRights {
     pub(crate) invite: bool,
     /// Менять настройки пространства.
     pub(crate) manage_space: bool,
+    /// Исключать или блокировать участников.
+    pub(crate) moderate: bool,
 }
 
 impl SpaceRights {
+    /// Есть ли смысл открывать настройки пространства.
+    fn can_open_settings(self) -> bool {
+        self.owner || self.manage_space || self.moderate
+    }
+
     /// Права по полям пространства: владелец может всё, остальным — маска
     /// `myPermissions`.
     fn of(space: &bs_types::SpaceWithChannelsAndMembers, me: &str) -> Self {
@@ -133,6 +140,7 @@ impl SpaceRights {
             manage_channels: has(Permissions::MANAGE_CHANNELS),
             invite: has(Permissions::CREATE_INVITE),
             manage_space: has(Permissions::MANAGE_SPACE),
+            moderate: has(Permissions::KICK_MEMBERS) || has(Permissions::BAN_MEMBERS),
         }
     }
 }
@@ -633,21 +641,31 @@ fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) 
                 .sense(Sense::click()),
             )
             .context_menu(|ui| space_menu(ui, space, nav));
-            if space.rights.invite {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.add_space(10.0);
-                    if ui
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(10.0);
+                if space.rights.invite
+                    && ui
                         .add(widgets::flat_icon(Icon::Users, 20.0, theme::TEXT_MUTED))
                         .on_hover_text("Пригласить людей")
                         .clicked()
-                    {
-                        *nav = Some(Nav::Invite {
-                            origin: space.origin,
-                            space_id: space.id.clone(),
-                        });
-                    }
-                });
-            }
+                {
+                    *nav = Some(Nav::Invite {
+                        origin: space.origin,
+                        space_id: space.id.clone(),
+                    });
+                }
+                if space.rights.can_open_settings()
+                    && ui
+                        .add(widgets::flat_icon(Icon::Gear, 20.0, theme::TEXT_MUTED))
+                        .on_hover_text("Настройки пространства")
+                        .clicked()
+                {
+                    *nav = Some(Nav::SpaceSettings {
+                        origin: space.origin,
+                        space_id: space.id.clone(),
+                    });
+                }
+            });
         });
 }
 
@@ -685,6 +703,13 @@ fn space_menu(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
         .collect();
     if space.rights.invite && ui.button("Пригласить людей").clicked() {
         *nav = Some(Nav::Invite {
+            origin: space.origin,
+            space_id: space.id.clone(),
+        });
+        ui.close();
+    }
+    if space.rights.can_open_settings() && ui.button("Настройки пространства").clicked() {
+        *nav = Some(Nav::SpaceSettings {
             origin: space.origin,
             space_id: space.id.clone(),
         });
@@ -753,6 +778,13 @@ enum Nav {
     },
     /// Открыть окно над пространством.
     SpaceDialog(super::space_dialogs::SpaceDialog),
+    /// Настройки пространства.
+    SpaceSettings {
+        /// Инстанс.
+        origin: usize,
+        /// Пространство.
+        space_id: String,
+    },
     /// Создать ссылку-приглашение и скопировать её.
     Invite {
         origin: usize,
@@ -793,6 +825,7 @@ pub(crate) struct ChatScreen {
     create_space: Option<CreateSpaceForm>,
     /// Окно над пространством (вход, новый канал, выход…).
     space_dialog: Option<super::space_dialogs::SpaceDialog>,
+    space_settings: Option<super::space_settings::SpaceSettings>,
     /// Открытые настройки.
     settings: Option<SettingsState>,
     /// Картинка, открытая на весь экран (значение поля).
@@ -960,6 +993,10 @@ impl ChatScreen {
             Nav::Channel(selected) => self.open_channel(selected),
             Nav::CreateSpace => self.create_space = Some(CreateSpaceForm::default()),
             Nav::SpaceDialog(dialog) => self.space_dialog = Some(dialog),
+            Nav::SpaceSettings { origin, space_id } => {
+                self.space_settings =
+                    super::space_settings::SpaceSettings::open(bridge, origin, &space_id);
+            }
             Nav::Invite { origin, space_id } => {
                 bridge.focus_on(origin);
                 bridge.request(BridgeRequest::SpaceInvite(space_id));
@@ -1036,6 +1073,7 @@ impl ChatScreen {
         if let Some(opened) = bridge.take_opened_space() {
             self.create_space = None;
             self.space_dialog = None;
+            self.space_settings = None;
             self.apply_nav(Nav::Space(opened), &items, bridge, &ctx);
             self.route_actions(bridge, &ctx);
         }
@@ -1127,6 +1165,11 @@ impl ChatScreen {
         {
             self.space_dialog = None;
         }
+        if let Some(settings) = self.space_settings.as_mut()
+            && !super::space_settings::show(&ctx, settings, bridge)
+        {
+            self.space_settings = None;
+        }
         self.show_toast(&ctx, now);
         if let Some(nav) = nav {
             self.apply_nav(nav, &items, bridge, &ctx);
@@ -1136,7 +1179,7 @@ impl ChatScreen {
 
     /// Итоги приглашений, создания каналов, входа и выхода.
     fn take_space_events(&mut self, bridge: &mut Bridge, ctx: &egui::Context, now: f64) {
-        use crate::bridge::SpaceEvent;
+        use crate::bridge::{SpaceEvent, SpaceOp};
         for (origin, event) in bridge.take_space_events() {
             match &event {
                 SpaceEvent::Invite { result, .. } => {
@@ -1154,8 +1197,19 @@ impl ChatScreen {
                 SpaceEvent::Left {
                     space_id,
                     result: Ok(()),
+                }
+                | SpaceEvent::Admin {
+                    space_id,
+                    op: SpaceOp::Delete,
+                    result: Ok(()),
+                    ..
                 } => {
-                    self.toast = Some(("Вы покинули пространство".to_owned(), now + 3.0));
+                    let text = if matches!(event, SpaceEvent::Left { .. }) {
+                        "Вы покинули пространство"
+                    } else {
+                        "Пространство удалено"
+                    };
+                    self.toast = Some((text.to_owned(), now + 3.0));
                     if self
                         .active_space
                         .as_ref()
@@ -1173,6 +1227,11 @@ impl ChatScreen {
                 && !dialog.apply(&event)
             {
                 self.space_dialog = None;
+            }
+            if let Some(settings) = self.space_settings.as_mut()
+                && !settings.apply(&event)
+            {
+                self.space_settings = None;
             }
         }
     }

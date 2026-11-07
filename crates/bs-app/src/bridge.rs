@@ -218,6 +218,13 @@ pub(crate) enum BridgeRequest {
         /// Свой id.
         user_id: String,
     },
+    /// Действие администратора над пространством.
+    SpaceAdmin {
+        /// Пространство.
+        space_id: String,
+        /// Что сделать.
+        op: SpaceOp,
+    },
     /// Создать канал.
     CreateChannel {
         /// Пространство.
@@ -516,9 +523,47 @@ pub(crate) enum CallEvent {
     },
 }
 
+/// Административное действие над пространством.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SpaceOp {
+    /// Изменить поля.
+    Update(bs_api::SpaceUpdate),
+    /// Удалить пространство.
+    Delete,
+    /// Исключить участника.
+    Kick(String),
+    /// Заблокировать участника с причиной.
+    Ban(String, Option<String>),
+    /// Снять блокировку.
+    Unban(String),
+    /// Передать владение.
+    Transfer(String),
+    /// Загрузить список блокировок.
+    ListBans,
+}
+
 /// Итог действия над пространством.
 #[derive(Debug)]
 pub(crate) enum SpaceEvent {
+    /// Итог административного действия; после успеха сервер присылает
+    /// свежий снимок пространства (кроме удаления и списка блокировок).
+    Admin {
+        /// Пространство.
+        space_id: String,
+        /// Что делали.
+        op: SpaceOp,
+        /// Итог.
+        result: Result<(), String>,
+        /// Обновлённое пространство.
+        space: Option<Box<bs_types::SpaceWithChannelsAndMembers>>,
+    },
+    /// Список блокировок.
+    Bans {
+        /// Пространство.
+        space_id: String,
+        /// Список или текст ошибки.
+        result: Result<Vec<bs_api::Ban>, String>,
+    },
     /// Код приглашения (или ошибка).
     Invite {
         /// Код или текст ошибки.
@@ -1472,14 +1517,30 @@ impl Session {
 
     /// Запоминает итог действия над пространством; выход убирает его из кэша.
     fn apply_space_event(&mut self, event: SpaceEvent) {
-        if let SpaceEvent::Left {
-            space_id,
-            result: Ok(()),
-        } = &event
-            && let Some(cache) = self.cache.as_mut()
-        {
-            cache.remove_space(space_id);
-            self.explore = None;
+        match &event {
+            SpaceEvent::Left {
+                space_id,
+                result: Ok(()),
+            }
+            | SpaceEvent::Admin {
+                space_id,
+                op: SpaceOp::Delete,
+                result: Ok(()),
+                ..
+            } => {
+                if let Some(cache) = self.cache.as_mut() {
+                    cache.remove_space(space_id);
+                }
+                self.explore = None;
+            }
+            SpaceEvent::Admin {
+                space: Some(space), ..
+            } => {
+                if let Some(cache) = self.cache.as_mut() {
+                    cache.upsert_space((**space).clone());
+                }
+            }
+            _ => {}
         }
         self.space_in.push(event);
     }
@@ -2170,6 +2231,40 @@ async fn set_profile_image(
     }
 }
 
+/// Выполняет административное действие и, если нужно, перечитывает пространство.
+async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) -> BridgeResponse {
+    if op == SpaceOp::ListBans {
+        let result = client
+            .list_bans(&space_id)
+            .await
+            .map_err(|err| space_message(&err));
+        return BridgeResponse::SpaceAction(SpaceEvent::Bans { space_id, result });
+    }
+    let done = match &op {
+        SpaceOp::Update(patch) => client.update_space(&space_id, patch).await,
+        SpaceOp::Delete => client.delete_space(&space_id).await,
+        SpaceOp::Kick(user) => client.leave_space(&space_id, user).await,
+        SpaceOp::Ban(user, reason) => {
+            client.ban_member(&space_id, user, reason.as_deref()).await
+        }
+        SpaceOp::Unban(user) => client.unban_member(&space_id, user).await,
+        SpaceOp::Transfer(user) => client.transfer_ownership(&space_id, user).await,
+        SpaceOp::ListBans => Ok(()),
+    };
+    let refresh = done.is_ok() && !matches!(op, SpaceOp::Delete | SpaceOp::Unban(_));
+    let space = if refresh {
+        client.space_full(&space_id).await.ok().map(Box::new)
+    } else {
+        None
+    };
+    BridgeResponse::SpaceAction(SpaceEvent::Admin {
+        space_id,
+        op,
+        result: done.map_err(|err| space_message(&err)),
+        space,
+    })
+}
+
 /// Выполняет действие с инвайтом.
 async fn invite_op(client: &bs_api::ApiClient, op: InviteOp) -> Result<String, String> {
     let fail = |err: bs_api::ApiError| upload_message(&err);
@@ -2536,6 +2631,7 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                 .map_err(|err| space_message(&err));
             BridgeResponse::SpaceAction(SpaceEvent::Left { space_id, result })
         }
+        BridgeRequest::SpaceAdmin { space_id, op } => space_admin(client, space_id, op).await,
         BridgeRequest::CreateChannel { space_id, channel } => {
             let result = client
                 .create_channel(&space_id, &channel)

@@ -25,6 +25,55 @@ pub struct NewChannel {
     pub category_id: Option<String>,
 }
 
+/// Тело `PATCH /api/spaces/:id`; пустые поля не отправляются.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceUpdate {
+    /// Новое имя.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Цвет значка.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_color: Option<String>,
+    /// Описание.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// `public` или `private`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<bs_types::SpaceVisibility>,
+}
+
+/// Запись списка блокировок.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ban {
+    /// Заблокированный.
+    pub user_id: String,
+    /// Причина.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Профиль заблокированного.
+    #[serde(default)]
+    pub user: Option<bs_types::User>,
+    /// Профиль модератора.
+    #[serde(default)]
+    pub moderator: Option<bs_types::User>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BanBody<'a> {
+    user_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnerBody<'a> {
+    new_owner_id: &'a str,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InviteCode {
@@ -124,6 +173,71 @@ impl ApiClient {
     pub async fn leave_space(&self, space_id: &str, user_id: &str) -> Result<(), ApiError> {
         let path = format!("/api/spaces/{space_id}/members/{user_id}");
         self.delete_json::<serde_json::Value>(&path).await?;
+        Ok(())
+    }
+
+    /// `PATCH /api/spaces/:id` — изменить пространство.
+    ///
+    /// # Errors
+    /// Нет права `MANAGE_SPACE` или неверные поля.
+    pub async fn update_space(&self, space_id: &str, update: &SpaceUpdate) -> Result<(), ApiError> {
+        let path = format!("/api/spaces/{space_id}");
+        self.patch_json::<serde_json::Value, _>(&path, update).await?;
+        Ok(())
+    }
+
+    /// `DELETE /api/spaces/:id` — удалить пространство (владелец).
+    ///
+    /// # Errors
+    /// Не владелец или сеть.
+    pub async fn delete_space(&self, space_id: &str) -> Result<(), ApiError> {
+        let path = format!("/api/spaces/{space_id}");
+        self.delete_json::<serde_json::Value>(&path).await?;
+        Ok(())
+    }
+
+    /// `GET /api/spaces/:id/bans` — список блокировок.
+    ///
+    /// # Errors
+    /// Нет права `BAN_MEMBERS`.
+    pub async fn list_bans(&self, space_id: &str) -> Result<Vec<Ban>, ApiError> {
+        self.get_json(&format!("/api/spaces/{space_id}/bans")).await
+    }
+
+    /// `POST /api/spaces/:id/bans` — заблокировать участника.
+    ///
+    /// # Errors
+    /// Нет права или цель выше по роли.
+    pub async fn ban_member(
+        &self,
+        space_id: &str,
+        user_id: &str,
+        reason: Option<&str>,
+    ) -> Result<(), ApiError> {
+        let path = format!("/api/spaces/{space_id}/bans");
+        self.post_json::<serde_json::Value, _>(&path, &BanBody { user_id, reason })
+            .await?;
+        Ok(())
+    }
+
+    /// `DELETE /api/spaces/:id/bans/:uid` — разблокировать.
+    ///
+    /// # Errors
+    /// Нет права `BAN_MEMBERS`.
+    pub async fn unban_member(&self, space_id: &str, user_id: &str) -> Result<(), ApiError> {
+        let path = format!("/api/spaces/{space_id}/bans/{user_id}");
+        self.delete_json::<serde_json::Value>(&path).await?;
+        Ok(())
+    }
+
+    /// `PATCH /api/spaces/:id/transfer-ownership` — передать владение.
+    ///
+    /// # Errors
+    /// Не владелец, цель не участник.
+    pub async fn transfer_ownership(&self, space_id: &str, new_owner: &str) -> Result<(), ApiError> {
+        let path = format!("/api/spaces/{space_id}/transfer-ownership");
+        self.patch_json::<serde_json::Value, _>(&path, &OwnerBody { new_owner_id: new_owner })
+            .await?;
         Ok(())
     }
 
