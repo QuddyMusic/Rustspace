@@ -540,6 +540,16 @@ pub(crate) enum SpaceOp {
     Transfer(String),
     /// Загрузить список блокировок.
     ListBans,
+    /// Создать роль.
+    CreateRole(bs_api::NewRole),
+    /// Изменить или переместить роль.
+    UpdateRole(String, bs_api::RoleUpdate),
+    /// Удалить роль.
+    DeleteRole(String),
+    /// Выдать роль участнику: (пользователь, роль).
+    AddMemberRole(String, String),
+    /// Снять роль с участника: (пользователь, роль).
+    RemoveMemberRole(String, String),
 }
 
 /// Итог действия над пространством.
@@ -2249,6 +2259,18 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
         }
         SpaceOp::Unban(user) => client.unban_member(&space_id, user).await,
         SpaceOp::Transfer(user) => client.transfer_ownership(&space_id, user).await,
+        SpaceOp::CreateRole(role) => client.create_role(&space_id, role).await.map(|_| ()),
+        SpaceOp::UpdateRole(role_id, update) => client
+            .update_role(&space_id, role_id, update)
+            .await
+            .map(|_| ()),
+        SpaceOp::DeleteRole(role_id) => client.delete_role(&space_id, role_id).await,
+        SpaceOp::AddMemberRole(user, role) => {
+            client.add_member_role(&space_id, user, role).await
+        }
+        SpaceOp::RemoveMemberRole(user, role) => {
+            client.remove_member_role(&space_id, user, role).await
+        }
         SpaceOp::ListBans => Ok(()),
     };
     let refresh = done.is_ok() && !matches!(op, SpaceOp::Delete | SpaceOp::Unban(_));

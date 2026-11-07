@@ -43,6 +43,71 @@ pub struct SpaceUpdate {
     pub visibility: Option<bs_types::SpaceVisibility>,
 }
 
+/// Тело `POST /api/spaces/:id/roles`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewRole {
+    /// Название.
+    pub name: String,
+    /// Цвет `#rrggbb`.
+    pub color: String,
+    /// Права, decimal string; без поля сервер берёт базовые.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<String>,
+}
+
+/// Сторона якоря при перемещении роли.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoleSide {
+    /// Выше якорной роли.
+    Above,
+    /// Ниже якорной роли.
+    Below,
+}
+
+/// Тело `PATCH /api/spaces/:id/roles/:roleId`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleUpdate {
+    /// Новое название.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Новый цвет.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Новые права, decimal string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<String>,
+    /// Версия прав, с которой начато редактирование (защита от гонки).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions_version: Option<String>,
+    /// Поставить выше этой роли.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub above: Option<String>,
+    /// Поставить ниже этой роли.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub below: Option<String>,
+}
+
+impl RoleUpdate {
+    /// Перемещение рядом с якорной ролью.
+    #[must_use]
+    pub fn moved(anchor: &str, side: RoleSide) -> Self {
+        let mut update = Self::default();
+        match side {
+            RoleSide::Above => update.above = Some(anchor.to_owned()),
+            RoleSide::Below => update.below = Some(anchor.to_owned()),
+        }
+        update
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RoleIdBody<'a> {
+    role_id: &'a str,
+}
+
 /// Запись списка блокировок.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -238,6 +303,74 @@ impl ApiClient {
         let path = format!("/api/spaces/{space_id}/transfer-ownership");
         self.patch_json::<serde_json::Value, _>(&path, &OwnerBody { new_owner_id: new_owner })
             .await?;
+        Ok(())
+    }
+
+    /// `POST /api/spaces/:id/roles` — создать роль.
+    ///
+    /// # Errors
+    /// Нет `MANAGE_ROLES`, занято имя, нарушена иерархия или права, которых нет у вас.
+    pub async fn create_role(
+        &self,
+        space_id: &str,
+        role: &NewRole,
+    ) -> Result<bs_types::Role, ApiError> {
+        self.post_json(&format!("/api/spaces/{space_id}/roles"), role)
+            .await
+    }
+
+    /// `PATCH /api/spaces/:id/roles/:roleId` — изменить или переместить роль.
+    ///
+    /// # Errors
+    /// См. [`Self::create_role`]; плюс `role_permissions_conflict`.
+    pub async fn update_role(
+        &self,
+        space_id: &str,
+        role_id: &str,
+        update: &RoleUpdate,
+    ) -> Result<bs_types::Role, ApiError> {
+        self.patch_json(&format!("/api/spaces/{space_id}/roles/{role_id}"), update)
+            .await
+    }
+
+    /// `DELETE /api/spaces/:id/roles/:roleId` — удалить роль.
+    ///
+    /// # Errors
+    /// Нет права, иерархия, `@everyone` удалить нельзя.
+    pub async fn delete_role(&self, space_id: &str, role_id: &str) -> Result<(), ApiError> {
+        self.delete_json::<serde_json::Value>(&format!("/api/spaces/{space_id}/roles/{role_id}"))
+            .await?;
+        Ok(())
+    }
+
+    /// `POST /api/spaces/:id/members/:uid/roles` — выдать роль участнику.
+    ///
+    /// # Errors
+    /// Нет права или иерархия.
+    pub async fn add_member_role(
+        &self,
+        space_id: &str,
+        user_id: &str,
+        role_id: &str,
+    ) -> Result<(), ApiError> {
+        let path = format!("/api/spaces/{space_id}/members/{user_id}/roles");
+        self.post_json::<serde_json::Value, _>(&path, &RoleIdBody { role_id })
+            .await?;
+        Ok(())
+    }
+
+    /// `DELETE /api/spaces/:id/members/:uid/roles/:roleId` — снять роль.
+    ///
+    /// # Errors
+    /// Нет права или иерархия.
+    pub async fn remove_member_role(
+        &self,
+        space_id: &str,
+        user_id: &str,
+        role_id: &str,
+    ) -> Result<(), ApiError> {
+        let path = format!("/api/spaces/{space_id}/members/{user_id}/roles/{role_id}");
+        self.delete_json::<serde_json::Value>(&path).await?;
         Ok(())
     }
 

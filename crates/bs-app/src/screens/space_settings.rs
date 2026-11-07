@@ -3,8 +3,10 @@
 //! Тексты — как в `spaceSettingsPanels` и `TransferOwnershipModal`
 //! оригинального веб-клиента. Права лишь решают, что показать; решает сервер.
 
+mod roles;
+
 use bs_api::{Ban, SpaceUpdate};
-use bs_permissions::{Permissions, has_permission_bit, parse_permission_string};
+use bs_permissions::{Permissions, can_manage_role_at, has_permission_bit, parse_permission_string};
 use bs_types::SpaceVisibility;
 use egui::{Align, CornerRadius, Layout, Margin, RichText};
 
@@ -21,6 +23,7 @@ const DESCRIPTION_MAX: usize = 200;
 enum Tab {
     Overview,
     Members,
+    Roles,
     Bans,
 }
 
@@ -60,6 +63,7 @@ pub(crate) struct SpaceSettings {
     busy: bool,
     error: Option<String>,
     notice: Option<String>,
+    roles: roles::RolesState,
 }
 
 /// Права текущего пользователя в пространстве.
@@ -70,6 +74,11 @@ struct Rights {
     manage_space: bool,
     kick: bool,
     ban: bool,
+    manage_roles: bool,
+    /// Все права текущего пользователя (владелец — все).
+    perms: Permissions,
+    /// Позиция высшей роли (владелец — наивысшая).
+    top: i64,
 }
 
 impl SpaceSettings {
@@ -98,6 +107,7 @@ impl SpaceSettings {
             busy: false,
             error: None,
             notice: None,
+            roles: roles::RolesState::default(),
         })
     }
 
@@ -113,7 +123,12 @@ impl SpaceSettings {
                 self.busy = false;
                 match (op, result) {
                     (SpaceOp::Delete, Ok(())) => return false,
-                    (_, Err(err)) => self.error = Some(err.clone()),
+                    (op, Err(err)) => {
+                        if matches!(op, SpaceOp::UpdateRole(_, _)) && err.starts_with("Кто-то другой") {
+                            self.roles.reload();
+                        }
+                        self.error = Some(err.clone());
+                    }
                     (SpaceOp::Update(_), Ok(())) => {
                         self.saved = self.fields.clone();
                         self.notice = Some("Настройки сохранены".to_owned());
@@ -134,7 +149,20 @@ impl SpaceSettings {
                             bans.retain(|b| b.user_id != *user);
                         }
                     }
-                    (SpaceOp::ListBans, Ok(())) => {}
+                    (SpaceOp::UpdateRole(_, _), Ok(())) => {
+                        self.roles.reload();
+                        self.notice = Some("Роль сохранена".to_owned());
+                    }
+                    (SpaceOp::DeleteRole(_), Ok(())) => self.roles.closed(),
+                    (SpaceOp::CreateRole(_), Ok(())) => {
+                        self.notice = Some("Роль создана. Настройте её ниже.".to_owned());
+                    }
+                    (
+                        SpaceOp::ListBans
+                        | SpaceOp::AddMemberRole(_, _)
+                        | SpaceOp::RemoveMemberRole(_, _),
+                        Ok(()),
+                    ) => {}
                 }
             }
             SpaceEvent::Bans { space_id, result } if *space_id == self.space_id => match result {
@@ -168,6 +196,18 @@ impl SpaceSettings {
             manage_space: has(Permissions::MANAGE_SPACE),
             kick: has(Permissions::KICK_MEMBERS),
             ban: has(Permissions::BAN_MEMBERS),
+            manage_roles: has(Permissions::MANAGE_ROLES),
+            perms: if owner { Permissions::all() } else { bits },
+            top: if owner {
+                i64::MAX
+            } else {
+                space
+                    .members
+                    .iter()
+                    .find(|m| m.user.id == cache.me().id)
+                    .and_then(|m| m.roles.iter().map(|r| r.position).max())
+                    .unwrap_or(0)
+            },
         })
     }
 
@@ -229,6 +269,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut SpaceSettings, bridge: &mut 
                             match state.tab {
                                 Tab::Overview => overview(ui, state, rights, bridge),
                                 Tab::Members => members(ui, state, rights, bridge),
+                                Tab::Roles => roles::show(ui, state, rights, bridge),
                                 Tab::Bans => bans(ui, state, bridge),
                             }
                             ui.add_space(16.0);
@@ -250,6 +291,9 @@ fn nav(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, keep_open: 
         ui.add_space(8.0);
         let mut tabs = vec![(Tab::Overview, "Основное", Icon::Gear)];
         tabs.push((Tab::Members, "Участники", Icon::Users));
+        if rights.manage_roles {
+            tabs.push((Tab::Roles, "Роли", Icon::Gear));
+        }
         if rights.ban {
             tabs.push((Tab::Bans, "Блокировки", Icon::User));
         }
@@ -477,6 +521,8 @@ struct Row {
     name: String,
     username: String,
     roles: Vec<String>,
+    role_ids: Vec<String>,
+    top: i64,
     owner: bool,
     me: bool,
 }
@@ -499,6 +545,8 @@ fn members(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, bridge:
                         .filter(|r| r.is_everyone != Some(true))
                         .map(|r| r.name.clone())
                         .collect(),
+                    role_ids: m.roles.iter().map(|r| r.id.clone()).collect(),
+                    top: m.roles.iter().map(|r| r.position).max().unwrap_or(0),
                     owner: m.user.id == s.space.owner_id,
                     me: m.user.id == me,
                 })
@@ -512,8 +560,22 @@ fn members(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, bridge:
     widgets::section_label(ui, &format!("Участники ({})", rows.len()));
     ui.add_space(6.0);
     status_lines(ui, state);
+    let assignable: Vec<(String, String, i64)> = bridge
+        .cache_at(state.origin)
+        .and_then(|c| c.space(&state.space_id))
+        .map(|s| {
+            let mut list: Vec<_> = s
+                .roles
+                .iter()
+                .filter(|r| r.is_everyone != Some(true))
+                .map(|r| (r.id.clone(), r.name.clone(), r.position))
+                .collect();
+            list.sort_by_key(|(_, _, position)| std::cmp::Reverse(*position));
+            list
+        })
+        .unwrap_or_default();
     for row in &rows {
-        member_row(ui, state, rights, bridge, row);
+        member_row(ui, state, rights, bridge, row, &assignable);
         ui.add_space(4.0);
     }
 }
@@ -524,6 +586,7 @@ fn member_row(
     rights: Rights,
     bridge: &mut Bridge,
     row: &Row,
+    assignable: &[(String, String, i64)],
 ) {
     egui::Frame::new()
         .fill(theme::BG_RAIL)
@@ -559,6 +622,12 @@ fn member_row(
                     if rights.kick && ui.button("Исключить").clicked() {
                         state.confirm = Some(Confirm::Kick(row.id.clone()));
                     }
+                    let outranks = rights.top > row.top || rights.perms.contains(Permissions::ADMINISTRATOR);
+                    if rights.manage_roles && outranks {
+                        ui.menu_button("Роли", |ui| {
+                            member_roles_menu(ui, state, rights, bridge, row, assignable);
+                        });
+                    }
                 });
             });
             let pending = state.confirm.clone();
@@ -572,6 +641,36 @@ fn member_row(
                 _ => {}
             }
         });
+}
+
+fn member_roles_menu(
+    ui: &mut egui::Ui,
+    state: &mut SpaceSettings,
+    rights: Rights,
+    bridge: &mut Bridge,
+    row: &Row,
+    assignable: &[(String, String, i64)],
+) {
+    if assignable.is_empty() {
+        ui.label(RichText::new("Ролей пока нет").color(theme::TEXT_MUTED));
+    }
+    for (id, name, position) in assignable {
+        let allowed = can_manage_role_at(rights.top, *position, rights.perms);
+        let mut has = row.role_ids.contains(id);
+        let was = has;
+        if ui
+            .add_enabled(allowed && !state.busy, egui::Checkbox::new(&mut has, name.as_str()))
+            .changed()
+            && has != was
+        {
+            let op = if has {
+                SpaceOp::AddMemberRole(row.id.clone(), id.clone())
+            } else {
+                SpaceOp::RemoveMemberRole(row.id.clone(), id.clone())
+            };
+            state.request(bridge, op);
+        }
+    }
 }
 
 fn confirm_box(
@@ -725,6 +824,7 @@ mod tests {
             busy: true,
             error: None,
             notice: None,
+            roles: roles::RolesState::default(),
         }
     }
 

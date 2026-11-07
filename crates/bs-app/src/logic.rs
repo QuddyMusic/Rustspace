@@ -122,6 +122,32 @@ pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String
         }
         Some("join_request_pending") => "Заявка на вступление уже отправлена",
         Some("invite_not_found" | "invalid_invite") => "Приглашение не найдено или устарело",
+        Some("role_name_taken") => "Роль с таким названием уже существует.",
+        Some("role_hierarchy") => {
+            "Это можно делать только с участниками и ролями ниже вашей самой высокой роли."
+        }
+        Some("role_permissions_conflict") => {
+            "Кто-то другой изменил права этой роли. Проверьте их и сохраните ещё раз."
+        }
+        Some("permissions_invalid") => "Недопустимое значение прав.",
+        Some("role_name_required") => "Укажите название роли.",
+        Some("cannot_change_own_roles") => "Вы не можете менять собственные роли.",
+        Some("everyone_role_not_assignable") => {
+            "Роль @everyone действует для всех, её нельзя назначить."
+        }
+        Some("everyone_role_not_deletable") => "Роль @everyone нельзя удалить.",
+        Some("role_not_in_space") => "Эта роль не принадлежит этому пространству.",
+        Some("member_not_found") => "Участник не найден.",
+        Some("space_owner_only") => "Это может сделать только владелец пространства.",
+        Some("cannot_grant_unowned_permissions") => {
+            "Нельзя выдать права, которых нет у вас самих."
+        }
+        Some("cannot_deny_unowned_permissions") => {
+            "Нельзя запретить права, которых нет у вас самих."
+        }
+        Some("cannot_change_unowned_permissions") => {
+            "Изменять можно только те права, которые есть у вас самих."
+        }
         Some("owner_cannot_leave") => "Владелец не может покинуть пространство",
         _ => "",
     };
