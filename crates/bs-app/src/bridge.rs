@@ -136,6 +136,8 @@ pub(crate) struct IssuedCredential {
 pub(crate) enum BridgeRequest {
     /// Список друзей.
     Friends,
+    /// Настройки уведомлений этого инстанса.
+    NotificationSettings,
     /// Список заявок в друзья.
     FriendRequests,
     /// Поиск пользователей по подстроке.
@@ -546,6 +548,8 @@ pub(crate) enum SpaceOp {
     UpdateRole(String, bs_api::RoleUpdate),
     /// Удалить роль.
     DeleteRole(String),
+    /// Изменить настройку уведомлений пространства (`None`) или канала.
+    Notify(Option<String>, bs_types::UpdateNotificationSettingRequest),
     /// Имя и тема канала.
     UpdateChannel(String, bs_api::ChannelUpdate),
     /// Удалить канал.
@@ -604,6 +608,13 @@ pub(crate) enum SpaceEvent {
         scope: bs_api::OverrideScope,
         /// Список или текст ошибки.
         result: Result<Vec<bs_api::PermissionOverride>, String>,
+    },
+    /// Итог изменения настроек уведомлений.
+    Notified {
+        /// Пространство.
+        space_id: String,
+        /// Новая настройка или текст ошибки.
+        result: Result<bs_types::NotificationSetting, String>,
     },
     /// Ожидающие заявки.
     Requests {
@@ -700,6 +711,8 @@ pub(crate) enum ComposeEvent {
 pub(crate) enum BridgeResponse {
     /// Пришли друзья.
     Friends(Vec<bs_types::Friend>),
+    /// Пришли настройки уведомлений.
+    NotificationSettings(Vec<bs_types::NotificationSetting>),
     /// Пришли заявки в друзья.
     FriendRequests(Vec<bs_types::FriendRequest>),
     /// Пришли результаты поиска пользователей.
@@ -1041,6 +1054,7 @@ impl Session {
                 self.ready = true;
                 self.session_lost = false;
                 self.last_error = None;
+                self.request(BridgeRequest::NotificationSettings);
             }
             BridgeEvent::Server { event } => self.apply_server_event(*event),
             BridgeEvent::State { state } => self.connection = state,
@@ -1588,6 +1602,14 @@ impl Session {
                 }
                 self.explore = None;
             }
+            SpaceEvent::Notified {
+                result: Ok(setting),
+                ..
+            } => {
+                if let Some(cache) = self.cache.as_mut() {
+                    cache.apply_notification_setting(setting.clone());
+                }
+            }
             SpaceEvent::Admin {
                 space: Some(space), ..
             } => {
@@ -1798,6 +1820,7 @@ impl Session {
     }
 
     /// Применяет ответ REST-запроса.
+    #[allow(clippy::too_many_lines, reason = "по ветке на каждый вид ответа; разобьём при рефакторинге")]
     fn handle_response(&mut self, response: BridgeResponse) {
         match response {
             BridgeResponse::History { channel_id, items } => {
@@ -1815,6 +1838,11 @@ impl Session {
             BridgeResponse::Friends(friends) => {
                 self.friends = friends;
                 self.social_error = None;
+            }
+            BridgeResponse::NotificationSettings(list) => {
+                if let Some(cache) = self.cache.as_mut() {
+                    cache.set_notification_settings(list);
+                }
             }
             BridgeResponse::FriendRequests(requests) => {
                 self.friend_requests = requests;
@@ -2306,6 +2334,14 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
             result,
         });
     }
+    if let SpaceOp::Notify(channel, change) = &op {
+        let result = match channel {
+            Some(id) => client.update_channel_notifications(id, change).await,
+            None => client.update_space_notifications(&space_id, change).await,
+        }
+        .map_err(|err| space_message(&err));
+        return BridgeResponse::SpaceAction(SpaceEvent::Notified { space_id, result });
+    }
     if op == SpaceOp::ListJoinRequests {
         let result = client
             .pending_join_requests(&space_id)
@@ -2359,6 +2395,7 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
         SpaceOp::ListBans
         | SpaceOp::ListJoinRequests
         | SpaceOp::ListOverrides(_)
+        | SpaceOp::Notify(..)
         | SpaceOp::UploadImage(..) => Ok(()),
     };
     let refresh = done.is_ok()
@@ -2632,6 +2669,10 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
     match request {
         BridgeRequest::Friends => match client.friends().await {
             Ok(friends) => BridgeResponse::Friends(friends),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::NotificationSettings => match client.notification_settings().await {
+            Ok(list) => BridgeResponse::NotificationSettings(list),
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
         BridgeRequest::FriendRequests => match client.friend_requests().await {
@@ -2957,13 +2998,18 @@ mod tests {
     ) {
         let mut bridge = new_bridge();
         let (commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
-        let (requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
+        let (requests_tx, mut requests_rx) = tokio_mpsc::unbounded_channel();
         bridge.commands = Some(commands_tx);
         bridge.requests = Some(requests_tx);
         bridge.phase = Phase::Connecting;
         bridge.handle_event(BridgeEvent::Ready {
             payload: Box::new(ready_payload()),
         });
+        // Первым после `ready` уходит загрузка настроек уведомлений.
+        assert!(matches!(
+            requests_rx.try_recv(),
+            Ok(BridgeRequest::NotificationSettings)
+        ));
         (bridge, commands_rx, requests_rx)
     }
 

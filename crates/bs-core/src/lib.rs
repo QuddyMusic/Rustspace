@@ -26,6 +26,7 @@ pub mod apply;
 mod error;
 mod federation;
 mod multicache;
+pub mod notifications;
 mod session;
 mod state;
 

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use bs_types::{
     ActiveCallInfo, Activity, Channel, ChannelId, DmChannel, DmMessageWithUser, Friend,
-    FriendRequest, MessageWithUser, PresenceIdentity, ReadState, ReadyPayload, SpaceFolder,
+    FriendRequest, MessageWithUser, NotificationSetting, PresenceIdentity, ReadState, ReadyPayload, SpaceFolder,
     SpaceId, SpaceLayoutItem, SpaceVoiceState, SpaceWithChannelsAndMembers, User, UserId,
     UserStatus, VoiceUserState,
 };
@@ -60,6 +60,8 @@ pub struct Cache {
     pub(crate) voice_user_states: HashMap<UserId, VoiceUserState>,
     pub(crate) supports_poke: bool,
     pub(crate) unread_counts: HashMap<ChannelId, i64>,
+    /// Настройки уведомлений: (пространство, канал либо `None` для всего пространства).
+    pub(crate) notification_settings: HashMap<(SpaceId, Option<ChannelId>), NotificationSetting>,
     pub(crate) read_states: HashMap<ChannelId, ReadState>,
     pub(crate) active_calls: Vec<ActiveCallInfo>,
     pub(crate) space_voice_states: HashMap<SpaceId, SpaceVoiceState>,
@@ -139,6 +141,7 @@ impl Cache {
             voice_user_states: voice_user_states.unwrap_or_default(),
             supports_poke: supports_poke.unwrap_or(false),
             unread_counts: unread_counts.unwrap_or_default(),
+            notification_settings: HashMap::new(),
             read_states: read_states
                 .unwrap_or_default()
                 .into_iter()
@@ -328,6 +331,52 @@ impl Cache {
     #[must_use]
     pub fn supports_poke(&self) -> bool {
         self.supports_poke
+    }
+
+    /// Заменяет все настройки уведомлений списком с сервера.
+    pub fn set_notification_settings(&mut self, list: Vec<NotificationSetting>) {
+        self.notification_settings = list
+            .into_iter()
+            .map(|s| ((s.space_id.clone(), s.channel_id.clone()), s))
+            .collect();
+    }
+
+    /// Применяет одну настройку; более старая запись не затирает новую.
+    pub fn apply_notification_setting(&mut self, setting: NotificationSetting) {
+        let key = (setting.space_id.clone(), setting.channel_id.clone());
+        if self
+            .notification_settings
+            .get(&key)
+            .is_none_or(|old| setting.updated_at >= old.updated_at)
+        {
+            self.notification_settings.insert(key, setting);
+        }
+    }
+
+    /// Сохранённая настройка пространства (`channel_id == None`) или канала.
+    #[must_use]
+    pub fn notification_setting(
+        &self,
+        space_id: &str,
+        channel_id: Option<&str>,
+    ) -> Option<&NotificationSetting> {
+        self.notification_settings
+            .get(&(space_id.to_owned(), channel_id.map(str::to_owned)))
+    }
+
+    /// Что действует для канала пространства в момент `now`.
+    #[must_use]
+    pub fn channel_policy(
+        &self,
+        space_id: &str,
+        channel_id: &str,
+        now: i64,
+    ) -> bs_types::ChannelNotificationPolicy {
+        crate::notifications::resolve_policy(
+            self.notification_setting(space_id, None),
+            self.notification_setting(space_id, Some(channel_id)),
+            now,
+        )
     }
 
     /// Число непрочитанных в канале (0, если счётчик не приходил).

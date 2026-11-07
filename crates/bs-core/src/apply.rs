@@ -102,7 +102,8 @@ fn categorize(event: &ServerEvent) -> Category {
         | ServerEvent::VoiceDisconnected { .. } => Category::Voice,
         ServerEvent::ChannelAck { .. }
         | ServerEvent::MarkUnread { .. }
-        | ServerEvent::ChannelUnreadCount { .. } => Category::Unread,
+        | ServerEvent::ChannelUnreadCount { .. }
+        | ServerEvent::NotificationSettingsUpdated { .. } => Category::Unread,
         ServerEvent::DmChannelCreated { .. }
         | ServerEvent::DmChannelClosed { .. }
         | ServerEvent::DmChannelUpdated { .. }
@@ -546,6 +547,10 @@ fn try_unread(cache: &mut Cache, event: ServerEvent) -> bool {
         }
         ServerEvent::ChannelUnreadCount { counts } => {
             cache.unread_counts = counts;
+            true
+        }
+        ServerEvent::NotificationSettingsUpdated { setting } => {
+            cache.apply_notification_setting(setting);
             true
         }
 

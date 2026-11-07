@@ -190,6 +190,7 @@ impl SpaceSettings {
                         | SpaceOp::UploadImage(..)
                         | SpaceOp::AddMemberRole(_, _)
                         | SpaceOp::RemoveMemberRole(_, _)
+                        | SpaceOp::Notify(..)
                         | SpaceOp::UpdateChannel(..)
                         | SpaceOp::DeleteChannel(_)
                         | SpaceOp::RenameCategory(..)

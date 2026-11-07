@@ -29,6 +29,7 @@ pub mod compose;
 pub mod error;
 pub mod federation;
 pub mod instance;
+pub mod notifications;
 pub mod invites;
 pub mod peers;
 pub mod profile;

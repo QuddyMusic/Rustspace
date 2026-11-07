@@ -8,6 +8,7 @@ pub(crate) mod connections;
 pub(crate) mod dialogs;
 pub(crate) mod home;
 pub(crate) mod login;
+pub(crate) mod notification_settings;
 pub(crate) mod profile;
 pub(crate) mod space_dialogs;
 pub(crate) mod space_settings;

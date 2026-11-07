@@ -50,6 +50,8 @@ pub(crate) struct SidebarChannel {
     pub(crate) name: String,
     /// Есть непрочитанные.
     pub(crate) unread: bool,
+    /// Канал заглушён (свой mute или mute пространства).
+    pub(crate) muted: bool,
     /// Голосовой канал.
     pub(crate) voice: bool,
     /// Кто сейчас в голосовом канале.
@@ -214,10 +216,14 @@ pub(crate) fn sidebar_items(cache: &Cache) -> Vec<SidebarSpace> {
         .map(|space| {
             let to_row = |channel: &bs_types::Channel| {
                 let voice = channel.channel_type == bs_types::ChannelType::Voice;
+                let muted = cache
+                    .channel_policy(&space.space.id, &channel.id, now_ms())
+                    .muted;
                 SidebarChannel {
                     id: channel.id.clone(),
                     name: channel.name.clone(),
-                    unread: cache.unread_count(&channel.id) > 0,
+                    unread: !muted && cache.unread_count(&channel.id) > 0,
+                    muted,
                     voice,
                     occupants: if voice {
                         occupants(cache, &names, &channel.id)
@@ -627,18 +633,23 @@ pub(crate) enum View {
     Channel,
 }
 
-/// ПКМ по каналу: «Настройки канала».
+/// ПКМ по каналу: «Настройки уведомлений» и «Настройки канала».
 fn channel_menu(
     row: &egui::Response,
     space: &SidebarSpace,
     channel: &SidebarChannel,
     nav: &mut Option<Nav>,
 ) {
-    if !space.rights.manage_channels {
-        return;
-    }
     row.context_menu(|ui| {
-        if ui.button("Настройки канала").clicked() {
+        if ui.button("Настройки уведомлений").clicked() {
+            *nav = Some(Nav::Notifications {
+                origin: space.origin,
+                space_id: space.id.clone(),
+                channel_id: Some(channel.id.clone()),
+            });
+            ui.close();
+        }
+        if space.rights.manage_channels && ui.button("Настройки канала").clicked() {
             *nav = Some(Nav::ChannelSettings {
                 origin: space.origin,
                 space_id: space.id.clone(),
@@ -730,6 +741,14 @@ fn space_menu(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
         });
         ui.close();
     }
+    if ui.button("Настройки уведомлений").clicked() {
+        *nav = Some(Nav::Notifications {
+            origin: space.origin,
+            space_id: space.id.clone(),
+            channel_id: None,
+        });
+        ui.close();
+    }
     if space.rights.can_open_settings() && ui.button("Настройки пространства").clicked() {
         *nav = Some(Nav::SpaceSettings {
             origin: space.origin,
@@ -807,6 +826,15 @@ enum Nav {
         /// Пространство.
         space_id: String,
     },
+    /// Настройки уведомлений пространства или канала.
+    Notifications {
+        /// Инстанс.
+        origin: usize,
+        /// Пространство.
+        space_id: String,
+        /// Канал; `None` — всё пространство.
+        channel_id: Option<String>,
+    },
     /// Настройки канала или категории.
     ChannelSettings {
         /// Инстанс.
@@ -858,6 +886,7 @@ pub(crate) struct ChatScreen {
     space_dialog: Option<super::space_dialogs::SpaceDialog>,
     space_settings: Option<super::space_settings::SpaceSettings>,
     channel_settings: Option<super::channel_settings::ChannelSettings>,
+    notification_settings: Option<super::notification_settings::NotificationSettings>,
     /// Открытые настройки.
     settings: Option<SettingsState>,
     /// Картинка, открытая на весь экран (значение поля).
@@ -1029,6 +1058,19 @@ impl ChatScreen {
                 self.space_settings =
                     super::space_settings::SpaceSettings::open(bridge, origin, &space_id);
             }
+            Nav::Notifications {
+                origin,
+                space_id,
+                channel_id,
+            } => {
+                self.notification_settings =
+                    super::notification_settings::NotificationSettings::open(
+                        bridge,
+                        origin,
+                        &space_id,
+                        channel_id.as_deref(),
+                    );
+            }
             Nav::ChannelSettings {
                 origin,
                 space_id,
@@ -1116,6 +1158,7 @@ impl ChatScreen {
             self.space_dialog = None;
             self.space_settings = None;
             self.channel_settings = None;
+            self.notification_settings = None;
             self.apply_nav(Nav::Space(opened), &items, bridge, &ctx);
             self.route_actions(bridge, &ctx);
         }
@@ -1217,6 +1260,11 @@ impl ChatScreen {
         {
             self.channel_settings = None;
         }
+        if let Some(settings) = self.notification_settings.as_mut()
+            && !super::notification_settings::show(&ctx, settings, bridge)
+        {
+            self.notification_settings = None;
+        }
         self.show_toast(&ctx, now);
         if let Some(nav) = nav {
             self.apply_nav(nav, &items, bridge, &ctx);
@@ -1281,6 +1329,11 @@ impl ChatScreen {
                     self.view = View::Friends;
                 }
                 _ => {}
+            }
+            if let Some(settings) = self.notification_settings.as_mut()
+                && !settings.apply(&event)
+            {
+                self.notification_settings = None;
             }
             if let Some(settings) = self.channel_settings.as_mut()
                 && !settings.apply(&event)
@@ -1501,6 +1554,9 @@ impl ChatScreen {
             } else {
                 "Нажмите, чтобы подключиться"
             });
+            if channel.muted {
+                theme::muted_mark(ui, &row.rect);
+            }
             channel_menu(&row, space, channel, nav);
             if row.clicked() {
                 *nav = Some(Nav::VoiceJoin {
@@ -1606,6 +1662,9 @@ impl ChatScreen {
                     selected,
                     channel.unread,
                 );
+                if channel.muted {
+                    theme::muted_mark(ui, &row.rect);
+                }
                 channel_menu(&row, space, channel, nav);
                 if row.clicked() {
                     *nav = Some(Nav::Channel(SelectedChannel {

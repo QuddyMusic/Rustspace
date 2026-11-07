@@ -464,6 +464,17 @@ fn list_row_with(
     response
 }
 
+/// Значок «заглушён» (перечёркнутый кружок) у правого края строки.
+pub(crate) fn muted_mark(ui: &egui::Ui, row: &egui::Rect) {
+    let center = egui::pos2(row.right() - 18.0, row.center().y);
+    let stroke = egui::Stroke::new(1.4, TEXT_FAINT);
+    ui.painter().circle_stroke(center, 5.5, stroke);
+    ui.painter().line_segment(
+        [center + egui::vec2(-3.8, 3.8), center + egui::vec2(3.8, -3.8)],
+        stroke,
+    );
+}
+
 /// Строка канала пространства.
 pub(crate) fn list_row(
     ui: &mut egui::Ui,
