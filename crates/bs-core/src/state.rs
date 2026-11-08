@@ -220,6 +220,11 @@ impl Cache {
         self.dm_channels.insert(channel.id.clone(), channel);
     }
 
+    /// Убирает личный канал (например, после выхода из группы).
+    pub fn remove_dm_channel(&mut self, id: &str) -> bool {
+        self.dm_channels.remove(id).is_some()
+    }
+
     /// Добавляет или обновляет пространство целиком (после создания или
     /// вступления через REST: событие о нём создателю не гарантировано).
     pub fn upsert_space(&mut self, space: SpaceWithChannelsAndMembers) {

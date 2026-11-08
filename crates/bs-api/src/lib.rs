@@ -28,6 +28,7 @@ pub mod community;
 pub mod compose;
 pub mod error;
 pub mod federation;
+pub mod groups;
 pub mod instance;
 pub mod notifications;
 pub mod invites;
@@ -74,3 +75,4 @@ pub use write::{
     CreateDmRequest, FriendRequestDecision, MessageSearchQuery, SEARCH_LIMIT_DEFAULT,
     SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN, SendFriendRequest,
 };
+pub use groups::{GROUP_MAX_MEMBERS, GROUP_NAME_MAX, GroupMember, GroupUpdate};

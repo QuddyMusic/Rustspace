@@ -108,6 +108,19 @@ pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String
         Some("rate_limited") => "Слишком часто: подождите несколько секунд",
         Some("content_too_long") => "Сообщение слишком длинное",
         Some("content_required") => "Нельзя отправить пустое сообщение",
+        Some("group_dm_too_few_members") => "В группе должно быть не менее двух других участников",
+        Some("group_dm_too_many_members") => "В группе может быть не более 10 участников",
+        Some("group_dm_includes_self") => "Вы добавляетесь в группу автоматически",
+        Some("dm_not_found") => "Беседа не найдена",
+        Some("dm_not_group") => "Это возможно только в групповой беседе",
+        Some("dm_owner_only") => "Это может сделать только владелец группы",
+        Some("group_dm_name_length") => "Название группы: от 1 до 50 символов",
+        Some("owner_cannot_kick_self") => {
+            "Владелец не может удалить сам себя. Вместо этого покиньте группу"
+        }
+        Some("target_not_dm_member") => "Этот пользователь не участник беседы",
+        Some("new_owner_required") => "Выберите, кто станет новым владельцем",
+        Some("already_owner") => "Этот пользователь уже владелец группы",
         Some("not_dm_member") => "Вы не участник этого личного канала",
         Some("recipient_deleted") => "Собеседник удалён: переписка доступна только для чтения",
         Some("missing_permission") => "Недостаточно прав",

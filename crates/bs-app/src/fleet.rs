@@ -946,6 +946,20 @@ impl Bridge {
             .collect()
     }
 
+    /// Итоги действий над группами со всех инстансов.
+    pub(crate) fn take_group_events(&mut self) -> Vec<(usize, crate::bridge::GroupEvent)> {
+        self.slots
+            .iter_mut()
+            .enumerate()
+            .flat_map(|(i, slot)| {
+                slot.session
+                    .take_group_events()
+                    .into_iter()
+                    .map(move |event| (i, event))
+            })
+            .collect()
+    }
+
     /// Итоги действий над пространствами со всех инстансов.
     pub(crate) fn take_space_events(&mut self) -> Vec<(usize, crate::bridge::SpaceEvent)> {
         self.slots

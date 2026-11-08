@@ -826,6 +826,8 @@ enum Nav {
         /// Пространство.
         space_id: String,
     },
+    /// Окно «Создать группу».
+    GroupCreate,
     /// Настройки уведомлений пространства или канала.
     Notifications {
         /// Инстанс.
@@ -887,6 +889,7 @@ pub(crate) struct ChatScreen {
     space_settings: Option<super::space_settings::SpaceSettings>,
     channel_settings: Option<super::channel_settings::ChannelSettings>,
     notification_settings: Option<super::notification_settings::NotificationSettings>,
+    group_dialog: Option<super::group_dm::GroupDialog>,
     /// Открытые настройки.
     settings: Option<SettingsState>,
     /// Картинка, открытая на весь экран (значение поля).
@@ -1057,6 +1060,9 @@ impl ChatScreen {
             Nav::SpaceSettings { origin, space_id } => {
                 self.space_settings =
                     super::space_settings::SpaceSettings::open(bridge, origin, &space_id);
+            }
+            Nav::GroupCreate => {
+                self.group_dialog = Some(super::group_dm::GroupDialog::create(bridge.focus_index()));
             }
             Nav::Notifications {
                 origin,
@@ -1265,11 +1271,53 @@ impl ChatScreen {
         {
             self.notification_settings = None;
         }
+        if let Some(dialog) = self.group_dialog.as_mut()
+            && !super::group_dm::show(&ctx, dialog, bridge)
+        {
+            self.group_dialog = None;
+        }
+        self.take_group_events(bridge);
         self.show_toast(&ctx, now);
         if let Some(nav) = nav {
             self.apply_nav(nav, &items, bridge, &ctx);
         }
         action
+    }
+
+    /// Итоги действий над группами.
+    fn take_group_events(&mut self, bridge: &mut Bridge) {
+        use super::group_dm::Outcome;
+        for (origin, event) in bridge.take_group_events() {
+            let outcome = self
+                .group_dialog
+                .as_mut()
+                .map_or(Outcome::Keep, |dialog| dialog.apply(&event));
+            let left = matches!(
+                (&event.op, &event.result),
+                (crate::bridge::GroupOp::Leave, Ok(()))
+            );
+            if left
+                && self
+                    .selected_channel
+                    .as_ref()
+                    .is_some_and(|c| c.origin == origin && c.channel == event.dm_id)
+            {
+                self.selected_channel = None;
+                self.view = View::Friends;
+            }
+            match outcome {
+                Outcome::Keep => {}
+                Outcome::Close => self.group_dialog = None,
+                Outcome::Open(dm_id) => {
+                    self.group_dialog = None;
+                    self.open_channel(SelectedChannel {
+                        origin,
+                        channel: dm_id,
+                        kind: ChannelKind::Dm,
+                    });
+                }
+            }
+        }
     }
 
     /// Итоги приглашений, создания каналов, входа и выхода.
@@ -1706,6 +1754,13 @@ impl ChatScreen {
                 {
                     *nav = Some(Nav::SearchPeople(String::new()));
                 }
+                if ui
+                    .add(widgets::flat_icon(Icon::Users, 18.0, theme::TEXT_MUTED))
+                    .on_hover_text("Создать группу")
+                    .clicked()
+                {
+                    *nav = Some(Nav::GroupCreate);
+                }
             });
         });
         ui.add_space(4.0);
@@ -1908,6 +1963,30 @@ impl ChatScreen {
         clicked
     }
 
+    /// Кнопка «Настройки группы» в шапке групповой беседы.
+    fn group_button(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
+        if let Some(selected) = self
+            .selected_channel
+            .as_ref()
+            .filter(|s| s.kind == ChannelKind::Dm)
+            && let Some(dm) = bridge
+                .cache_at(selected.origin)
+                .and_then(|c| c.dm_channel(&selected.channel))
+                .filter(|dm| dm.owner_id.is_some())
+        {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .add(widgets::flat_icon(Icon::Users, 22.0, theme::TEXT_FAINT))
+                    .on_hover_text("Настройки группы")
+                    .clicked()
+                {
+                    self.group_dialog =
+                        Some(super::group_dm::GroupDialog::manage(selected.origin, dm));
+                }
+            });
+        }
+    }
+
     /// Шапка ленты: название канала, тема, переключатель участников.
     fn show_header(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
         let (prefix, title, topic) = self.selected_channel.as_ref().map_or_else(
@@ -1956,7 +2035,15 @@ impl ChatScreen {
                         .filter(|s| s.kind == ChannelKind::Dm)
                         && self.voice.dm.is_none()
                     {
+                        let is_group = bridge
+                            .cache()
+                            .and_then(|c| c.dm_channel(&selected.channel))
+                            .is_some_and(|dm| dm.owner_id.is_some());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if is_group {
+                                // Правее телефона стоит кнопка настроек группы.
+                                ui.add_space(34.0);
+                            }
                             if ui
                                 .add(widgets::flat_icon(Icon::Phone, 22.0, theme::TEXT_FAINT))
                                 .on_hover_text("Позвонить")
@@ -1971,6 +2058,7 @@ impl ChatScreen {
                             }
                         });
                     }
+                    self.group_button(ui, bridge);
                     if has_members {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let color = if self.show_members {

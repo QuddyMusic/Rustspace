@@ -112,7 +112,8 @@ fn categorize(event: &ServerEvent) -> Category {
         | ServerEvent::DmMessageDeleted { .. }
         | ServerEvent::DmEmbedsResolved { .. }
         | ServerEvent::DmMemberAdded { .. }
-        | ServerEvent::DmMemberRemoved { .. } => Category::Dm,
+        | ServerEvent::DmMemberRemoved { .. }
+        | ServerEvent::DmOwnerUpdated { .. } => Category::Dm,
         ServerEvent::FederationPeerRejected { .. }
         | ServerEvent::FederationPeerActive { .. }
         | ServerEvent::FederationApprovalRequestReceived { .. } => Category::Federation,
@@ -637,6 +638,20 @@ fn try_dm(cache: &mut Cache, event: ServerEvent) -> bool {
                 dm.members.len() != before
             }
             None => false,
+        },
+        ServerEvent::DmOwnerUpdated {
+            dm_channel_id,
+            new_owner_id,
+            new_owner_home_user_id,
+            new_owner_home_instance,
+        } => match cache.dm_channels.get_mut(&dm_channel_id) {
+            Some(dm) if dm.owner_id.as_deref() != Some(new_owner_id.as_str()) => {
+                dm.owner_id = Some(new_owner_id);
+                dm.owner_home_user_id = new_owner_home_user_id;
+                dm.owner_home_instance = new_owner_home_instance;
+                true
+            }
+            _ => false,
         },
 
         _ => false,

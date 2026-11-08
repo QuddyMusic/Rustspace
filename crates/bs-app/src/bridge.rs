@@ -220,6 +220,13 @@ pub(crate) enum BridgeRequest {
         /// Свой id.
         user_id: String,
     },
+    /// Действие над групповой беседой.
+    GroupAdmin {
+        /// Беседа (для создания — пустая строка).
+        dm_id: String,
+        /// Что сделать.
+        op: GroupOp,
+    },
     /// Действие администратора над пространством.
     SpaceAdmin {
         /// Пространство.
@@ -525,6 +532,34 @@ pub(crate) enum CallEvent {
     },
 }
 
+/// Что сделать с групповой беседой.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GroupOp {
+    /// Создать группу из этих людей.
+    Create(Vec<bs_api::GroupMember>),
+    /// Новое название (`None` — сбросить).
+    Rename(Option<String>),
+    /// Добавить друга.
+    Add(String),
+    /// Убрать участника (только владелец).
+    Remove(String),
+    /// Покинуть группу.
+    Leave,
+    /// Передать права владельца.
+    Transfer(String),
+}
+
+/// Итог действия над группой.
+#[derive(Debug, Clone)]
+pub(crate) struct GroupEvent {
+    /// Беседа (у созданной — её новый id).
+    pub(crate) dm_id: String,
+    /// Что делали.
+    pub(crate) op: GroupOp,
+    /// Успех либо текст ошибки.
+    pub(crate) result: Result<(), String>,
+}
+
 /// Административное действие над пространством.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SpaceOp {
@@ -746,6 +781,8 @@ pub(crate) enum BridgeResponse {
     VoiceToken(VoiceTokenEvent),
     /// Итог действия над пространством.
     SpaceAction(SpaceEvent),
+    /// Итог действия над группой и созданный канал.
+    GroupAction(GroupEvent, Option<Box<bs_types::DmChannel>>),
     /// Скачанный файл.
     Raw {
         /// Номер запроса.
@@ -918,6 +955,7 @@ pub(crate) struct Session {
     profile_in: Vec<ProfileEvent>,
     voice_in: Vec<VoiceTokenEvent>,
     space_in: Vec<SpaceEvent>,
+    group_in: Vec<GroupEvent>,
     call_in: Vec<CallEvent>,
     raw_ready: Vec<(u64, Result<Vec<u8>, String>)>,
     /// Ответы настроек, которые GUI ещё не забрал.
@@ -996,6 +1034,7 @@ impl Session {
             profile_in: Vec::new(),
             voice_in: Vec::new(),
             space_in: Vec::new(),
+            group_in: Vec::new(),
             call_in: Vec::new(),
             raw_ready: Vec::new(),
             admin_in: Vec::new(),
@@ -1181,6 +1220,7 @@ impl Session {
         self.profile_in.clear();
         self.voice_in.clear();
         self.space_in.clear();
+        self.group_in.clear();
         self.call_in.clear();
         self.admin_in.clear();
         self.explore = None;
@@ -1622,6 +1662,11 @@ impl Session {
         self.space_in.push(event);
     }
 
+    /// Забирает итоги действий над группами.
+    pub(crate) fn take_group_events(&mut self) -> Vec<GroupEvent> {
+        std::mem::take(&mut self.group_in)
+    }
+
     /// Забирает итоги действий над пространствами.
     pub(crate) fn take_space_events(&mut self) -> Vec<SpaceEvent> {
         std::mem::take(&mut self.space_in)
@@ -1899,6 +1944,22 @@ impl Session {
             BridgeResponse::UserProfile(event) => self.profile_in.push(event),
             BridgeResponse::VoiceToken(event) => self.voice_in.push(event),
             BridgeResponse::SpaceAction(event) => self.apply_space_event(event),
+            BridgeResponse::GroupAction(event, channel) => {
+                if let Some(cache) = self.cache.as_mut() {
+                    match (&event.op, &event.result) {
+                        (GroupOp::Create(_), Ok(())) => {
+                            if let Some(channel) = channel {
+                                cache.upsert_dm_channel(*channel);
+                            }
+                        }
+                        (GroupOp::Leave, Ok(())) => {
+                            cache.remove_dm_channel(&event.dm_id);
+                        }
+                        _ => {}
+                    }
+                }
+                self.group_in.push(event);
+            }
             BridgeResponse::Raw { tag, result } => self.raw_ready.push((tag, result)),
             BridgeResponse::JoinRequested => {
                 self.info = Some("Заявка отправлена".to_owned());
@@ -2659,6 +2720,32 @@ fn upload_message(err: &bs_api::ApiError) -> String {
 }
 
 /// Текст отказа сервера на действие над пространством.
+async fn group_admin(client: &bs_api::ApiClient, dm_id: String, op: GroupOp) -> BridgeResponse {
+    let mut created = None;
+    let result = match &op {
+        GroupOp::Create(users) => client.create_group_dm(users).await.map(|dm| {
+            created = Some(Box::new(dm));
+        }),
+        GroupOp::Rename(name) => client
+            .update_group_dm(
+                &dm_id,
+                &bs_api::GroupUpdate {
+                    name: Some(name.clone()),
+                    icon: None,
+                },
+            )
+            .await
+            .map(|_| ()),
+        GroupOp::Add(user) => client.add_group_member(&dm_id, user).await.map(|_| ()),
+        GroupOp::Remove(user) => client.remove_group_member(&dm_id, user).await.map(|_| ()),
+        GroupOp::Leave => client.leave_group_dm(&dm_id).await.map(|_| ()),
+        GroupOp::Transfer(user) => client.transfer_group_owner(&dm_id, user).await.map(|_| ()),
+    }
+    .map_err(|err| space_message(&err));
+    let dm_id = created.as_ref().map_or(dm_id, |dm| dm.id.clone());
+    BridgeResponse::GroupAction(GroupEvent { dm_id, op, result }, created)
+}
+
 fn space_message(err: &bs_api::ApiError) -> String {
     let message = err.body().map_or_else(|| err.to_string(), |b| b.error.clone());
     crate::logic::describe_server_error(err.code(), &message)
@@ -2787,6 +2874,7 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
             BridgeResponse::SpaceAction(SpaceEvent::Left { space_id, result })
         }
         BridgeRequest::SpaceAdmin { space_id, op } => space_admin(client, space_id, op).await,
+        BridgeRequest::GroupAdmin { dm_id, op } => group_admin(client, dm_id, op).await,
         BridgeRequest::CreateChannel { space_id, channel } => {
             let result = client
                 .create_channel(&space_id, &channel)

@@ -1,0 +1,541 @@
+//! Групповые беседы: «Создать группу» и «Настройки группы».
+//!
+//! Тексты — из `dm.json` (`groupSettings.*`, `kick.*`, `transfer.*`,
+//! `leave.*`) оригинала. Решения принимает сервер; клиент лишь прячет
+//! действия, которых у пользователя нет.
+
+use bs_api::{GROUP_MAX_MEMBERS, GROUP_NAME_MAX, GroupMember};
+use bs_types::{DmChannel, Friend};
+use egui::{CornerRadius, Margin, RichText};
+
+use crate::bridge::{BridgeRequest, GroupEvent, GroupOp};
+use crate::fleet::Bridge;
+use crate::social::user_display_name;
+use crate::{theme, widgets};
+
+/// Что сделало окно после события.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Outcome {
+    /// Остаётся открытым.
+    Keep,
+    /// Закрыть.
+    Close,
+    /// Закрыть и открыть эту беседу.
+    Open(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Confirm {
+    Leave,
+    Kick(String),
+    Transfer(String),
+}
+
+#[derive(Debug)]
+enum Mode {
+    Create {
+        picked: Vec<String>,
+    },
+    Manage {
+        dm_id: String,
+        name: String,
+        confirm: Option<Confirm>,
+        adding: bool,
+    },
+}
+
+/// Состояние окна.
+#[derive(Debug)]
+pub(crate) struct GroupDialog {
+    origin: usize,
+    mode: Mode,
+    search: String,
+    busy: bool,
+    error: Option<String>,
+}
+
+fn friend_name(friend: &Friend) -> String {
+    user_display_name(friend.display_name.as_deref(), &friend.username)
+}
+
+fn member(friend: &Friend) -> GroupMember {
+    GroupMember {
+        id: friend.id.clone(),
+        home_user_id: friend.home_user_id.clone(),
+        home_instance: friend.home_instance.clone(),
+    }
+}
+
+/// Можно ли отправить создание: нужны от 2 до `GROUP_MAX_MEMBERS - 1` человек.
+fn can_create(picked: usize) -> bool {
+    (2..GROUP_MAX_MEMBERS).contains(&picked)
+}
+
+impl GroupDialog {
+    /// Окно создания группы на инстансе `origin`.
+    pub(crate) fn create(origin: usize) -> Self {
+        Self {
+            origin,
+            mode: Mode::Create { picked: Vec::new() },
+            search: String::new(),
+            busy: false,
+            error: None,
+        }
+    }
+
+    /// Окно управления группой.
+    pub(crate) fn manage(origin: usize, dm: &DmChannel) -> Self {
+        Self {
+            origin,
+            mode: Mode::Manage {
+                dm_id: dm.id.clone(),
+                name: dm.name.clone().unwrap_or_default(),
+                confirm: None,
+                adding: false,
+            },
+            search: String::new(),
+            busy: false,
+            error: None,
+        }
+    }
+
+    fn send(&mut self, bridge: &mut Bridge, dm_id: String, op: GroupOp) {
+        self.busy = true;
+        self.error = None;
+        bridge.focus_on(self.origin);
+        bridge.request(BridgeRequest::GroupAdmin { dm_id, op });
+    }
+
+    /// Учитывает итог действия.
+    pub(crate) fn apply(&mut self, event: &GroupEvent) -> Outcome {
+        let mine = match &self.mode {
+            Mode::Create { .. } => matches!(event.op, GroupOp::Create(_)),
+            Mode::Manage { dm_id, .. } => *dm_id == event.dm_id,
+        };
+        if !mine {
+            return Outcome::Keep;
+        }
+        self.busy = false;
+        match (&event.op, &event.result) {
+            (GroupOp::Create(_), Ok(())) => Outcome::Open(event.dm_id.clone()),
+            (GroupOp::Leave, Ok(())) => Outcome::Close,
+            (op, Ok(())) => {
+                if let Mode::Manage {
+                    confirm, adding, ..
+                } = &mut self.mode
+                {
+                    *confirm = None;
+                    if matches!(op, GroupOp::Add(_)) {
+                        *adding = false;
+                    }
+                }
+                Outcome::Keep
+            }
+            (_, Err(err)) => {
+                self.error = Some(err.clone());
+                Outcome::Keep
+            }
+        }
+    }
+}
+
+/// Рисует окно. `false` — окно нужно закрыть.
+pub(crate) fn show(ctx: &egui::Context, state: &mut GroupDialog, bridge: &mut Bridge) -> bool {
+    let mut keep_open = true;
+    let response = egui::Modal::new(egui::Id::unique("group_dm"))
+        .frame(
+            egui::Frame::new()
+                .fill(theme::BG_BUBBLE)
+                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .corner_radius(CornerRadius::same(16))
+                .inner_margin(Margin::same(20)),
+        )
+        .show(ctx, |ui| {
+            ui.set_width(400.0);
+            let managed = match &state.mode {
+                Mode::Create { .. } => None,
+                Mode::Manage { dm_id, .. } => Some(dm_id.clone()),
+            };
+            if let Some(dm_id) = managed {
+                let dm = bridge
+                    .cache_at(state.origin)
+                    .and_then(|c| c.dm_channel(&dm_id))
+                    .cloned();
+                match dm {
+                    Some(dm) => manage(ui, state, bridge, &dm),
+                    None => keep_open = false,
+                }
+            } else {
+                create(ui, state, bridge);
+            }
+            if let Some(err) = &state.error {
+                ui.add_space(6.0);
+                ui.label(RichText::new(err).color(theme::ROSE));
+            }
+            ui.add_space(10.0);
+            if ui.button("Закрыть").clicked() {
+                keep_open = false;
+            }
+        });
+    keep_open && !response.should_close()
+}
+
+fn title(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        RichText::new(text)
+            .size(18.0)
+            .family(theme::bold_family())
+            .color(theme::TEXT_BRIGHT),
+    );
+    ui.add_space(8.0);
+}
+
+fn create(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge) {
+    title(ui, "Создать группу");
+    ui.label(
+        RichText::new(format!(
+            "Выберите от 2 до {} друзей. Вы добавитесь в группу автоматически.",
+            GROUP_MAX_MEMBERS - 1
+        ))
+        .color(theme::TEXT_MUTED),
+    );
+    ui.add_space(6.0);
+    let friends: Vec<Friend> = bridge.friends().to_vec();
+    let Mode::Create { picked } = &mut state.mode else {
+        return;
+    };
+    let search = &mut state.search;
+    widgets::text_field(ui, search, "Поиск друзей…", 64);
+    ui.add_space(4.0);
+    let needle = search.trim().to_lowercase();
+    egui::ScrollArea::vertical()
+        .max_height(260.0)
+        .show(ui, |ui| {
+            for friend in friends
+                .iter()
+                .filter(|f| needle.is_empty() || friend_name(f).to_lowercase().contains(&needle))
+            {
+                let mut on = picked.contains(&friend.id);
+                let full = picked.len() >= GROUP_MAX_MEMBERS - 1 && !on;
+                ui.add_enabled_ui(!full, |ui| {
+                    ui.horizontal(|ui| {
+                        let name = friend_name(friend);
+                        theme::avatar(ui, &name, 28.0, None, None);
+                        if ui.checkbox(&mut on, name).changed() {
+                            if on {
+                                picked.push(friend.id.clone());
+                            } else {
+                                picked.retain(|id| *id != friend.id);
+                            }
+                        }
+                    });
+                });
+            }
+            if friends.is_empty() {
+                ui.label(RichText::new("Сначала добавьте друзей").color(theme::TEXT_MUTED));
+            }
+        });
+    ui.add_space(8.0);
+    let count = picked.len();
+    let users: Vec<GroupMember> = friends
+        .iter()
+        .filter(|f| picked.contains(&f.id))
+        .map(member)
+        .collect();
+    let label = if state.busy {
+        "Создание…".to_owned()
+    } else {
+        format!("Создать группу ({count})")
+    };
+    if ui
+        .add_enabled(
+            can_create(count) && !state.busy,
+            theme::primary_button(&label),
+        )
+        .clicked()
+    {
+        state.send(bridge, String::new(), GroupOp::Create(users));
+    }
+}
+
+fn manage(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &DmChannel) {
+    let me = bridge
+        .cache_at(state.origin)
+        .map(|c| c.me().id.clone())
+        .unwrap_or_default();
+    let owner = dm.owner_id.as_deref() == Some(me.as_str());
+    title(ui, "Настройки группы");
+    name_row(ui, state, bridge, dm, owner);
+    ui.add_space(10.0);
+    widgets::section_label(
+        ui,
+        &format!("Участники — {} из {GROUP_MAX_MEMBERS}", dm.members.len()),
+    );
+    ui.add_space(4.0);
+    egui::ScrollArea::vertical()
+        .max_height(220.0)
+        .show(ui, |ui| {
+            for user in &dm.members {
+                member_row(ui, state, bridge, dm, owner, &me, user);
+            }
+        });
+    ui.add_space(8.0);
+    add_member(ui, state, bridge, dm);
+    ui.add_space(10.0);
+    ui.separator();
+    ui.add_space(6.0);
+    leave(ui, state, bridge, dm);
+}
+
+fn name_row(
+    ui: &mut egui::Ui,
+    state: &mut GroupDialog,
+    bridge: &mut Bridge,
+    dm: &DmChannel,
+    owner: bool,
+) {
+    let saved = dm.name.clone().unwrap_or_default();
+    let busy = state.busy;
+    let mut send = None;
+    if let Mode::Manage { name, .. } = &mut state.mode {
+        widgets::field_label(ui, "Название группы");
+        ui.add_enabled_ui(owner, |ui| {
+            widgets::text_field(ui, name, "Название группы", GROUP_NAME_MAX);
+        });
+        ui.label(
+            RichText::new(format!("{}/{GROUP_NAME_MAX}", name.chars().count()))
+                .size(12.0)
+                .color(theme::TEXT_MUTED),
+        );
+        let trimmed = name.trim().to_owned();
+        if owner && trimmed != saved.trim() {
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(!busy, theme::primary_button("Сохранить"))
+                    .clicked()
+                {
+                    send = Some((!trimmed.is_empty()).then_some(trimmed));
+                }
+                if ui.button("Отменить изменения").clicked() {
+                    name.clone_from(&saved);
+                }
+            });
+        }
+    }
+    if let Some(next) = send {
+        state.send(bridge, dm.id.clone(), GroupOp::Rename(next));
+    }
+}
+
+fn member_row(
+    ui: &mut egui::Ui,
+    state: &mut GroupDialog,
+    bridge: &mut Bridge,
+    dm: &DmChannel,
+    owner: bool,
+    me: &str,
+    user: &bs_types::User,
+) {
+    let name = user_display_name(user.display_name.as_deref(), &user.username);
+    let is_owner = dm.owner_id.as_deref() == Some(user.id.as_str());
+    let confirm = match &state.mode {
+        Mode::Manage { confirm, .. } => confirm.clone(),
+        Mode::Create { .. } => None,
+    };
+    ui.horizontal(|ui| {
+        theme::avatar(ui, &name, 28.0, None, None);
+        ui.label(RichText::new(&name).color(theme::TEXT_BRIGHT));
+        if is_owner {
+            ui.label(
+                RichText::new("· Владелец группы")
+                    .size(12.0)
+                    .color(theme::TEXT_MUTED),
+            );
+        }
+        if owner && user.id != me {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Удалить").clicked() {
+                    set_confirm(state, Some(Confirm::Kick(user.id.clone())));
+                }
+                if ui.small_button("Передать права").clicked() {
+                    set_confirm(state, Some(Confirm::Transfer(user.id.clone())));
+                }
+            });
+        }
+    });
+    let asked = |c: &Confirm| confirm.as_ref() == Some(c);
+    if asked(&Confirm::Kick(user.id.clone())) {
+        let text = format!(
+            "Удалить {name} из этой группы? Этот участник больше не увидит новые сообщения."
+        );
+        match confirm_box(ui, &text, "Удалить из группы", state.busy) {
+            Some(true) => {
+                state.send(bridge, dm.id.clone(), GroupOp::Remove(user.id.clone()));
+            }
+            Some(false) => set_confirm(state, None),
+            None => {}
+        }
+    } else if asked(&Confirm::Transfer(user.id.clone())) {
+        let text = format!("Передать права владельца {name}? Вы лишитесь прав владельца.");
+        match confirm_box(ui, &text, "Передать", state.busy) {
+            Some(true) => {
+                state.send(bridge, dm.id.clone(), GroupOp::Transfer(user.id.clone()));
+            }
+            Some(false) => set_confirm(state, None),
+            None => {}
+        }
+    }
+}
+
+/// Текст подтверждения: `Some(true)` — подтвердили, `Some(false)` — отменили.
+fn confirm_box(ui: &mut egui::Ui, text: &str, button: &str, busy: bool) -> Option<bool> {
+    let mut pressed = None;
+    egui::Frame::new()
+        .fill(theme::BG_RAIL)
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::same(8))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).color(theme::TEXT_MUTED));
+            ui.horizontal(|ui| {
+                if ui.add_enabled(!busy, egui::Button::new(button)).clicked() {
+                    pressed = Some(true);
+                }
+                if ui.button("Отмена").clicked() {
+                    pressed = Some(false);
+                }
+            });
+        });
+    pressed
+}
+
+fn set_confirm(state: &mut GroupDialog, value: Option<Confirm>) {
+    if let Mode::Manage { confirm, .. } = &mut state.mode {
+        *confirm = value;
+    }
+}
+
+fn add_member(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &DmChannel) {
+    if dm.members.len() >= GROUP_MAX_MEMBERS {
+        ui.label(RichText::new("Группа заполнена").color(theme::TEXT_MUTED));
+        return;
+    }
+    let adding = matches!(&state.mode, Mode::Manage { adding: true, .. });
+    if !adding {
+        if ui.button("Добавить участника").clicked()
+            && let Mode::Manage { adding, .. } = &mut state.mode
+        {
+            *adding = true;
+        }
+        return;
+    }
+    widgets::text_field(ui, &mut state.search, "Поиск друзей…", 64);
+    let needle = state.search.trim().to_lowercase();
+    let candidates: Vec<Friend> = bridge
+        .friends()
+        .iter()
+        .filter(|f| !dm.members.iter().any(|m| m.id == f.id))
+        .filter(|f| needle.is_empty() || friend_name(f).to_lowercase().contains(&needle))
+        .cloned()
+        .collect();
+    egui::ScrollArea::vertical()
+        .max_height(140.0)
+        .show(ui, |ui| {
+            if candidates.is_empty() {
+                ui.label(RichText::new("Нет подходящих друзей").color(theme::TEXT_MUTED));
+            }
+            for friend in &candidates {
+                ui.horizontal(|ui| {
+                    let name = friend_name(friend);
+                    theme::avatar(ui, &name, 24.0, None, None);
+                    ui.label(&name);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(!state.busy, egui::Button::new("Добавить"))
+                            .clicked()
+                        {
+                            state.send(bridge, dm.id.clone(), GroupOp::Add(friend.id.clone()));
+                        }
+                    });
+                });
+            }
+        });
+}
+
+fn leave(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &DmChannel) {
+    let asked = matches!(
+        &state.mode,
+        Mode::Manage {
+            confirm: Some(Confirm::Leave),
+            ..
+        }
+    );
+    if !asked {
+        if ui
+            .add(egui::Button::new(
+                RichText::new("Покинуть группу").color(theme::ROSE),
+            ))
+            .clicked()
+        {
+            set_confirm(state, Some(Confirm::Leave));
+        }
+        return;
+    }
+    let name = dm
+        .name
+        .clone()
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| "группа".to_owned());
+    let text = format!(
+        "Покинуть «{name}»? Вы перестанете получать сообщения из этой беседы. Остальные участники увидят системное сообщение."
+    );
+    let label = if state.busy {
+        "Выход…"
+    } else {
+        "Покинуть группу"
+    };
+    match confirm_box(ui, &text, label, state.busy) {
+        Some(true) => {
+            state.send(bridge, dm.id.clone(), GroupOp::Leave);
+        }
+        Some(false) => set_confirm(state, None),
+        None => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn group_size_limits() {
+        assert!(!can_create(1));
+        assert!(can_create(2));
+        assert!(can_create(9));
+        assert!(!can_create(10));
+    }
+
+    #[test]
+    fn create_finishes_by_opening_the_new_group() {
+        let mut dialog = GroupDialog::create(0);
+        dialog.busy = true;
+        let event = GroupEvent {
+            dm_id: "g1".to_owned(),
+            op: GroupOp::Create(vec![GroupMember::local("a"), GroupMember::local("b")]),
+            result: Ok(()),
+        };
+        assert_eq!(dialog.apply(&event), Outcome::Open("g1".to_owned()));
+        assert!(!dialog.busy);
+    }
+
+    #[test]
+    fn errors_stay_in_the_dialog() {
+        let mut dialog = GroupDialog::create(0);
+        let event = GroupEvent {
+            dm_id: String::new(),
+            op: GroupOp::Create(Vec::new()),
+            result: Err("нет".to_owned()),
+        };
+        assert_eq!(dialog.apply(&event), Outcome::Keep);
+        assert_eq!(dialog.error.as_deref(), Some("нет"));
+    }
+}
