@@ -925,6 +925,8 @@ pub(crate) struct Session {
     responses: Option<std_mpsc::Receiver<BridgeResponse>>,
     /// Фоновая задача сессии: её `abort()` и есть выход.
     session: Option<tokio::task::JoinHandle<()>>,
+    /// Куда сохранять сессию домашнего инстанса (`None` — не сохранять).
+    persist: Option<std::path::PathBuf>,
     friends: Vec<bs_types::Friend>,
     friend_requests: Vec<bs_types::FriendRequest>,
     dm_channels: Vec<bs_types::DmChannel>,
@@ -1019,6 +1021,7 @@ impl Session {
             requests: None,
             responses: None,
             session: None,
+            persist: None,
             friends: Vec::new(),
             friend_requests: Vec::new(),
             dm_channels: Vec::new(),
@@ -1369,8 +1372,47 @@ impl Session {
             username: username.trim().to_owned(),
             password: Zeroizing::new(password.to_owned()),
             register: None,
+            resume: None,
+            persist: self.persist.clone(),
             transport,
         });
+    }
+
+    /// Задаёт файл, в котором хранится сессия домашнего инстанса.
+    pub(crate) fn set_persist(&mut self, path: Option<std::path::PathBuf>) {
+        self.persist = path;
+    }
+
+    /// Стирает сохранённую сессию (явный выход).
+    pub(crate) fn forget_saved(&self) {
+        if let Some(path) = self.persist.as_ref() {
+            crate::saved_session::clear(path);
+        }
+    }
+
+    /// Входит по сохранённому токену; `None`, если сохранённой сессии нет.
+    pub(crate) fn resume_saved(&mut self) -> Option<(String, TransportPolicy)> {
+        if self.phase != Phase::Idle {
+            return None;
+        }
+        let path = self.persist.clone()?;
+        let saved = crate::saved_session::load(&path)?;
+        let base = normalize_base(&saved.base)?;
+        let parsed = url::Url::parse(&base).ok()?;
+        if saved.transport.check(&parsed).is_err() {
+            return None;
+        }
+        self.launch(SessionParams {
+            origin: Origin::Home,
+            base: base.clone(),
+            username: String::new(),
+            password: Zeroizing::new(String::new()),
+            register: None,
+            resume: Some(saved.token),
+            persist: Some(path),
+            transport: saved.transport,
+        });
+        Some((base, saved.transport))
     }
 
     /// Запускает вход на другой инстанс по секрету, выданному домом.
@@ -1410,6 +1452,8 @@ impl Session {
                 home_instance: Some(credential.home_host.clone()),
                 home_user_id: Some(credential.home_user_id.clone()),
             }),
+            resume: None,
+            persist: None,
             transport,
         });
     }
@@ -1440,6 +1484,8 @@ impl Session {
             username: username.to_owned(),
             password: Zeroizing::new(password.expose().to_owned()),
             register: None,
+            resume: None,
+            persist: None,
             transport,
         });
     }
@@ -2001,6 +2047,10 @@ struct SessionParams {
     password: Zeroizing<String>,
     /// Регистрация перед входом (федеративный аккаунт на чужом инстансе).
     register: Option<RegisterRequest>,
+    /// Сохранённый токен: вход без пароля.
+    resume: Option<Secret>,
+    /// Файл, куда писать токен после успешного входа (только домашний инстанс).
+    persist: Option<std::path::PathBuf>,
     transport: TransportPolicy,
 }
 
@@ -2025,6 +2075,8 @@ async fn run_session(
         username,
         password,
         register,
+        resume,
+        persist,
         transport,
     } = params;
     let mut refusal = None;
@@ -2035,22 +2087,50 @@ async fn run_session(
         }
     }
     let mut store = CredentialStore::new();
-    let login = InstanceHandle::login_with_transport(
-        &mut store,
-        origin,
-        &base,
-        &username,
-        &password,
-        Some(ClientKind::Desktop),
-        ReconnectPolicy::default(),
-        transport,
-    )
-    .await;
+    let resuming = resume.is_some();
+    let login = if let Some(token) = resume {
+        store.insert(origin.clone(), bs_identity::AccessToken::new(token.expose()));
+        InstanceHandle::resume_with_transport(
+            &mut store,
+            origin,
+            &base,
+            Some(ClientKind::Desktop),
+            ReconnectPolicy::default(),
+            transport,
+        )
+        .await
+    } else {
+        InstanceHandle::login_with_transport(
+            &mut store,
+            origin,
+            &base,
+            &username,
+            &password,
+            Some(ClientKind::Desktop),
+            ReconnectPolicy::default(),
+            transport,
+        )
+        .await
+    };
     drop(password);
 
     let (handle, ready) = match login {
         Ok(pair) => pair,
         Err(err) => {
+            let rejected = matches!(
+                err,
+                bs_instances::InstanceError::Identity(bs_identity::IdentityError::TokenRejected)
+            );
+            if rejected && let Some(path) = persist.as_ref() {
+                crate::saved_session::clear(path);
+            }
+            if resuming && rejected {
+                let _ = events.send(BridgeEvent::LoginFailed {
+                    message: "Сессия истекла, войдите заново".to_owned(),
+                    kind: FailureKind::Auth,
+                });
+                return;
+            }
             let message = if refusal.is_some() {
                 remote_login_refused(refusal, &err.to_string())
             } else {
@@ -2081,6 +2161,12 @@ async fn run_session(
         }
     }
 
+    if let Some(path) = persist.as_ref()
+        && let Err(err) =
+            crate::saved_session::save(path, &base, handle.token().expose(), transport)
+    {
+        tracing::warn!(%err, "не удалось сохранить сессию");
+    }
     let mut sub = handle.subscribe();
     // Загрузки картинок идут параллельно, но не больше `MAX_IMAGE_JOBS`
     // сразу; при выходе из сессии `JoinSet` обрывает незавершённые.
@@ -2096,6 +2182,10 @@ async fn run_session(
                     }
                 }
                 Ok(InstanceEvent::AuthRejected { failure, message, .. }) => {
+                    // Токен больше не годится: в следующий раз войти по нему нельзя.
+                    if let Some(path) = persist.as_ref() {
+                        crate::saved_session::clear(path);
+                    }
                     let _ = events.send(BridgeEvent::Error {
                         message: format!("{message} ({failure:?})"),
                     });
@@ -3108,6 +3198,8 @@ mod tests {
             username: "alice".to_owned(),
             password: zeroize::Zeroizing::new("secret".to_owned()),
             register: None,
+            resume: None,
+            persist: None,
             transport: TransportPolicy::Strict,
         }
     }
@@ -3492,6 +3584,96 @@ mod tests {
             .await
             .expect("run_session должен завершиться")
             .expect("задача не должна паниковать");
+    }
+
+    /// Явный выход стирает сохранённую сессию, а без файла входа по токену нет.
+    #[test]
+    #[allow(clippy::expect_used, reason = "в тестах паника допустима")]
+    fn forget_saved_removes_the_file_and_blocks_resume() {
+        let path = std::env::temp_dir()
+            .join(format!("bs-forget-{}", std::process::id()))
+            .join("session.json");
+        crate::saved_session::save(&path, "https://x.example", "tok", TransportPolicy::Strict)
+            .expect("запись");
+        let (mut bridge, _commands, _requests) = active_bridge();
+        bridge.set_persist(Some(path.clone()));
+        bridge.forget_saved();
+        assert!(crate::saved_session::load(&path).is_none());
+        assert!(bridge.resume_saved().is_none());
+    }
+
+    /// Вход по сохранённому токену: пароль не нужен, токен пишется обратно.
+    #[tokio::test]
+    #[allow(clippy::expect_used, reason = "в тестах паника допустима")]
+    async fn resume_with_saved_token_reaches_ready_and_persists() {
+        let ready = ServerEvent::Ready(Box::new(ready_payload()));
+        let (base, _server_events) = crate::fake_instance::spawn(ready).await;
+        let path = std::env::temp_dir()
+            .join(format!("bs-resume-ok-{}", std::process::id()))
+            .join("session.json");
+
+        let (events_tx, events_rx) = std_mpsc::channel();
+        let (_commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
+        let (_requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
+        let (responses_tx, _responses_rx) = std_mpsc::channel();
+
+        let mut p = params();
+        p.base = base.clone();
+        p.password = zeroize::Zeroizing::new(String::new());
+        p.resume = Some(Secret::new("jwt-abc"));
+        p.persist = Some(path.clone());
+        let session = tokio::spawn(run_session(
+            p,
+            events_tx,
+            commands_rx,
+            requests_rx,
+            responses_tx,
+        ));
+        let event = tokio::task::spawn_blocking(move || {
+            events_rx.recv_timeout(Duration::from_secs(10))
+        })
+        .await
+        .expect("join");
+        assert!(matches!(&event, Ok(BridgeEvent::Ready { .. })), "{event:?}");
+        let saved = crate::saved_session::load(&path).expect("сессия сохранена");
+        assert_eq!(saved.base, base);
+        assert_eq!(saved.token.expose(), "jwt-abc");
+        session.abort();
+        crate::saved_session::clear(&path);
+    }
+
+    /// Сервер не принял токен: файл стирается, пользователь видит причину.
+    #[tokio::test]
+    #[allow(clippy::expect_used, reason = "в тестах паника допустима")]
+    async fn resume_with_rejected_token_clears_the_file() {
+        let ready = ServerEvent::Ready(Box::new(ready_payload()));
+        let (base, _server_events) = crate::fake_instance::spawn(ready).await;
+        let path = std::env::temp_dir()
+            .join(format!("bs-resume-bad-{}", std::process::id()))
+            .join("session.json");
+        crate::saved_session::save(&path, &base, "old-token", TransportPolicy::Strict)
+            .expect("запись");
+
+        let (events_tx, events_rx) = std_mpsc::channel();
+        let (_commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
+        let (_requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
+        let (responses_tx, _responses_rx) = std_mpsc::channel();
+
+        let mut p = params();
+        p.base = base;
+        p.resume = Some(Secret::new("old-token"));
+        p.persist = Some(path.clone());
+        run_session(p, events_tx, commands_rx, requests_rx, responses_tx).await;
+
+        let event = events_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("событие об отказе");
+        let BridgeEvent::LoginFailed { message, kind } = event else {
+            unreachable!("ожидался отказ входа, пришло {event:?}");
+        };
+        assert_eq!(kind, super::FailureKind::Auth);
+        assert!(message.contains("войдите заново"), "{message}");
+        assert!(crate::saved_session::load(&path).is_none(), "файл стёрт");
     }
 
     /// `abort()` (так работает выход) всё равно сообщает `Ended`:

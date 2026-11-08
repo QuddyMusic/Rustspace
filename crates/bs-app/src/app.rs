@@ -38,10 +38,16 @@ pub(crate) struct BackspaceApp {
 impl BackspaceApp {
     /// Создаёт приложение; `runtime` — handle фонового tokio-runtime.
     pub(crate) fn new(runtime: Handle) -> Self {
+        let mut bridge = Bridge::new(runtime);
+        let mut login = LoginScreen::default();
+        // Сохранённая сессия: входим по токену, без пароля.
+        if let Some(base) = bridge.restore(crate::saved_session::default_path()) {
+            login.base = base;
+        }
         Self {
             screen: Screen::Login,
-            bridge: Bridge::new(runtime),
-            login: LoginScreen::default(),
+            bridge,
+            login,
             chat: ChatScreen::default(),
             images: ImageHub::default(),
         }

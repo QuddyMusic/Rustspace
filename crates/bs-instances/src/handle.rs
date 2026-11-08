@@ -132,6 +132,23 @@ impl InstanceHandle {
         Self::from_session(session, client_kind, policy).await
     }
 
+    /// Поднимает подключение по сохранённому токену из `store` (без пароля).
+    ///
+    /// Токен проверяется через `GET /api/users/@me`; при `401` он удаляется
+    /// из `store`, а вызывающий получает [`InstanceError::Identity`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn resume_with_transport(
+        store: &mut CredentialStore,
+        origin: Origin,
+        base: &str,
+        client_kind: Option<ClientKind>,
+        policy: ReconnectPolicy,
+        transport: TransportPolicy,
+    ) -> Result<(Self, ServerEvent), InstanceError> {
+        let session = InstanceSession::resume_with_policy(store, origin, base, transport).await?;
+        Self::from_session(session, client_kind, policy).await
+    }
+
     /// Поднимает подключение из уже готовой сессии.
     pub async fn from_session(
         session: InstanceSession,

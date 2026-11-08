@@ -68,8 +68,18 @@ impl InstanceSession {
         origin: Origin,
         base: &str,
     ) -> Result<Self, IdentityError> {
+        Self::resume_with_policy(store, origin, base, TransportPolicy::Strict).await
+    }
+
+    /// Как [`InstanceSession::resume`], но с явной политикой транспорта.
+    pub async fn resume_with_policy(
+        store: &mut CredentialStore,
+        origin: Origin,
+        base: &str,
+        policy: TransportPolicy,
+    ) -> Result<Self, IdentityError> {
         let token = store.get(&origin)?.clone();
-        let mut client = ApiClient::new(origin.clone(), base)?;
+        let mut client = ApiClient::with_policy(origin.clone(), base, policy)?;
         client.set_token(Some(token.expose().to_owned()));
         match client.me().await {
             Ok(user) => Ok(Self {

@@ -268,8 +268,21 @@ impl Bridge {
         self.focus = 0;
     }
 
-    /// Выход: закрывает все сессии.
+    /// Включает сохранение сессии в файл и входит по ней, если она есть.
+    ///
+    /// Возвращает адрес инстанса, в который пошёл автоматический вход.
+    pub(crate) fn restore(&mut self, path: Option<std::path::PathBuf>) -> Option<String> {
+        self.slots[0].session.set_persist(path);
+        let (base, transport) = self.slots[0].session.resume_saved()?;
+        self.transport = transport;
+        self.slots[0].base = canonical_base(&base);
+        self.focus = 0;
+        Some(base)
+    }
+
+    /// Выход: закрывает все сессии и забывает сохранённый вход.
     pub(crate) fn logout(&mut self) {
+        self.slots[0].session.forget_saved();
         self.leaving = true;
         for slot in &mut self.slots {
             slot.session.logout();

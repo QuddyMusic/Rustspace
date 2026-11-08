@@ -73,6 +73,24 @@ async fn handle_conn(
         return Ok(());
     }
 
+    if request_line.starts_with("GET /api/users/@me") {
+        // Проверка сохранённого токена: годится только `jwt-abc`.
+        let authorised = headers.get("authorization").map(String::as_str) == Some("Bearer jwt-abc");
+        let (status, body) = if authorised {
+            let user = serde_json::from_str::<serde_json::Value>(&login_response()).unwrap();
+            ("200 OK", user["user"].to_string())
+        } else {
+            ("401 Unauthorized", r#"{"error":"Unauthorized","code":"unauthorized"}"#.to_owned())
+        };
+        let response = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).await?;
+        stream.flush().await?;
+        return Ok(());
+    }
+
     if headers.get("upgrade").map(String::as_str) == Some("websocket") {
         let key = headers
             .get("sec-websocket-key")
