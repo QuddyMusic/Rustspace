@@ -1002,6 +1002,14 @@ impl Bridge {
     }
 
     /// Скачанные файлы со всех инстансов.
+    /// Ход скачиваний на диск со всех инстансов.
+    pub(crate) fn take_downloads(&mut self) -> Vec<(u64, crate::bridge::DownloadState)> {
+        self.slots
+            .iter_mut()
+            .flat_map(|slot| slot.session.take_downloads())
+            .collect()
+    }
+
     pub(crate) fn take_raw(&mut self) -> Vec<(u64, Result<Vec<u8>, String>)> {
         self.slots
             .iter_mut()

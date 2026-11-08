@@ -61,6 +61,8 @@ pub(crate) enum Icon {
     HangUp,
     /// Лупа.
     Search,
+    /// Стрелка вниз над лотком: скачать.
+    Download,
 }
 
 /// Точки дуги окружности: углы в градусах, 0° — вправо, по часовой на экране.
@@ -134,6 +136,11 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
         Icon::User => {
             painter.circle_stroke(p(12.0, 8.0), 3.9 * unit, stroke);
             line(arc(p(12.0, 20.5), 7.5 * unit, 180.0, 360.0, 14));
+        }
+        Icon::Download => {
+            line(vec![p(12.0, 3.5), p(12.0, 15.0)]);
+            line(vec![p(7.0, 10.5), p(12.0, 15.5), p(17.0, 10.5)]);
+            line(vec![p(4.5, 19.5), p(19.5, 19.5)]);
         }
         Icon::Search => {
             painter.circle_stroke(p(10.5, 10.5), 6.0 * unit, stroke);

@@ -21,7 +21,7 @@ use egui::epaint::RectShape;
 use egui::{Color32, Context, CornerRadius, Id, Rect, TextureHandle, TextureOptions, pos2};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::bridge::BridgeRequest;
+use crate::bridge::{BridgeRequest, DownloadState};
 
 /// Сколько байт текстур держим в памяти до вытеснения.
 const TEXTURE_BUDGET: usize = 96 * 1024 * 1024;
@@ -121,6 +121,14 @@ struct Inner {
     tick: u64,
     next_tag: u64,
     raw_pending: HashMap<u64, RawPurpose>,
+    /// Скачивания на диск: номер запроса → значение поля файла.
+    download_ids: HashMap<u64, String>,
+    /// Состояние скачивания по значению поля файла.
+    downloads: HashMap<String, Download>,
+    /// Завершённые скачивания: подпись и итог (для уведомления).
+    download_done: Vec<(String, Result<(), String>)>,
+    /// Подписи скачиваний для уведомлений.
+    download_labels: HashMap<String, String>,
     raw_done: Vec<(RawPurpose, Result<Vec<u8>, String>)>,
 }
 
@@ -131,6 +139,26 @@ pub(crate) struct ImageHub(Arc<Mutex<Inner>>);
 /// Ключ, под которым хаб лежит в памяти контекста `egui`.
 fn hub_id() -> Id {
     Id::unique("bs_image_hub")
+}
+
+/// Состояние скачивания вложения на диск.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Download {
+    /// Идёт: принято байт и общий размер.
+    Running { got: u64, total: Option<u64> },
+    /// Сохранено.
+    Done,
+    /// Не удалось.
+    Failed(String),
+}
+
+impl Download {
+    /// Доля готовности `0..=100`, если размер известен.
+    pub(crate) fn percent(got: u64, total: Option<u64>) -> Option<u64> {
+        total
+            .filter(|t| *t > 0)
+            .map(|t| (got.min(t).saturating_mul(100) / t).min(100))
+    }
 }
 
 /// Зачем скачивается файл целиком.
@@ -166,6 +194,80 @@ impl ImageHub {
             inner.raw_pending.insert(tag, purpose);
         }
         sent
+    }
+
+    /// Просит владельца инстанса сохранить файл на диск. `label` — подпись для
+    /// уведомления. `false`, если путь недопустим, инстанс не подключён или
+    /// этот файл уже скачивается.
+    pub(crate) fn request_download(&self, value: &str, dest: std::path::PathBuf, label: &str) -> bool {
+        let Some(key) = self.resolve(value) else {
+            return false;
+        };
+        if key.0 == EXTERNAL {
+            return false;
+        }
+        let mut inner = self.lock();
+        if matches!(inner.downloads.get(value), Some(Download::Running { .. })) {
+            return false;
+        }
+        inner.next_tag += 1;
+        let id = inner.next_tag;
+        let sent = inner
+            .links
+            .iter()
+            .find(|(base, _)| *base == key.0)
+            .is_some_and(|(_, tx)| {
+                tx.send(BridgeRequest::Download {
+                    id,
+                    path: key.1.clone(),
+                    dest,
+                })
+                .is_ok()
+            });
+        if sent {
+            inner.download_ids.insert(id, value.to_owned());
+            inner
+                .downloads
+                .insert(value.to_owned(), Download::Running { got: 0, total: None });
+            inner.download_labels.insert(value.to_owned(), label.to_owned());
+        }
+        sent
+    }
+
+    /// Принимает ход скачивания на диск.
+    pub(crate) fn accept_download(&self, id: u64, state: DownloadState) {
+        let mut inner = self.lock();
+        let Some(value) = inner.download_ids.get(&id).cloned() else {
+            return;
+        };
+        let label = inner.download_labels.get(&value).cloned().unwrap_or_default();
+        match state {
+            DownloadState::Progress { got, total } => {
+                inner.downloads.insert(value, Download::Running { got, total });
+            }
+            DownloadState::Done => {
+                inner.download_ids.remove(&id);
+                inner.downloads.insert(value, Download::Done);
+                inner.download_done.push((label, Ok(())));
+            }
+            DownloadState::Failed(message) => {
+                inner.download_ids.remove(&id);
+                inner
+                    .downloads
+                    .insert(value, Download::Failed(message.clone()));
+                inner.download_done.push((label, Err(message)));
+            }
+        }
+    }
+
+    /// Состояние скачивания файла по значению поля.
+    pub(crate) fn download(&self, value: &str) -> Option<Download> {
+        self.lock().downloads.get(value).cloned()
+    }
+
+    /// Забирает завершённые скачивания (для уведомления).
+    pub(crate) fn take_download_done(&self) -> Vec<(String, Result<(), String>)> {
+        std::mem::take(&mut self.lock().download_done)
     }
 
     /// Принимает скачанный файл.

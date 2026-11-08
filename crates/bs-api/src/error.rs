@@ -23,6 +23,10 @@ pub enum ApiError {
     #[error(transparent)]
     Insecure(#[from] bs_types::TransportError),
 
+    /// Не удалось записать скачанный файл на диск.
+    #[error("не удалось записать файл: {0}")]
+    Io(std::io::Error),
+
     /// Ответ больше допустимого размера: клиент не читает его целиком.
     #[error("ответ сервера слишком большой (больше {limit} байт)")]
     ResponseTooLarge {
@@ -67,7 +71,7 @@ impl ApiError {
             | Self::Decode { status, .. }
             | Self::Unexpected { status, .. } => Some(*status),
             Self::Transport(err) => err.status(),
-            Self::Url(_) | Self::Insecure(_) | Self::ResponseTooLarge { .. } => None,
+            Self::Url(_) | Self::Insecure(_) | Self::Io(_) | Self::ResponseTooLarge { .. } => None,
         }
     }
 

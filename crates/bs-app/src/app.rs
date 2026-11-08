@@ -55,6 +55,28 @@ impl BackspaceApp {
 }
 
 impl BackspaceApp {
+    /// Сообщает, чем закончились скачивания файлов на диск.
+    fn finish_downloads(&mut self) {
+        let done = self.images.take_download_done();
+        if done.is_empty() {
+            return;
+        }
+        let failed: Vec<_> = done
+            .iter()
+            .filter_map(|(label, result)| {
+                result.as_ref().err().map(|err| format!("{label}: {err}"))
+            })
+            .collect();
+        let saved = done.len() - failed.len();
+        let text = match (saved, failed.first()) {
+            (0, Some(first)) => format!("Не удалось скачать {first}"),
+            (1, None) => format!("Файл сохранён: {}", done[0].0),
+            (n, None) => format!("Сохранено файлов: {n}"),
+            (n, Some(first)) => format!("Сохранено файлов: {n}; не удалось: {first}"),
+        };
+        self.bridge.set_info(text);
+    }
+
     /// Завершает скачивания: картинка в буфер обмена или стикер в коллекцию.
     fn finish_raw(&mut self, ctx: &egui::Context) {
         for (purpose, result) in self.images.take_raw_done() {
@@ -163,6 +185,10 @@ impl eframe::App for BackspaceApp {
         for (tag, result) in self.bridge.take_raw() {
             self.images.accept_raw(tag, result);
         }
+        for (id, state) in self.bridge.take_downloads() {
+            self.images.accept_download(id, state);
+        }
+        self.finish_downloads();
         self.finish_raw(ui.ctx());
         if lost {
             // Кэш и каналы мост уже сбросил сам, когда сессия закрылась.

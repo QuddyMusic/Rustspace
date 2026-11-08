@@ -125,6 +125,31 @@ impl SearchState {
     }
 }
 
+/// Ход скачивания файла.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DownloadState {
+    /// Принято байт и общий размер (если сервер его сообщил).
+    Progress { got: u64, total: Option<u64> },
+    /// Файл целиком записан на диск.
+    Done,
+    /// Не удалось (текст для пользователя).
+    Failed(String),
+}
+
+/// Через сколько принятых байт сообщаем о ходе скачивания.
+const DOWNLOAD_STEP: u64 = 128 * 1024;
+
+/// Текст ошибки скачивания для пользователя.
+fn download_message(err: &bs_api::ApiError) -> String {
+    match err {
+        bs_api::ApiError::Io(io) => format!("не удалось записать файл ({io})"),
+        other if other.status().is_some_and(|s| s.as_u16() == 404) => {
+            "файл больше не доступен на сервере".to_owned()
+        }
+        other => other.to_string(),
+    }
+}
+
 /// Размер страницы результатов поиска.
 const SEARCH_PAGE: u16 = 25;
 /// Сколько сообщений просим вокруг найденного.
@@ -390,6 +415,12 @@ pub(crate) enum BridgeRequest {
         query: bs_api::MessageSearchQuery,
         /// Номер поиска (см. [`SearchState`]).
         seq: u64,
+    },
+    /// Скачать файл инстанса на диск (потоком, с прогрессом).
+    Download {
+        id: u64,
+        path: bs_api::AssetPath,
+        dest: std::path::PathBuf,
     },
     /// Окно сообщений вокруг найденного (переход к результату).
     Around {
@@ -895,6 +926,8 @@ pub(crate) enum BridgeResponse {
         /// Сами сообщения.
         items: HistoryItems,
     },
+    /// Ход скачивания файла на диск.
+    Download { id: u64, state: DownloadState },
     /// Страница результатов поиска.
     SearchDone {
         seq: u64,
@@ -1055,6 +1088,8 @@ pub(crate) struct Session {
     group_in: Vec<GroupEvent>,
     call_in: Vec<CallEvent>,
     raw_ready: Vec<(u64, Result<Vec<u8>, String>)>,
+    /// Ход скачиваний на диск, ещё не переданный хабу картинок.
+    downloads_ready: Vec<(u64, DownloadState)>,
     /// Ответы настроек, которые GUI ещё не забрал.
     admin_in: Vec<AdminEvent>,
     /// Готовые картинки, которые GUI ещё не превратил в текстуры.
@@ -1141,6 +1176,7 @@ impl Session {
             group_in: Vec::new(),
             call_in: Vec::new(),
             raw_ready: Vec::new(),
+            downloads_ready: Vec::new(),
             admin_in: Vec::new(),
             saved_in: Vec::new(),
             deleted_in: Vec::new(),
@@ -1768,6 +1804,11 @@ impl Session {
     }
 
     /// Забирает скачанные файлы.
+    /// Забирает ход скачиваний на диск.
+    pub(crate) fn take_downloads(&mut self) -> Vec<(u64, DownloadState)> {
+        std::mem::take(&mut self.downloads_ready)
+    }
+
     pub(crate) fn take_raw(&mut self) -> Vec<(u64, Result<Vec<u8>, String>)> {
         std::mem::take(&mut self.raw_ready)
     }
@@ -2239,6 +2280,7 @@ impl Session {
                 self.group_in.push(event);
             }
             BridgeResponse::Raw { tag, result } => self.raw_ready.push((tag, result)),
+            BridgeResponse::Download { id, state } => self.downloads_ready.push((id, state)),
             BridgeResponse::JoinRequested => {
                 self.info = Some("Заявка отправлена".to_owned());
                 self.social_error = None;
@@ -2446,6 +2488,31 @@ async fn run_session(
                         };
                         let result = load_image(&client, &path).await;
                         let _ = tx.send(BridgeResponse::Image { path, result });
+                    });
+                }
+                Some(BridgeRequest::Download { id, path, dest }) => {
+                    let client = handle.client().clone();
+                    let tx = responses.clone();
+                    image_jobs.spawn(async move {
+                        let mut reported = 0_u64;
+                        let progress_tx = tx.clone();
+                        let result = client
+                            .download_asset(&path, &dest, move |got, total| {
+                                // Не чаще раза на каждые 128 КиБ (и в самом начале).
+                                if got == 0 || got.saturating_sub(reported) >= DOWNLOAD_STEP {
+                                    reported = got;
+                                    let _ = progress_tx.send(BridgeResponse::Download {
+                                        id,
+                                        state: DownloadState::Progress { got, total },
+                                    });
+                                }
+                            })
+                            .await;
+                        let state = match result {
+                            Ok(_) => DownloadState::Done,
+                            Err(err) => DownloadState::Failed(download_message(&err)),
+                        };
+                        let _ = tx.send(BridgeResponse::Download { id, state });
                     });
                 }
                 Some(BridgeRequest::Raw { tag, path }) => {
@@ -3132,6 +3199,7 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
         // Картинки обрабатываются отдельно и параллельно (см. `run_session`).
         BridgeRequest::Image(_)
         | BridgeRequest::Raw { .. }
+        | BridgeRequest::Download { .. }
         | BridgeRequest::Upload { .. }
         | BridgeRequest::SetImage { .. } => BridgeResponse::Done,
         BridgeRequest::Admin(request) => BridgeResponse::Admin(handle_admin(client, request).await),
@@ -3858,6 +3926,76 @@ mod tests {
             .await
             .expect("run_session должен завершиться")
             .expect("задача не должна паниковать");
+    }
+
+    /// Скачивание вложения на диск: прогресс, затем «готово»; ошибка — текстом.
+    #[tokio::test]
+    #[allow(clippy::expect_used, reason = "в тестах паника допустима")]
+    async fn download_request_writes_the_file_and_reports_failures() {
+        let ready = ServerEvent::Ready(Box::new(ready_payload()));
+        let (base, _server_events) = crate::fake_instance::spawn(ready).await;
+        let dir = std::env::temp_dir().join(format!("bs-bridge-dl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("папка");
+
+        let (events_tx, events_rx) = std_mpsc::channel();
+        let (_commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
+        let (requests_tx, requests_rx) = tokio_mpsc::unbounded_channel();
+        let (responses_tx, responses_rx) = std_mpsc::channel();
+        let mut p = params();
+        p.base = base;
+        let session = tokio::spawn(run_session(
+            p,
+            events_tx,
+            commands_rx,
+            requests_rx,
+            responses_tx,
+        ));
+        let ready = tokio::task::spawn_blocking(move || {
+            let event = events_rx.recv_timeout(Duration::from_secs(10));
+            (events_rx, event)
+        })
+        .await
+        .expect("join");
+        assert!(matches!(&ready.1, Ok(BridgeEvent::Ready { .. })), "{:?}", ready.1);
+
+        let ok_path = dir.join("a.bin");
+        let bad_path = dir.join("b.bin");
+        for (id, name, dest) in [(1, "a.bin", ok_path.clone()), (2, "gone.bin", bad_path.clone())] {
+            requests_tx
+                .send(BridgeRequest::Download {
+                    id,
+                    path: bs_api::AssetPath::parse(&format!("/api/uploads/{name}"))
+                        .expect("путь"),
+                    dest,
+                })
+                .expect("запрос");
+        }
+        let states = tokio::task::spawn_blocking(move || {
+            let mut done = std::collections::HashMap::new();
+            while done.len() < 2 {
+                match responses_rx.recv_timeout(Duration::from_secs(10)) {
+                    Ok(BridgeResponse::Download { id, state })
+                        if !matches!(state, super::DownloadState::Progress { .. }) =>
+                    {
+                        done.insert(id, state);
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+            done
+        })
+        .await
+        .expect("join");
+        assert_eq!(states.get(&1), Some(&super::DownloadState::Done));
+        assert!(
+            matches!(states.get(&2), Some(super::DownloadState::Failed(m)) if m.contains("больше не доступен")),
+            "{states:?}"
+        );
+        assert_eq!(std::fs::read(&ok_path).expect("файл").len(), 3000);
+        assert!(!bad_path.exists());
+        session.abort();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Явный выход стирает сохранённую сессию, а без файла входа по токену нет.

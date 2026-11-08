@@ -73,6 +73,23 @@ async fn handle_conn(
         return Ok(());
     }
 
+    if request_line.starts_with("GET /api/uploads/") {
+        // Любой файл отдаётся 3000 байтами «x», кроме `gone.bin`.
+        let (status, body) = if request_line.contains("gone.bin") {
+            ("404 Not Found", Vec::new())
+        } else {
+            ("200 OK", vec![b'x'; 3000])
+        };
+        let head = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/octet-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(head.as_bytes()).await?;
+        stream.write_all(&body).await?;
+        stream.flush().await?;
+        return Ok(());
+    }
+
     if request_line.starts_with("GET /api/users/@me") {
         // Проверка сохранённого токена: годится только `jwt-abc`.
         let authorised = headers.get("authorization").map(String::as_str) == Some("Bearer jwt-abc");

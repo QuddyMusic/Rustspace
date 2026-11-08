@@ -202,6 +202,73 @@ impl ApiClient {
     }
 }
 
+/// Сколько секунд даём на скачивание одного файла (обычный таймаут клиента
+/// рассчитан на короткие запросы и оборвал бы большой файл).
+const DOWNLOAD_TIMEOUT_SECS: u64 = 3600;
+
+impl ApiClient {
+    /// Скачивает файл на диск потоком, не держа его целиком в памяти.
+    ///
+    /// Данные пишутся во временный `<dest>.part`; после полного получения он
+    /// переименовывается в `dest` (существующий файл заменяется). При любой
+    /// ошибке временный файл удаляется. `progress` получает число принятых
+    /// байт и общий размер, если сервер его сообщил. Токен не отправляется.
+    ///
+    /// # Errors
+    /// Сетевые ошибки, не-2xx ответ, внешний путь, ошибки записи на диск.
+    pub async fn download_asset(
+        &self,
+        asset: &AssetPath,
+        dest: &std::path::Path,
+        mut progress: impl FnMut(u64, Option<u64>) + Send,
+    ) -> Result<u64, ApiError> {
+        use std::io::Write as _;
+
+        if asset.is_external() {
+            return Err(ApiError::Url(url::ParseError::RelativeUrlWithoutBase));
+        }
+        let url = self.endpoint(asset.as_str())?;
+        let mut response = self
+            .http()
+            .get(url)
+            .timeout(std::time::Duration::from_secs(DOWNLOAD_TIMEOUT_SECS))
+            .send()
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(ApiError::Unexpected {
+                status,
+                body: String::new(),
+            });
+        }
+        let total = response.content_length();
+        let mut tmp = dest.as_os_str().to_owned();
+        tmp.push(".part");
+        let tmp = std::path::PathBuf::from(tmp);
+        // Запись идёт кусками по мере прихода; куски небольшие, поэтому
+        // блокирующая запись на диск не задерживает исполнитель заметно.
+        let result = async {
+            let mut file = std::fs::File::create(&tmp).map_err(ApiError::Io)?;
+            let mut received: u64 = 0;
+            progress(0, total);
+            while let Some(chunk) = response.chunk().await? {
+                file.write_all(&chunk).map_err(ApiError::Io)?;
+                received += chunk.len() as u64;
+                progress(received, total);
+            }
+            file.flush().map_err(ApiError::Io)?;
+            drop(file);
+            std::fs::rename(&tmp, dest).map_err(ApiError::Io)?;
+            Ok(received)
+        }
+        .await;
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{AssetPath, resolve_asset};

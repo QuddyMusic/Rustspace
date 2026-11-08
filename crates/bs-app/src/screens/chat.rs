@@ -924,6 +924,8 @@ pub(crate) struct ChatScreen {
     react_picker: Option<(String, usize)>,
     /// Имена пользователей для упоминаний (обновляется каждый кадр).
     names: HashMap<String, String>,
+    /// Ожидаем выбор места для скачиваемого вложения.
+    save_pending: Option<crate::download::Pending>,
     /// Поиск по сообщениям текущего канала.
     search: super::search_panel::SearchPanel,
     /// Сообщение, к которому нужно прокрутить ленту (из результатов поиска).
@@ -2423,6 +2425,27 @@ impl ChatScreen {
             });
     }
 
+    /// Принимает выбор места для скачиваемых файлов и запускает скачивание.
+    fn poll_save(&mut self, ctx: &egui::Context) {
+        let Some(pending) = &self.save_pending else {
+            return;
+        };
+        match pending.try_recv() {
+            Ok(picked) => {
+                self.save_pending = None;
+                if let Some(hub) = crate::images::ImageHub::of(ctx) {
+                    for (target, path) in picked {
+                        hub.request_download(&target.value, path, &target.name);
+                    }
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.save_pending = None,
+        }
+    }
+
     /// Прокручивает к сообщению из результатов поиска и ненадолго подсвечивает его.
     fn jump_and_flash(
         &mut self,
@@ -2462,6 +2485,7 @@ impl ChatScreen {
 
     /// Панель поиска и плашка «вы смотрите старые сообщения».
     fn show_search(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
+        self.poll_save(ctx);
         let Some(selected) = self.selected_channel.clone() else {
             return;
         };
@@ -2542,6 +2566,7 @@ impl ChatScreen {
     ) {
         ui.add_space(if show_header { 16.0 } else { 2.0 });
         let mut hits: Vec<media::Hit> = Vec::new();
+        let mut downloads: Vec<media::DownloadHit> = Vec::new();
         let mut profile_rects: Vec<egui::Rect> = Vec::new();
         let mut reaction_targets: Vec<(egui::Rect, super::body::ReactionClick)> = Vec::new();
         let inner = ui.horizontal_top(|ui| {
@@ -2580,8 +2605,9 @@ impl ChatScreen {
                     super::body::show_text(ui, &row.id, &blocks, row.edited);
                 }
                 for attachment in &row.attachments {
-                    hits.extend(media::show_attachment(ui, attachment));
+                    hits.extend(media::show_attachment(ui, attachment, &mut downloads));
                 }
+                media::show_download_all(ui, &row.attachments, &mut downloads);
                 if !row.reactions.is_empty() {
                     reaction_targets = super::body::show_reactions(ui, &row.reactions);
                 }
@@ -2599,7 +2625,21 @@ impl ChatScreen {
             self.scroll_anchor = None;
         }
         self.jump_and_flash(ui, &response, rect, &row.id);
-        if response.clicked()
+        let download_click = if response.clicked() {
+            response.interact_pointer_pos().and_then(|pos| {
+                downloads
+                    .iter()
+                    .find(|(rect, _)| rect.contains(pos))
+                    .map(|(_, click)| click.clone())
+            })
+        } else {
+            None
+        };
+        if let Some(click) = download_click {
+            if self.save_pending.is_none() {
+                self.save_pending = Some(crate::download::start(ui.ctx(), click));
+            }
+        } else if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
             && let Some((_, value)) = hits.iter().find(|(rect, _)| rect.contains(pos))
         {
@@ -2657,12 +2697,25 @@ impl ChatScreen {
             .is_some_and(|v| !v.starts_with("https://") || v.starts_with("sticker:"));
         let mut open_picker = false;
         let mut reply_request = false;
+        let mut save_request: Option<crate::download::Click> = None;
         response.context_menu(|ui| {
             if let Some(value) = &image {
                 if ui.button("Копировать картинку").clicked() {
                     if let Some(hub) = crate::images::ImageHub::of(ui.ctx()) {
                         hub.request_raw(value, crate::images::RawPurpose::Copy);
                     }
+                    ui.close();
+                }
+                if ui.button("Сохранить как…").clicked() {
+                    let name = row
+                        .attachments
+                        .iter()
+                        .find(|a| &a.filename == value)
+                        .map_or_else(|| value.clone(), |a| a.name.clone());
+                    save_request = Some(crate::download::Click::One(crate::download::Target {
+                        value: value.clone(),
+                        name,
+                    }));
                     ui.close();
                 }
                 if can_collect && ui.button("Сохранить в мои стикеры").clicked()
@@ -2719,6 +2772,11 @@ impl ChatScreen {
         }
         if open_picker {
             self.react_picker = Some((row.id.clone(), 0));
+        }
+        if let Some(click) = save_request
+            && self.save_pending.is_none()
+        {
+            self.save_pending = Some(crate::download::start(ui.ctx(), click));
         }
     }
 }

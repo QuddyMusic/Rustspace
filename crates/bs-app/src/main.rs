@@ -26,6 +26,7 @@ mod logic;
 mod markdown;
 mod media;
 mod registry;
+mod download;
 mod saved_session;
 mod screens;
 mod social;
