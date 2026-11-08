@@ -271,6 +271,26 @@ impl Cache {
         })
     }
 
+    /// Заменяет загруженные сообщения канала пространства страницей `page`
+    /// (переход к старому сообщению: старый хвост истории не склеить с новым
+    /// окном без пропуска, поэтому прежние сообщения забываются).
+    pub fn replace_history(&mut self, channel_id: &str, page: Vec<MessageWithUser>) {
+        self.messages.remove(channel_id);
+        self.merge_history(channel_id, page);
+    }
+
+    /// То же для личного канала.
+    pub fn replace_dm_history(&mut self, dm_channel_id: &str, page: Vec<DmMessageWithUser>) {
+        self.dm_messages.remove(dm_channel_id);
+        self.merge_dm_history(dm_channel_id, page);
+    }
+
+    /// Забывает загруженные сообщения канала (пространства или личного).
+    pub fn forget_messages(&mut self, channel_id: &str) {
+        self.messages.remove(channel_id);
+        self.dm_messages.remove(channel_id);
+    }
+
     /// Кто печатает в канале на момент `now_ms` (протухшие записи отброшены).
     pub fn typing_in(&self, channel_id: &str, now_ms: i64) -> impl Iterator<Item = &TypingEntry> {
         self.typing

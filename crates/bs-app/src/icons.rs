@@ -59,6 +59,8 @@ pub(crate) enum Icon {
     Phone,
     /// Трубка: завершить звонок.
     HangUp,
+    /// Лупа.
+    Search,
 }
 
 /// Точки дуги окружности: углы в градусах, 0° — вправо, по часовой на экране.
@@ -132,6 +134,10 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
         Icon::User => {
             painter.circle_stroke(p(12.0, 8.0), 3.9 * unit, stroke);
             line(arc(p(12.0, 20.5), 7.5 * unit, 180.0, 360.0, 14));
+        }
+        Icon::Search => {
+            painter.circle_stroke(p(10.5, 10.5), 6.0 * unit, stroke);
+            line(vec![p(15.0, 15.0), p(20.5, 20.5)]);
         }
         Icon::Users => {
             painter.circle_stroke(p(9.0, 8.5), 3.5 * unit, stroke);

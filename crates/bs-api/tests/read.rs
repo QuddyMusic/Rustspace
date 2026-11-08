@@ -239,3 +239,41 @@ async fn dm_messages_clamps_limit_and_maps_errors() {
         .unwrap_err();
     assert_eq!(err.code(), Some("not_dm_member"));
 }
+
+#[tokio::test]
+async fn loads_messages_around_a_target() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/channels/c1/messages/around"))
+        .and(query_param("messageId", "m5"))
+        .and(query_param("limit", "50"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([message_json("m4"), message_json("m5")])),
+        )
+        .mount(&server)
+        .await;
+    let page = client(&server)
+        .messages_around("c1", "m5", Some(50))
+        .await
+        .unwrap();
+    assert_eq!(page.len(), 2);
+    assert_eq!(page[1].message.id, "m5");
+}
+
+#[tokio::test]
+async fn around_reports_missing_message() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/dm/d1/messages/around"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(
+            json!({"error": "Message not found", "code": "message_not_found"}),
+        ))
+        .mount(&server)
+        .await;
+    let err = client(&server)
+        .dm_messages_around("d1", "zz", None)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("404"), "{err}");
+}

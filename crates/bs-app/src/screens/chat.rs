@@ -860,6 +860,9 @@ enum Nav {
     },
 }
 
+/// Сколько секунд подсвечивается сообщение после перехода из поиска.
+const FLASH_SECONDS: f64 = 2.5;
+
 /// Состояние экрана чата.
 #[derive(Debug, Default)]
 pub(crate) struct ChatScreen {
@@ -921,6 +924,12 @@ pub(crate) struct ChatScreen {
     react_picker: Option<(String, usize)>,
     /// Имена пользователей для упоминаний (обновляется каждый кадр).
     names: HashMap<String, String>,
+    /// Поиск по сообщениям текущего канала.
+    search: super::search_panel::SearchPanel,
+    /// Сообщение, к которому нужно прокрутить ленту (из результатов поиска).
+    jump_to: Option<String>,
+    /// Подсвеченное после перехода сообщение и момент, когда подсветка гаснет.
+    flash: Option<(String, f64)>,
 }
 
 /// На что отвечаем.
@@ -1220,6 +1229,7 @@ impl ChatScreen {
                 self.show_header(ui, bridge);
                 self.show_composer(ui, bridge);
                 self.show_messages(ui, bridge);
+                self.show_search(&ctx, bridge);
             }
         }
 
@@ -1987,6 +1997,38 @@ impl ChatScreen {
         }
     }
 
+    /// Лупа в шапке: открывает поиск по сообщениям. Стоит левее остальных
+    /// кнопок шапки, поэтому отступает на ширину каждой из них.
+    fn search_button(&mut self, ui: &mut egui::Ui, bridge: &Bridge, has_members: bool) {
+        let Some(selected) = self.selected_channel.clone() else {
+            return;
+        };
+        let mut buttons = usize::from(has_members);
+        if selected.kind == ChannelKind::Dm {
+            let is_group = bridge
+                .cache_at(selected.origin)
+                .and_then(|c| c.dm_channel(&selected.channel))
+                .is_some_and(|dm| dm.owner_id.is_some());
+            buttons += usize::from(is_group) + usize::from(self.voice.dm.is_none());
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            #[allow(clippy::cast_precision_loss, reason = "кнопок в шапке единицы")]
+            ui.add_space(34.0 * buttons as f32);
+            let color = if self.search.open {
+                theme::TEXT_BRIGHT
+            } else {
+                theme::TEXT_FAINT
+            };
+            if ui
+                .add(widgets::flat_icon(Icon::Search, 22.0, color))
+                .on_hover_text("Поиск по сообщениям")
+                .clicked()
+            {
+                self.search.toggle();
+            }
+        });
+    }
+
     /// Шапка ленты: название канала, тема, переключатель участников.
     fn show_header(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
         let (prefix, title, topic) = self.selected_channel.as_ref().map_or_else(
@@ -2059,6 +2101,7 @@ impl ChatScreen {
                         });
                     }
                     self.group_button(ui, bridge);
+                    self.search_button(ui, bridge, has_members);
                     if has_members {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let color = if self.show_members {
@@ -2292,6 +2335,9 @@ impl ChatScreen {
                 };
                 self.sync_scroll_key(&selected);
                 let channel_id = selected.channel.clone();
+                if let Some(id) = bridge.take_jump(&channel_id) {
+                    self.jump_to = Some(id);
+                }
                 bridge.ensure_history(selected.kind, &channel_id);
                 let history = bridge
                     .history_state(&channel_id)
@@ -2375,6 +2421,85 @@ impl ChatScreen {
                 );
                 self.show_react_picker(ui, bridge);
             });
+    }
+
+    /// Прокручивает к сообщению из результатов поиска и ненадолго подсвечивает его.
+    fn jump_and_flash(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        rect: egui::Rect,
+        id: &str,
+    ) {
+        let now = ui.input(|i| i.time);
+        if self.jump_to.as_deref() == Some(id) {
+            response.scroll_to_me(Some(egui::Align::Center));
+            self.flash = Some((id.to_owned(), now + FLASH_SECONDS));
+            self.jump_to = None;
+        }
+        if let Some((flash_id, until)) = &self.flash
+            && flash_id == id
+        {
+            let left = (*until - now) / FLASH_SECONDS;
+            if left <= 0.0 {
+                self.flash = None;
+            } else {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "доля 0..1 переводится в альфа-канал 0..255"
+                )]
+                let alpha = (left.clamp(0.0, 1.0) * 46.0) as u8;
+                ui.painter().rect_filled(
+                    rect,
+                    4.0,
+                    egui::Color32::from_rgba_unmultiplied(252, 211, 77, alpha),
+                );
+                ui.ctx().request_repaint();
+            }
+        }
+    }
+
+    /// Панель поиска и плашка «вы смотрите старые сообщения».
+    fn show_search(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
+        let Some(selected) = self.selected_channel.clone() else {
+            return;
+        };
+        self.search.sync(bridge);
+        if let Some(id) = self
+            .search
+            .show(ctx, bridge, selected.kind, &selected.channel)
+        {
+            bridge.jump_to(selected.kind, &selected.channel, &id);
+        }
+        if bridge.is_detached(&selected.channel) {
+            // Середина ленты: слева колонка каналов, справа панель участников.
+            let right = if self.show_members && self.active_space.is_some() {
+                236.0
+            } else {
+                0.0
+            };
+            let shift = (322.0 - right) / 2.0;
+            egui::Area::new(egui::Id::unique("detached_bar"))
+                .anchor(egui::Align2::CENTER_BOTTOM, [shift, -96.0])
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::new()
+                        .fill(theme::BG_BUBBLE)
+                        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                        .corner_radius(egui::CornerRadius::same(18))
+                        .inner_margin(Margin::symmetric(14, 7))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(theme::muted("Вы смотрите старые сообщения"));
+                                if ui.button("К последним").clicked() {
+                                    self.jump_to = None;
+                                    bridge.return_to_present(&selected.channel);
+                                }
+                            });
+                        });
+                });
+        }
     }
 
     /// Окно выбора эмодзи для реакции.
@@ -2473,6 +2598,7 @@ impl ChatScreen {
             response.scroll_to_me(Some(egui::Align::TOP));
             self.scroll_anchor = None;
         }
+        self.jump_and_flash(ui, &response, rect, &row.id);
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
             && let Some((_, value)) = hits.iter().find(|(rect, _)| rect.contains(pos))

@@ -91,6 +91,76 @@ impl HistoryItems {
     }
 }
 
+/// Одно найденное сообщение (общий вид для каналов и личных каналов).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SearchHit {
+    pub(crate) id: String,
+    /// Отображаемое имя автора.
+    pub(crate) author: String,
+    pub(crate) created_at: i64,
+    pub(crate) content: String,
+    /// Число вложений.
+    pub(crate) attachments: usize,
+}
+
+/// Состояние поиска по сообщениям текущего канала.
+#[derive(Debug, Default)]
+pub(crate) struct SearchState {
+    /// Номер поиска: ответы от прежних поисков отбрасываются.
+    seq: u64,
+    /// Запрос ушёл, ответа нет.
+    pub(crate) loading: bool,
+    pub(crate) hits: Vec<SearchHit>,
+    /// Сколько всего нашёл сервер.
+    pub(crate) total: i64,
+    pub(crate) error: Option<String>,
+}
+
+impl SearchState {
+    /// Сколько результатов ещё не показано.
+    pub(crate) fn remaining(&self) -> usize {
+        usize::try_from(self.total)
+            .unwrap_or(0)
+            .saturating_sub(self.hits.len())
+    }
+}
+
+/// Размер страницы результатов поиска.
+const SEARCH_PAGE: u16 = 25;
+/// Сколько сообщений просим вокруг найденного.
+const AROUND_PAGE: u16 = 50;
+
+fn display_name(user: &bs_types::User) -> String {
+    user.display_name
+        .clone()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| user.username.clone())
+}
+
+fn hits_of_space(list: Vec<MessageWithUser>) -> Vec<SearchHit> {
+    list.into_iter()
+        .map(|m| SearchHit {
+            author: display_name(&m.user),
+            id: m.message.id.clone(),
+            created_at: m.message.created_at,
+            content: m.message.content.unwrap_or_default(),
+            attachments: m.attachments.len(),
+        })
+        .collect()
+}
+
+fn hits_of_dm(list: Vec<DmMessageWithUser>) -> Vec<SearchHit> {
+    list.into_iter()
+        .map(|m| SearchHit {
+            author: display_name(&m.user),
+            id: m.message.id.clone(),
+            created_at: m.message.created_at,
+            content: m.message.content.unwrap_or_default(),
+            attachments: m.attachments.len(),
+        })
+        .collect()
+}
+
 /// Секрет, который нельзя случайно напечатать: `Debug` скрывает значение,
 /// память затирается при уничтожении.
 #[derive(Clone)]
@@ -312,6 +382,20 @@ pub(crate) enum BridgeRequest {
         kind: ChannelKind,
         /// Курсор «старее этого id»; `None` — самые новые.
         before: Option<String>,
+    },
+    /// Поиск по сообщениям канала.
+    Search {
+        channel_id: String,
+        kind: ChannelKind,
+        query: bs_api::MessageSearchQuery,
+        /// Номер поиска (см. [`SearchState`]).
+        seq: u64,
+    },
+    /// Окно сообщений вокруг найденного (переход к результату).
+    Around {
+        channel_id: String,
+        kind: ChannelKind,
+        message_id: String,
     },
 }
 
@@ -811,6 +895,17 @@ pub(crate) enum BridgeResponse {
         /// Сами сообщения.
         items: HistoryItems,
     },
+    /// Страница результатов поиска.
+    SearchDone {
+        seq: u64,
+        result: Result<(Vec<SearchHit>, i64), String>,
+    },
+    /// Окно вокруг сообщения загружено (или нет).
+    AroundDone {
+        channel_id: String,
+        message_id: String,
+        result: Result<HistoryItems, String>,
+    },
     /// История не загрузилась.
     HistoryFailed {
         /// Канал, чью историю запрашивали.
@@ -974,6 +1069,12 @@ pub(crate) struct Session {
     info: Option<String>,
     /// Загрузка истории по id канала.
     history: HashMap<String, HistoryState>,
+    /// Поиск по сообщениям.
+    search: SearchState,
+    /// Куда прокрутить после загрузки окна: (канал, сообщение).
+    jump: Option<(String, String)>,
+    /// Каналы, где вместо свежих сообщений загружено окно вокруг найденного.
+    detached: std::collections::HashSet<String>,
     /// Кэш инстанса; `None` до первого `ready`.
     cache: Option<Cache>,
     ready: bool,
@@ -1051,6 +1152,9 @@ impl Session {
             opened_space: None,
             info: None,
             history: HashMap::new(),
+            search: SearchState::default(),
+            jump: None,
+            detached: std::collections::HashSet::new(),
             cache: None,
             ready: false,
             session_lost: false,
@@ -1231,6 +1335,9 @@ impl Session {
         self.opened_space = None;
         self.info = None;
         self.notice = None;
+        self.search = SearchState::default();
+        self.jump = None;
+        self.detached.clear();
         self.ready = false;
         self.connection = ConnectionState::Connecting;
         self.phase = Phase::Idle;
@@ -1853,6 +1960,109 @@ impl Session {
         }
     }
 
+    /// Состояние поиска по сообщениям.
+    pub(crate) const fn search_state(&self) -> &SearchState {
+        &self.search
+    }
+
+    /// Сбрасывает результаты поиска (панель закрыта или сменился канал).
+    pub(crate) fn clear_search(&mut self) {
+        self.search.seq += 1;
+        self.search.loading = false;
+        self.search.hits.clear();
+        self.search.total = 0;
+        self.search.error = None;
+    }
+
+    /// Запускает поиск; `more` — следующая страница тех же результатов.
+    pub(crate) fn run_search(
+        &mut self,
+        kind: ChannelKind,
+        channel_id: &str,
+        mut query: bs_api::MessageSearchQuery,
+        more: bool,
+    ) {
+        if more {
+            if self.search.loading {
+                return;
+            }
+            query.offset = u32::try_from(self.search.hits.len()).ok();
+        } else {
+            self.clear_search();
+        }
+        query.limit = Some(SEARCH_PAGE);
+        let request = BridgeRequest::Search {
+            channel_id: channel_id.to_owned(),
+            kind,
+            query,
+            seq: self.search.seq,
+        };
+        self.search.error = None;
+        self.search.loading = self.request(request);
+    }
+
+    /// Переходит к сообщению: если оно уже загружено — сразу, иначе
+    /// грузит окно вокруг него и заменяет им ленту канала.
+    pub(crate) fn jump_to(&mut self, kind: ChannelKind, channel_id: &str, message_id: &str) {
+        let known = self.cache.as_ref().is_some_and(|cache| match kind {
+            ChannelKind::Space => cache
+                .messages(channel_id)
+                .iter()
+                .any(|m| m.message.id == message_id),
+            ChannelKind::Dm => cache
+                .dm_messages(channel_id)
+                .iter()
+                .any(|m| m.message.id == message_id),
+        });
+        if known {
+            self.jump = Some((channel_id.to_owned(), message_id.to_owned()));
+            return;
+        }
+        let _ = self.request(BridgeRequest::Around {
+            channel_id: channel_id.to_owned(),
+            kind,
+            message_id: message_id.to_owned(),
+        });
+    }
+
+    /// Сообщение, к которому надо прокрутить ленту этого канала (однократно).
+    pub(crate) fn take_jump(&mut self, channel_id: &str) -> Option<String> {
+        if self.jump.as_ref().is_some_and(|(chan, _)| chan == channel_id) {
+            return self.jump.take().map(|(_, id)| id);
+        }
+        None
+    }
+
+    /// Показано ли окно вокруг найденного сообщения вместо свежих.
+    pub(crate) fn is_detached(&self, channel_id: &str) -> bool {
+        self.detached.contains(channel_id)
+    }
+
+    /// Возвращает канал к свежим сообщениям: старое окно забывается, лента
+    /// грузится заново.
+    pub(crate) fn return_to_present(&mut self, channel_id: &str) {
+        self.detached.remove(channel_id);
+        self.history.remove(channel_id);
+        if let Some(cache) = self.cache.as_mut() {
+            cache.forget_messages(channel_id);
+        }
+    }
+
+    /// Вливает окно вокруг сообщения: лента канала заменяется им.
+    fn apply_around(&mut self, channel_id: &str, message_id: String, items: HistoryItems) {
+        let Some(cache) = self.cache.as_mut() else {
+            return;
+        };
+        match items {
+            HistoryItems::Space(page) => cache.replace_history(channel_id, page),
+            HistoryItems::Dm(page) => cache.replace_dm_history(channel_id, page),
+        }
+        self.history
+            .insert(channel_id.to_owned(), HistoryState::default());
+        self.detached.insert(channel_id.to_owned());
+        self.jump = Some((channel_id.to_owned(), message_id));
+    }
+
     /// Подгружает страницу старее уже загруженного (или повторяет первую
     /// страницу после ошибки).
     pub(crate) fn load_older(&mut self, kind: ChannelKind, channel_id: &str) {
@@ -1917,6 +2127,28 @@ impl Session {
             BridgeResponse::History { channel_id, items } => {
                 self.apply_history(&channel_id, items);
             }
+            BridgeResponse::SearchDone { seq, result } => {
+                if seq == self.search.seq {
+                    self.search.loading = false;
+                    match result {
+                        Ok((hits, total)) => {
+                            self.search.hits.extend(hits);
+                            self.search.total = total;
+                        }
+                        Err(message) => self.search.error = Some(message),
+                    }
+                }
+            }
+            BridgeResponse::AroundDone {
+                channel_id,
+                message_id,
+                result,
+            } => match result {
+                Ok(items) => self.apply_around(&channel_id, message_id, items),
+                Err(message) => {
+                    self.info = Some(format!("Не удалось перейти к сообщению: {message}"));
+                }
+            },
             BridgeResponse::HistoryFailed {
                 channel_id,
                 message,
@@ -3110,6 +3342,48 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                     channel_id,
                     message: err.to_string(),
                 },
+            }
+        }
+        BridgeRequest::Search {
+            channel_id,
+            kind,
+            query,
+            seq,
+        } => {
+            let result = match kind {
+                ChannelKind::Space => client
+                    .search_channel_messages(&channel_id, &query)
+                    .await
+                    .map(|r| (hits_of_space(r.results), r.total_count)),
+                ChannelKind::Dm => client
+                    .search_dm_messages(&channel_id, &query)
+                    .await
+                    .map(|r| (hits_of_dm(r.results), r.total_count)),
+            };
+            BridgeResponse::SearchDone {
+                seq,
+                result: result.map_err(|err| space_message(&err)),
+            }
+        }
+        BridgeRequest::Around {
+            channel_id,
+            kind,
+            message_id,
+        } => {
+            let result = match kind {
+                ChannelKind::Space => client
+                    .messages_around(&channel_id, &message_id, Some(AROUND_PAGE))
+                    .await
+                    .map(HistoryItems::Space),
+                ChannelKind::Dm => client
+                    .dm_messages_around(&channel_id, &message_id, Some(AROUND_PAGE))
+                    .await
+                    .map(HistoryItems::Dm),
+            };
+            BridgeResponse::AroundDone {
+                channel_id,
+                message_id,
+                result: result.map_err(|err| space_message(&err)),
             }
         }
     }

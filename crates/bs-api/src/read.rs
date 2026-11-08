@@ -5,6 +5,8 @@ use bs_types::{
     SpaceWithChannelsAndMembers,
 };
 
+use url::form_urlencoded;
+
 use crate::client::ApiClient;
 use crate::error::ApiError;
 
@@ -139,5 +141,67 @@ impl ApiClient {
             messages,
             paged_after,
         })
+    }
+
+    /// `GET /api/channels/:id/messages/around` — окно сообщений вокруг
+    /// указанного (для перехода к результату поиска).
+    ///
+    /// `limit` зажимается в `1..=100`; страница идёт «старые → новые».
+    /// Сервер отвечает `404 message_not_found`, если сообщения нет в канале.
+    pub async fn messages_around(
+        &self,
+        channel_id: &str,
+        message_id: &str,
+        limit: Option<u16>,
+    ) -> Result<Vec<MessageWithUser>, ApiError> {
+        let path = around_path(
+            &format!("/api/channels/{channel_id}/messages/around"),
+            message_id,
+            limit,
+        );
+        self.get_json(&path).await
+    }
+
+    /// `GET /api/dm/:id/messages/around` — то же для личного канала.
+    pub async fn dm_messages_around(
+        &self,
+        dm_channel_id: &str,
+        message_id: &str,
+        limit: Option<u16>,
+    ) -> Result<Vec<DmMessageWithUser>, ApiError> {
+        let path = around_path(
+            &format!("/api/dm/{dm_channel_id}/messages/around"),
+            message_id,
+            limit,
+        );
+        self.get_json(&path).await
+    }
+}
+
+/// Путь `GET .../messages/around` с закодированным `messageId`.
+fn around_path(base: &str, message_id: &str, limit: Option<u16>) -> String {
+    let mut ser = form_urlencoded::Serializer::new(String::new());
+    ser.append_pair("messageId", message_id);
+    if let Some(limit) = limit {
+        let clamped = limit.clamp(MESSAGES_LIMIT_MIN, MESSAGES_LIMIT_MAX);
+        ser.append_pair("limit", &clamped.to_string());
+    }
+    format!("{base}?{}", ser.finish())
+}
+
+#[cfg(test)]
+mod around_tests {
+    use super::around_path;
+
+    #[test]
+    fn around_path_encodes_id_and_clamps_limit() {
+        assert_eq!(
+            around_path("/api/dm/d1/messages/around", "a b", Some(500)),
+            "/api/dm/d1/messages/around?messageId=a+b&limit=100"
+        );
+        assert_eq!(
+            around_path("/api/channels/c/messages/around", "7", None),
+            "/api/channels/c/messages/around?messageId=7"
+        );
     }
 }
