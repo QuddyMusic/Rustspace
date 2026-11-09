@@ -233,26 +233,53 @@ impl VoiceState {
         }
     }
 
-    /// Играет звуки по изменениям в комнате с прошлого кадра.
+    /// Играет звуки по изменениям в комнате и держит вызов, пока звонят.
     pub(crate) fn cue(&mut self, bridge: &Bridge) {
-        let next = self.call.as_ref().map_or_else(Default::default, |call| {
-            let cache = bridge.cache_at(call.origin);
-            let me = cache.map(|c| c.me().id.clone());
-            crate::sounds::RoomView {
-                in_room: call.confirmed,
-                muted: call.muted,
-                deafened: call.deafened,
-                others: cache
-                    .map(|c| {
-                        c.users_in_voice(&call.channel_id)
-                            .iter()
-                            .filter(|id| Some(*id) != me.as_ref())
-                            .cloned()
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            }
+        let calling = self
+            .dm
+            .as_ref()
+            .is_some_and(|dm| dm.phase == crate::dmcall::DmPhase::Ringing);
+        let do_not_disturb = self.incoming.as_ref().is_some_and(|incoming| {
+            bridge.cache_at(incoming.origin).is_some_and(|cache| {
+                let me = cache.me();
+                cache.user_status(&me.id).unwrap_or(me.status)
+                    == bs_types::UserStatus::DoNotDisturb
+            })
         });
+        self.sounds.set_loop(crate::sounds::ringtone(
+            self.incoming.is_some(),
+            calling,
+            do_not_disturb,
+        ));
+
+        let next = if let Some(dm) = &self.dm {
+            // В личном звонке чужие входы и выходы — это сам звонок: без звука.
+            crate::sounds::RoomView {
+                in_room: dm.phase == crate::dmcall::DmPhase::Active,
+                muted: dm.muted,
+                deafened: dm.deafened,
+                others: std::collections::BTreeSet::new(),
+            }
+        } else {
+            self.call.as_ref().map_or_else(Default::default, |call| {
+                let cache = bridge.cache_at(call.origin);
+                let me = cache.map(|c| c.me().id.clone());
+                crate::sounds::RoomView {
+                    in_room: call.confirmed,
+                    muted: call.muted,
+                    deafened: call.deafened,
+                    others: cache
+                        .map(|c| {
+                            c.users_in_voice(&call.channel_id)
+                                .iter()
+                                .filter(|id| Some(*id) != me.as_ref())
+                                .cloned()
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                }
+            })
+        };
         if next == self.room_view {
             return;
         }

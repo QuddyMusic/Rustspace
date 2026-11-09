@@ -29,6 +29,10 @@ pub(crate) enum Sound {
     Deafen,
     /// Звук включён.
     Undeafen,
+    /// Нам звонят (играет по кругу).
+    CallRinging,
+    /// Мы звоним и ждём ответа (играет по кругу).
+    CallCalling,
 }
 
 impl Sound {
@@ -46,6 +50,8 @@ impl Sound {
             Self::Unmute => include_bytes!("../assets/sounds/unmute.ogg"),
             Self::Deafen => include_bytes!("../assets/sounds/deafen.ogg"),
             Self::Undeafen => include_bytes!("../assets/sounds/undeafen.ogg"),
+            Self::CallRinging => include_bytes!("../assets/sounds/call_ringing.ogg"),
+            Self::CallCalling => include_bytes!("../assets/sounds/call_calling.ogg"),
         }
     }
 }
@@ -98,6 +104,19 @@ pub(crate) fn cues(prev: &RoomView, next: &RoomView) -> Vec<Sound> {
     }
 }
 
+/// Какой вызов играть сейчас: входящий важнее исходящего, а «не беспокоить»
+/// глушит только входящий (как в оригинале; карточка звонка остаётся).
+#[must_use]
+pub(crate) const fn ringtone(incoming: bool, calling: bool, do_not_disturb: bool) -> Option<Sound> {
+    if incoming && !do_not_disturb {
+        Some(Sound::CallRinging)
+    } else if calling {
+        Some(Sound::CallCalling)
+    } else {
+        None
+    }
+}
+
 /// Базовая громкость звуков интерфейса (как `SFX_BASE_VOLUME` оригинала).
 #[cfg(feature = "sounds")]
 const BASE_VOLUME: f32 = 0.8;
@@ -114,6 +133,8 @@ mod real {
     #[derive(Default)]
     pub(crate) struct Sounds {
         sink: Option<MixerDeviceSink>,
+        /// Звук, который сейчас играет по кругу.
+        looping: Option<(Sound, Player)>,
         /// Устройство не открылось — больше не пытаемся и не шумим в логе.
         unavailable: bool,
     }
@@ -122,18 +143,16 @@ mod real {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.debug_struct("Sounds")
                 .field("open", &self.sink.is_some())
+                .field("looping", &self.looping.as_ref().map(|(sound, _)| *sound))
                 .field("unavailable", &self.unavailable)
                 .finish()
         }
     }
 
     impl Sounds {
-        /// Играет звук и не ждёт его конца.
-        pub(crate) fn play(&mut self, sound: Sound) {
-            if self.unavailable {
-                return;
-            }
-            if self.sink.is_none() {
+        /// Открывает устройство при первом обращении.
+        fn sink(&mut self) -> Option<&MixerDeviceSink> {
+            if self.sink.is_none() && !self.unavailable {
                 match DeviceSinkBuilder::open_default_sink() {
                     Ok(mut sink) => {
                         sink.log_on_drop(false);
@@ -142,11 +161,15 @@ mod real {
                     Err(err) => {
                         tracing::warn!(%err, "звуковое устройство недоступно, звуков не будет");
                         self.unavailable = true;
-                        return;
                     }
                 }
             }
-            let Some(sink) = &self.sink else {
+            self.sink.as_ref()
+        }
+
+        /// Играет звук и не ждёт его конца.
+        pub(crate) fn play(&mut self, sound: Sound) {
+            let Some(sink) = self.sink() else {
                 return;
             };
             match Decoder::new_vorbis(Cursor::new(sound.bytes())) {
@@ -155,6 +178,31 @@ mod real {
                     player.set_volume(BASE_VOLUME);
                     player.append(decoder);
                     player.detach();
+                }
+                Err(err) => tracing::warn!(%err, ?sound, "не удалось разобрать звук"),
+            }
+        }
+
+        /// Включает звук по кругу, выключает (`None`) или оставляет как есть,
+        /// если уже играет именно он.
+        pub(crate) fn set_loop(&mut self, wanted: Option<Sound>) {
+            if self.looping.as_ref().map(|(sound, _)| *sound) == wanted {
+                return;
+            }
+            // Остановка: `Player` без `detach` замолкает, когда его бросают.
+            self.looping = None;
+            let Some(sound) = wanted else {
+                return;
+            };
+            let Some(sink) = self.sink() else {
+                return;
+            };
+            match Decoder::new_looped(Cursor::new(sound.bytes())) {
+                Ok(decoder) => {
+                    let player = Player::connect_new(sink.mixer());
+                    player.set_volume(BASE_VOLUME);
+                    player.append(decoder);
+                    self.looping = Some((sound, player));
                 }
                 Err(err) => tracing::warn!(%err, ?sound, "не удалось разобрать звук"),
             }
@@ -177,6 +225,13 @@ mod real {
             reason = "тот же интерфейс, что у настоящего"
         )]
         pub(crate) fn play(&mut self, _sound: Sound) {}
+
+        #[allow(
+            clippy::unused_self,
+            clippy::needless_pass_by_ref_mut,
+            reason = "тот же интерфейс, что у настоящего"
+        )]
+        pub(crate) fn set_loop(&mut self, _wanted: Option<Sound>) {}
     }
 }
 
@@ -233,6 +288,16 @@ mod tests {
     }
 
     #[test]
+    fn incoming_call_beats_outgoing_and_dnd_silences_it() {
+        assert_eq!(ringtone(true, true, false), Some(Sound::CallRinging));
+        assert_eq!(ringtone(true, false, true), None);
+        // «Не беспокоить» не мешает слышать собственный исходящий вызов.
+        assert_eq!(ringtone(true, true, true), Some(Sound::CallCalling));
+        assert_eq!(ringtone(false, true, false), Some(Sound::CallCalling));
+        assert_eq!(ringtone(false, false, false), None);
+    }
+
+    #[test]
     fn others_coming_and_going() {
         let base = view(true, false, false, &["a"]);
         assert_eq!(
@@ -256,7 +321,7 @@ mod tests {
         }
     }
 
-    const ALL: [Sound; 7] = [
+    const ALL: [Sound; 9] = [
         Sound::UserJoin,
         Sound::UserLeave,
         Sound::Disconnect,
@@ -264,6 +329,8 @@ mod tests {
         Sound::Unmute,
         Sound::Deafen,
         Sound::Undeafen,
+        Sound::CallRinging,
+        Sound::CallCalling,
     ];
 
     #[test]
