@@ -987,6 +987,20 @@ impl Bridge {
             .collect()
     }
 
+    /// Новые сообщения со всех инстансов: номер инстанса и сообщение.
+    pub(crate) fn take_new_messages(&mut self) -> Vec<(usize, crate::bridge::NewMessage)> {
+        self.slots
+            .iter_mut()
+            .enumerate()
+            .flat_map(|(i, slot)| {
+                slot.session
+                    .take_new_messages()
+                    .into_iter()
+                    .map(move |message| (i, message))
+            })
+            .collect()
+    }
+
     /// Токены голоса со всех инстансов: номер инстанса и ответ.
     pub(crate) fn take_voice_tokens(&mut self) -> Vec<(usize, crate::bridge::VoiceTokenEvent)> {
         self.slots

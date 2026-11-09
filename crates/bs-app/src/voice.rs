@@ -234,7 +234,7 @@ impl VoiceState {
     }
 
     /// Играет звуки по изменениям в комнате и держит вызов, пока звонят.
-    pub(crate) fn cue(&mut self, bridge: &Bridge) {
+    pub(crate) fn cue(&mut self, bridge: &mut Bridge) {
         let calling = self
             .dm
             .as_ref()
@@ -246,6 +246,7 @@ impl VoiceState {
                     == bs_types::UserStatus::DoNotDisturb
             })
         });
+        self.cue_messages(bridge);
         self.sounds.set_loop(crate::sounds::ringtone(
             self.incoming.is_some(),
             calling,
@@ -287,6 +288,31 @@ impl VoiceState {
             self.sounds.play(sound);
         }
         self.room_view = next;
+    }
+
+    /// Звук нового сообщения: один на кадр, как бы много их ни пришло.
+    fn cue_messages(&mut self, bridge: &mut Bridge) {
+        let arrived = bridge.take_new_messages();
+        let loud = arrived.iter().any(|(origin, message)| {
+            bridge
+                .cache_at(*origin)
+                .is_some_and(|cache| message_alerts_user(cache, message))
+        });
+        if !loud {
+            return;
+        }
+        // «Не беспокоить» гасит все оповещения; свой статус берём с того же
+        // инстанса, что и сообщение.
+        let quiet = arrived.iter().all(|(origin, _)| {
+            bridge.cache_at(*origin).is_none_or(|cache| {
+                let me = cache.me();
+                cache.user_status(&me.id).unwrap_or(me.status)
+                    == bs_types::UserStatus::DoNotDisturb
+            })
+        });
+        if !quiet {
+            self.sounds.play(crate::sounds::Sound::Message);
+        }
     }
 
     /// Разбирает ответы моста и следит, что сервер нас не отключил.
@@ -649,6 +675,52 @@ pub(crate) fn moderate(bridge: &mut Bridge, origin: usize, op: ModOp) {
     bridge.focus_on(origin);
     bridge.send(event);
     bridge.focus_on(previous);
+}
+
+/// Нужно ли сообщить об этом сообщении (правило оригинала, см. `sounds`).
+pub(crate) fn message_alerts_user(cache: &bs_core::Cache, message: &crate::bridge::NewMessage) -> bool {
+    let me = cache.me();
+    let own = message.author_id == me.id;
+    if message.dm {
+        return crate::sounds::message_alerts(&crate::sounds::MessageAlert {
+            own,
+            dm: true,
+            muted: false,
+            level: bs_types::NotificationLevel::All,
+            direct: false,
+            everyone: false,
+            role: false,
+            suppress_everyone: false,
+            suppress_roles: false,
+        });
+    }
+    let Some(channel) = cache.channel(&message.channel_id) else {
+        return false;
+    };
+    let policy = cache.channel_policy(
+        &channel.space_id,
+        &message.channel_id,
+        crate::registry::now_ms(),
+    );
+    let my_roles: Vec<&str> = cache
+        .space(&channel.space_id)
+        .and_then(|space| space.members.iter().find(|m| m.user.id == me.id))
+        .map(|member| member.roles.iter().map(|r| r.id.as_str()).collect())
+        .unwrap_or_default();
+    crate::sounds::message_alerts(&crate::sounds::MessageAlert {
+        own,
+        dm: false,
+        muted: policy.muted,
+        level: policy.level,
+        direct: message.content.contains(&format!("<@{}>", me.id)),
+        everyone: message.mention_everyone,
+        role: message
+            .mention_roles
+            .iter()
+            .any(|id| my_roles.contains(&id.as_str())),
+        suppress_everyone: policy.suppress_everyone,
+        suppress_roles: policy.suppress_roles,
+    })
 }
 
 #[cfg(test)]

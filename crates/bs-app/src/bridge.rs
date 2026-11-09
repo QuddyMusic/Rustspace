@@ -798,6 +798,23 @@ pub(crate) enum SpaceEvent {
     },
 }
 
+/// Сообщение, которое только что пришло по сети.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NewMessage {
+    /// Личное сообщение.
+    pub(crate) dm: bool,
+    /// Канал (или личная беседа).
+    pub(crate) channel_id: String,
+    /// Автор.
+    pub(crate) author_id: String,
+    /// Текст.
+    pub(crate) content: String,
+    /// Инстанс пометил `@everyone`/`@here`.
+    pub(crate) mention_everyone: bool,
+    /// Инстанс пометил упомянутые роли.
+    pub(crate) mention_roles: Vec<String>,
+}
+
 /// Ответ на запрос токена LiveKit.
 #[derive(Debug)]
 pub(crate) struct VoiceTokenEvent {
@@ -1087,6 +1104,8 @@ pub(crate) struct Session {
     space_in: Vec<SpaceEvent>,
     group_in: Vec<GroupEvent>,
     call_in: Vec<CallEvent>,
+    /// Только что пришедшие сообщения (для звука); историю сюда не кладём.
+    new_messages: Vec<NewMessage>,
     raw_ready: Vec<(u64, Result<Vec<u8>, String>)>,
     /// Ход скачиваний на диск, ещё не переданный хабу картинок.
     downloads_ready: Vec<(u64, DownloadState)>,
@@ -1175,6 +1194,7 @@ impl Session {
             space_in: Vec::new(),
             group_in: Vec::new(),
             call_in: Vec::new(),
+            new_messages: Vec::new(),
             raw_ready: Vec::new(),
             downloads_ready: Vec::new(),
             admin_in: Vec::new(),
@@ -1328,6 +1348,26 @@ impl Session {
             // `ready` после реконнекта пересобирает кэш без сообщений:
             // историю надо загрузить заново.
             ServerEvent::Ready(_) => self.history.clear(),
+            ServerEvent::MessageCreated { message } => {
+                self.new_messages.push(NewMessage {
+                    dm: false,
+                    channel_id: message.message.channel_id.clone(),
+                    author_id: message.message.user_id.clone(),
+                    content: message.message.content.clone().unwrap_or_default(),
+                    mention_everyone: message.message.mention_everyone == Some(true),
+                    mention_roles: message.message.mention_role_ids.clone().unwrap_or_default(),
+                });
+            }
+            ServerEvent::DmMessageCreated { message } => {
+                self.new_messages.push(NewMessage {
+                    dm: true,
+                    channel_id: message.message.dm_channel_id.clone(),
+                    author_id: message.message.user_id.clone(),
+                    content: message.message.content.clone().unwrap_or_default(),
+                    mention_everyone: false,
+                    mention_roles: Vec::new(),
+                });
+            }
             _ => {}
         }
         if let Some(cache) = self.cache.as_mut() {
@@ -1864,6 +1904,11 @@ impl Session {
     /// Забирает итоги действий над пространствами.
     pub(crate) fn take_space_events(&mut self) -> Vec<SpaceEvent> {
         std::mem::take(&mut self.space_in)
+    }
+
+    /// Забирает сообщения, пришедшие с прошлого вызова.
+    pub(crate) fn take_new_messages(&mut self) -> Vec<NewMessage> {
+        std::mem::take(&mut self.new_messages)
     }
 
     /// Забирает накопленные ответы на запросы токена голоса.

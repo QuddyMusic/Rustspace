@@ -3168,4 +3168,28 @@ mod tests {
         assert_eq!(found[0].avatar.as_deref(), Some("bob.png"));
         assert_eq!(found[1].avatar, None);
     }
+
+    #[test]
+    fn new_message_alert_wiring() {
+        use crate::bridge::NewMessage;
+        let cache = Cache::from_ready(ready("s1", "Работа", "c1", "general"));
+        let me = cache.me().id.clone();
+        let msg = |dm: bool, channel: &str, author: &str, content: &str| NewMessage {
+            dm,
+            channel_id: channel.to_owned(),
+            author_id: author.to_owned(),
+            content: content.to_owned(),
+            mention_everyone: false,
+            mention_roles: Vec::new(),
+        };
+        let alerts = |m: &NewMessage| crate::voice::message_alerts_user(&cache, m);
+        // Личное от другого — да; своё — нет; неизвестный канал — нет.
+        assert!(alerts(&msg(true, "d1", "2", "привет")));
+        assert!(!alerts(&msg(true, "d1", &me, "привет")));
+        assert!(!alerts(&msg(false, "нет-такого", "2", "привет")));
+        // Прямое упоминание проходит при любом уровне, кроме «ничего»/mute;
+        // свои сообщения не звучат никогда.
+        assert!(alerts(&msg(false, "c1", "2", &format!("эй <@{me}>"))));
+        assert!(!alerts(&msg(false, "c1", &me, &format!("<@{me}>"))));
+    }
 }

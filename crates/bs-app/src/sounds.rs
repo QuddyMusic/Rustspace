@@ -29,6 +29,8 @@ pub(crate) enum Sound {
     Deafen,
     /// Звук включён.
     Undeafen,
+    /// Пришло сообщение, о котором стоит сообщить.
+    Message,
     /// Нам звонят (играет по кругу).
     CallRinging,
     /// Мы звоним и ждём ответа (играет по кругу).
@@ -50,6 +52,7 @@ impl Sound {
             Self::Unmute => include_bytes!("../assets/sounds/unmute.ogg"),
             Self::Deafen => include_bytes!("../assets/sounds/deafen.ogg"),
             Self::Undeafen => include_bytes!("../assets/sounds/undeafen.ogg"),
+            Self::Message => include_bytes!("../assets/sounds/message.ogg"),
             Self::CallRinging => include_bytes!("../assets/sounds/call_ringing.ogg"),
             Self::CallCalling => include_bytes!("../assets/sounds/call_calling.ogg"),
         }
@@ -100,6 +103,56 @@ pub(crate) fn cues(prev: &RoomView, next: &RoomView) -> Vec<Sound> {
                 out.push(Sound::UserLeave);
             }
             out
+        }
+    }
+}
+
+/// Что известно о новом сообщении для решения «играть ли звук».
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "независимые признаки сообщения"
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MessageAlert {
+    /// Написали мы сами.
+    pub(crate) own: bool,
+    /// Личное сообщение (настройки каналов на него не действуют).
+    pub(crate) dm: bool,
+    /// Канал или пространство заглушены.
+    pub(crate) muted: bool,
+    /// Уровень уведомлений канала.
+    pub(crate) level: bs_types::NotificationLevel,
+    /// Нас упомянули прямо (`<@id>`).
+    pub(crate) direct: bool,
+    /// Стоит `@everyone` / `@here`.
+    pub(crate) everyone: bool,
+    /// Упомянута роль, которая у нас есть.
+    pub(crate) role: bool,
+    /// В пространстве отключены массовые упоминания.
+    pub(crate) suppress_everyone: bool,
+    /// В пространстве отключены упоминания ролей.
+    pub(crate) suppress_roles: bool,
+}
+
+/// Правило оригинала (`isMessageAlert`): свои — никогда, личные — всегда,
+/// в каналах — по настройке; прямое упоминание проходит всегда, кроме «ничего».
+#[must_use]
+pub(crate) const fn message_alerts(m: &MessageAlert) -> bool {
+    use bs_types::NotificationLevel::{All, Mentions, Nothing};
+    if m.own {
+        return false;
+    }
+    if m.dm {
+        return true;
+    }
+    if m.muted {
+        return false;
+    }
+    match m.level {
+        Nothing => false,
+        All => true,
+        Mentions => {
+            m.direct || (m.everyone && !m.suppress_everyone) || (m.role && !m.suppress_roles)
         }
     }
 }
@@ -297,6 +350,88 @@ mod tests {
         assert_eq!(ringtone(false, false, false), None);
     }
 
+    fn alert() -> MessageAlert {
+        MessageAlert {
+            own: false,
+            dm: false,
+            muted: false,
+            level: bs_types::NotificationLevel::Mentions,
+            direct: false,
+            everyone: false,
+            role: false,
+            suppress_everyone: false,
+            suppress_roles: false,
+        }
+    }
+
+    #[test]
+    fn message_rule_follows_the_original() {
+        use bs_types::NotificationLevel::{All, Nothing};
+        // Свои — никогда; личные — всегда, даже при «ничего» и mute.
+        assert!(!message_alerts(&MessageAlert {
+            own: true,
+            dm: true,
+            ..alert()
+        }));
+        assert!(message_alerts(&MessageAlert {
+            dm: true,
+            muted: true,
+            level: Nothing,
+            ..alert()
+        }));
+        // Канал: mute и «ничего» глушат даже прямое упоминание.
+        assert!(!message_alerts(&MessageAlert {
+            muted: true,
+            level: All,
+            ..alert()
+        }));
+        assert!(!message_alerts(&MessageAlert {
+            level: Nothing,
+            direct: true,
+            ..alert()
+        }));
+        assert!(message_alerts(&MessageAlert {
+            level: All,
+            ..alert()
+        }));
+        // «Только упоминания»: без упоминания тихо.
+        assert!(!message_alerts(&alert()));
+        assert!(message_alerts(&MessageAlert {
+            direct: true,
+            ..alert()
+        }));
+    }
+
+    #[test]
+    fn mass_mentions_respect_the_suppress_switches() {
+        let everyone = MessageAlert {
+            everyone: true,
+            ..alert()
+        };
+        assert!(message_alerts(&everyone));
+        assert!(!message_alerts(&MessageAlert {
+            suppress_everyone: true,
+            ..everyone
+        }));
+        let role = MessageAlert {
+            role: true,
+            ..alert()
+        };
+        assert!(message_alerts(&role));
+        assert!(!message_alerts(&MessageAlert {
+            suppress_roles: true,
+            ..role
+        }));
+        // Выключатели не гасят прямое упоминание.
+        let both = MessageAlert {
+            direct: true,
+            suppress_everyone: true,
+            suppress_roles: true,
+            ..everyone
+        };
+        assert!(message_alerts(&both));
+    }
+
     #[test]
     fn others_coming_and_going() {
         let base = view(true, false, false, &["a"]);
@@ -321,7 +456,7 @@ mod tests {
         }
     }
 
-    const ALL: [Sound; 9] = [
+    const ALL: [Sound; 10] = [
         Sound::UserJoin,
         Sound::UserLeave,
         Sound::Disconnect,
@@ -329,6 +464,7 @@ mod tests {
         Sound::Unmute,
         Sound::Deafen,
         Sound::Undeafen,
+        Sound::Message,
         Sound::CallRinging,
         Sound::CallCalling,
     ];
