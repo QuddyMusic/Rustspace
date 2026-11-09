@@ -14,10 +14,13 @@ path = "src/main.rs"
 
 [features]
 # Голос через LiveKit: нужна libwebrtc (скачивается при сборке `webrtc-sys`).
-voice = ["dep:bs-voice"]
+voice = ["dep:bs-voice", "sounds"]
+# Звуки интерфейса (rodio): нужна библиотека ALSA на Linux (libasound2-dev).
+sounds = ["dep:rodio"]
 
 [dependencies]
 bs-voice = { workspace = true, optional = true }
+rodio = { version = "0.23", default-features = false, features = ["playback", "vorbis"], optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 bs-api = { workspace = true }

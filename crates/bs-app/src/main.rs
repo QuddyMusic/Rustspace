@@ -31,6 +31,7 @@ mod download;
 mod saved_session;
 mod screens;
 mod social;
+mod sounds;
 mod theme;
 mod voice;
 mod voice_media;

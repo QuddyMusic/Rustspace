@@ -69,6 +69,10 @@ pub(crate) struct VoiceState {
     pub(crate) call: Option<VoiceCall>,
     /// Сообщение для пользователя (например, «вас отключили»).
     pub(crate) notice: Option<String>,
+    /// Проигрыватель звуков интерфейса.
+    pub(crate) sounds: crate::sounds::Sounds,
+    /// Каким было состояние комнаты на прошлом кадре (для звуков).
+    room_view: crate::sounds::RoomView,
 }
 
 /// Что сделать после кадра панели.
@@ -227,6 +231,35 @@ impl VoiceState {
                 }
             }
         }
+    }
+
+    /// Играет звуки по изменениям в комнате с прошлого кадра.
+    pub(crate) fn cue(&mut self, bridge: &Bridge) {
+        let next = self.call.as_ref().map_or_else(Default::default, |call| {
+            let cache = bridge.cache_at(call.origin);
+            let me = cache.map(|c| c.me().id.clone());
+            crate::sounds::RoomView {
+                in_room: call.confirmed,
+                muted: call.muted,
+                deafened: call.deafened,
+                others: cache
+                    .map(|c| {
+                        c.users_in_voice(&call.channel_id)
+                            .iter()
+                            .filter(|id| Some(*id) != me.as_ref())
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            }
+        });
+        if next == self.room_view {
+            return;
+        }
+        for sound in crate::sounds::cues(&self.room_view, &next) {
+            self.sounds.play(sound);
+        }
+        self.room_view = next;
     }
 
     /// Разбирает ответы моста и следит, что сервер нас не отключил.

@@ -1192,6 +1192,7 @@ impl ChatScreen {
                 .start_dm(bridge, origin, &dm_id, federated, &peer);
         }
         self.voice.poll(bridge);
+        self.voice.cue(bridge);
         if let Some(answer) = crate::dmcall::show_incoming(&ctx, &self.voice) {
             self.voice.answer(bridge, answer);
         }
