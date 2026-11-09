@@ -389,7 +389,10 @@ fn send_status(bridge: &mut Bridge, call: &VoiceCall) {
     bridge.focus_on(previous);
 }
 
-/// Панель над профилем: канал, состояние соединения и кнопки.
+/// Панель над профилем: канал, состояние соединения и «Отключиться».
+///
+/// Микрофон и наушники живут в нижней панели профиля (как в оригинале), здесь
+/// их нет — иначе кнопки дублируются.
 pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction {
     let mut action = DockAction::None;
     let Some(info) = state.dock_info() else {
@@ -431,32 +434,6 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                             {
                                 action = DockAction::Leave;
                             }
-                            let headphones = if info.deafened {
-                                Icon::HeadphonesOff
-                            } else {
-                                Icon::Headphones
-                            };
-                            if widgets::icon_button(ui, headphones, 30.0)
-                                .on_hover_text(if info.deafened {
-                                    "Включить звук"
-                                } else {
-                                    "Выключить звук"
-                                })
-                                .clicked()
-                            {
-                                action = DockAction::ToggleDeafen;
-                            }
-                            let mic = if info.muted { Icon::MicOff } else { Icon::Mic };
-                            if widgets::icon_button(ui, mic, 30.0)
-                                .on_hover_text(if info.muted {
-                                    "Включить микрофон"
-                                } else {
-                                    "Выключить микрофон"
-                                })
-                                .clicked()
-                            {
-                                action = DockAction::ToggleMute;
-                            }
                         });
                     });
                 });
@@ -470,8 +447,6 @@ struct DockInfo {
     /// Подробности (причина сбоя, что делать) — во всплывающей подсказке.
     detail: Option<String>,
     subtitle: String,
-    muted: bool,
-    deafened: bool,
 }
 
 impl VoiceState {
@@ -490,8 +465,6 @@ impl VoiceState {
                 status,
                 detail: status_detail(dm.token.as_ref(), &self.status),
                 subtitle: theme::truncate_chars(&dm.peer, 13),
-                muted: dm.muted,
-                deafened: dm.deafened,
             });
         }
         let call = self.call.as_ref()?;
@@ -502,8 +475,6 @@ impl VoiceState {
                 &format!("{} / {}", call.channel_name, call.space_name),
                 13,
             ),
-            muted: call.muted,
-            deafened: call.deafened,
         })
     }
 }
