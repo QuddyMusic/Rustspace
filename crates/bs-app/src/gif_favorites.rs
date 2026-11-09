@@ -119,12 +119,42 @@ impl GifFavorites {
         self.items.iter().any(|item| item.id == id)
     }
 
+    /// Есть ли в избранном GIF с таким адресом (так его знает лента сообщений).
+    pub(crate) fn contains_url(&self, url: &str) -> bool {
+        self.items.iter().any(|item| item.url == url)
+    }
+
+    /// Добавляет GIF из ленты по адресу или убирает его. `size` — размеры, если
+    /// картинка уже загружена.
+    ///
+    /// # Errors
+    /// Файл не удалось записать.
+    pub(crate) fn toggle_url(
+        &mut self,
+        url: &str,
+        size: Option<[u32; 2]>,
+    ) -> std::io::Result<bool> {
+        let [width, height] = size.unwrap_or([0, 0]);
+        self.toggle(&GifItem {
+            id: url.to_owned(),
+            title: String::new(),
+            preview_url: url.to_owned(),
+            url: url.to_owned(),
+            width,
+            height,
+        })
+    }
+
     /// Добавляет GIF или убирает, если он уже там. `Ok(true)` — теперь в избранном.
     ///
     /// # Errors
     /// Файл не удалось записать (список в памяти при этом уже изменён).
     pub(crate) fn toggle(&mut self, item: &GifItem) -> std::io::Result<bool> {
-        let added = if let Some(at) = self.items.iter().position(|i| i.id == item.id) {
+        let added = if let Some(at) = self
+            .items
+            .iter()
+            .position(|i| i.id == item.id || i.url == item.url)
+        {
             self.items.remove(at);
             false
         } else {
@@ -207,6 +237,23 @@ mod tests {
         assert_eq!(second.items()[0].width, 200);
         second.select(&account_key("https://a", "u2"));
         assert_eq!(second.items()[0].id, "2");
+    }
+
+    #[test]
+    fn chat_gif_and_search_gif_are_the_same_favorite() {
+        let mut favs = GifFavorites::with_path(temp_path("url"));
+        favs.select("k");
+        assert!(favs.toggle(&gif("g1")).unwrap());
+        assert!(favs.contains_url("https://x/g1.gif"));
+        // В ленте тот же GIF известен только по адресу: повторное нажатие убирает его.
+        assert!(!favs.toggle_url("https://x/g1.gif", None).unwrap());
+        assert!(favs.items().is_empty());
+        assert!(
+            favs.toggle_url("https://x/new.gif", Some([320, 180]))
+                .unwrap()
+        );
+        assert_eq!(favs.items()[0].width, 320);
+        assert_eq!(favs.items()[0].preview_url, "https://x/new.gif");
     }
 
     #[test]

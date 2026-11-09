@@ -470,6 +470,33 @@ impl Composer {
         }
     }
 
+    /// Этот GIF из ленты уже в избранном?
+    pub(crate) fn is_favorite_gif(&mut self, bridge: &Bridge, url: &str) -> bool {
+        if let Some(key) = favorite_key(bridge, self.origin) {
+            self.favorites.select(&key);
+        }
+        self.favorites.contains_url(url)
+    }
+
+    /// Добавляет GIF из ленты в избранное или убирает; возвращает текст для
+    /// уведомления.
+    pub(crate) fn toggle_favorite_gif(
+        &mut self,
+        bridge: &Bridge,
+        url: &str,
+        size: Option<[u32; 2]>,
+    ) -> String {
+        let Some(key) = favorite_key(bridge, self.origin) else {
+            return "Не удалось определить аккаунт для избранного".to_owned();
+        };
+        self.favorites.select(&key);
+        match self.favorites.toggle_url(url, size) {
+            Ok(true) => "GIF добавлен в избранное".to_owned(),
+            Ok(false) => "GIF убран из избранного".to_owned(),
+            Err(err) => format!("Избранное не сохранилось на диск: {err}"),
+        }
+    }
+
     /// Рисует поле и возвращает то, что нужно отправить.
     #[allow(clippy::too_many_lines, reason = "один экран: разметка поля целиком")]
     pub(crate) fn show(

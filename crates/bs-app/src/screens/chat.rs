@@ -2727,6 +2727,15 @@ impl ChatScreen {
         let can_collect = image
             .as_deref()
             .is_some_and(|v| !v.starts_with("https://") || v.starts_with("sticker:"));
+        // Избранное можно вести только по GIF-ссылкам: в сообщение уходит адрес.
+        let gif_url = image
+            .as_deref()
+            .filter(|v| media::gif_of(&row.body) == Some(*v))
+            .map(str::to_owned);
+        let gif_favorite = gif_url
+            .as_deref()
+            .is_some_and(|url| self.composer.is_favorite_gif(bridge, url));
+        let mut favorite_request = false;
         let mut open_picker = false;
         let mut reply_request = false;
         let mut save_request: Option<crate::download::Click> = None;
@@ -2748,6 +2757,18 @@ impl ChatScreen {
                         value: value.clone(),
                         name,
                     }));
+                    ui.close();
+                }
+                if gif_url.is_some()
+                    && ui
+                        .button(if gif_favorite {
+                            "Убрать из избранных GIF"
+                        } else {
+                            "В избранные GIF"
+                        })
+                        .clicked()
+                {
+                    favorite_request = true;
                     ui.close();
                 }
                 if can_collect && ui.button("Сохранить в мои стикеры").clicked()
@@ -2804,6 +2825,16 @@ impl ChatScreen {
         }
         if open_picker {
             self.react_picker = Some((row.id.clone(), 0));
+        }
+        if favorite_request && let Some(url) = &gif_url {
+            let size = crate::images::ImageHub::of(ui.ctx())
+                .and_then(|hub| match hub.state(url) {
+                    crate::images::ImageState::Ready(image) => Some(image.size_f32()),
+                    _ => None,
+                })
+                .map(|[w, h]| [w.round() as u32, h.round() as u32]);
+            let text = self.composer.toggle_favorite_gif(bridge, url, size);
+            self.toast = Some((text, ui.input(|i| i.time) + 3.0));
         }
         if let Some(click) = save_request
             && self.save_pending.is_none()
