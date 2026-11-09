@@ -71,6 +71,8 @@ pub(crate) struct Occupant {
     pub(crate) muted: bool,
     /// Звук выключен.
     pub(crate) deafened: bool,
+    /// Аватар (имя файла или адрес); `None` — рисуем инициалы.
+    pub(crate) avatar: Option<String>,
 }
 
 /// Группа каналов: категория или каналы без категории (`name == None`).
@@ -189,6 +191,7 @@ pub(crate) struct SidebarDm {
 
 /// Кто сидит в голосовом канале, с флагами микрофона и звука.
 fn occupants(cache: &Cache, names: &HashMap<String, String>, channel_id: &str) -> Vec<Occupant> {
+    let avatars = avatar_map(cache);
     cache
         .users_in_voice(channel_id)
         .iter()
@@ -200,6 +203,7 @@ fn occupants(cache: &Cache, names: &HashMap<String, String>, channel_id: &str) -
                 muted: state.is_some_and(|s| s.is_muted),
                 deafened: state.is_some_and(|s| s.is_deafened),
                 me: *id == cache.me().id,
+                avatar: avatars.get(id).cloned(),
             }
         })
         .collect()
@@ -347,6 +351,17 @@ fn merge_origins(
         for mut space in origin_spaces {
             space.origin = origin;
             space.icon = space.icon.map(|v| crate::images::absolute(base, &v));
+            for occupant in space
+                .groups
+                .iter_mut()
+                .flat_map(|g| g.channels.iter_mut())
+                .flat_map(|c| c.occupants.iter_mut())
+            {
+                occupant.avatar = occupant
+                    .avatar
+                    .take()
+                    .map(|v| crate::images::absolute(base, &v));
+            }
             spaces.push(space);
         }
         for mut dm in origin_dms {
@@ -496,6 +511,22 @@ fn needs_header(prev: Option<&MessageRow>, cur: &MessageRow) -> bool {
 }
 
 /// Имена пользователей, известных кэшу: для упоминаний и подсказок реакций.
+/// Аватары известных пользователей (участники пространств, личные чаты, мы).
+fn avatar_map(cache: &Cache) -> HashMap<String, String> {
+    let mut avatars = HashMap::new();
+    let users = cache
+        .spaces()
+        .flat_map(|space| space.members.iter().map(|m| &m.user))
+        .chain(cache.dm_channels().flat_map(|dm| dm.members.iter()))
+        .chain(std::iter::once(cache.me()));
+    for user in users {
+        if let Some(avatar) = user.avatar.as_ref().filter(|a| !a.is_empty()) {
+            avatars.insert(user.id.clone(), avatar.clone());
+        }
+    }
+    avatars
+}
+
 fn name_map(cache: &Cache) -> HashMap<String, String> {
     let mut names = HashMap::new();
     for space in cache.spaces() {
@@ -1634,6 +1665,7 @@ impl ChatScreen {
                     occupant.muted,
                     occupant.deafened,
                     self.voice.speaking.contains(&occupant.id),
+                    occupant.avatar.as_deref(),
                 );
                 if !occupant.me {
                     let others: Vec<(String, String)> = space
@@ -3072,5 +3104,36 @@ mod tests {
         assert_eq!(rows[0].name, "alice");
         assert_eq!(rows[0].section(), super::MemberSection::Owner);
         assert_eq!(rows[1].section(), super::MemberSection::Online);
+    }
+
+    #[test]
+    fn voice_occupants_carry_avatars() {
+        let mut payload = ready("s1", "Работа", "c1", "general");
+        let user = |id: &str, name: &str, avatar: serde_json::Value| {
+            serde_json::json!({
+                "spaceId": "s1", "userId": id, "nickname": null, "joinedAt": 1,
+                "user": {
+                    "id": id, "username": name, "displayName": null, "avatar": avatar,
+                    "banner": null, "accentColor": null, "avatarColor": null, "bio": null,
+                    "status": "online", "customStatus": null, "isAdmin": false,
+                    "createdAt": 1, "homeInstance": null, "homeUserId": null,
+                    "replicatedInstances": []
+                },
+                "roles": []
+            })
+        };
+        payload.spaces[0].members = serde_json::from_value(serde_json::json!([
+            user("2", "bob", serde_json::json!("bob.png")),
+            user("3", "carl", serde_json::Value::Null),
+        ]))
+        .expect("members");
+        payload.voice_states = Some(
+            std::iter::once(("c1".to_owned(), vec!["2".to_owned(), "3".to_owned()])).collect(),
+        );
+        let cache = Cache::from_ready(payload);
+        let found = super::occupants(&cache, &super::name_map(&cache), "c1");
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].avatar.as_deref(), Some("bob.png"));
+        assert_eq!(found[1].avatar, None);
     }
 }

@@ -521,20 +521,29 @@ pub(crate) fn occupant_row(
     muted: bool,
     deafened: bool,
     speaking: bool,
+    image: Option<&str>,
 ) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), Sense::click());
+    let avatar_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 40.0, rect.center().y),
+        egui::Vec2::splat(22.0),
+    );
+    paint_avatar(ui.painter(), avatar_rect, name, None, false, image);
+    if speaking {
+        ui.painter().circle_stroke(
+            avatar_rect.center(),
+            12.5,
+            egui::Stroke::new(2.0, GREEN),
+        );
+    }
     ui.painter().text(
-        egui::pos2(rect.left() + 48.0, rect.center().y),
+        egui::pos2(rect.left() + 58.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         truncate_chars(name, 20),
         FontId::proportional(13.5),
         if speaking { GREEN } else { TEXT_MUTED },
     );
-    if speaking {
-        ui.painter()
-            .circle_filled(egui::pos2(rect.left() + 38.0, rect.center().y), 3.0, GREEN);
-    }
     let mut x = rect.right() - 22.0;
     if deafened {
         crate::icons::paint(
