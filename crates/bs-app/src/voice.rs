@@ -415,7 +415,11 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
-                            ui.label(RichText::new(info.status.0).size(12.5).color(info.status.1));
+                            let status =
+                                ui.label(RichText::new(info.status.0).size(12.5).color(info.status.1));
+                            if let Some(detail) = &info.detail {
+                                status.on_hover_text(detail);
+                            }
                             ui.label(
                                 theme::muted(theme::truncate_chars(&info.subtitle, 13)).size(11.5),
                             );
@@ -463,6 +467,8 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
 /// Что показать на панели.
 struct DockInfo {
     status: (&'static str, egui::Color32),
+    /// Подробности (причина сбоя, что делать) — во всплывающей подсказке.
+    detail: Option<String>,
     subtitle: String,
     muted: bool,
     deafened: bool,
@@ -476,11 +482,12 @@ impl VoiceState {
                 (_, Some(Err(_)), _) => ("Нет токена LiveKit", theme::ROSE),
                 (_, _, MediaStatus::Failed(_)) => ("Нет звукового соединения", theme::ROSE),
                 (_, _, MediaStatus::Live) => ("Звонок идёт", theme::GREEN),
-                (_, _, MediaStatus::Unavailable) => ("Без звука (нет LiveKit)", theme::TEXT_MUTED),
+                (_, _, MediaStatus::Unavailable) => ("Сборка без голоса", theme::TEXT_MUTED),
                 _ => ("Подключение…", theme::AMBER),
             };
             return Some(DockInfo {
                 status,
+                detail: status_detail(dm.token.as_ref(), &self.status),
                 subtitle: theme::truncate_chars(&dm.peer, 13),
                 muted: dm.muted,
                 deafened: dm.deafened,
@@ -489,6 +496,7 @@ impl VoiceState {
         let call = self.call.as_ref()?;
         Some(DockInfo {
             status: status_line(call, &self.status),
+            detail: status_detail(call.token.as_ref(), &self.status),
             subtitle: theme::truncate_chars(
                 &format!("{} / {}", call.channel_name, call.space_name),
                 13,
@@ -506,8 +514,27 @@ fn status_line(call: &VoiceCall, media: &MediaStatus) -> (&'static str, egui::Co
         (Some(Err(_)), _, _) => ("Нет токена LiveKit", theme::ROSE),
         (_, MediaStatus::Failed(_), _) => ("Нет звукового соединения", theme::ROSE),
         (_, MediaStatus::Live, _) => ("Голос подключён", theme::GREEN),
-        (_, MediaStatus::Unavailable, true) => ("Без звука (нет LiveKit)", theme::TEXT_MUTED),
+        (_, MediaStatus::Unavailable, true) => ("Сборка без голоса", theme::TEXT_MUTED),
         _ => ("Подключение…", theme::AMBER),
+    }
+}
+
+/// Пояснение к статусу: почему так и что делать.
+fn status_detail(
+    token: Option<&Result<LiveKitTokenResponse, String>>,
+    media: &MediaStatus,
+) -> Option<String> {
+    match (token, media) {
+        (Some(Err(err)), _) => Some(format!(
+            "Сервер не выдал токен LiveKit: {err}. Проверьте, что на инстансе настроен LiveKit."
+        )),
+        (_, MediaStatus::Failed(err)) => Some(format!("Не удалось подключиться к LiveKit: {err}")),
+        (_, MediaStatus::Unavailable) => Some(
+            "Приложение собрано без голосового движка. Запустите: \
+             cargo run -p bs-app --features voice"
+                .to_owned(),
+        ),
+        _ => None,
     }
 }
 
