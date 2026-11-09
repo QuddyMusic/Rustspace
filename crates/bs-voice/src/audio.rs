@@ -118,7 +118,25 @@ impl AudioEngine {
         if self.inner.is_recording_initialized() {
             return Ok(());
         }
-        self.inner.start_recording().map_err(VoiceError::Audio)
+        let first = match self.inner.start_recording() {
+            Ok(()) => return Ok(()),
+            Err(err) => err,
+        };
+        // Системный микрофон «по умолчанию» иногда не открывается (PipeWire,
+        // занятое устройство): перебираем остальные, пока какой-то не заведётся.
+        let devices = self.devices(DeviceKind::Input);
+        warn!(error = %first, devices = devices.len(), "захват не стартовал, пробуем другие микрофоны");
+        if devices.is_empty() {
+            return Err(VoiceError::NoMicrophone);
+        }
+        for device in &devices {
+            debug!(device = %device.name, "пробуем микрофон");
+            if self.set_input(&device.id).is_ok() && self.inner.start_recording().is_ok() {
+                info!(device = %device.name, "захват запущен на запасном микрофоне");
+                return Ok(());
+            }
+        }
+        Err(VoiceError::Audio(first))
     }
 
     /// Останавливает захват.

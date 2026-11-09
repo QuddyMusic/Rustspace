@@ -380,7 +380,7 @@ impl VoiceState {
         };
         self.status = media.status();
         self.speaking = media.speaking();
-        if self.status == MediaStatus::Live
+        if self.status.is_live()
             && !was_synced
             && let Some(call) = self.dm.as_mut()
         {

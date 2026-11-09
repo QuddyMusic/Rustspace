@@ -29,6 +29,8 @@ pub struct VoiceSession {
     mic_publication: Arc<RwLock<Option<LocalTrackPublication>>>,
     muted: Arc<RwLock<bool>>,
     deafened: Arc<RwLock<bool>>,
+    /// Почему микрофон не опубликован (сессия при этом работает на приём).
+    mic_error: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl VoiceSession {
@@ -79,6 +81,7 @@ impl VoiceSession {
             mic_publication: Arc::clone(&mic_publication),
             muted: Arc::new(RwLock::new(config.start_muted)),
             deafened: Arc::new(RwLock::new(config.start_deafened)),
+            mic_error: Arc::new(std::sync::Mutex::new(None)),
         };
 
         let pump = session.clone();
@@ -89,8 +92,15 @@ impl VoiceSession {
             debug!("поток событий LiveKit завершён");
         });
 
-        if config.auto_publish_mic {
-            session.publish_mic().await?;
+        if config.auto_publish_mic
+            && let Err(err) = session.publish_mic().await
+        {
+            // Без микрофона можно слушать других: не рвём соединение.
+            tracing::warn!(error = %err, "микрофон недоступен, работаем только на приём");
+            *session
+                .mic_error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(err.to_string());
         }
         if config.start_deafened {
             session.set_deafened(true).await?;
@@ -102,6 +112,15 @@ impl VoiceSession {
     #[must_use]
     pub fn identity(&self) -> &str {
         &self.identity
+    }
+
+    /// Причина, по которой микрофон не заработал (`None` — всё в порядке).
+    #[must_use]
+    pub fn mic_error(&self) -> Option<String> {
+        self.mic_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Текущий снимок комнаты.

@@ -26,8 +26,21 @@ pub(crate) enum MediaStatus {
     Connecting,
     /// Звук идёт.
     Live,
+    /// Слушаем других, но микрофон не заработал (причина внутри).
+    #[cfg_attr(
+        not(feature = "voice"),
+        allow(dead_code, reason = "строится только с LiveKit")
+    )]
+    ListenOnly(String),
     /// Не удалось или соединение оборвалось.
     Failed(String),
+}
+
+impl MediaStatus {
+    /// Соединение с комнатой установлено (микрофон может не работать).
+    pub(crate) const fn is_live(&self) -> bool {
+        matches!(self, Self::Live | Self::ListenOnly(_))
+    }
 }
 
 /// Направление устройства.
@@ -313,7 +326,9 @@ mod real {
                     let mut shared = lock(&shared);
                     if shared.generation == generation {
                         shared.session = Some(session.clone());
-                        shared.status = MediaStatus::Live;
+                        shared.status = session
+                            .mic_error()
+                            .map_or(MediaStatus::Live, MediaStatus::ListenOnly);
                         false
                     } else {
                         true

@@ -367,7 +367,7 @@ impl VoiceState {
         };
         self.status = media.status();
         self.speaking = media.speaking();
-        if self.status == MediaStatus::Live
+        if self.status.is_live()
             && !was_synced
             && let Some(call) = self.call.as_mut()
         {
@@ -481,6 +481,7 @@ impl VoiceState {
                 (crate::dmcall::DmPhase::Ringing, _, _) => ("Вызываем…", theme::AMBER),
                 (_, Some(Err(_)), _) => ("Нет токена LiveKit", theme::ROSE),
                 (_, _, MediaStatus::Failed(_)) => ("Нет звукового соединения", theme::ROSE),
+                (_, _, MediaStatus::ListenOnly(_)) => ("Звонок: нет микрофона", theme::AMBER),
                 (_, _, MediaStatus::Live) => ("Звонок идёт", theme::GREEN),
                 (_, _, MediaStatus::Unavailable) => ("Сборка без голоса", theme::TEXT_MUTED),
                 _ => ("Подключение…", theme::AMBER),
@@ -513,6 +514,7 @@ fn status_line(call: &VoiceCall, media: &MediaStatus) -> (&'static str, egui::Co
         _ if call.forced_mute => ("Вас заглушил модератор", theme::AMBER),
         (Some(Err(_)), _, _) => ("Нет токена LiveKit", theme::ROSE),
         (_, MediaStatus::Failed(_), _) => ("Нет звукового соединения", theme::ROSE),
+        (_, MediaStatus::ListenOnly(_), _) => ("Нет микрофона", theme::AMBER),
         (_, MediaStatus::Live, _) => ("Голос подключён", theme::GREEN),
         (_, MediaStatus::Unavailable, true) => ("Сборка без голоса", theme::TEXT_MUTED),
         _ => ("Подключение…", theme::AMBER),
@@ -529,6 +531,11 @@ fn status_detail(
             "Сервер не выдал токен LiveKit: {err}. Проверьте, что на инстансе настроен LiveKit."
         )),
         (_, MediaStatus::Failed(err)) => Some(format!("Не удалось подключиться к LiveKit: {err}")),
+        (_, MediaStatus::ListenOnly(err)) => Some(format!(
+            "Вы слышите других, но вас не слышат: микрофон не открылся ({err}). \
+             Проверьте, что микрофон подключён и не занят другой программой, \
+             и выберите его в настройках голоса."
+        )),
         (_, MediaStatus::Unavailable) => Some(
             "Приложение собрано без голосового движка. Запустите: \
              cargo run -p bs-app --features voice"
