@@ -24,7 +24,7 @@ pub(crate) struct SavedSession {
 }
 
 /// Каталог настроек приложения (`None`, если домашний каталог неизвестен).
-fn config_dir() -> Option<PathBuf> {
+pub(crate) fn config_dir() -> Option<PathBuf> {
     let var = |name: &str| {
         std::env::var_os(name)
             .filter(|v| !v.is_empty())

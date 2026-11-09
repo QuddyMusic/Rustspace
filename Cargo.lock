@@ -687,6 +687,7 @@ dependencies = [
  "egui",
  "futures-util",
  "rfd",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.28.0",

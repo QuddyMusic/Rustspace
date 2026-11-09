@@ -20,6 +20,7 @@ mod emoji_data;
 #[cfg(test)]
 mod fake_instance;
 mod fleet;
+mod gif_favorites;
 mod icons;
 mod images;
 mod logic;

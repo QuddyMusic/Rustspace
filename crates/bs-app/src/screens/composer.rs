@@ -105,6 +105,8 @@ struct Gifs {
     next: String,
     loading: bool,
     error: Option<String>,
+    /// Открыта вкладка «Избранное».
+    favorites_only: bool,
 }
 
 #[derive(Debug, Default)]
@@ -123,12 +125,47 @@ pub(crate) struct Composer {
     staged: Vec<Staged>,
     open: Open,
     gifs: Gifs,
+    favorites: crate::gif_favorites::GifFavorites,
     stickers: Stickers,
     emoji_category: usize,
     reading: Option<(PickMode, Receiver<Vec<Picked>>)>,
     /// Инстанс, к которому относится накопленное состояние.
     origin: Option<usize>,
     note: Option<String>,
+}
+
+/// Ключ аккаунта для избранных GIF: инстанс + пользователь.
+fn favorite_key(bridge: &Bridge, origin: Option<usize>) -> Option<String> {
+    let base = bridge.base_at(origin.unwrap_or(0))?;
+    let user = bridge.cache_at(origin.unwrap_or(0))?.me().id.clone();
+    Some(crate::gif_favorites::account_key(base, &user))
+}
+
+/// Звёздочка: контур или залитая.
+fn paint_star(painter: &egui::Painter, center: Pos2, radius: f32, filled: bool) {
+    let points: Vec<Pos2> = (0..10)
+        .map(|i| {
+            let angle = std::f32::consts::PI * (i as f32 / 5.0) - std::f32::consts::FRAC_PI_2;
+            let r = if i % 2 == 0 { radius } else { radius * 0.42 };
+            center + Vec2::new(angle.cos(), angle.sin()) * r
+        })
+        .collect();
+    let gold = Color32::from_rgb(250, 204, 21);
+    if filled {
+        let mut mesh = egui::Mesh::default();
+        mesh.colored_vertex(center, gold);
+        for point in &points {
+            mesh.colored_vertex(*point, gold);
+        }
+        for i in 0..10_u32 {
+            mesh.add_triangle(0, 1 + i, 1 + (i + 1) % 10);
+        }
+        painter.add(egui::Shape::mesh(mesh));
+    }
+    painter.add(egui::Shape::closed_line(
+        points,
+        egui::Stroke::new(1.5, if filled { gold } else { Color32::WHITE }),
+    ));
 }
 
 /// Идентификатор поля ввода: нужен, чтобы вернуть в него фокус.
@@ -846,7 +883,22 @@ impl Composer {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_secs(1));
         }
-        match self.gifs.enabled {
+        if let Some(key) = favorite_key(bridge, self.origin) {
+            self.favorites.select(&key);
+        }
+        ui.horizontal(|ui| {
+            if widgets::pill_tab(ui, "Поиск", !self.gifs.favorites_only).clicked() {
+                self.gifs.favorites_only = false;
+            }
+            if widgets::pill_tab(ui, "Избранное", self.gifs.favorites_only).clicked() {
+                self.gifs.favorites_only = true;
+            }
+        });
+        ui.add_space(4.0);
+        let favorites_only = self.gifs.favorites_only;
+        // Избранное — просто адреса: ему ключ Klipy не нужен.
+        let gate = if favorites_only { Some(true) } else { self.gifs.enabled };
+        match gate {
             None => {
                 if let Some(error) = &self.gifs.enabled_error {
                     theme::empty_state(ui, &format!("Не удалось проверить GIF: {error}"));
@@ -864,37 +916,48 @@ impl Composer {
             }
             Some(true) => {}
         }
-        let before = self.gifs.query.clone();
-        widgets::search_box(ui, &mut self.gifs.query, "Поиск GIF в Klipy");
-        if self.gifs.query != before {
-            self.gifs.typed_at = now;
-        }
-        let asked = self.gifs.asked.clone();
-        let settled = now - self.gifs.typed_at >= GIF_DEBOUNCE;
-        if asked.as_deref() != Some(self.gifs.query.trim()) {
-            if settled {
-                let query = self.gifs.query.trim().to_owned();
-                if bridge.request(BridgeRequest::Gifs {
-                    query: query.clone(),
-                    pos: String::new(),
-                }) {
-                    self.gifs.asked = Some(query);
-                    self.gifs.loading = true;
-                    self.gifs.items.clear();
-                    self.gifs.next.clear();
-                    self.gifs.error = None;
+        if !favorites_only {
+            let before = self.gifs.query.clone();
+            widgets::search_box(ui, &mut self.gifs.query, "Поиск GIF в Klipy");
+            if self.gifs.query != before {
+                self.gifs.typed_at = now;
+            }
+            let asked = self.gifs.asked.clone();
+            let settled = now - self.gifs.typed_at >= GIF_DEBOUNCE;
+            if asked.as_deref() != Some(self.gifs.query.trim()) {
+                if settled {
+                    let query = self.gifs.query.trim().to_owned();
+                    if bridge.request(BridgeRequest::Gifs {
+                        query: query.clone(),
+                        pos: String::new(),
+                    }) {
+                        self.gifs.asked = Some(query);
+                        self.gifs.loading = true;
+                        self.gifs.items.clear();
+                        self.gifs.next.clear();
+                        self.gifs.error = None;
+                    }
+                } else {
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(120));
                 }
-            } else {
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_millis(120));
             }
         }
         ui.add_space(6.0);
-        if let Some(error) = &self.gifs.error {
+        if let Some(error) = self.gifs.error.as_ref().filter(|_| !favorites_only) {
             ui.label(RichText::new(error).color(theme::ROSE).size(12.5));
         }
+        if let Some(note) = &self.note {
+            ui.label(RichText::new(note).color(theme::ROSE).size(12.5));
+        }
         let mut chosen = None;
+        let mut toggled: Option<GifItem> = None;
         let mut want_more = false;
+        let list: &[GifItem] = if favorites_only {
+            self.favorites.items()
+        } else {
+            &self.gifs.items
+        };
         let output = egui::ScrollArea::vertical()
             .id_salt("gif_scroll")
             .auto_shrink([false, false])
@@ -903,8 +966,8 @@ impl Composer {
                 let width = ui.available_width();
                 let column = (width - gap) / 2.0;
                 let mut heights = [0.0_f32; 2];
-                let mut placed = Vec::with_capacity(self.gifs.items.len());
-                for item in &self.gifs.items {
+                let mut placed = Vec::with_capacity(list.len());
+                for item in list {
                     let ratio = if item.width == 0 || item.height == 0 {
                         0.75
                     } else {
@@ -918,7 +981,7 @@ impl Composer {
                 let total = heights[0].max(heights[1]);
                 let (area, _) = ui.allocate_exact_size(Vec2::new(width, total), Sense::hover());
                 let clip = ui.clip_rect();
-                for (item, (side, top, height)) in self.gifs.items.iter().zip(placed) {
+                for (item, (side, top, height)) in list.iter().zip(placed) {
                     let x = area.left() + side as f32 * (column + gap);
                     let rect = Rect::from_min_size(
                         Pos2::new(x, area.top() + top),
@@ -957,11 +1020,47 @@ impl Composer {
                         (Some(message), false) => format!("{}\nНе загрузилось: {message}", item.title),
                         _ => item.title.clone(),
                     };
+                    let star = Rect::from_min_size(
+                        rect.right_top() + Vec2::new(-30.0, 4.0),
+                        Vec2::splat(26.0),
+                    );
+                    let starred = self.favorites.contains(&item.id);
+                    let tile_hovered = response.hovered();
                     if response.on_hover_text(hint).clicked() {
                         chosen = Some(item.url.clone());
                     }
+                    if tile_hovered || starred || ui.rect_contains_pointer(rect) {
+                        let button = ui.interact(
+                            star,
+                            ui.scope_id().with(("gif-star", &item.id)),
+                            Sense::click(),
+                        );
+                        ui.painter().circle_filled(
+                            star.center(),
+                            13.0,
+                            Color32::from_black_alpha(if button.hovered() { 190 } else { 130 }),
+                        );
+                        paint_star(ui.painter(), star.center(), 8.0, starred);
+                        if button
+                            .on_hover_text(if starred {
+                                "Убрать из избранного"
+                            } else {
+                                "В избранное"
+                            })
+                            .clicked()
+                        {
+                            toggled = Some(item.clone());
+                        }
+                    }
                 }
-                if self.gifs.loading {
+                if favorites_only {
+                    if list.is_empty() {
+                        theme::empty_state(
+                            ui,
+                            "Здесь пока пусто. Наведите на GIF в поиске и нажмите звёздочку — он появится тут.",
+                        );
+                    }
+                } else if self.gifs.loading {
                     ui.label(theme::muted("Загрузка…"));
                 } else if self.gifs.items.is_empty() && self.gifs.asked.is_some() {
                     theme::empty_state(
@@ -974,7 +1073,15 @@ impl Composer {
         if visible_bottom + 120.0 >= output.content_size.y {
             want_more = true;
         }
+        if let Some(item) = toggled {
+            self.note = self
+                .favorites
+                .toggle(&item)
+                .err()
+                .map(|err| format!("Избранное не сохранилось на диск: {err}"));
+        }
         if want_more
+            && !favorites_only
             && !self.gifs.loading
             && !self.gifs.next.is_empty()
             && let Some(query) = self.gifs.asked.clone()
