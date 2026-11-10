@@ -1,4 +1,5 @@
 [alias]
+xtask = "run -q -p xtask --"
 b = "build"
 t = "test --workspace --all-features"
 c = "clippy --workspace --all-targets --all-features -- -D warnings"

@@ -12,6 +12,7 @@ members = [
     "crates/bs-media",
     "crates/bs-app",
     "crates/bs-tui",
+    "crates/bs-contract",
     "xtask",
 ]
 

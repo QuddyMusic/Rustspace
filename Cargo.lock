@@ -722,6 +722,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bs-contract"
+version = "0.1.0"
+dependencies = [
+ "bs-api",
+ "bs-types",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.28.0",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "bs-core"
 version = "0.1.0"
 dependencies = [
