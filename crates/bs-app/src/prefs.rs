@@ -207,8 +207,6 @@ impl Prefs {
         }
         self.scale = self.scale.clamp(0.5, 3.0);
         self.sounds.volume = self.sounds.volume.min(200);
-        self.voice.input_volume = self.voice.input_volume.min(200);
-        self.voice.output_volume = self.voice.output_volume.min(200);
         self.appearance.radius = self.appearance.radius.min(20);
         self
     }
