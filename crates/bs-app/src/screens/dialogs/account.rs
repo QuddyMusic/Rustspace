@@ -73,7 +73,7 @@ fn profile_preview(ui: &mut egui::Ui, state: &SettingsState, me: &User) {
     egui::Frame::new()
         .fill(theme::bg_sidebar())
         .stroke(egui::Stroke::new(1.0, theme::border()))
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             let (banner, _) =

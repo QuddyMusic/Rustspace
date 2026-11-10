@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use bs_api::IdentityDeleteMode;
 use chrono::{Datelike, TimeZone};
-use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke};
+use egui::{Align, Color32, Layout, Margin, RichText, Sense, Stroke};
 
 use crate::fleet::{Bridge, ConnectionRow, RowState};
 use crate::i18n::tr;
@@ -206,7 +206,7 @@ fn home_card(ui: &mut egui::Ui, home: &crate::fleet::HomeRow) {
     egui::Frame::new()
         .fill(theme::bg_sidebar())
         .stroke(Stroke::new(1.0, theme::border()))
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::symmetric(14, 12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -298,7 +298,7 @@ fn status_badge(ui: &mut egui::Ui, state: RowState) {
     let size = galley.size() + egui::vec2(14.0, 6.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     ui.painter()
-        .rect_filled(rect, CornerRadius::same(5), color.gamma_multiply(0.16));
+        .rect_filled(rect, crate::theme::rounded(5), color.gamma_multiply(0.16));
     ui.painter()
         .galley(rect.center() - galley.size() / 2.0, galley, color);
 }
@@ -327,7 +327,7 @@ fn row_card(
                 Color32::TRANSPARENT
             },
         ))
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::symmetric(14, 11));
     let inner = frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -489,7 +489,7 @@ fn details(ui: &mut egui::Ui, row: &ConnectionRow) {
         egui::Frame::new()
             .fill(theme::red().gamma_multiply(0.12))
             .stroke(Stroke::new(1.0, theme::red().gamma_multiply(0.35)))
-            .corner_radius(CornerRadius::same(6))
+            .corner_radius(crate::theme::rounded(6))
             .inner_margin(Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -540,7 +540,7 @@ fn peering_label(status: &str) -> &'static str {
 fn small_button(text: &str, tint: Color32) -> egui::Button<'static> {
     egui::Button::new(RichText::new(text.to_owned()).size(12.5).color(tint))
         .fill(tint.gamma_multiply(0.14))
-        .corner_radius(CornerRadius::same(6))
+        .corner_radius(crate::theme::rounded(6))
         .min_size(egui::vec2(0.0, 28.0))
 }
 
@@ -656,7 +656,7 @@ fn dialog(
     ui.add_space(6.0);
     egui::Frame::new()
         .fill(theme::bg_input())
-        .corner_radius(CornerRadius::same(8))
+        .corner_radius(crate::theme::rounded(8))
         .inner_margin(Margin::same(12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -876,7 +876,7 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
         let hovered = response.hovered();
         ui.painter().rect_stroke(
             rect,
-            CornerRadius::same(10),
+            crate::theme::rounded(10),
             Stroke::new(
                 1.0,
                 if hovered {
@@ -909,7 +909,7 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
     egui::Frame::new()
         .fill(theme::bg_sidebar())
         .stroke(Stroke::new(1.0, theme::border()))
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::same(16))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

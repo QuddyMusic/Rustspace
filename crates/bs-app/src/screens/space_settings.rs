@@ -13,7 +13,7 @@ use bs_permissions::{
     Permissions, can_manage_role_at, has_permission_bit, parse_permission_string,
 };
 use bs_types::SpaceVisibility;
-use egui::{Align, CornerRadius, Layout, Margin, RichText};
+use egui::{Align, Layout, Margin, RichText};
 
 use crate::bridge::{BridgeRequest, SpaceEvent, SpaceOp};
 use crate::fleet::Bridge;
@@ -352,7 +352,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut SpaceSettings, bridge: &mut 
             egui::Frame::new()
                 .fill(theme::bg_bubble())
                 .stroke(egui::Stroke::new(1.0, theme::border()))
-                .corner_radius(CornerRadius::same(16))
+                .corner_radius(crate::theme::rounded(16))
                 .inner_margin(Margin::same(0)),
         )
         .show(ctx, |ui| {
@@ -504,7 +504,7 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge
         !state.busy,
         egui::Button::new(RichText::new(label).color(theme::bg_rail()))
             .fill(theme::rose())
-            .corner_radius(CornerRadius::same(8)),
+            .corner_radius(crate::theme::rounded(8)),
     );
     if delete.clicked() {
         if state.delete_armed {
@@ -661,7 +661,7 @@ fn member_row(
 ) {
     egui::Frame::new()
         .fill(theme::bg_rail())
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -789,7 +789,7 @@ fn confirm_box(
             !state.busy,
             egui::Button::new(RichText::new(label).color(theme::bg_rail()))
                 .fill(theme::rose())
-                .corner_radius(CornerRadius::same(8)),
+                .corner_radius(crate::theme::rounded(8)),
         );
         if go.clicked() {
             let op = if ban {
@@ -836,7 +836,7 @@ fn bans(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge) {
             .map_or_else(|| ban.user_id.clone(), display_name);
         egui::Frame::new()
             .fill(theme::bg_rail())
-            .corner_radius(CornerRadius::same(10))
+            .corner_radius(crate::theme::rounded(10))
             .inner_margin(Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());

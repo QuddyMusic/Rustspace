@@ -3,7 +3,7 @@
 //! Тексты и поля — как в `CreateChannel`, `CreateCategory`, `JoinSpace` и
 //! подтверждении выхода оригинального веб-клиента.
 
-use egui::{Align, CornerRadius, Layout, Margin, RichText};
+use egui::{Align, Layout, Margin, RichText};
 
 use crate::bridge::{BridgeRequest, SpaceEvent};
 use crate::fleet::Bridge;
@@ -166,7 +166,7 @@ fn modal(
             egui::Frame::new()
                 .fill(theme::bg_bubble())
                 .stroke(egui::Stroke::new(1.0, theme::border()))
-                .corner_radius(CornerRadius::same(16))
+                .corner_radius(crate::theme::rounded(16))
                 .inner_margin(Margin::same(22)),
         )
         .show(ctx, |ui| {
@@ -436,7 +436,7 @@ fn show_leave(ctx: &egui::Context, form: &mut LeaveForm, bridge: &mut Bridge) ->
                     .color(theme::bg_rail()),
                 )
                 .fill(theme::rose())
-                .corner_radius(CornerRadius::same(8)),
+                .corner_radius(crate::theme::rounded(8)),
             );
             if leave.clicked() {
                 form.busy = true;

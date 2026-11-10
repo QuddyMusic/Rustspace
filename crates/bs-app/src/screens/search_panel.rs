@@ -287,7 +287,7 @@ impl SearchPanel {
                 egui::Frame::new()
                     .fill(theme::bg_bubble())
                     .stroke(egui::Stroke::new(1.0, theme::border()))
-                    .corner_radius(egui::CornerRadius::same(10))
+                    .corner_radius(crate::theme::rounded(10))
                     .inner_margin(Margin::same(14))
                     .shadow(egui::Shadow {
                         offset: [0, 6],
@@ -502,7 +502,7 @@ impl SearchPanel {
 fn hit_row(ui: &mut egui::Ui, hit: &SearchHit, needle: &str, now_ms: i64) -> bool {
     let inner = egui::Frame::new()
         .inner_margin(Margin::symmetric(8, 6))
-        .corner_radius(egui::CornerRadius::same(6))
+        .corner_radius(crate::theme::rounded(6))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_top(|ui| {

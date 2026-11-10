@@ -183,7 +183,7 @@ pub(crate) fn show_text(ui: &mut egui::Ui, salt: &str, blocks: &[Block], edited:
                 egui::Frame::new()
                     .fill(theme::bg_input())
                     .stroke(Stroke::new(1.0, theme::border()))
-                    .corner_radius(CornerRadius::same(8))
+                    .corner_radius(crate::theme::rounded(8))
                     .inner_margin(Margin::symmetric(10, 8))
                     .show(ui, |ui| {
                         let font = egui::TextStyle::Monospace.resolve(ui.style());
@@ -252,11 +252,12 @@ pub(crate) fn show_reactions(
             } else {
                 theme::bg_hover()
             };
-            ui.painter().rect_filled(rect, CornerRadius::same(12), fill);
+            ui.painter()
+                .rect_filled(rect, crate::theme::rounded(12), fill);
             if group.mine {
                 ui.painter().rect_stroke(
                     rect,
-                    CornerRadius::same(12),
+                    crate::theme::rounded(12),
                     Stroke::new(1.0, theme::accent()),
                     egui::StrokeKind::Inside,
                 );
@@ -296,7 +297,7 @@ pub(crate) fn show_reactions(
             let hovered = ui.rect_contains_pointer(rect);
             if hovered {
                 ui.painter()
-                    .rect_filled(rect, CornerRadius::same(12), theme::bg_hover());
+                    .rect_filled(rect, crate::theme::rounded(12), theme::bg_hover());
             }
             crate::icons::paint(
                 ui.painter(),

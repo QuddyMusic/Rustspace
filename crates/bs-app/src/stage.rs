@@ -115,11 +115,7 @@ pub(crate) fn show(ui: &mut egui::Ui, voice: &mut VoiceState, bridge: &Bridge) {
         .resizable(true)
         .default_size(300.0)
         .size_range(160.0..=900.0)
-        .frame(
-            egui::Frame::new()
-                .fill(theme::bg_rail())
-                .inner_margin(egui::Margin::same(8)),
-        )
+        .frame(theme::module(theme::bg_rail()).inner_margin(egui::Margin::same(8)))
         .show(ui, |ui| {
             update_textures(ui.ctx(), &mut voice.stage, &feeds);
             let shown: Vec<&Feed> = match &voice.stage.focused {

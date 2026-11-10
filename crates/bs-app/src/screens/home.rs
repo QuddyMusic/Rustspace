@@ -75,9 +75,8 @@ impl HomeState {
 
 /// Шапка центральной области: плоская, высотой 52.
 fn header_frame() -> egui::Frame {
-    egui::Frame::new()
-        .fill(theme::bg_chat())
-        .inner_margin(Margin::symmetric(18, 0))
+    // Подложку рисует модуль, в который вложена шапка.
+    egui::Frame::new().inner_margin(Margin::symmetric(18, 0))
 }
 
 /// Список друзей: шапка с вкладками и тело вкладки.
@@ -126,11 +125,7 @@ pub(crate) fn show_friends(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Br
             });
         });
     egui::CentralPanel::default()
-        .frame(
-            egui::Frame::new()
-                .fill(theme::bg_chat())
-                .inner_margin(Margin::symmetric(24, 6)),
-        )
+        .frame(egui::Frame::new().inner_margin(Margin::symmetric(24, 6)))
         .show(ui, |ui| {
             if let Some(err) = bridge.social_error() {
                 ui.label(RichText::new(err).color(theme::rose()));
@@ -312,7 +307,7 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
     ui.add_space(10.0);
     egui::Frame::new()
         .fill(theme::bg_input())
-        .corner_radius(CornerRadius::same(9))
+        .corner_radius(crate::theme::rounded(9))
         .inner_margin(Margin::symmetric(14, 8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -373,13 +368,10 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
 /// Правая панель «Сейчас онлайн»: друзья по статусам; клик открывает беседу.
 pub(crate) fn show_active_now(ui: &mut egui::Ui, bridge: &Bridge) {
     egui::Panel::right("active_now")
+        .show_separator_line(false)
         .exact_size(250.0)
         .resizable(false)
-        .frame(
-            egui::Frame::new()
-                .fill(theme::bg_chat())
-                .inner_margin(Margin::symmetric(18, 14)),
-        )
+        .frame(theme::module(theme::bg_chat()).inner_margin(Margin::symmetric(18, 14)))
         .show(ui, |ui| {
             ui.label(
                 RichText::new(tr("Сейчас онлайн"))
@@ -483,11 +475,7 @@ pub(crate) fn show_explore(
     }
     let err = bridge.social_error().map(str::to_owned);
     egui::CentralPanel::default()
-        .frame(
-            egui::Frame::new()
-                .fill(theme::bg_chat())
-                .inner_margin(Margin::symmetric(24, 8)),
-        )
+        .frame(egui::Frame::new().inner_margin(Margin::symmetric(24, 8)))
         .show(ui, |ui| {
             if let Some(err) = err {
                 ui.label(RichText::new(err).color(theme::rose()));
@@ -621,7 +609,7 @@ fn space_card(
     egui::Frame::new()
         .fill(theme::bg_sidebar())
         .stroke(egui::Stroke::new(1.0, theme::border()))
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .show(ui, |ui| {
             ui.set_width(CARD_WIDTH);
             ui.vertical(|ui| {
@@ -732,7 +720,7 @@ fn space_card(
                         };
                         let button = egui::Button::new(RichText::new(label).color(text))
                             .fill(fill)
-                            .corner_radius(CornerRadius::same(7))
+                            .corner_radius(crate::theme::rounded(7))
                             .min_size(egui::vec2(width, 34.0));
                         if ui.add(button).clicked() {
                             let by_request = space.visibility != SpaceVisibility::Public;

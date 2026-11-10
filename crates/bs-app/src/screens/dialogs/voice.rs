@@ -231,7 +231,7 @@ pub(super) fn mic_test_card(
                 egui::Sense::hover(),
             );
             ui.painter()
-                .rect_filled(rect, CornerRadius::same(5), theme::bg_input());
+                .rect_filled(rect, crate::theme::rounded(5), theme::bg_input());
             let mut filled = rect;
             filled.set_width(rect.width() * level);
             let color = if level > 0.9 {
@@ -242,7 +242,7 @@ pub(super) fn mic_test_card(
                 theme::green()
             };
             ui.painter()
-                .rect_filled(filled, CornerRadius::same(5), color);
+                .rect_filled(filled, crate::theme::rounded(5), color);
             if running {
                 ui.ctx().request_repaint();
             }

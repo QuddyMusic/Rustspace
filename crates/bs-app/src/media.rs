@@ -253,7 +253,7 @@ pub(crate) fn show_download_all(
     let hover = ui.rect_contains_pointer(rect) && running == 0;
     ui.painter().rect(
         rect,
-        CornerRadius::same(8),
+        crate::theme::rounded(8),
         if hover {
             theme::bg_hover()
         } else {
@@ -324,7 +324,7 @@ pub(crate) fn show_attachment(
         _ => fit(guess, MAX_BOX),
     };
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
-    let radius = CornerRadius::same(10);
+    let radius = crate::theme::rounded(10);
     let mut failure: Option<String> = None;
     let mut ready = false;
     match state {
@@ -411,7 +411,7 @@ pub(crate) fn show_gif(ui: &mut egui::Ui, url: &str) -> Option<Hit> {
                 ui.painter(),
                 rect,
                 &image,
-                CornerRadius::same(10),
+                crate::theme::rounded(10),
                 true,
                 Color32::WHITE,
             );
@@ -427,7 +427,7 @@ pub(crate) fn show_gif(ui: &mut egui::Ui, url: &str) -> Option<Hit> {
 
 fn placeholder(ui: &egui::Ui, rect: Rect, text: &str) {
     ui.painter()
-        .rect_filled(rect, CornerRadius::same(10), theme::bg_bubble());
+        .rect_filled(rect, crate::theme::rounded(10), theme::bg_bubble());
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
@@ -442,7 +442,7 @@ fn file_card(ui: &mut egui::Ui, att: &AttachmentView, downloads: &mut Vec<Downlo
     egui::Frame::new()
         .fill(theme::bg_bubble())
         .stroke(egui::Stroke::new(1.0, theme::border()))
-        .corner_radius(10)
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -486,7 +486,7 @@ pub(crate) fn viewer(ctx: &egui::Context, value: &str) -> bool {
                         ui.painter(),
                         target,
                         &image,
-                        CornerRadius::same(6),
+                        crate::theme::rounded(6),
                         true,
                         Color32::WHITE,
                     );

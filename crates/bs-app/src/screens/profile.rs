@@ -214,7 +214,7 @@ pub(crate) fn show(
         .frame(
             egui::Frame::new()
                 .fill(theme::bg_sidebar())
-                .corner_radius(CornerRadius::same(12))
+                .corner_radius(crate::theme::rounded(12))
                 .stroke(egui::Stroke::new(1.0, theme::border())),
         )
         .show(ctx, |ui| {

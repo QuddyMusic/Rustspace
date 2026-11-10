@@ -5,7 +5,7 @@
 use std::sync::mpsc::{Receiver, channel};
 
 use bs_types::SpaceVisibility;
-use egui::{CornerRadius, Margin, RichText, Vec2};
+use egui::{Margin, RichText, Vec2};
 
 use super::{DESCRIPTION_MAX, Rights, SpaceSettings, heading, status_lines};
 use crate::bridge::SpaceOp;
@@ -115,7 +115,7 @@ fn image_row(
     };
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-        let radius = CornerRadius::same(if banner { 10 } else { 16 });
+        let radius = crate::theme::rounded(if banner { 10 } else { 16 });
         ui.painter().rect_filled(rect, radius, theme::bg_rail());
         let shown = !value.is_empty()
             && images::paint_value(
@@ -255,7 +255,7 @@ fn directory(ui: &mut egui::Ui, state: &mut SpaceSettings) {
     ui.add_space(4.0);
     egui::Frame::new()
         .fill(theme::bg_rail())
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::same(12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -317,7 +317,7 @@ fn join_requests(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Brid
             .map_or_else(|| tr("Неизвестно").to_owned(), super::display_name);
         egui::Frame::new()
             .fill(theme::bg_rail())
-            .corner_radius(CornerRadius::same(10))
+            .corner_radius(crate::theme::rounded(10))
             .inner_margin(Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());

@@ -6,7 +6,7 @@
 
 use bs_api::{GROUP_MAX_MEMBERS, GROUP_NAME_MAX, GroupMember};
 use bs_types::{DmChannel, Friend};
-use egui::{CornerRadius, Margin, RichText};
+use egui::{Margin, RichText};
 
 use crate::bridge::{BridgeRequest, GroupEvent, GroupOp};
 use crate::fleet::Bridge;
@@ -148,7 +148,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut GroupDialog, bridge: &mut Br
             egui::Frame::new()
                 .fill(theme::bg_bubble())
                 .stroke(egui::Stroke::new(1.0, theme::border()))
-                .corner_radius(CornerRadius::same(16))
+                .corner_radius(crate::theme::rounded(16))
                 .inner_margin(Margin::same(20)),
         )
         .show(ctx, |ui| {
@@ -474,7 +474,7 @@ fn confirm_box(ui: &mut egui::Ui, text: &str, button: &str, busy: bool) -> Optio
     let mut pressed = None;
     egui::Frame::new()
         .fill(theme::bg_rail())
-        .corner_radius(CornerRadius::same(8))
+        .corner_radius(crate::theme::rounded(8))
         .inner_margin(Margin::same(8))
         .show(ui, |ui| {
             ui.label(RichText::new(text).color(theme::text_muted()));

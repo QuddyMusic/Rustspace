@@ -9,7 +9,7 @@ use bs_permissions::{
     permissions_version,
 };
 use bs_types::Role;
-use egui::{Color32, CornerRadius, Margin, RichText};
+use egui::{Color32, Margin, RichText};
 
 use super::{Rights, SpaceSettings, heading, status_lines};
 use crate::bridge::SpaceOp;
@@ -234,7 +234,7 @@ fn role_row(
     let mut mv: Option<(String, RoleSide)> = None;
     egui::Frame::new()
         .fill(theme::bg_rail())
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -535,7 +535,7 @@ fn buttons(
             foreign.is_empty() && !state.busy,
             egui::Button::new(RichText::new(label).color(theme::bg_rail()))
                 .fill(theme::rose())
-                .corner_radius(CornerRadius::same(8)),
+                .corner_radius(crate::theme::rounded(8)),
         );
         if delete.clicked() {
             if state.roles.delete_armed {

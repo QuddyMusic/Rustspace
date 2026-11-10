@@ -5,7 +5,7 @@
 
 use bs_core::notifications::{DEFAULT_LEVEL, mute_active, resolve_policy};
 use bs_types::{NotificationLevel, NotificationMuteDuration, UpdateNotificationSettingRequest};
-use egui::{CornerRadius, Margin, RichText};
+use egui::{Margin, RichText};
 
 use crate::bridge::{BridgeRequest, SpaceEvent, SpaceOp};
 use crate::fleet::Bridge;
@@ -123,7 +123,7 @@ pub(crate) fn show(
             egui::Frame::new()
                 .fill(theme::bg_bubble())
                 .stroke(egui::Stroke::new(1.0, theme::border()))
-                .corner_radius(CornerRadius::same(16))
+                .corner_radius(crate::theme::rounded(16))
                 .inner_margin(Margin::same(20)),
         )
         .show(ctx, |ui| {

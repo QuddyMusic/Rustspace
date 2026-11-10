@@ -123,7 +123,7 @@ fn preset_card(ui: &mut egui::Ui, preset: Preset, selected: bool) -> egui::Respo
     let p = preset.palette();
     let (rect, response) = ui.allocate_exact_size(egui::vec2(150.0, 104.0), Sense::click());
     let painter = ui.painter();
-    let radius = CornerRadius::same(10);
+    let radius = crate::theme::rounded(10);
     painter.rect_filled(rect, radius, p.bg_chat);
     // Мини-раскладка: рейл, боковая панель, «сообщения», акцентная кнопка.
     let inner = rect.shrink(8.0);

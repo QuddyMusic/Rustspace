@@ -71,16 +71,12 @@ impl ChatScreen {
 
         egui::Panel::bottom("composer")
             .show_separator_line(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::bg_chat())
-                    .inner_margin(Margin {
-                        left: 20,
-                        right: 20,
-                        top: 0,
-                        bottom: 18,
-                    }),
-            )
+            .frame(egui::Frame::new().inner_margin(Margin {
+                left: 20,
+                right: 20,
+                top: 0,
+                bottom: 18,
+            }))
             .show(ui, |ui| {
                 // Строка над полем: «печатает…» или режим правки; высота постоянна.
                 ui.horizontal(|ui| {
@@ -258,11 +254,7 @@ impl ChatScreen {
 
     pub(super) fn show_messages(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) {
         egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::bg_chat())
-                    .inner_margin(Margin::symmetric(0, 0)),
-            )
+            .frame(egui::Frame::new())
             .show(ui, |ui| {
                 let Some(selected) = self.selected_channel.clone() else {
                     ui.centered_and_justified(|ui| {
@@ -445,7 +437,7 @@ impl ChatScreen {
                     egui::Frame::new()
                         .fill(theme::bg_bubble())
                         .stroke(egui::Stroke::new(1.0, theme::border()))
-                        .corner_radius(egui::CornerRadius::same(18))
+                        .corner_radius(crate::theme::rounded(18))
                         .inner_margin(Margin::symmetric(14, 7))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {

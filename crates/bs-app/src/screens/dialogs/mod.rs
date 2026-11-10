@@ -134,7 +134,7 @@ pub(crate) fn show_create_space(
             egui::Frame::new()
                 .fill(theme::bg_bubble())
                 .stroke(egui::Stroke::new(1.0, theme::border()))
-                .corner_radius(CornerRadius::same(16))
+                .corner_radius(crate::theme::rounded(16))
                 .inner_margin(Margin::same(22)),
         )
         .show(ctx, |ui| {
@@ -464,7 +464,7 @@ fn show_settings_inner(
         .rect_filled(outer, 0.0, Color32::from_rgb(0x08, 0x08, 0x0c));
     ui.painter().rect(
         window,
-        CornerRadius::same(16),
+        crate::theme::rounded(16),
         theme::bg_rail(),
         egui::Stroke::new(1.0, theme::border()),
         egui::StrokeKind::Inside,
@@ -527,7 +527,7 @@ fn nav_profile(ui: &mut egui::Ui, me: &User) {
     egui::Frame::new()
         .fill(theme::bg_sidebar())
         .stroke(egui::Stroke::new(1.0, theme::border()))
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::symmetric(12, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -613,7 +613,7 @@ fn settings_nav(
     egui::Frame::new()
         .fill(theme::bg_sidebar())
         .stroke(egui::Stroke::new(1.0, theme::border()))
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::symmetric(8, 12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -664,7 +664,7 @@ fn settings_nav(
             if response.hovered() {
                 ui.painter().rect_filled(
                     rect.shrink2(egui::vec2(8.0, 1.0)),
-                    CornerRadius::same(8),
+                    crate::theme::rounded(8),
                     theme::bg_hover(),
                 );
             }
@@ -691,7 +691,7 @@ pub(super) fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
         .fill(theme::bg_sidebar())
         .stroke(egui::Stroke::new(1.0, theme::border()))
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::same(16))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

@@ -468,6 +468,43 @@ pub(crate) fn radius() -> u8 {
     SHAPE.read().map_or(8, |shape| shape.0)
 }
 
+/// Скругление, рассчитанное на стандартные 8 px, под настройку пользователя.
+///
+/// Все рамки интерфейса берут радиус отсюда: при 0 углы прямые, при 16 —
+/// вдвое круглее стандартных.
+#[must_use]
+pub(crate) fn rounded(base: u8) -> CornerRadius {
+    let scaled = (u32::from(base) * u32::from(radius()) + 4) / 8;
+    CornerRadius::same(u8::try_from(scaled).unwrap_or(u8::MAX))
+}
+
+/// Зазор между модулями окна: при прямых углах модули стоят вплотную.
+#[must_use]
+pub(crate) fn module_gap() -> i8 {
+    if radius() == 0 { 0 } else { 6 }
+}
+
+/// Рамка модуля главного окна (боковая панель, чат, участники…):
+/// своя подложка, скругление из настроек и зазор вокруг.
+pub(crate) fn module(fill: Color32) -> egui::Frame {
+    let gap = module_gap();
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(rounded(12))
+        .outer_margin(Margin {
+            left: 0,
+            right: gap,
+            top: gap,
+            bottom: gap,
+        })
+}
+
+/// Подложка под модулями окна — цвет зазоров между ними.
+pub(crate) fn paint_backdrop(ui: &egui::Ui) {
+    ui.painter()
+        .rect_filled(ui.max_rect(), CornerRadius::ZERO, bg_rail());
+}
+
 /// Включена ли компактная лента.
 #[must_use]
 pub(crate) fn compact() -> bool {
@@ -603,9 +640,8 @@ pub(crate) fn apply(ctx: &egui::Context, appearance: &Appearance) {
     visuals.selection.bg_fill = p.accent.gamma_multiply(if p.dark { 0.85 } else { 0.35 });
     visuals.selection.stroke = Stroke::new(1.0, p.text_bright);
     visuals.window_stroke = Stroke::new(1.0, p.border);
-    let big = appearance.radius.saturating_add(4);
-    visuals.window_corner_radius = CornerRadius::same(big);
-    visuals.menu_corner_radius = CornerRadius::same(appearance.radius.saturating_add(2));
+    visuals.window_corner_radius = rounded(12);
+    visuals.menu_corner_radius = rounded(10);
     visuals.window_shadow = egui::epaint::Shadow {
         offset: [0, 8],
         blur: 24,
@@ -1029,7 +1065,7 @@ fn list_row_with(
         None
     };
     if let Some(bg) = bg {
-        ui.painter().rect_filled(row, CornerRadius::same(8), bg);
+        ui.painter().rect_filled(row, rounded(8), bg);
     }
     if selected {
         let bar = egui::Rect::from_center_size(
@@ -1093,11 +1129,8 @@ pub(crate) fn voice_row(ui: &mut egui::Ui, label: &str, active: bool) -> egui::R
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), Sense::click());
     if response.hovered() {
-        ui.painter().rect_filled(
-            rect.shrink2(egui::vec2(8.0, 1.0)),
-            CornerRadius::same(8),
-            bg_hover(),
-        );
+        ui.painter()
+            .rect_filled(rect.shrink2(egui::vec2(8.0, 1.0)), rounded(8), bg_hover());
     }
     let color = if active { green() } else { channel_text() };
     crate::icons::paint(
@@ -1278,8 +1311,7 @@ pub(crate) fn member_row<'a>(
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), Sense::click());
     if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), bg_hover());
+        ui.painter().rect_filled(rect, rounded(8), bg_hover());
     }
     let face = face.into();
     let name = face.name;

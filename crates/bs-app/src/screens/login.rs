@@ -52,7 +52,7 @@ impl LoginScreen {
                     ui.add_space((ui.available_height() * top).max(24.0));
                     egui::Frame::new()
                         .fill(theme::bg_chat())
-                        .corner_radius(egui::CornerRadius::same(10))
+                        .corner_radius(crate::theme::rounded(10))
                         .inner_margin(egui::Margin::same(28))
                         .show(ui, |ui| {
                             ui.set_width(380.0);

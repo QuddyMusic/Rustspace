@@ -15,7 +15,7 @@ use crate::theme::{
 pub(crate) fn search_box(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::Response {
     egui::Frame::new()
         .fill(bg_input())
-        .corner_radius(CornerRadius::same(8))
+        .corner_radius(crate::theme::rounded(8))
         .inner_margin(Margin::symmetric(10, 7))
         .show(ui, |ui| {
             ui.add(
@@ -74,10 +74,10 @@ pub(crate) fn pill_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     if selected {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(7), bg_active());
+            .rect_filled(rect, crate::theme::rounded(7), bg_active());
     } else if response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(7), bg_hover());
+            .rect_filled(rect, crate::theme::rounded(7), bg_hover());
     }
     let pos = rect.center() - galley.size() / 2.0;
     ui.painter().galley(pos, galley, text_muted());
@@ -98,7 +98,8 @@ pub(crate) fn mint_button(ui: &mut egui::Ui, label: &str, selected: bool) -> egu
     );
     let size = galley.size() + egui::vec2(18.0, 10.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+    ui.painter()
+        .rect_filled(rect, crate::theme::rounded(6), fill);
     let pos = rect.center() - galley.size() / 2.0;
     ui.painter().galley(pos, galley, text());
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -216,10 +217,10 @@ pub(crate) fn dm_entry(ui: &mut egui::Ui, dm: &DmEntry<'_>) -> egui::Response {
     let row = rect.shrink2(egui::vec2(8.0, 1.0));
     if dm.selected {
         ui.painter()
-            .rect_filled(row, CornerRadius::same(8), bg_active());
+            .rect_filled(row, crate::theme::rounded(8), bg_active());
     } else if response.hovered() {
         ui.painter()
-            .rect_filled(row, CornerRadius::same(8), bg_hover());
+            .rect_filled(row, crate::theme::rounded(8), bg_hover());
     }
     let avatar_rect = egui::Rect::from_min_size(
         row.left_top() + egui::vec2(8.0, 7.0),
@@ -310,10 +311,10 @@ pub(crate) fn nav_row(
     let row = rect.shrink2(egui::vec2(8.0, 1.0));
     if selected {
         ui.painter()
-            .rect_filled(row, CornerRadius::same(8), bg_active());
+            .rect_filled(row, crate::theme::rounded(8), bg_active());
     } else if response.hovered() {
         ui.painter()
-            .rect_filled(row, CornerRadius::same(8), bg_hover());
+            .rect_filled(row, crate::theme::rounded(8), bg_hover());
     }
     let color = if selected {
         text_bright()
@@ -351,7 +352,7 @@ pub(crate) fn compact_person<'a>(
     if response.hovered() {
         ui.painter().rect_filled(
             rect.shrink2(egui::vec2(0.0, 1.0)),
-            CornerRadius::same(8),
+            crate::theme::rounded(8),
             bg_hover(),
         );
     }
@@ -471,7 +472,7 @@ pub(crate) fn text_field(
 ) -> egui::Response {
     egui::Frame::new()
         .fill(bg_input())
-        .corner_radius(CornerRadius::same(8))
+        .corner_radius(crate::theme::rounded(8))
         .inner_margin(Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.add(
@@ -494,7 +495,7 @@ pub(crate) fn secret_field(
 ) -> egui::Response {
     egui::Frame::new()
         .fill(bg_input())
-        .corner_radius(CornerRadius::same(8))
+        .corner_radius(crate::theme::rounded(8))
         .inner_margin(Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.add(
@@ -519,7 +520,7 @@ pub(crate) fn text_area(
 ) -> egui::Response {
     let response = egui::Frame::new()
         .fill(bg_input())
-        .corner_radius(CornerRadius::same(8))
+        .corner_radius(crate::theme::rounded(8))
         .inner_margin(Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.add(
@@ -549,10 +550,10 @@ pub(crate) fn radio_card(
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 52.0), Sense::click());
     if selected {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), bg_active());
+            .rect_filled(rect, crate::theme::rounded(8), bg_active());
     } else if response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), bg_hover());
+            .rect_filled(rect, crate::theme::rounded(8), bg_hover());
     }
     let center = egui::pos2(rect.left() + 20.0, rect.center().y);
     ui.painter().circle_stroke(

@@ -6,7 +6,7 @@
 use bs_api::{ChannelUpdate, OverrideScope, PermissionOverride};
 use bs_permissions::{Permissions, parse_permission_string, permissions_to_string};
 use bs_types::OverrideTargetType;
-use egui::{CornerRadius, Margin, RichText};
+use egui::{Margin, RichText};
 
 use super::space_settings::{PERMISSION_GROUPS, Rights, rights_for};
 use crate::bridge::{BridgeRequest, SpaceEvent, SpaceOp};
@@ -210,7 +210,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut ChannelSettings, bridge: &mu
             egui::Frame::new()
                 .fill(theme::bg_bubble())
                 .stroke(egui::Stroke::new(1.0, theme::border()))
-                .corner_radius(CornerRadius::same(16))
+                .corner_radius(crate::theme::rounded(16))
                 .inner_margin(Margin::same(0)),
         )
         .show(ctx, |ui| {
@@ -505,7 +505,7 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Brid
         !state.busy,
         egui::Button::new(RichText::new(label).color(theme::bg_rail()))
             .fill(theme::rose())
-            .corner_radius(CornerRadius::same(8)),
+            .corner_radius(crate::theme::rounded(8)),
     );
     if button.clicked() {
         if state.delete_armed {
@@ -668,7 +668,7 @@ fn entry_row(
     let open = state.selected.as_ref() == Some(&(entry.kind, entry.id.clone()));
     egui::Frame::new()
         .fill(theme::bg_rail())
-        .corner_radius(CornerRadius::same(10))
+        .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

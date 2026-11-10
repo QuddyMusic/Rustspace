@@ -633,16 +633,12 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
         .exact_size(74.0)
         .resizable(false)
         .show_separator_line(false)
-        .frame(
-            egui::Frame::new()
-                .fill(theme::bg_sidebar())
-                .inner_margin(Margin::symmetric(10, 4)),
-        )
+        .frame(egui::Frame::new().inner_margin(Margin::symmetric(10, 4)))
         .show(ctx_ui, |ui| {
             egui::Frame::new()
                 .fill(theme::bg_rail())
                 .stroke(egui::Stroke::new(1.0, theme::border()))
-                .corner_radius(egui::CornerRadius::same(12))
+                .corner_radius(crate::theme::rounded(12))
                 .inner_margin(Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());

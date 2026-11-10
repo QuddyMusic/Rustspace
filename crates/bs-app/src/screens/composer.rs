@@ -245,7 +245,7 @@ fn paint_gif_fallback(ui: &egui::Ui, rect: Rect, item: &GifItem) -> (bool, Optio
         ui.painter(),
         rect,
         &item.url,
-        CornerRadius::same(8),
+        crate::theme::rounded(8),
         true,
         Color32::WHITE,
     );
@@ -551,7 +551,7 @@ impl Composer {
                     theme::border()
                 },
             ))
-            .corner_radius(CornerRadius::same(16))
+            .corner_radius(crate::theme::rounded(16))
             .inner_margin(Margin::symmetric(14, 10))
             .show(ui, |ui| {
                 if !editing {
@@ -619,7 +619,8 @@ impl Composer {
                             } else {
                                 theme::accent()
                             };
-                            ui.painter().rect_filled(rect, CornerRadius::same(10), fill);
+                            ui.painter()
+                                .rect_filled(rect, crate::theme::rounded(10), fill);
                             crate::icons::paint(
                                 ui.painter(),
                                 rect.center(),
@@ -701,7 +702,7 @@ impl Composer {
             for item in &self.staged {
                 egui::Frame::new()
                     .fill(theme::bg_hover())
-                    .corner_radius(CornerRadius::same(10))
+                    .corner_radius(crate::theme::rounded(10))
                     .inner_margin(Margin::symmetric(10, 7))
                     .show(ui, |ui| {
                         ui.set_width(190.0);
@@ -793,7 +794,7 @@ impl Composer {
                 egui::Frame::new()
                     .fill(theme::bg_sidebar())
                     .stroke(egui::Stroke::new(1.0, theme::border()))
-                    .corner_radius(CornerRadius::same(12))
+                    .corner_radius(crate::theme::rounded(12))
                     .inner_margin(Margin::same(6))
                     .show(ui, |ui| {
                         ui.set_width(220.0);
@@ -854,7 +855,7 @@ impl Composer {
                 egui::Frame::new()
                     .fill(theme::bg_sidebar())
                     .stroke(egui::Stroke::new(1.0, theme::border()))
-                    .corner_radius(CornerRadius::same(14))
+                    .corner_radius(crate::theme::rounded(14))
                     .inner_margin(Margin::same(10))
                     .show(ui, |ui| {
                         ui.set_min_size(PICKER_SIZE);
@@ -1041,7 +1042,7 @@ impl Composer {
                         ui.painter(),
                         rect,
                         &item.preview_url,
-                        CornerRadius::same(8),
+                        crate::theme::rounded(8),
                         true,
                         Color32::WHITE,
                     );
@@ -1051,12 +1052,12 @@ impl Composer {
                     }
                     if !painted {
                         ui.painter()
-                            .rect_filled(rect, CornerRadius::same(8), theme::bg_hover());
+                            .rect_filled(rect, crate::theme::rounded(8), theme::bg_hover());
                     }
                     if response.hovered() {
                         ui.painter().rect_stroke(
                             rect,
-                            CornerRadius::same(8),
+                            crate::theme::rounded(8),
                             egui::Stroke::new(2.0, theme::mint()),
                             egui::StrokeKind::Inside,
                         );
@@ -1186,7 +1187,7 @@ impl Composer {
                                     if response.hovered() {
                                         ui.painter().rect_filled(
                                             rect,
-                                            CornerRadius::same(10),
+                                            crate::theme::rounded(10),
                                             theme::bg_active(),
                                         );
                                     }
@@ -1238,10 +1239,10 @@ pub(crate) fn emoji_picker(ui: &mut egui::Ui, category: &mut usize) -> Option<&'
             let (rect, response) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
             if selected {
                 ui.painter()
-                    .rect_filled(rect, CornerRadius::same(8), theme::bg_active());
+                    .rect_filled(rect, crate::theme::rounded(8), theme::bg_active());
             } else if response.hovered() {
                 ui.painter()
-                    .rect_filled(rect, CornerRadius::same(8), theme::bg_hover());
+                    .rect_filled(rect, crate::theme::rounded(8), theme::bg_hover());
             }
             paint_emoji(ui, rect.shrink(6.0), tab_glyph, CATEGORIES.get(index));
             if response.on_hover_text(*name).clicked() {
@@ -1270,7 +1271,7 @@ pub(crate) fn emoji_picker(ui: &mut egui::Ui, category: &mut usize) -> Option<&'
                         if response.hovered() {
                             ui.painter().rect_filled(
                                 rect,
-                                CornerRadius::same(8),
+                                crate::theme::rounded(8),
                                 theme::bg_active(),
                             );
                         }
@@ -1350,7 +1351,7 @@ fn gif_button() -> impl egui::Widget {
         };
         ui.painter().rect_stroke(
             rect,
-            CornerRadius::same(6),
+            crate::theme::rounded(6),
             egui::Stroke::new(1.5, color),
             egui::StrokeKind::Inside,
         );
@@ -1370,7 +1371,7 @@ fn menu_row(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::click());
     if response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), theme::bg_active());
+            .rect_filled(rect, crate::theme::rounded(8), theme::bg_active());
     }
     crate::icons::paint(
         ui.painter(),

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use bs_core::Cache;
 use bs_types::{ChannelId, UserStatus};
-use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
+use egui::{Align, Layout, Margin, RichText, Sense};
 
 use crate::bridge::{BridgeRequest, ChannelKind, HistoryState};
 use crate::fleet::Bridge;
@@ -448,11 +448,14 @@ impl ChatScreen {
         match self.view {
             View::Friends => {
                 home::show_active_now(ui, bridge);
-                home::show_friends(ui, &mut self.home, bridge);
+                main_module(ui, |ui| home::show_friends(ui, &mut self.home, bridge));
             }
             View::Explore => {
                 let mut create = false;
-                if let Some(target) = home::show_explore(ui, &mut self.home, bridge, &mut create) {
+                let target = main_module(ui, |ui| {
+                    home::show_explore(ui, &mut self.home, bridge, &mut create)
+                });
+                if let Some(target) = target {
                     *nav = Some(Nav::Space(target));
                 }
                 if create {
@@ -468,9 +471,11 @@ impl ChatScreen {
                         self.profile = Some(super::profile::ProfileState::open(bridge, &id, &name));
                     }
                 }
-                self.show_header(ui, bridge);
-                self.show_composer(ui, bridge);
-                self.show_messages(ui, bridge);
+                main_module(ui, |ui| {
+                    self.show_header(ui, bridge);
+                    self.show_composer(ui, bridge);
+                    self.show_messages(ui, bridge);
+                });
                 match self.pending_join.take() {
                     Some(super::invite_card::InviteJoin::Slot(origin, code)) => {
                         let previous = bridge.focus_index();
@@ -595,6 +600,7 @@ impl ChatScreen {
                     .unwrap_or_default()
             })
             .collect();
+        theme::paint_backdrop(ui);
         self.show_rail(ui, &items, &dms, &hosts, &mut nav);
         self.show_left_column(ui, bridge, &items, &dms, &mut nav);
         crate::stage::show(ui, &mut self.voice, bridge);
@@ -770,6 +776,15 @@ fn route_connection(bridge: &mut Bridge, action: super::connections::ConnAction)
             bridge.delete_identity(&targets, mode);
         }
     }
+}
+
+/// Главный модуль окна (лента, друзья, обзор) — скруглённая карточка
+/// на подложке; вложенные панели рисуются уже без своей заливки.
+fn main_module<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::CentralPanel::default()
+        .frame(theme::module(theme::bg_chat()))
+        .show(ui, add)
+        .inner
 }
 
 #[cfg(test)]

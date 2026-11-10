@@ -1,10 +1,10 @@
 //! Колонки и панели: пространства, каналы, пользователь, участники, шапка.
 
 use super::{
-    Align, Bridge, ChannelKind, ChatScreen, CornerRadius, Icon, Layout, Margin, MemberRow,
-    MemberSection, Nav, RichText, SelectedChannel, Sense, SidebarChannel, SidebarDm, SidebarSpace,
-    UserStatus, author_name, connection_label, dm_display_name, face, face_of, group_member_rows,
-    member_rows, now_ms, theme, tr, widgets,
+    Align, Bridge, ChannelKind, ChatScreen, Icon, Layout, Margin, MemberRow, MemberSection, Nav,
+    RichText, SelectedChannel, Sense, SidebarChannel, SidebarDm, SidebarSpace, UserStatus,
+    author_name, connection_label, dm_display_name, face, face_of, group_member_rows, member_rows,
+    now_ms, theme, tr, widgets,
 };
 
 /// Что показано в центральной области.
@@ -200,7 +200,7 @@ impl ChatScreen {
                 egui::Frame::new()
                     .fill(theme::bg_bubble())
                     .stroke(egui::Stroke::new(1.0, theme::border()))
-                    .corner_radius(CornerRadius::same(10))
+                    .corner_radius(crate::theme::rounded(10))
                     .inner_margin(Margin::symmetric(16, 10))
                     .show(ui, |ui| {
                         ui.label(RichText::new(text).color(theme::text_bright()));
@@ -314,17 +314,13 @@ impl ChatScreen {
             .default_size(250.0)
             .size_range(200.0..=360.0)
             .show_separator_line(false)
-            .frame(egui::Frame::new().fill(theme::bg_sidebar()))
+            .frame(theme::module(theme::bg_sidebar()))
             .show(ui, |ui| {
                 egui::Panel::top("sidebar_search")
                     .exact_size(52.0)
                     .resizable(false)
                     .show_separator_line(false)
-                    .frame(
-                        egui::Frame::new()
-                            .fill(theme::bg_sidebar())
-                            .inner_margin(Margin::symmetric(10, 10)),
-                    )
+                    .frame(egui::Frame::new().inner_margin(Margin::symmetric(10, 10)))
                     .show(ui, |ui| {
                         let hint = if self.active_space.is_some() {
                             tr("Найти канал")
@@ -643,16 +639,12 @@ impl ChatScreen {
             .exact_size(66.0)
             .resizable(false)
             .show_separator_line(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::bg_sidebar())
-                    .inner_margin(Margin::symmetric(10, 8)),
-            )
+            .frame(egui::Frame::new().inner_margin(Margin::symmetric(10, 8)))
             .show(ui, |ui| {
                 egui::Frame::new()
                     .fill(theme::bg_rail())
                     .stroke(egui::Stroke::new(1.0, theme::border()))
-                    .corner_radius(CornerRadius::same(12))
+                    .corner_radius(crate::theme::rounded(12))
                     .inner_margin(Margin::symmetric(10, 0))
                     .show(ui, |ui| {
                         ui.set_height(48.0);
@@ -749,13 +741,10 @@ impl ChatScreen {
     ) -> Option<(String, String)> {
         let mut clicked = None;
         egui::Panel::right("members")
+            .show_separator_line(false)
             .exact_size(236.0)
             .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::bg_sidebar())
-                    .inner_margin(Margin::symmetric(10, 16)),
-            )
+            .frame(theme::module(theme::bg_sidebar()).inner_margin(Margin::symmetric(10, 16)))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("members_scroll")
@@ -892,11 +881,7 @@ impl ChatScreen {
         egui::Panel::top("chat_header")
             .exact_size(52.0)
             .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::bg_chat())
-                    .inner_margin(Margin::symmetric(20, 0)),
-            )
+            .frame(egui::Frame::new().inner_margin(Margin::symmetric(20, 0)))
             .show(ui, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.label(RichText::new(prefix).size(20.0).color(theme::text_faint()));
