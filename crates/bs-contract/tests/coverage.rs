@@ -4,12 +4,7 @@
 //! ошибке: каждый неудачный вызов записывается, и в конце печатается полный
 //! список. Так один прогон показывает все расхождения сразу.
 
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::too_many_lines
-)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::fmt::Debug;
 
@@ -81,18 +76,25 @@ async fn register(base: &str, prefix: &str) -> Account {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn rest_surface_matches_real_server() {
-    let Some(base) = server_url() else {
-        eprintln!("BS_CONTRACT_URL не задан — контрактный тест пропущен");
-        return;
-    };
-    let mut log = Log::default();
-    let owner = register(&base, "own").await;
-    let guest = register(&base, "gst").await;
-    let third = register(&base, "thr").await;
-    let me = owner.api.me().await.unwrap();
+/// Участники сценария.
+struct Cast {
+    owner: Account,
+    guest: Account,
+    third: Account,
+}
 
+/// Пространство, созданное для проверки.
+struct SpaceCtx {
+    id: String,
+    text: String,
+}
+
+async fn friends(log: &mut Log, cast: &Cast) {
+    let Cast {
+        owner,
+        guest,
+        third,
+    } = cast;
     // Друзья: нужны для групповых бесед.
     for other in [&guest, &third] {
         if let Some(id) = log.check(
@@ -123,7 +125,10 @@ async fn rest_surface_matches_real_server() {
         "discover_users",
         owner.api.discover_users("", Some(10), None).await,
     );
+}
 
+async fn create_space(log: &mut Log, cast: &Cast) -> SpaceCtx {
+    let Cast { owner, guest, .. } = cast;
     // ─── Пространство, каналы, категории, права ────────────────────────────
     let space = owner
         .api
@@ -175,6 +180,12 @@ async fn rest_surface_matches_real_server() {
             owner.api.list_overrides(&scope).await,
         );
     }
+    SpaceCtx { id: space.id, text }
+}
+
+async fn permissions(log: &mut Log, cast: &Cast, space: &SpaceCtx) {
+    let Cast { owner, guest, .. } = cast;
+    let text = &space.text;
     let scope = OverrideScope::Channel(text.clone());
     log.check(
         "put_override",
@@ -228,6 +239,11 @@ async fn rest_surface_matches_real_server() {
                 .await,
         );
     }
+}
+
+async fn channel_settings(log: &mut Log, cast: &Cast, space: &SpaceCtx) {
+    let Cast { owner, guest, .. } = cast;
+    let text = &space.text;
     log.check(
         "create_channel(voice)",
         owner
@@ -248,7 +264,7 @@ async fn rest_surface_matches_real_server() {
         guest
             .api
             .update_channel_notifications(
-                &text,
+                text,
                 // Подавление @everyone/@роли — настройка только пространства:
                 // для канала сервер его отклоняет.
                 &UpdateNotificationSettingRequest {
@@ -258,7 +274,11 @@ async fn rest_surface_matches_real_server() {
             )
             .await,
     );
+}
 
+async fn messages(log: &mut Log, cast: &Cast, space: &SpaceCtx) {
+    let Cast { owner, .. } = cast;
+    let text = &space.text;
     // ─── Сообщения ─────────────────────────────────────────────────────────
     let attachment = log.check(
         "upload_file",
@@ -272,7 +292,7 @@ async fn rest_surface_matches_real_server() {
         owner
             .api
             .send_channel_message(
-                &text,
+                text,
                 &SendMessageBody {
                     content: "с вложением".into(),
                     attachments: attachment.iter().map(|a| a.id.clone()).collect(),
@@ -286,7 +306,7 @@ async fn rest_surface_matches_real_server() {
             "messages_around",
             owner
                 .api
-                .messages_around(&text, &message.message.id, Some(20))
+                .messages_around(text, &message.message.id, Some(20))
                 .await,
         );
     }
@@ -295,7 +315,7 @@ async fn rest_surface_matches_real_server() {
         owner
             .api
             .search_channel_messages(
-                &text,
+                text,
                 &MessageSearchQuery {
                     has: Some("image".into()),
                     ..MessageSearchQuery::default()
@@ -303,7 +323,14 @@ async fn rest_surface_matches_real_server() {
             )
             .await,
     );
+}
 
+async fn direct_messages(log: &mut Log, cast: &Cast) {
+    let Cast {
+        owner,
+        guest,
+        third,
+    } = cast;
     // ─── ЛС и группы ───────────────────────────────────────────────────────
     if let Some(dm) = log.check(
         "open_dm",
@@ -371,7 +398,14 @@ async fn rest_surface_matches_real_server() {
             owner.api.transfer_group_owner(&group.id, &guest.id).await,
         );
     }
+}
 
+async fn profile(log: &mut Log, cast: &Cast) {
+    let Cast {
+        owner,
+        guest,
+        third,
+    } = cast;
     // ─── Стикеры, профиль, пароль ──────────────────────────────────────────
     if let Some(sticker) = log.check("upload_sticker", owner.api.upload_sticker("pix", PNG).await) {
         log.check(
@@ -398,7 +432,10 @@ async fn rest_surface_matches_real_server() {
         "notification_settings",
         guest.api.notification_settings().await,
     );
+}
 
+async fn ownership(log: &mut Log, cast: &Cast, space: &SpaceCtx) {
+    let Cast { owner, guest, .. } = cast;
     // ─── Владение и заявки ─────────────────────────────────────────────────
     log.check(
         "transfer_ownership",
@@ -408,92 +445,122 @@ async fn rest_surface_matches_real_server() {
         "pending_join_requests",
         guest.api.pending_join_requests(&space.id).await,
     );
+}
 
-    // ─── Администрирование ─────────────────────────────────────────────────
-    if me.is_admin {
-        log.check("instance_settings", owner.api.instance_settings().await);
+async fn admin(log: &mut Log, cast: &Cast) {
+    let Cast { owner, third, .. } = cast;
+    log.check("instance_settings", owner.api.instance_settings().await);
+    log.check(
+        "update_instance_settings",
+        owner
+            .api
+            .update_instance_settings(&InstanceSettingsPatch {
+                instance_name: Some("Контракт".into()),
+                ..InstanceSettingsPatch::default()
+            })
+            .await,
+    );
+    log.check("admin_users", owner.api.admin_users("", 1, false).await);
+    log.check(
+        "admin_set_role",
+        owner.api.admin_set_role(&third.id, false).await,
+    );
+    log.check(
+        "admin_reset_password",
+        owner.api.admin_reset_password(&third.id).await,
+    );
+    log.check("storage_stats", owner.api.storage_stats().await);
+    log.check("storage_cleanup", owner.api.storage_cleanup(true).await);
+    log.check("streaming_limits", owner.api.streaming_limits().await);
+    log.check(
+        "update_streaming",
+        owner
+            .api
+            .update_streaming(&StreamingPatch {
+                max_bitrate_kbps: Some(6000),
+                ..StreamingPatch::default()
+            })
+            .await,
+    );
+    log.check("telemetry", owner.api.telemetry().await);
+    log.check("telemetry_preview", owner.api.telemetry_preview().await);
+    log.check("update_status", owner.api.update_status(false).await);
+    log.check("peers", owner.api.peers().await);
+    log.check("approval_requests", owner.api.approval_requests().await);
+    log.check(
+        "admin_delete_user",
+        owner.api.admin_delete_user(&third.id).await,
+    );
+}
+
+async fn admin_invites(log: &mut Log, cast: &Cast) {
+    let Cast { owner, .. } = cast;
+    if let Some(invite) = log.check(
+        "create_invite",
+        owner
+            .api
+            .create_invite(&NewInvite {
+                name: "покрытие".into(),
+                max_uses: Some(5),
+                expires_at: None,
+            })
+            .await,
+    ) {
         log.check(
-            "update_instance_settings",
+            "update_invite",
             owner
                 .api
-                .update_instance_settings(&InstanceSettingsPatch {
-                    instance_name: Some("Контракт".into()),
-                    ..InstanceSettingsPatch::default()
-                })
+                .update_invite(
+                    &invite.id,
+                    &InvitePatch {
+                        name: Some("покрытие 2".into()),
+                        ..InvitePatch::default()
+                    },
+                )
                 .await,
         );
-        log.check("admin_users", owner.api.admin_users("", 1, false).await);
         log.check(
-            "admin_set_role",
-            owner.api.admin_set_role(&third.id, false).await,
+            "invite_redemptions",
+            owner.api.invite_redemptions(&invite.id).await,
         );
+        log.check("revoke_invite", owner.api.revoke_invite(&invite.id).await);
         log.check(
-            "admin_reset_password",
-            owner.api.admin_reset_password(&third.id).await,
-        );
-        log.check("storage_stats", owner.api.storage_stats().await);
-        log.check("storage_cleanup", owner.api.storage_cleanup(true).await);
-        log.check("streaming_limits", owner.api.streaming_limits().await);
-        log.check(
-            "update_streaming",
+            "reinstate_invite",
             owner
                 .api
-                .update_streaming(&StreamingPatch {
-                    max_bitrate_kbps: Some(6000),
-                    ..StreamingPatch::default()
-                })
+                .reinstate_invite(&invite.id, &InvitePatch::default())
                 .await,
         );
-        log.check("telemetry", owner.api.telemetry().await);
-        log.check("telemetry_preview", owner.api.telemetry_preview().await);
-        log.check("update_status", owner.api.update_status(false).await);
-        log.check("peers", owner.api.peers().await);
-        log.check("approval_requests", owner.api.approval_requests().await);
-        if let Some(invite) = log.check(
-            "create_invite",
-            owner
-                .api
-                .create_invite(&NewInvite {
-                    name: "покрытие".into(),
-                    max_uses: Some(5),
-                    expires_at: None,
-                })
-                .await,
-        ) {
-            log.check(
-                "update_invite",
-                owner
-                    .api
-                    .update_invite(
-                        &invite.id,
-                        &InvitePatch {
-                            name: Some("покрытие 2".into()),
-                            ..InvitePatch::default()
-                        },
-                    )
-                    .await,
-            );
-            log.check(
-                "invite_redemptions",
-                owner.api.invite_redemptions(&invite.id).await,
-            );
-            log.check("revoke_invite", owner.api.revoke_invite(&invite.id).await);
-            log.check(
-                "reinstate_invite",
-                owner
-                    .api
-                    .reinstate_invite(&invite.id, &InvitePatch::default())
-                    .await,
-            );
-            log.check("invites(archived)", owner.api.invites(true).await);
-            log.check("delete_invite", owner.api.delete_invite(&invite.id).await);
-        }
-        log.check(
-            "admin_delete_user",
-            owner.api.admin_delete_user(&third.id).await,
-        );
+        log.check("invites(archived)", owner.api.invites(true).await);
+        log.check("delete_invite", owner.api.delete_invite(&invite.id).await);
     }
+}
 
+#[tokio::test(flavor = "multi_thread")]
+async fn rest_surface_matches_real_server() {
+    let Some(base) = server_url() else {
+        eprintln!("BS_CONTRACT_URL не задан — контрактный тест пропущен");
+        return;
+    };
+    let mut log = Log::default();
+    let cast = Cast {
+        owner: register(&base, "own").await,
+        guest: register(&base, "gst").await,
+        third: register(&base, "thr").await,
+    };
+    let me = cast.owner.api.me().await.unwrap();
+    friends(&mut log, &cast).await;
+    let space = create_space(&mut log, &cast).await;
+    permissions(&mut log, &cast, &space).await;
+    channel_settings(&mut log, &cast, &space).await;
+    messages(&mut log, &cast, &space).await;
+    direct_messages(&mut log, &cast).await;
+    profile(&mut log, &cast).await;
+    ownership(&mut log, &cast, &space).await;
+    if me.is_admin {
+        admin(&mut log, &cast).await;
+        admin_invites(&mut log, &cast).await;
+    }
     eprintln!(
         "REST: {} вызовов прошло, {} с ошибкой",
         log.passed,

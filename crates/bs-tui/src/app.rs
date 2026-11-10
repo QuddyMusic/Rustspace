@@ -303,110 +303,17 @@ impl App {
     }
 
     /// Применяет одно событие фоновой сессии.
-    #[allow(clippy::too_many_lines)]
     pub fn apply_net_event(&mut self, event: NetEvent) {
         match event {
-            NetEvent::Ready { origin, event } => {
-                if let ServerEvent::Ready(payload) = *event {
-                    self.me_id.clone_from(&payload.user.id);
-                    self.me_name = payload
-                        .user
-                        .display_name
-                        .clone()
-                        .unwrap_or_else(|| payload.user.username.clone());
-                    self.multi.insert_ready(origin.clone(), *payload);
-                }
-                self.states.insert(origin.clone(), Status::Connected);
-                self.active = origin.clone();
-                self.screen = Screen::Chat;
-                self.chat.follow(&origin);
-                self.chat.clamp_multi(&self.multi);
-                if let Some(cache) = self.multi.cache(&self.active) {
-                    self.social.clamp(cache);
-                }
-                self.refresh_social();
-            }
+            NetEvent::Ready { origin, event } => self.on_ready(origin, *event),
             NetEvent::Server { origin, event } => {
                 if let ServerEvent::Ready(payload) = *event {
                     // Повторный `ready` (переподключение): пересобираем кэш.
-                    self.me_id.clone_from(&payload.user.id);
-                    self.me_name = payload
-                        .user
-                        .display_name
-                        .clone()
-                        .unwrap_or_else(|| payload.user.username.clone());
+                    self.remember_me(&payload);
                     self.multi.insert_ready(origin.clone(), *payload);
-                    self.states.insert(origin.clone(), Status::Connected);
+                    self.states.insert(origin, Status::Connected);
                 } else {
-                    match *event {
-                        ServerEvent::DmCallIncoming {
-                            dm_channel_id,
-                            federated_call_id,
-                            caller_id,
-                            caller_name,
-                            livekit_url,
-                            livekit_token,
-                            ..
-                        } => {
-                            self.on_call_incoming(
-                                origin.as_web_str(),
-                                dm_channel_id,
-                                federated_call_id,
-                                caller_id,
-                                caller_name,
-                                livekit_url,
-                                livekit_token,
-                            );
-                        }
-                        ServerEvent::DmCallAccepted {
-                            dm_channel_id,
-                            federated_call_id,
-                            ..
-                        } => {
-                            let identity = CallIdentity {
-                                dm_channel_id,
-                                federated_call_id,
-                                origin: Some(origin.as_web_str()),
-                            };
-                            self.coord.server_accepted(&identity);
-                        }
-                        ServerEvent::DmCallRejected {
-                            dm_channel_id,
-                            federated_call_id,
-                        }
-                        | ServerEvent::DmCallEnded {
-                            dm_channel_id,
-                            federated_call_id,
-                        } => {
-                            let identity = CallIdentity {
-                                dm_channel_id,
-                                federated_call_id,
-                                origin: Some(origin.as_web_str()),
-                            };
-                            self.call_ended(&identity);
-                        }
-                        ServerEvent::DmCallUndeliverable {
-                            dm_channel_id,
-                            federated_call_id,
-                            ..
-                        } => {
-                            let identity = CallIdentity {
-                                dm_channel_id,
-                                federated_call_id: Some(federated_call_id),
-                                origin: Some(origin.as_web_str()),
-                            };
-                            self.call_ended(&identity);
-                        }
-                        other => {
-                            if self.multi.apply(&origin, other).is_accepted()
-                                && origin == self.active
-                                && let Some(cache) = self.multi.cache(&self.active)
-                            {
-                                self.chat.clamp_multi(&self.multi);
-                                self.social.clamp(cache);
-                            }
-                        }
-                    }
+                    self.on_server_event(&origin, *event);
                 }
             }
             NetEvent::State { origin, state } => {
@@ -419,21 +326,111 @@ impl App {
                 };
                 self.states.insert(origin, status);
             }
-            NetEvent::Disconnected { origin } => {
-                self.multi.remove(&origin);
-                self.states.remove(&origin);
-                if origin == self.active {
-                    if let Some(next) = self.multi.origins().first().cloned() {
-                        self.active = next;
-                        self.after_switch();
-                    } else {
-                        self.active = Origin::Home;
-                        self.screen = Screen::Login;
-                    }
-                }
-            }
+            NetEvent::Disconnected { origin } => self.on_disconnected(&origin),
             NetEvent::Failed { origin, message } => {
                 self.states.insert(origin, Status::Failed(message));
+            }
+        }
+    }
+
+    /// Запоминает себя из `ready`.
+    fn remember_me(&mut self, payload: &bs_types::ReadyPayload) {
+        self.me_id.clone_from(&payload.user.id);
+        self.me_name = payload
+            .user
+            .display_name
+            .clone()
+            .unwrap_or_else(|| payload.user.username.clone());
+    }
+
+    /// Первый `ready` инстанса: он становится активным.
+    fn on_ready(&mut self, origin: Origin, event: ServerEvent) {
+        if let ServerEvent::Ready(payload) = event {
+            self.remember_me(&payload);
+            self.multi.insert_ready(origin.clone(), *payload);
+        }
+        self.states.insert(origin.clone(), Status::Connected);
+        self.chat.follow(&origin);
+        self.active = origin;
+        self.screen = Screen::Chat;
+        self.chat.clamp_multi(&self.multi);
+        if let Some(cache) = self.multi.cache(&self.active) {
+            self.social.clamp(cache);
+        }
+        self.refresh_social();
+    }
+
+    /// Событие сервера: звонки разбирает координатор, остальное — кэш.
+    fn on_server_event(&mut self, origin: &Origin, event: ServerEvent) {
+        let identity = |dm_channel_id, federated_call_id| CallIdentity {
+            dm_channel_id,
+            federated_call_id,
+            origin: Some(origin.as_web_str()),
+        };
+        match event {
+            ServerEvent::DmCallIncoming {
+                dm_channel_id,
+                federated_call_id,
+                caller_id,
+                caller_name,
+                livekit_url,
+                livekit_token,
+                ..
+            } => {
+                self.on_call_incoming(
+                    origin.as_web_str(),
+                    dm_channel_id,
+                    federated_call_id,
+                    caller_id,
+                    caller_name,
+                    livekit_url,
+                    livekit_token,
+                );
+            }
+            ServerEvent::DmCallAccepted {
+                dm_channel_id,
+                federated_call_id,
+                ..
+            } => {
+                self.coord
+                    .server_accepted(&identity(dm_channel_id, federated_call_id));
+            }
+            ServerEvent::DmCallRejected {
+                dm_channel_id,
+                federated_call_id,
+            }
+            | ServerEvent::DmCallEnded {
+                dm_channel_id,
+                federated_call_id,
+            } => self.call_ended(&identity(dm_channel_id, federated_call_id)),
+            ServerEvent::DmCallUndeliverable {
+                dm_channel_id,
+                federated_call_id,
+                ..
+            } => self.call_ended(&identity(dm_channel_id, Some(federated_call_id))),
+            other => {
+                if self.multi.apply(origin, other).is_accepted()
+                    && *origin == self.active
+                    && let Some(cache) = self.multi.cache(&self.active)
+                {
+                    self.chat.clamp_multi(&self.multi);
+                    self.social.clamp(cache);
+                }
+            }
+        }
+    }
+
+    /// Инстанс отключился: переходим на следующий или к входу.
+    fn on_disconnected(&mut self, origin: &Origin) {
+        self.multi.remove(origin);
+        self.states.remove(origin);
+        if *origin == self.active {
+            if let Some(next) = self.multi.origins().first().cloned() {
+                self.active = next;
+                self.after_switch();
+            } else {
+                self.active = Origin::Home;
+                self.screen = Screen::Login;
             }
         }
     }

@@ -6,12 +6,7 @@
 //! профиль, приглашения. Каждое событие WebSocket и выбранные REST-ответы
 //! разбираются строго; итоговый отчёт пишется в `target/contract-report.txt`.
 
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::too_many_lines
-)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -73,14 +68,23 @@ async fn raw_get(base: &str, token: &str, path: &str) -> Value {
         .unwrap_or_else(|err| panic!("GET {path} json: {err}"))
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn full_client_scenario_against_real_server() {
-    let Some(base) = server_url() else {
-        eprintln!("BS_CONTRACT_URL не задан — контрактный тест пропущен");
-        return;
-    };
-    let mut findings = Findings::default();
+/// Всё, что сценарий передаёт между шагами.
+struct World {
+    base: String,
+    alice: Account,
+    bob: Account,
+    carol: Account,
+    me: bs_types::User,
+    alice_ws: StrictSocket,
+    bob_ws: StrictSocket,
+    carol_ws: StrictSocket,
+    findings: Findings,
+    space_id: String,
+    text_channel: String,
+    code: String,
+}
 
+async fn setup(base: String) -> World {
     // ─── Инстанс и регистрация ─────────────────────────────────────────────
     let info = ApiClient::home(&base)
         .unwrap()
@@ -101,14 +105,38 @@ async fn full_client_scenario_against_real_server() {
     let me = alice.api.me().await.unwrap();
     assert_eq!(me.username, alice.username);
 
-    let (mut alice_ws, ready) = StrictSocket::connect(&base, &alice.token).await.unwrap();
+    let (alice_ws, ready) = StrictSocket::connect(&base, &alice.token).await.unwrap();
     let ServerEvent::Ready(ready) = ready else {
         unreachable!()
     };
     assert_eq!(ready.user.id, alice.id);
-    let (mut bob_ws, _) = StrictSocket::connect(&base, &bob.token).await.unwrap();
-    let (mut carol_ws, _) = StrictSocket::connect(&base, &carol.token).await.unwrap();
+    let (bob_ws, _) = StrictSocket::connect(&base, &bob.token).await.unwrap();
+    let (carol_ws, _) = StrictSocket::connect(&base, &carol.token).await.unwrap();
 
+    World {
+        base,
+        alice,
+        bob,
+        carol,
+        me,
+        alice_ws,
+        bob_ws,
+        carol_ws,
+        findings: Findings::default(),
+        space_id: String::new(),
+        text_channel: String::new(),
+        code: String::new(),
+    }
+}
+
+async fn create_space(w: &mut World) {
+    let World {
+        alice,
+        bob,
+        carol,
+        alice_ws,
+        ..
+    } = w;
     // ─── Пространство, каналы, приглашение ─────────────────────────────────
     let space = alice
         .api
@@ -177,6 +205,14 @@ async fn full_client_scenario_against_real_server() {
     let full = bob.api.space(&space_id).await.unwrap();
     assert!(full.members.iter().any(|m| m.user.id == bob.id));
 
+    w.space_id = space_id;
+    w.text_channel = text_channel;
+    w.code = code;
+}
+
+async fn roles(w: &mut World) {
+    let space_id = w.space_id.clone();
+    let World { alice, bob, .. } = w;
     // ─── Роли ──────────────────────────────────────────────────────────────
     let role = alice
         .api
@@ -201,7 +237,18 @@ async fn full_client_scenario_against_real_server() {
         .await
         .unwrap();
     alice.api.delete_role(&space_id, &role.id).await.unwrap();
+}
 
+async fn send_messages(w: &mut World) -> (String, String) {
+    let text_channel = w.text_channel.clone();
+    let World {
+        alice,
+        bob,
+        carol,
+        alice_ws,
+        bob_ws,
+        ..
+    } = w;
     // ─── Сообщения через WebSocket ─────────────────────────────────────────
     alice_ws
         .send(&ClientEvent::MessageCreate {
@@ -273,9 +320,20 @@ async fn full_client_scenario_against_real_server() {
         .await
         .unwrap();
 
+    (first.message.id, rest_message.message.id)
+}
+
+async fn react_and_delete(w: &mut World, first_id: &str, rest_id: &str) {
+    let text_channel = w.text_channel.clone();
+    let World {
+        alice_ws,
+        bob_ws,
+        carol_ws,
+        ..
+    } = w;
     bob_ws
         .send(&ClientEvent::ReactionAdd {
-            message_id: first.message.id.clone(),
+            message_id: first_id.to_owned(),
             emoji: "👍".into(),
         })
         .await
@@ -288,7 +346,7 @@ async fn full_client_scenario_against_real_server() {
         .unwrap();
     bob_ws
         .send(&ClientEvent::ReactionRemove {
-            message_id: first.message.id.clone(),
+            message_id: first_id.to_owned(),
             emoji: "👍".into(),
         })
         .await
@@ -303,13 +361,13 @@ async fn full_client_scenario_against_real_server() {
     alice_ws
         .send(&ClientEvent::ChannelAck {
             channel_id: text_channel.clone(),
-            message_id: rest_message.message.id.clone(),
+            message_id: rest_id.to_owned(),
         })
         .await
         .unwrap();
     carol_ws
         .send(&ClientEvent::MessageDelete {
-            message_id: rest_message.message.id.clone(),
+            message_id: rest_id.to_owned(),
         })
         .await
         .unwrap();
@@ -319,7 +377,16 @@ async fn full_client_scenario_against_real_server() {
         })
         .await
         .unwrap();
+}
 
+async fn history(w: &mut World) {
+    let text_channel = w.text_channel.clone();
+    let World {
+        base,
+        alice,
+        findings,
+        ..
+    } = w;
     let page = alice
         .api
         .messages(&text_channel, None, Some(50))
@@ -327,7 +394,7 @@ async fn full_client_scenario_against_real_server() {
         .unwrap();
     assert!(page.messages.len() >= 2);
     let raw = raw_get(
-        &base,
+        base,
         &alice.token,
         &format!("/api/channels/{text_channel}/messages?limit=50"),
     )
@@ -337,7 +404,7 @@ async fn full_client_scenario_against_real_server() {
         .or_else(|| raw.get("messages").and_then(Value::as_array))
     {
         for item in items {
-            check_typed::<bs_types::MessageWithUser>("rest.message", item, &mut findings).unwrap();
+            check_typed::<bs_types::MessageWithUser>("rest.message", item, findings).unwrap();
         }
     }
     let search = alice
@@ -352,7 +419,18 @@ async fn full_client_scenario_against_real_server() {
         .await
         .unwrap();
     assert!(search.total_count >= 1);
+}
 
+async fn friends(w: &mut World) {
+    let World {
+        base,
+        alice,
+        bob,
+        alice_ws,
+        bob_ws,
+        findings,
+        ..
+    } = w;
     // ─── Друзья ────────────────────────────────────────────────────────────
     let request_id = alice
         .api
@@ -387,11 +465,22 @@ async fn full_client_scenario_against_real_server() {
             .iter()
             .any(|f| f.id == bob.id)
     );
-    let raw = raw_get(&base, &alice.token, "/api/social/friends").await;
+    let raw = raw_get(base, &alice.token, "/api/social/friends").await;
     for item in raw.as_array().into_iter().flatten() {
-        check_typed::<bs_types::Friend>("rest.friend", item, &mut findings).unwrap();
+        check_typed::<bs_types::Friend>("rest.friend", item, findings).unwrap();
     }
+}
 
+async fn direct_messages(w: &mut World) {
+    let World {
+        base,
+        alice,
+        bob,
+        alice_ws,
+        bob_ws,
+        findings,
+        ..
+    } = w;
     // ─── Личные сообщения ──────────────────────────────────────────────────
     let dm = alice
         .api
@@ -445,11 +534,18 @@ async fn full_client_scenario_against_real_server() {
         .unwrap();
     let dm_page = bob.api.dm_messages(&dm.id, None, Some(50)).await.unwrap();
     assert!(!dm_page.messages.is_empty());
-    let raw = raw_get(&base, &bob.token, "/api/dm").await;
+    let raw = raw_get(base, &bob.token, "/api/dm").await;
     for item in raw.as_array().into_iter().flatten() {
-        check_typed::<bs_types::DmChannel>("rest.dm_channel", item, &mut findings).unwrap();
+        check_typed::<bs_types::DmChannel>("rest.dm_channel", item, findings).unwrap();
     }
+}
 
+async fn space_invite(w: &mut World) {
+    let space_id = w.space_id.clone();
+    let code = w.code.clone();
+    let World {
+        alice, bob, bob_ws, ..
+    } = w;
     // ─── Приглашение в пространство через ЛС ───────────────────────────────
     let sent = alice
         .api
@@ -481,7 +577,16 @@ async fn full_client_scenario_against_real_server() {
     assert!(
         matches!(parsed, bs_types::DmSystemEvent::SpaceInvite(ref i) if i.space_id == space_id)
     );
+}
 
+async fn group_dm(w: &mut World) {
+    let World {
+        alice,
+        bob,
+        carol,
+        carol_ws,
+        ..
+    } = w;
     // ─── Групповая беседа (только с друзьями) ──────────────────────────────
     let carol_request = alice
         .api
@@ -538,7 +643,17 @@ async fn full_client_scenario_against_real_server() {
             "не разобрано системное событие: {content}"
         );
     }
+}
 
+async fn profile(w: &mut World) {
+    let space_id = w.space_id.clone();
+    let World {
+        base,
+        alice,
+        bob,
+        findings,
+        ..
+    } = w;
     // ─── Уведомления, профиль, стикеры, GIF ────────────────────────────────
     bob.api
         .update_space_notifications(
@@ -565,12 +680,14 @@ async fn full_client_scenario_against_real_server() {
     alice.api.mutuals(&bob.id).await.unwrap();
     alice.api.stickers().await.unwrap();
     alice.api.gif_enabled().await.unwrap();
-    let raw = raw_get(&base, &alice.token, "/api/users/@me").await;
-    check_typed::<bs_types::User>("rest.me", &raw, &mut findings).unwrap();
-    let raw = raw_get(&base, &alice.token, &format!("/api/spaces/{space_id}")).await;
-    check_typed::<bs_types::SpaceWithChannelsAndMembers>("rest.space", &raw, &mut findings)
-        .unwrap();
+    let raw = raw_get(base, &alice.token, "/api/users/@me").await;
+    check_typed::<bs_types::User>("rest.me", &raw, findings).unwrap();
+    let raw = raw_get(base, &alice.token, &format!("/api/spaces/{space_id}")).await;
+    check_typed::<bs_types::SpaceWithChannelsAndMembers>("rest.space", &raw, findings).unwrap();
+}
 
+async fn admin(w: &mut World) {
+    let World { alice, me, .. } = w;
     // ─── Администрирование (первый пользователь инстанса — админ) ──────────
     if me.is_admin {
         alice.api.instance_settings().await.unwrap();
@@ -587,7 +704,13 @@ async fn full_client_scenario_against_real_server() {
         alice.api.revoke_invite(&invite.id).await.unwrap();
         alice.api.storage_stats().await.unwrap();
     }
+}
 
+async fn moderation(w: &mut World) {
+    let space_id = w.space_id.clone();
+    let World {
+        alice, bob, carol, ..
+    } = w;
     // ─── Модерация и уход ──────────────────────────────────────────────────
     alice
         .api
@@ -608,7 +731,34 @@ async fn full_client_scenario_against_real_server() {
     // Удаление пространства сервер не рассылает событием: проверяем по REST.
     alice.api.delete_space(&space_id).await.unwrap();
     assert!(alice.api.space(&space_id).await.is_err());
+}
 
+#[tokio::test(flavor = "multi_thread")]
+async fn full_client_scenario_against_real_server() {
+    let Some(base) = server_url() else {
+        eprintln!("BS_CONTRACT_URL не задан — контрактный тест пропущен");
+        return;
+    };
+    let mut w = setup(base).await;
+    create_space(&mut w).await;
+    roles(&mut w).await;
+    let (first_id, rest_id) = send_messages(&mut w).await;
+    react_and_delete(&mut w, &first_id, &rest_id).await;
+    history(&mut w).await;
+    friends(&mut w).await;
+    direct_messages(&mut w).await;
+    space_invite(&mut w).await;
+    group_dm(&mut w).await;
+    profile(&mut w).await;
+    admin(&mut w).await;
+    moderation(&mut w).await;
+    let World {
+        alice_ws,
+        bob_ws,
+        carol_ws,
+        mut findings,
+        ..
+    } = w;
     // ─── Отчёт ─────────────────────────────────────────────────────────────
     for socket in [&alice_ws, &bob_ws, &carol_ws] {
         findings.merge(&socket.findings());
