@@ -155,7 +155,7 @@ impl RegisterForm {
                 egui::RichText::new("Создать аккаунт")
                     .size(24.0)
                     .family(theme::bold_family())
-                    .color(theme::TEXT_BRIGHT),
+                    .color(theme::text_bright()),
             );
             ui.label(theme::muted("Новый аккаунт на инстансе Backspace"));
         });
@@ -189,7 +189,7 @@ impl RegisterForm {
                 ui.label(
                     egui::RichText::new("Пароли не совпадают")
                         .size(12.0)
-                        .color(theme::ROSE),
+                        .color(theme::rose()),
                 );
             }
             ui.add_space(6.0);
@@ -232,10 +232,10 @@ impl RegisterForm {
         }
         if let Some(problem) = &self.problem {
             ui.add_space(8.0);
-            ui.label(egui::RichText::new(problem).color(theme::ROSE));
+            ui.label(egui::RichText::new(problem).color(theme::rose()));
         } else if let Some(err) = bridge.last_error() {
             ui.add_space(8.0);
-            ui.label(egui::RichText::new(err).color(theme::ROSE));
+            ui.label(egui::RichText::new(err).color(theme::rose()));
         }
         ui.add_space(10.0);
         ui.vertical_centered(|ui| {
@@ -293,15 +293,16 @@ impl RegisterForm {
 
     fn instance_status(&self, ui: &mut egui::Ui) {
         let (text, color) = match &self.info.result {
-            None if self.info.pending() => ("Проверяем инстанс…".to_owned(), theme::TEXT_FAINT),
+            None if self.info.pending() => ("Проверяем инстанс…".to_owned(), theme::text_faint()),
             None => return,
-            Some(Err(err)) => (format!("Инстанс не отвечает: {err}"), theme::ROSE),
-            Some(Ok(info)) if info.registration_open => {
-                (format!("{} · регистрация открыта", info.name), theme::MINT)
-            }
+            Some(Err(err)) => (format!("Инстанс не отвечает: {err}"), theme::rose()),
+            Some(Ok(info)) if info.registration_open => (
+                format!("{} · регистрация открыта", info.name),
+                theme::mint(),
+            ),
             Some(Ok(info)) => (
                 format!("{} · регистрация только по приглашению", info.name),
-                theme::AMBER,
+                theme::amber(),
             ),
         };
         ui.label(egui::RichText::new(text).size(12.0).color(color));
@@ -314,7 +315,7 @@ impl RegisterForm {
         }
         let (text, color) = username_problem(name).map_or_else(
             || self.name_verdict(),
-            |problem| (problem.to_owned(), theme::AMBER),
+            |problem| (problem.to_owned(), theme::amber()),
         );
         ui.label(egui::RichText::new(text).size(12.0).color(color));
     }
@@ -322,19 +323,19 @@ impl RegisterForm {
     /// Ответ сервера о занятости имени.
     fn name_verdict(&self) -> (String, egui::Color32) {
         match &self.name_check.result {
-            None => ("Проверяем…".to_owned(), theme::TEXT_FAINT),
-            Some(Ok(UsernameCheck::Available)) => ("Имя свободно".to_owned(), theme::MINT),
-            Some(Ok(UsernameCheck::Taken)) => ("Имя уже занято".to_owned(), theme::ROSE),
+            None => ("Проверяем…".to_owned(), theme::text_faint()),
+            Some(Ok(UsernameCheck::Available)) => ("Имя свободно".to_owned(), theme::mint()),
+            Some(Ok(UsernameCheck::Taken)) => ("Имя уже занято".to_owned(), theme::rose()),
             Some(Ok(UsernameCheck::Invalid { code })) => (
                 crate::logic::describe_server_error(Some(code), "Имя не подходит"),
-                theme::ROSE,
+                theme::rose(),
             ),
             // Закрытая регистрация не мешает имени: по приглашению можно.
             Some(Ok(UsernameCheck::RegistrationClosed)) => (
                 "Проверка недоступна: нужна ссылка-приглашение".to_owned(),
-                theme::TEXT_FAINT,
+                theme::text_faint(),
             ),
-            Some(Err(_)) => ("Не удалось проверить имя".to_owned(), theme::TEXT_FAINT),
+            Some(Err(_)) => ("Не удалось проверить имя".to_owned(), theme::text_faint()),
         }
     }
 
@@ -343,21 +344,21 @@ impl RegisterForm {
             return;
         }
         let (text, color) = match &self.invite_check.result {
-            None => ("Проверяем приглашение…".to_owned(), theme::TEXT_FAINT),
+            None => ("Проверяем приглашение…".to_owned(), theme::text_faint()),
             Some(Ok(InviteCheck::Valid { name })) if name.is_empty() => {
-                ("Приглашение действует".to_owned(), theme::MINT)
+                ("Приглашение действует".to_owned(), theme::mint())
             }
             Some(Ok(InviteCheck::Valid { name })) => {
-                (format!("Приглашение «{name}» действует"), theme::MINT)
+                (format!("Приглашение «{name}» действует"), theme::mint())
             }
-            Some(Ok(InviteCheck::Expired)) => ("Срок приглашения истёк".to_owned(), theme::ROSE),
+            Some(Ok(InviteCheck::Expired)) => ("Срок приглашения истёк".to_owned(), theme::rose()),
             Some(Ok(InviteCheck::Exhausted)) => {
-                ("Приглашение уже использовано".to_owned(), theme::ROSE)
+                ("Приглашение уже использовано".to_owned(), theme::rose())
             }
-            Some(Ok(InviteCheck::Invalid)) => ("Приглашение не найдено".to_owned(), theme::ROSE),
+            Some(Ok(InviteCheck::Invalid)) => ("Приглашение не найдено".to_owned(), theme::rose()),
             Some(Err(_)) => (
                 "Не удалось проверить приглашение".to_owned(),
-                theme::TEXT_FAINT,
+                theme::text_faint(),
             ),
         };
         ui.label(egui::RichText::new(text).size(12.0).color(color));
@@ -377,7 +378,7 @@ impl RegisterForm {
                     ui.painter().circle_stroke(
                         rect.center(),
                         12.5,
-                        egui::Stroke::new(2.0, theme::TEXT_BRIGHT),
+                        egui::Stroke::new(2.0, theme::text_bright()),
                     );
                 }
                 if response.on_hover_text(name).clicked() {

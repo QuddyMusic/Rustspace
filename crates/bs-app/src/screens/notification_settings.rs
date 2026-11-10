@@ -120,8 +120,8 @@ pub(crate) fn show(
     let response = egui::Modal::new(egui::Id::unique("notification_settings"))
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_BUBBLE)
-                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .fill(theme::bg_bubble())
+                .stroke(egui::Stroke::new(1.0, theme::border()))
                 .corner_radius(CornerRadius::same(16))
                 .inner_margin(Margin::same(20)),
         )
@@ -131,7 +131,7 @@ pub(crate) fn show(
                 RichText::new(&state.title)
                     .size(18.0)
                     .family(theme::bold_family())
-                    .color(theme::TEXT_BRIGHT),
+                    .color(theme::text_bright()),
             );
             ui.add_space(10.0);
             body(ui, state, bridge);
@@ -199,7 +199,7 @@ fn body(ui: &mut egui::Ui, state: &mut NotificationSettings, bridge: &mut Bridge
         ui.label(
             RichText::new("Это пространство заглушено, поэтому заглушены и его каналы.")
                 .size(12.0)
-                .color(theme::AMBER),
+                .color(theme::amber()),
         );
     }
     if !is_channel {
@@ -209,11 +209,11 @@ fn body(ui: &mut egui::Ui, state: &mut NotificationSettings, bridge: &mut Bridge
     ui.label(
         RichText::new("О личных сообщениях вы получаете уведомления всегда.")
             .size(12.0)
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
     if let Some(err) = &state.error {
         ui.add_space(6.0);
-        ui.label(RichText::new(err).color(theme::ROSE));
+        ui.label(RichText::new(err).color(theme::rose()));
     }
     if let Some(change) = change {
         state.save(bridge, change);
@@ -233,7 +233,7 @@ fn mute_block(
             |end| format!("Заглушено до {}", theme::stamp(end, now)),
         );
         ui.horizontal(|ui| {
-            ui.label(RichText::new(text).color(theme::TEXT_MUTED));
+            ui.label(RichText::new(text).color(theme::text_muted()));
             if ui
                 .add_enabled(!state.busy, egui::Button::new("Отменить заглушение"))
                 .clicked()
@@ -283,7 +283,7 @@ fn mass_mentions(
     ] {
         let mut value = current;
         ui.horizontal(|ui| {
-            ui.label(RichText::new(label).color(theme::TEXT_BRIGHT));
+            ui.label(RichText::new(label).color(theme::text_bright()));
             ui.add_enabled_ui(!state.busy, |ui| widgets::toggle(ui, &mut value));
         });
         if value != current {
@@ -302,7 +302,7 @@ fn mass_mentions(
             "@here доходит до тех же участников, что и @everyone. Упоминания вас по имени всегда приходят.",
         )
         .size(12.0)
-        .color(theme::TEXT_MUTED),
+        .color(theme::text_muted()),
     );
 }
 

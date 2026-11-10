@@ -1,6 +1,6 @@
 //! Показ текста сообщения (markdown), цитаты-ответа и реакций.
 
-use egui::{Color32, CornerRadius, Margin, RichText, Sense, Stroke, Vec2};
+use egui::{CornerRadius, Margin, RichText, Sense, Stroke, Vec2};
 
 use crate::markdown::{Block, Kind, Span};
 use crate::theme;
@@ -52,7 +52,7 @@ pub(crate) fn group_reactions<'a>(
 }
 
 fn rich(span: &Span) -> RichText {
-    let mut text = RichText::new(&span.text).color(theme::TEXT);
+    let mut text = RichText::new(&span.text).color(theme::text());
     if span.bold {
         text = text.family(theme::bold_family());
     }
@@ -74,13 +74,13 @@ fn show_span(ui: &mut egui::Ui, salt: &str, index: usize, span: &Span) {
             ui.label(
                 RichText::new(&span.text)
                     .monospace()
-                    .color(theme::TEXT_BRIGHT)
-                    .background_color(theme::BG_INPUT),
+                    .color(theme::text_bright())
+                    .background_color(theme::bg_input()),
             );
         }
         Kind::Link => {
             ui.add(egui::Hyperlink::from_label_and_url(
-                RichText::new(&span.text).color(theme::SKY),
+                RichText::new(&span.text).color(theme::sky()),
                 &span.text,
             ))
             .on_hover_text(&span.text);
@@ -88,21 +88,21 @@ fn show_span(ui: &mut egui::Ui, salt: &str, index: usize, span: &Span) {
         Kind::Mention => {
             ui.label(
                 RichText::new(&span.text)
-                    .color(theme::TEXT_BRIGHT)
+                    .color(theme::text_bright())
                     .family(theme::bold_family())
-                    .background_color(theme::ACCENT.gamma_multiply(0.45)),
+                    .background_color(theme::accent().gamma_multiply(0.45)),
             );
         }
         Kind::Spoiler => {
             let id = ui.make_persistent_id((salt, index, "spoiler"));
             let shown = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
             if shown {
-                ui.label(rich(span).background_color(theme::BG_ACTIVE));
+                ui.label(rich(span).background_color(theme::bg_active()));
             } else {
                 let response = ui.label(
                     RichText::new(&span.text)
-                        .color(theme::BG_ACTIVE)
-                        .background_color(theme::BG_ACTIVE),
+                        .color(theme::bg_active())
+                        .background_color(theme::bg_active()),
                 );
                 if response
                     .interact(Sense::click())
@@ -174,18 +174,18 @@ pub(crate) fn show_text(ui: &mut egui::Ui, salt: &str, blocks: &[Block], edited:
                 ui.horizontal(|ui| {
                     let (bar, _) = ui.allocate_exact_size(Vec2::new(3.0, 18.0), Sense::hover());
                     ui.painter()
-                        .rect_filled(bar, CornerRadius::same(2), theme::TEXT_FAINT);
+                        .rect_filled(bar, CornerRadius::same(2), theme::text_faint());
                     ui.vertical(|ui| show_spans(ui, &format!("{salt}{index}"), spans, None));
                 });
             }
             Block::Code(code) => {
                 egui::Frame::new()
-                    .fill(theme::BG_INPUT)
-                    .stroke(Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::bg_input())
+                    .stroke(Stroke::new(1.0, theme::border()))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(Margin::symmetric(10, 8))
                     .show(ui, |ui| {
-                        ui.label(RichText::new(code).monospace().color(theme::TEXT_BRIGHT));
+                        ui.label(RichText::new(code).monospace().color(theme::text_bright()));
                     });
             }
         }
@@ -201,12 +201,12 @@ pub(crate) fn show_reply_quote(ui: &mut egui::Ui, author: &str, text: &str) -> e
         ui.set_max_width((ui.available_width() - 28.0).max(80.0));
         let (bar, _) = ui.allocate_exact_size(Vec2::new(3.0, 16.0), Sense::hover());
         ui.painter()
-            .rect_filled(bar, CornerRadius::same(2), theme::ACCENT);
+            .rect_filled(bar, CornerRadius::same(2), theme::accent());
         ui.label(
             RichText::new(author)
                 .family(theme::bold_family())
                 .size(12.5)
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
         );
         ui.add(egui::Label::new(theme::muted(text.replace('\n', " ")).size(12.5)).truncate());
     })
@@ -232,18 +232,18 @@ pub(crate) fn show_reactions(
             let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
             let hovered = ui.rect_contains_pointer(rect);
             let fill = if group.mine {
-                theme::ACCENT.gamma_multiply(0.35)
+                theme::accent().gamma_multiply(0.35)
             } else if hovered {
-                theme::BG_ACTIVE
+                theme::bg_active()
             } else {
-                theme::BG_HOVER
+                theme::bg_hover()
             };
             ui.painter().rect_filled(rect, CornerRadius::same(12), fill);
             if group.mine {
                 ui.painter().rect_stroke(
                     rect,
                     CornerRadius::same(12),
-                    Stroke::new(1.0, theme::ACCENT),
+                    Stroke::new(1.0, theme::accent()),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -257,7 +257,7 @@ pub(crate) fn show_reactions(
                     egui::Align2::CENTER_CENTER,
                     &group.emoji,
                     egui::FontId::proportional(14.0),
-                    theme::TEXT,
+                    theme::text(),
                 );
             }
             ui.painter().text(
@@ -266,9 +266,9 @@ pub(crate) fn show_reactions(
                 &count,
                 egui::FontId::proportional(13.0),
                 if group.mine {
-                    Color32::WHITE
+                    theme::text_bright()
                 } else {
-                    theme::TEXT_MUTED
+                    theme::text_muted()
                 },
             );
             if hovered {
@@ -282,14 +282,14 @@ pub(crate) fn show_reactions(
             let hovered = ui.rect_contains_pointer(rect);
             if hovered {
                 ui.painter()
-                    .rect_filled(rect, CornerRadius::same(12), theme::BG_HOVER);
+                    .rect_filled(rect, CornerRadius::same(12), theme::bg_hover());
             }
             crate::icons::paint(
                 ui.painter(),
                 rect.center(),
                 14.0,
                 crate::icons::Icon::Smile,
-                theme::TEXT_FAINT,
+                theme::text_faint(),
             );
             if hovered {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

@@ -7,48 +7,500 @@
 use bs_types::UserStatus;
 use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, Sense, Stroke, TextStyle};
 
-/// Фон приложения и колонки пространств (`--bg-base`, чуть светлее).
-pub(crate) const BG_RAIL: Color32 = Color32::from_rgb(0x0e, 0x0e, 0x14);
-/// Колонка каналов и панель участников (`--bg-channel`).
-pub(crate) const BG_SIDEBAR: Color32 = Color32::from_rgb(0x1a, 0x1a, 0x23);
-/// Лента сообщений (`--bg-chat`).
-pub(crate) const BG_CHAT: Color32 = Color32::from_rgb(0x13, 0x13, 0x1a);
-/// Утопленные поля ввода (`--bg-input`).
-pub(crate) const BG_INPUT: Color32 = Color32::from_rgb(0x11, 0x11, 0x18);
-/// Плавающее поле ввода сообщения: «стеклянный пузырь».
-pub(crate) const BG_BUBBLE: Color32 = Color32::from_rgb(0x1d, 0x1d, 0x27);
-/// Наведение на элемент списка.
-pub(crate) const BG_HOVER: Color32 = Color32::from_rgb(0x21, 0x21, 0x2c);
-/// Выбранный элемент списка (`--bg-elevated`).
-pub(crate) const BG_ACTIVE: Color32 = Color32::from_rgb(0x25, 0x25, 0x30);
-/// Тонкая граница: белый с ~7% непрозрачности поверх тёмного.
-pub(crate) const BORDER: Color32 = Color32::from_rgb(0x28, 0x28, 0x32);
-/// Основной текст (`--txt`).
-pub(crate) const TEXT: Color32 = Color32::from_rgb(0xe4, 0xe4, 0xea);
-/// Приглушённый текст (`--txt2`).
-pub(crate) const TEXT_MUTED: Color32 = Color32::from_rgb(0xa0, 0xa0, 0xaa);
-/// Третичный текст: подсказки, категории (`--txt3`).
-pub(crate) const TEXT_FAINT: Color32 = Color32::from_rgb(0x6d, 0x6d, 0x7c);
-/// Яркий текст имён и заголовков (`--txt`).
-pub(crate) const TEXT_BRIGHT: Color32 = Color32::from_rgb(0xef, 0xef, 0xef);
-/// Брендовый акцент «лаванда» (`--accent-primary`).
-pub(crate) const ACCENT: Color32 = Color32::from_rgb(0x7c, 0x6c, 0xf6);
-/// Мятный: позитивные действия (`--accent-mint`).
-pub(crate) const MINT: Color32 = Color32::from_rgb(0x86, 0xef, 0xac);
-/// Тёмная мятная подложка под мятный текст (кнопка «Добавить»).
-pub(crate) const MINT_BG: Color32 = Color32::from_rgb(0x17, 0x3b, 0x21);
-/// Розовый: непрочитанное и ошибки (`--accent-rose`).
-pub(crate) const ROSE: Color32 = Color32::from_rgb(0xfd, 0xa4, 0xaf);
-/// Янтарный: неактивен, предупреждения (`--accent-amber`).
-pub(crate) const AMBER: Color32 = Color32::from_rgb(0xfc, 0xd3, 0x4d);
-/// Онлайн.
-pub(crate) const GREEN: Color32 = Color32::from_rgb(0x4a, 0xde, 0x80);
-/// Небесный акцент (`--accent-sky`).
-pub(crate) const SKY: Color32 = Color32::from_rgb(0x7d, 0xd3, 0xfc);
-/// Не беспокоить.
-pub(crate) const RED: Color32 = Color32::from_rgb(0xf8, 0x71, 0x71);
-/// Офлайн.
-pub(crate) const GRAY: Color32 = Color32::from_rgb(0x6d, 0x6d, 0x7c);
+/// Цвета интерфейса: одна тема оформления.
+///
+/// Встроенные темы — [`Preset`]; пользователь может взять любую за основу и
+/// поменять отдельные цвета, а также сохранить или загрузить тему файлом
+/// JSON (`#rrggbb` для каждого поля). Текущая палитра хранится глобально:
+/// интерфейс читает её через функции-аксессоры (`bg_chat()`, `accent()`…),
+/// поэтому смена темы применяется со следующего кадра без перезапуска.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct Palette {
+    /// Тёмная тема (база стилей `egui` — тёмная или светлая).
+    pub(crate) dark: bool,
+    /// Фон приложения и колонки пространств (`--bg-base`).
+    #[serde(with = "hex")]
+    pub(crate) bg_rail: Color32,
+    /// Колонка каналов и панель участников (`--bg-channel`).
+    #[serde(with = "hex")]
+    pub(crate) bg_sidebar: Color32,
+    /// Лента сообщений (`--bg-chat`).
+    #[serde(with = "hex")]
+    pub(crate) bg_chat: Color32,
+    /// Утопленные поля ввода (`--bg-input`).
+    #[serde(with = "hex")]
+    pub(crate) bg_input: Color32,
+    /// Плавающие элементы: поле ввода, окна, меню.
+    #[serde(with = "hex")]
+    pub(crate) bg_bubble: Color32,
+    /// Наведение на элемент списка.
+    #[serde(with = "hex")]
+    pub(crate) bg_hover: Color32,
+    /// Выбранный элемент списка (`--bg-elevated`).
+    #[serde(with = "hex")]
+    pub(crate) bg_active: Color32,
+    /// Наведение на кнопку.
+    #[serde(with = "hex")]
+    pub(crate) widget_hover: Color32,
+    /// Тонкие границы и разделители.
+    #[serde(with = "hex")]
+    pub(crate) border: Color32,
+    /// Основной текст.
+    #[serde(with = "hex")]
+    pub(crate) text: Color32,
+    /// Приглушённый текст.
+    #[serde(with = "hex")]
+    pub(crate) text_muted: Color32,
+    /// Третичный текст: подсказки, категории.
+    #[serde(with = "hex")]
+    pub(crate) text_faint: Color32,
+    /// Яркий текст имён и заголовков.
+    #[serde(with = "hex")]
+    pub(crate) text_bright: Color32,
+    /// Подпись канала в покое.
+    #[serde(with = "hex")]
+    pub(crate) channel_text: Color32,
+    /// Брендовый акцент.
+    #[serde(with = "hex")]
+    pub(crate) accent: Color32,
+    /// Текст на акцентной заливке.
+    #[serde(with = "hex")]
+    pub(crate) on_accent: Color32,
+    /// Позитивные действия.
+    #[serde(with = "hex")]
+    pub(crate) mint: Color32,
+    /// Подложка под мятный текст (кнопка «Добавить»).
+    #[serde(with = "hex")]
+    pub(crate) mint_bg: Color32,
+    /// Непрочитанное и ошибки.
+    #[serde(with = "hex")]
+    pub(crate) rose: Color32,
+    /// Предупреждения, «нет на месте».
+    #[serde(with = "hex")]
+    pub(crate) amber: Color32,
+    /// Онлайн, говорит.
+    #[serde(with = "hex")]
+    pub(crate) green: Color32,
+    /// Ссылки и информационные акценты.
+    #[serde(with = "hex")]
+    pub(crate) sky: Color32,
+    /// «Не беспокоить», опасные действия.
+    #[serde(with = "hex")]
+    pub(crate) red: Color32,
+    /// Офлайн.
+    #[serde(with = "hex")]
+    pub(crate) gray: Color32,
+}
+
+impl Default for Palette {
+    fn default() -> Self {
+        Self::AETHER
+    }
+}
+
+const fn rgb(hex: u32) -> Color32 {
+    Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+}
+
+#[allow(clippy::unreadable_literal, reason = "цвета записаны как #rrggbb")]
+impl Palette {
+    /// «Aether Drift» — тёплая тёмная тема оригинального Backspace.
+    pub(crate) const AETHER: Self = Self {
+        dark: true,
+        bg_rail: rgb(0x0e0e14),
+        bg_sidebar: rgb(0x1a1a23),
+        bg_chat: rgb(0x13131a),
+        bg_input: rgb(0x111118),
+        bg_bubble: rgb(0x1d1d27),
+        bg_hover: rgb(0x21212c),
+        bg_active: rgb(0x252530),
+        widget_hover: rgb(0x2e2e3b),
+        border: rgb(0x282832),
+        text: rgb(0xe4e4ea),
+        text_muted: rgb(0xa0a0aa),
+        text_faint: rgb(0x6d6d7c),
+        text_bright: rgb(0xefefef),
+        channel_text: rgb(0x8a8a98),
+        accent: rgb(0x7c6cf6),
+        on_accent: rgb(0xffffff),
+        mint: rgb(0x86efac),
+        mint_bg: rgb(0x173b21),
+        rose: rgb(0xfda4af),
+        amber: rgb(0xfcd34d),
+        green: rgb(0x4ade80),
+        sky: rgb(0x7dd3fc),
+        red: rgb(0xf87171),
+        gray: rgb(0x6d6d7c),
+    };
+
+    /// «Полночь» — глубокий чёрный для OLED-экранов.
+    pub(crate) const MIDNIGHT: Self = Self {
+        bg_rail: rgb(0x000000),
+        bg_sidebar: rgb(0x0a0a0c),
+        bg_chat: rgb(0x050506),
+        bg_input: rgb(0x111113),
+        bg_bubble: rgb(0x141417),
+        bg_hover: rgb(0x16161a),
+        bg_active: rgb(0x1c1c21),
+        widget_hover: rgb(0x26262c),
+        border: rgb(0x1f1f24),
+        channel_text: rgb(0x7f7f8a),
+        accent: rgb(0x8b7cff),
+        ..Self::AETHER
+    };
+
+    /// «Nord» — холодная сине-серая палитра.
+    pub(crate) const NORD: Self = Self {
+        dark: true,
+        bg_rail: rgb(0x242933),
+        bg_sidebar: rgb(0x2e3440),
+        bg_chat: rgb(0x2b303b),
+        bg_input: rgb(0x252a34),
+        bg_bubble: rgb(0x343b48),
+        bg_hover: rgb(0x3b4252),
+        bg_active: rgb(0x434c5e),
+        widget_hover: rgb(0x4c566a),
+        border: rgb(0x3b4252),
+        text: rgb(0xe5e9f0),
+        text_muted: rgb(0xb4bccc),
+        text_faint: rgb(0x7b8394),
+        text_bright: rgb(0xeceff4),
+        channel_text: rgb(0x9aa3b5),
+        accent: rgb(0x88c0d0),
+        on_accent: rgb(0x1f232b),
+        mint: rgb(0xa3be8c),
+        mint_bg: rgb(0x2f3b2c),
+        rose: rgb(0xd08770),
+        amber: rgb(0xebcb8b),
+        green: rgb(0xa3be8c),
+        sky: rgb(0x81a1c1),
+        red: rgb(0xbf616a),
+        gray: rgb(0x7b8394),
+    };
+
+    /// «Сумерки» — фиолетовая тёмная тема с розовыми акцентами.
+    pub(crate) const DUSK: Self = Self {
+        dark: true,
+        bg_rail: rgb(0x191622),
+        bg_sidebar: rgb(0x221e2e),
+        bg_chat: rgb(0x1e1a29),
+        bg_input: rgb(0x18151f),
+        bg_bubble: rgb(0x2a2538),
+        bg_hover: rgb(0x2c2739),
+        bg_active: rgb(0x352e46),
+        widget_hover: rgb(0x3d3550),
+        border: rgb(0x332c42),
+        text: rgb(0xf0ecf8),
+        text_muted: rgb(0xb7aecb),
+        text_faint: rgb(0x7d7392),
+        text_bright: rgb(0xf8f8f2),
+        channel_text: rgb(0x9a90b0),
+        accent: rgb(0xff79c6),
+        on_accent: rgb(0x1e1a29),
+        mint: rgb(0x50fa7b),
+        mint_bg: rgb(0x1d3a27),
+        rose: rgb(0xff92df),
+        amber: rgb(0xf1fa8c),
+        green: rgb(0x50fa7b),
+        sky: rgb(0x8be9fd),
+        red: rgb(0xff5555),
+        gray: rgb(0x7d7392),
+    };
+
+    /// «Дневная» — светлая тема.
+    pub(crate) const DAYLIGHT: Self = Self {
+        dark: false,
+        bg_rail: rgb(0xe3e5ea),
+        bg_sidebar: rgb(0xf0f1f5),
+        bg_chat: rgb(0xfbfbfd),
+        bg_input: rgb(0xebedf2),
+        bg_bubble: rgb(0xffffff),
+        bg_hover: rgb(0xe6e8ef),
+        bg_active: rgb(0xdcdfe8),
+        widget_hover: rgb(0xd3d7e2),
+        border: rgb(0xd8dbe3),
+        text: rgb(0x2b2d36),
+        text_muted: rgb(0x5d606e),
+        text_faint: rgb(0x8a8d9a),
+        text_bright: rgb(0x14151b),
+        channel_text: rgb(0x60636f),
+        accent: rgb(0x6555e8),
+        on_accent: rgb(0xffffff),
+        mint: rgb(0x15803d),
+        mint_bg: rgb(0xd1f2dc),
+        rose: rgb(0xd6336c),
+        amber: rgb(0xb45309),
+        green: rgb(0x16a34a),
+        sky: rgb(0x0369a1),
+        red: rgb(0xdc2626),
+        gray: rgb(0x9ca3af),
+    };
+
+    /// «Высокий контраст» — максимальная читаемость.
+    pub(crate) const CONTRAST: Self = Self {
+        dark: true,
+        bg_rail: rgb(0x000000),
+        bg_sidebar: rgb(0x000000),
+        bg_chat: rgb(0x000000),
+        bg_input: rgb(0x101010),
+        bg_bubble: rgb(0x141414),
+        bg_hover: rgb(0x262626),
+        bg_active: rgb(0x333333),
+        widget_hover: rgb(0x404040),
+        border: rgb(0x8a8a8a),
+        text: rgb(0xffffff),
+        text_muted: rgb(0xe0e0e0),
+        text_faint: rgb(0xbdbdbd),
+        text_bright: rgb(0xffffff),
+        channel_text: rgb(0xe0e0e0),
+        accent: rgb(0xffd400),
+        on_accent: rgb(0x000000),
+        mint: rgb(0x00ff7f),
+        mint_bg: rgb(0x003a1c),
+        rose: rgb(0xff6b8b),
+        amber: rgb(0xffd400),
+        green: rgb(0x00ff7f),
+        sky: rgb(0x4dd2ff),
+        red: rgb(0xff4040),
+        gray: rgb(0xbdbdbd),
+    };
+
+    /// Цвета для редактора темы: подпись и ссылка на поле.
+    pub(crate) fn fields_mut(&mut self) -> [(&'static str, &mut Color32); 24] {
+        [
+            ("Фон рейла пространств", &mut self.bg_rail),
+            ("Боковые панели", &mut self.bg_sidebar),
+            ("Лента сообщений", &mut self.bg_chat),
+            ("Поля ввода", &mut self.bg_input),
+            ("Окна и меню", &mut self.bg_bubble),
+            ("Наведение", &mut self.bg_hover),
+            ("Выбранный элемент", &mut self.bg_active),
+            ("Наведение на кнопку", &mut self.widget_hover),
+            ("Границы", &mut self.border),
+            ("Текст", &mut self.text),
+            ("Приглушённый текст", &mut self.text_muted),
+            ("Подсказки", &mut self.text_faint),
+            ("Заголовки и имена", &mut self.text_bright),
+            ("Названия каналов", &mut self.channel_text),
+            ("Акцент", &mut self.accent),
+            ("Текст на акценте", &mut self.on_accent),
+            ("Позитивное действие", &mut self.mint),
+            ("Подложка позитивного", &mut self.mint_bg),
+            ("Непрочитанное, ошибки", &mut self.rose),
+            ("Предупреждения", &mut self.amber),
+            ("В сети", &mut self.green),
+            ("Ссылки", &mut self.sky),
+            ("Опасные действия", &mut self.red),
+            ("Не в сети", &mut self.gray),
+        ]
+    }
+}
+
+/// Встроенные темы.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum Preset {
+    /// Тема оригинального клиента.
+    Aether,
+    /// Чёрная для OLED.
+    Midnight,
+    /// Nord.
+    Nord,
+    /// Фиолетовая.
+    Dusk,
+    /// Светлая.
+    Daylight,
+    /// Высокий контраст.
+    Contrast,
+}
+
+impl Preset {
+    /// Все встроенные темы в порядке показа.
+    pub(crate) const ALL: [Self; 6] = [
+        Self::Aether,
+        Self::Midnight,
+        Self::Nord,
+        Self::Dusk,
+        Self::Daylight,
+        Self::Contrast,
+    ];
+
+    /// Название для интерфейса.
+    pub(crate) const fn title(self) -> &'static str {
+        match self {
+            Self::Aether => "Aether Drift",
+            Self::Midnight => "Полночь",
+            Self::Nord => "Nord",
+            Self::Dusk => "Сумерки",
+            Self::Daylight => "Дневная",
+            Self::Contrast => "Высокий контраст",
+        }
+    }
+
+    /// Палитра темы.
+    pub(crate) const fn palette(self) -> Palette {
+        match self {
+            Self::Aether => Palette::AETHER,
+            Self::Midnight => Palette::MIDNIGHT,
+            Self::Nord => Palette::NORD,
+            Self::Dusk => Palette::DUSK,
+            Self::Daylight => Palette::DAYLIGHT,
+            Self::Contrast => Palette::CONTRAST,
+        }
+    }
+}
+
+/// Сохраняемые настройки оформления.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct Appearance {
+    /// Встроенная тема, взятая за основу.
+    pub(crate) preset: Preset,
+    /// Своя палитра поверх темы (после правки цветов или загрузки файла).
+    pub(crate) custom: Option<Palette>,
+    /// Скругление углов карточек и кнопок, px.
+    pub(crate) radius: u8,
+    /// Компактная лента: меньше отступов между сообщениями.
+    pub(crate) compact: bool,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            preset: Preset::Aether,
+            custom: None,
+            radius: 8,
+            compact: false,
+        }
+    }
+}
+
+impl Appearance {
+    /// Палитра, которую нужно показать.
+    pub(crate) fn palette(&self) -> Palette {
+        self.custom.unwrap_or_else(|| self.preset.palette())
+    }
+}
+
+/// Текущая палитра.
+static CURRENT: std::sync::RwLock<Palette> = std::sync::RwLock::new(Palette::AETHER);
+/// Скругление и плотность ленты.
+static SHAPE: std::sync::RwLock<(u8, bool)> = std::sync::RwLock::new((8, false));
+
+fn current() -> Palette {
+    *CURRENT
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+macro_rules! palette_accessors {
+    ($($(#[$doc:meta])* $name:ident),* $(,)?) => {
+        $(
+            $(#[$doc])*
+            #[must_use]
+            pub(crate) fn $name() -> Color32 {
+                current().$name
+            }
+        )*
+    };
+}
+
+palette_accessors!(
+    /// Фон рейла пространств.
+    bg_rail,
+    /// Боковые панели.
+    bg_sidebar,
+    /// Лента сообщений.
+    bg_chat,
+    /// Поля ввода.
+    bg_input,
+    /// Окна и плавающие элементы.
+    bg_bubble,
+    /// Наведение.
+    bg_hover,
+    /// Выбранный элемент.
+    bg_active,
+    /// Границы.
+    border,
+    /// Основной текст.
+    text,
+    /// Приглушённый текст.
+    text_muted,
+    /// Подсказки.
+    text_faint,
+    /// Заголовки и имена.
+    text_bright,
+    /// Названия каналов в покое.
+    channel_text,
+    /// Акцент.
+    accent,
+    /// Текст на акценте.
+    on_accent,
+    /// Позитивное действие.
+    mint,
+    /// Подложка позитивного.
+    mint_bg,
+    /// Непрочитанное и ошибки.
+    rose,
+    /// Предупреждения.
+    amber,
+    /// В сети.
+    green,
+    /// Ссылки.
+    sky,
+    /// Опасные действия.
+    red,
+    /// Не в сети.
+    gray,
+);
+
+/// Скругление углов из настроек.
+#[must_use]
+pub(crate) fn radius() -> u8 {
+    SHAPE.read().map_or(8, |shape| shape.0)
+}
+
+/// Включена ли компактная лента.
+#[must_use]
+pub(crate) fn compact() -> bool {
+    SHAPE.read().is_ok_and(|shape| shape.1)
+}
+
+/// `#rrggbb` для полей палитры.
+mod hex {
+    use egui::Color32;
+    use serde::{Deserialize as _, Deserializer, Serializer};
+
+    #[allow(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "сигнатура задана serde(with)"
+    )]
+    pub(super) fn serialize<S: Serializer>(color: &Color32, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(&format!(
+            "#{:02x}{:02x}{:02x}",
+            color.r(),
+            color.g(),
+            color.b()
+        ))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Color32, D::Error> {
+        let text = String::deserialize(de)?;
+        super::parse_hex(&text)
+            .ok_or_else(|| serde::de::Error::custom(format!("ожидался цвет #rrggbb: {text}")))
+    }
+}
+
+/// Разбирает `#rrggbb` или `rrggbb`.
+#[must_use]
+pub(crate) fn parse_hex(text: &str) -> Option<Color32> {
+    let digits = text.trim().trim_start_matches('#');
+    if digits.len() != 6 || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(digits, 16).ok().map(rgb)
+}
 
 /// Имя семейства полужирного начертания (Inter SemiBold).
 const BOLD_FAMILY: &str = "inter-semibold";
@@ -111,45 +563,78 @@ pub(crate) fn palette(name: &str) -> Option<Color32> {
 pub(crate) const PALETTE_NAMES: [&str; 7] =
     ["mint", "sky", "lavender", "coral", "rose", "teal", "amber"];
 
-/// Применяет тему к контексту `egui`.
-pub(crate) fn apply(ctx: &egui::Context) {
+/// Подключает шрифты; вызывается один раз при запуске.
+pub(crate) fn install(ctx: &egui::Context) {
     install_fonts(ctx);
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = BG_CHAT;
-    visuals.window_fill = BG_BUBBLE;
-    visuals.extreme_bg_color = BG_INPUT;
-    visuals.faint_bg_color = BG_SIDEBAR;
-    visuals.override_text_color = Some(TEXT);
-    visuals.hyperlink_color = Color32::from_rgb(0x7d, 0xd3, 0xfc);
-    visuals.selection.bg_fill = ACCENT;
-    visuals.selection.stroke = Stroke::new(1.0, TEXT_BRIGHT);
-    visuals.window_stroke = Stroke::new(1.0, BORDER);
-    visuals.window_corner_radius = CornerRadius::same(12);
-    visuals.menu_corner_radius = CornerRadius::same(10);
+}
 
-    let radius = CornerRadius::same(8);
+/// Применяет оформление: палитру, скругления и стили `egui`.
+pub(crate) fn apply(ctx: &egui::Context, appearance: &Appearance) {
+    let palette = appearance.palette();
+    if let Ok(mut current) = CURRENT.write() {
+        *current = palette;
+    }
+    if let Ok(mut shape) = SHAPE.write() {
+        *shape = (appearance.radius, appearance.compact);
+    }
+    let p = palette;
+    let mut visuals = if p.dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+    visuals.panel_fill = p.bg_chat;
+    visuals.window_fill = p.bg_bubble;
+    visuals.extreme_bg_color = p.bg_input;
+    visuals.faint_bg_color = p.bg_sidebar;
+    visuals.code_bg_color = p.bg_input;
+    visuals.override_text_color = Some(p.text);
+    visuals.hyperlink_color = p.sky;
+    visuals.warn_fg_color = p.amber;
+    visuals.error_fg_color = p.red;
+    visuals.selection.bg_fill = p.accent.gamma_multiply(if p.dark { 0.85 } else { 0.35 });
+    visuals.selection.stroke = Stroke::new(1.0, p.text_bright);
+    visuals.window_stroke = Stroke::new(1.0, p.border);
+    let big = appearance.radius.saturating_add(4);
+    visuals.window_corner_radius = CornerRadius::same(big);
+    visuals.menu_corner_radius = CornerRadius::same(appearance.radius.saturating_add(2));
+    visuals.window_shadow = egui::epaint::Shadow {
+        offset: [0, 8],
+        blur: 24,
+        spread: 0,
+        color: Color32::from_black_alpha(if p.dark { 110 } else { 40 }),
+    };
+    visuals.popup_shadow = egui::epaint::Shadow {
+        offset: [0, 4],
+        blur: 14,
+        spread: 0,
+        color: Color32::from_black_alpha(if p.dark { 90 } else { 30 }),
+    };
+
+    let radius = CornerRadius::same(appearance.radius);
     let widgets = &mut visuals.widgets;
-    widgets.noninteractive.bg_fill = BG_CHAT;
-    widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
-    widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT);
+    widgets.noninteractive.bg_fill = p.bg_chat;
+    widgets.noninteractive.weak_bg_fill = p.bg_chat;
+    widgets.noninteractive.bg_stroke = Stroke::new(1.0, p.border);
+    widgets.noninteractive.fg_stroke = Stroke::new(1.0, p.text);
     widgets.noninteractive.corner_radius = radius;
-    widgets.inactive.bg_fill = BG_ACTIVE;
-    widgets.inactive.weak_bg_fill = BG_ACTIVE;
+    widgets.inactive.bg_fill = p.bg_active;
+    widgets.inactive.weak_bg_fill = p.bg_active;
     widgets.inactive.bg_stroke = Stroke::NONE;
-    widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT);
+    widgets.inactive.fg_stroke = Stroke::new(1.0, p.text);
     widgets.inactive.corner_radius = radius;
-    widgets.hovered.bg_fill = Color32::from_rgb(0x2e, 0x2e, 0x3b);
-    widgets.hovered.weak_bg_fill = Color32::from_rgb(0x2e, 0x2e, 0x3b);
+    widgets.hovered.bg_fill = p.widget_hover;
+    widgets.hovered.weak_bg_fill = p.widget_hover;
     widgets.hovered.bg_stroke = Stroke::NONE;
-    widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT_BRIGHT);
+    widgets.hovered.fg_stroke = Stroke::new(1.0, p.text_bright);
     widgets.hovered.corner_radius = radius;
-    widgets.active.bg_fill = ACCENT;
-    widgets.active.weak_bg_fill = ACCENT;
+    widgets.active.bg_fill = p.accent;
+    widgets.active.weak_bg_fill = p.accent;
     widgets.active.bg_stroke = Stroke::NONE;
-    widgets.active.fg_stroke = Stroke::new(1.0, TEXT_BRIGHT);
+    widgets.active.fg_stroke = Stroke::new(1.0, p.on_accent);
     widgets.active.corner_radius = radius;
-    widgets.open.bg_fill = BG_ACTIVE;
-    widgets.open.weak_bg_fill = BG_ACTIVE;
+    widgets.open.bg_fill = p.bg_active;
+    widgets.open.weak_bg_fill = p.bg_active;
     widgets.open.corner_radius = radius;
     ctx.set_visuals(visuals);
 
@@ -176,27 +661,27 @@ pub(crate) fn apply(ctx: &egui::Context) {
 pub(crate) fn primary_button(text: impl Into<String>) -> egui::Button<'static> {
     egui::Button::new(
         egui::RichText::new(text.into())
-            .color(Color32::WHITE)
+            .color(on_accent())
             .family(bold_family()),
     )
-    .fill(ACCENT)
-    .corner_radius(CornerRadius::same(8))
+    .fill(accent())
+    .corner_radius(CornerRadius::same(radius()))
 }
 
 /// Приглушённая подпись.
 #[must_use]
 pub(crate) fn muted(text: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(text.into()).color(TEXT_MUTED)
+    egui::RichText::new(text.into()).color(text_muted())
 }
 
 /// Цвет индикатора присутствия.
 #[must_use]
-pub(crate) const fn status_color(status: UserStatus) -> Color32 {
+pub(crate) fn status_color(status: UserStatus) -> Color32 {
     match status {
-        UserStatus::Online => GREEN,
-        UserStatus::Idle => AMBER,
-        UserStatus::DoNotDisturb => RED,
-        UserStatus::Offline => GRAY,
+        UserStatus::Online => green(),
+        UserStatus::Idle => amber(),
+        UserStatus::DoNotDisturb => red(),
+        UserStatus::Offline => gray(),
     }
 }
 
@@ -293,13 +778,13 @@ pub(crate) fn paint_avatar(
             egui::Align2::CENTER_CENTER,
             initials(name),
             FontId::proportional(size * 0.42),
-            if dim { TEXT_MUTED } else { Color32::WHITE },
+            if dim { text_muted() } else { Color32::WHITE },
         );
     }
     if let Some(status) = status {
         let dot = (size * 0.17).max(4.0);
         let center = rect.right_bottom() - egui::vec2(size * 0.12, size * 0.12);
-        painter.circle_filled(center, dot + 2.0, BG_SIDEBAR);
+        painter.circle_filled(center, dot + 2.0, bg_sidebar());
         painter.circle_filled(center, dot, status_color(status));
     }
 }
@@ -308,11 +793,11 @@ pub(crate) fn paint_avatar(
 pub(crate) fn positive_button(text: impl Into<String>) -> egui::Button<'static> {
     egui::Button::new(
         egui::RichText::new(text.into())
-            .color(MINT)
+            .color(mint())
             .family(bold_family()),
     )
-    .fill(MINT_BG)
-    .corner_radius(CornerRadius::same(8))
+    .fill(mint_bg())
+    .corner_radius(CornerRadius::same(radius()))
 }
 
 /// Плитка «домой» (личные сообщения) в колонке пространств: лавандовый
@@ -327,8 +812,8 @@ pub(crate) fn rail_home(ui: &mut egui::Ui, selected: bool, unread: bool) -> egui
         16
     };
     let painter = ui.painter();
-    painter.rect_filled(icon, CornerRadius::same(radius), ACCENT);
-    crate::brand::paint(painter, icon.center(), 26.0, Color32::WHITE);
+    painter.rect_filled(icon, CornerRadius::same(radius), accent());
+    crate::brand::paint(painter, icon.center(), 26.0, on_accent());
     paint_rail_pill(painter, rect, selected, response.hovered(), unread);
     response
 }
@@ -355,7 +840,7 @@ fn paint_rail_pill(
             egui::pos2(rect.left() + 2.0, rect.center().y),
             egui::vec2(5.0, height),
         );
-        painter.rect_filled(pill, CornerRadius::same(3), TEXT_BRIGHT);
+        painter.rect_filled(pill, CornerRadius::same(3), text_bright());
     }
 }
 
@@ -404,11 +889,8 @@ pub(crate) fn rail_separator(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 2.0), Sense::hover());
     let line = egui::Rect::from_center_size(rect.center(), egui::vec2(28.0, 2.0));
     ui.painter()
-        .rect_filled(line, CornerRadius::same(1), BORDER);
+        .rect_filled(line, CornerRadius::same(1), border());
 }
-
-/// Цвет подписи канала в покое.
-const CHANNEL_TEXT: Color32 = Color32::from_rgb(0x8a, 0x8a, 0x98);
 
 /// Строка в списках каналов/бесед: мягкая подложка при выборе, акцентная
 /// черта слева, розовая точка у непрочитанных. `leading` рисуется перед подписью.
@@ -423,9 +905,9 @@ fn list_row_with(
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), Sense::click());
     let row = rect.shrink2(egui::vec2(8.0, 1.0));
     let bg = if selected {
-        Some(BG_ACTIVE)
+        Some(bg_active())
     } else if response.hovered() {
-        Some(BG_HOVER)
+        Some(bg_hover())
     } else {
         None
     };
@@ -437,7 +919,8 @@ fn list_row_with(
             egui::pos2(rect.left() + 4.0, rect.center().y),
             egui::vec2(3.0, 18.0),
         );
-        ui.painter().rect_filled(bar, CornerRadius::same(2), ACCENT);
+        ui.painter()
+            .rect_filled(bar, CornerRadius::same(2), accent());
     }
     let mut inner = ui.new_child(
         egui::UiBuilder::new()
@@ -446,9 +929,9 @@ fn list_row_with(
     );
     leading(&mut inner);
     let color = if selected || unread {
-        TEXT_BRIGHT
+        text_bright()
     } else {
-        CHANNEL_TEXT
+        channel_text()
     };
     let mut text = egui::RichText::new(label).color(color);
     if unread {
@@ -458,7 +941,7 @@ fn list_row_with(
     if unread {
         inner.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let (dot, _) = ui.allocate_exact_size(egui::Vec2::splat(8.0), Sense::hover());
-            ui.painter().circle_filled(dot.center(), 4.0, ROSE);
+            ui.painter().circle_filled(dot.center(), 4.0, rose());
         });
     }
     response
@@ -467,7 +950,7 @@ fn list_row_with(
 /// Значок «заглушён» (перечёркнутый кружок) у правого края строки.
 pub(crate) fn muted_mark(ui: &egui::Ui, row: &egui::Rect) {
     let center = egui::pos2(row.right() - 18.0, row.center().y);
-    let stroke = egui::Stroke::new(1.4, TEXT_FAINT);
+    let stroke = egui::Stroke::new(1.4, text_faint());
     ui.painter().circle_stroke(center, 5.5, stroke);
     ui.painter().line_segment(
         [
@@ -496,10 +979,10 @@ pub(crate) fn voice_row(ui: &mut egui::Ui, label: &str, active: bool) -> egui::R
         ui.painter().rect_filled(
             rect.shrink2(egui::vec2(8.0, 1.0)),
             CornerRadius::same(8),
-            BG_HOVER,
+            bg_hover(),
         );
     }
-    let color = if active { GREEN } else { CHANNEL_TEXT };
+    let color = if active { green() } else { channel_text() };
     crate::icons::paint(
         ui.painter(),
         egui::pos2(rect.left() + 28.0, rect.center().y),
@@ -535,14 +1018,14 @@ pub(crate) fn occupant_row(
     paint_avatar(ui.painter(), avatar_rect, name, None, false, image);
     if speaking {
         ui.painter()
-            .circle_stroke(avatar_rect.center(), 12.5, egui::Stroke::new(2.0, GREEN));
+            .circle_stroke(avatar_rect.center(), 12.5, egui::Stroke::new(2.0, green()));
     }
     ui.painter().text(
         egui::pos2(rect.left() + 58.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         truncate_chars(name, 20),
         FontId::proportional(13.5),
-        if speaking { GREEN } else { TEXT_MUTED },
+        if speaking { green() } else { text_muted() },
     );
     let mut x = rect.right() - 22.0;
     if deafened {
@@ -551,7 +1034,7 @@ pub(crate) fn occupant_row(
             egui::pos2(x, rect.center().y),
             14.0,
             crate::icons::Icon::HeadphonesOff,
-            ROSE,
+            rose(),
         );
         x -= 18.0;
     }
@@ -561,7 +1044,7 @@ pub(crate) fn occupant_row(
             egui::pos2(x, rect.center().y),
             14.0,
             crate::icons::Icon::MicOff,
-            ROSE,
+            rose(),
         );
     }
     response
@@ -589,7 +1072,7 @@ pub(crate) fn category_header(ui: &mut egui::Ui, name: &str, add: bool) -> Categ
                     egui::RichText::new(name.to_uppercase())
                         .size(11.0)
                         .family(bold_family())
-                        .color(TEXT_FAINT),
+                        .color(text_faint()),
                 )
                 .sense(egui::Sense::click()),
             );
@@ -600,7 +1083,7 @@ pub(crate) fn category_header(ui: &mut egui::Ui, name: &str, add: bool) -> Categ
                         ui.add(crate::widgets::flat_icon(
                             crate::icons::Icon::Plus,
                             16.0,
-                            TEXT_FAINT,
+                            text_faint(),
                         ))
                         .on_hover_text("Создать канал"),
                     );
@@ -619,7 +1102,7 @@ pub(crate) fn section_title(text: &str) -> egui::RichText {
     egui::RichText::new(text.to_uppercase())
         .size(11.0)
         .family(bold_family())
-        .color(TEXT_FAINT)
+        .color(text_faint())
 }
 
 /// Участник в правой панели: аватар со статусом и имя; офлайн — приглушён.
@@ -633,7 +1116,7 @@ pub(crate) fn member_row(
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), Sense::click());
     if response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), BG_HOVER);
+            .rect_filled(rect, CornerRadius::same(8), bg_hover());
     }
     let offline = status == UserStatus::Offline;
     let avatar_rect = egui::Rect::from_min_size(
@@ -653,7 +1136,7 @@ pub(crate) fn member_row(
         egui::Align2::LEFT_CENTER,
         truncate_chars(name, 22),
         FontId::proportional(15.0),
-        if offline { TEXT_FAINT } else { TEXT },
+        if offline { text_faint() } else { text() },
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -677,7 +1160,7 @@ pub(crate) fn day_divider(ui: &mut egui::Ui, label: &str) {
             egui::RichText::new(label)
                 .size(11.5)
                 .family(bold_family())
-                .color(TEXT_FAINT),
+                .color(text_faint()),
         );
     });
     ui.add_space(6.0);

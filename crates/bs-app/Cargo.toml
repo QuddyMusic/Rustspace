@@ -43,5 +43,6 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 wiremock = "0.6"
+tempfile = "3"
 tokio-tungstenite = { workspace = true, features = ["handshake"] }
 futures-util = { workspace = true }

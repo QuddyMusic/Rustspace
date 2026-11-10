@@ -134,12 +134,12 @@ pub(crate) fn preview(content: &str, needle: &str, max: usize) -> String {
 fn highlighted(text: &str, needle: &str) -> LayoutJob {
     let plain = egui::TextFormat {
         font_id: FontId::proportional(13.5),
-        color: theme::TEXT_MUTED,
+        color: theme::text_muted(),
         ..Default::default()
     };
     let hit = egui::TextFormat {
         font_id: FontId::proportional(13.5),
-        color: theme::TEXT_BRIGHT,
+        color: theme::text_bright(),
         background: Color32::from_rgba_unmultiplied(252, 211, 77, 70),
         ..Default::default()
     };
@@ -284,8 +284,8 @@ impl SearchPanel {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(theme::BG_BUBBLE)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::bg_bubble())
+                    .stroke(egui::Stroke::new(1.0, theme::border()))
                     .corner_radius(egui::CornerRadius::same(10))
                     .inner_margin(Margin::same(14))
                     .shadow(egui::Shadow {
@@ -325,7 +325,7 @@ impl SearchPanel {
             }
             changed |= edit.changed();
             if ui
-                .add(widgets::flat_icon(Icon::Close, 16.0, theme::TEXT_FAINT))
+                .add(widgets::flat_icon(Icon::Close, 16.0, theme::text_faint()))
                 .on_hover_text("Закрыть")
                 .clicked()
             {
@@ -428,13 +428,13 @@ impl SearchPanel {
         channel_id: &str,
     ) -> Option<String> {
         if let Some(error) = &self.field_error {
-            ui.label(RichText::new(error).color(theme::ROSE).size(12.5));
+            ui.label(RichText::new(error).color(theme::rose()).size(12.5));
             return None;
         }
         let state = bridge.search_state();
         let searching = self.sent.is_some() || self.edited_at.is_some();
         if let Some(error) = &state.error {
-            ui.label(RichText::new(error).color(theme::ROSE).size(12.5));
+            ui.label(RichText::new(error).color(theme::rose()).size(12.5));
         } else if state.loading && state.hits.is_empty() {
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -511,7 +511,7 @@ fn hit_row(ui: &mut egui::Ui, hit: &SearchHit, needle: &str, now_ms: i64) -> boo
                         ui.label(
                             RichText::new(&hit.author)
                                 .family(theme::bold_family())
-                                .color(theme::TEXT_BRIGHT),
+                                .color(theme::text_bright()),
                         );
                         ui.label(theme::muted(theme::stamp(hit.created_at, now_ms)).size(11.5));
                     });

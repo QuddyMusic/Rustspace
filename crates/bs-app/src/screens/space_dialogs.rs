@@ -163,8 +163,8 @@ fn modal(
     let response = egui::Modal::new(egui::Id::unique(id))
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_BUBBLE)
-                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .fill(theme::bg_bubble())
+                .stroke(egui::Stroke::new(1.0, theme::border()))
                 .corner_radius(CornerRadius::same(16))
                 .inner_margin(Margin::same(22)),
         )
@@ -175,7 +175,7 @@ fn modal(
                     RichText::new(title)
                         .size(19.0)
                         .family(theme::bold_family())
-                        .color(theme::TEXT_BRIGHT),
+                        .color(theme::text_bright()),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if widgets::icon_button(ui, crate::icons::Icon::Close, 30.0).clicked() {
@@ -191,7 +191,7 @@ fn modal(
 fn error_line(ui: &mut egui::Ui, error: Option<&String>) {
     if let Some(err) = error {
         ui.add_space(6.0);
-        ui.label(RichText::new(err).color(theme::ROSE));
+        ui.label(RichText::new(err).color(theme::rose()));
     }
 }
 
@@ -233,7 +233,7 @@ fn show_join(ctx: &egui::Context, form: &mut JoinForm, bridge: &mut Bridge) -> b
             ui.label(
                 RichText::new("Есть код приглашения?")
                     .size(13.0)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             );
             widgets::field_label(ui, "Код или ссылка");
             let field = widgets::text_field(
@@ -392,7 +392,7 @@ fn show_leave(ctx: &egui::Context, form: &mut LeaveForm, bridge: &mut Bridge) ->
                 "Вы уверены, что хотите покинуть это пространство? Чтобы снова \
                  присоединиться, вам понадобится новое приглашение.",
             )
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
         );
         error_line(ui, form.error.as_ref());
         ui.add_space(14.0);
@@ -405,9 +405,9 @@ fn show_leave(ctx: &egui::Context, form: &mut LeaveForm, bridge: &mut Bridge) ->
                     } else {
                         "Покинуть пространство"
                     })
-                    .color(theme::BG_RAIL),
+                    .color(theme::bg_rail()),
                 )
-                .fill(theme::ROSE)
+                .fill(theme::rose())
                 .corner_radius(CornerRadius::same(8)),
             );
             if leave.clicked() {

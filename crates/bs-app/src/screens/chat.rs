@@ -700,7 +700,7 @@ fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) 
                 RichText::new(theme::truncate_chars(&space.name, 24))
                     .size(15.5)
                     .family(theme::bold_family())
-                    .color(theme::TEXT_BRIGHT),
+                    .color(theme::text_bright()),
             )
             .sense(Sense::click()),
         )
@@ -709,7 +709,7 @@ fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) 
             ui.add_space(10.0);
             if space.rights.invite
                 && ui
-                    .add(widgets::flat_icon(Icon::Users, 20.0, theme::TEXT_MUTED))
+                    .add(widgets::flat_icon(Icon::Users, 20.0, theme::text_muted()))
                     .on_hover_text("Пригласить людей")
                     .clicked()
             {
@@ -720,7 +720,7 @@ fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) 
             }
             if space.rights.can_open_settings()
                 && ui
-                    .add(widgets::flat_icon(Icon::Gear, 20.0, theme::TEXT_MUTED))
+                    .add(widgets::flat_icon(Icon::Gear, 20.0, theme::text_muted()))
                     .on_hover_text("Настройки пространства")
                     .clicked()
             {
@@ -812,7 +812,7 @@ fn space_menu(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
             ui.separator();
         }
         if ui
-            .button(RichText::new("Покинуть пространство").color(theme::ROSE))
+            .button(RichText::new("Покинуть пространство").color(theme::rose()))
             .clicked()
         {
             *nav = Some(Nav::SpaceDialog(SpaceDialog::leave(
@@ -900,6 +900,8 @@ pub(crate) struct ChatScreen {
     pub(crate) pending_call: Option<(String, Option<String>, String)>,
     /// Голосовой звонок.
     pub(crate) voice: crate::voice::VoiceState,
+    /// Рация (push-to-talk) между кадрами.
+    ptt: crate::hotkeys::PushToTalk,
     /// Выбранный канал и его инстанс.
     pub(crate) selected_channel: Option<SelectedChannel>,
     pub(crate) draft: String,
@@ -984,8 +986,15 @@ impl ChatScreen {
         *self = Self {
             show_members: true,
             initialized: true,
-            ..Self::default()
+            ..Self::with_prefs()
         };
+    }
+
+    /// Пустой экран с голосовыми настройками из сохранённых.
+    pub(crate) fn with_prefs() -> Self {
+        let mut chat = Self::default();
+        chat.voice.prefs = crate::prefs::get().voice;
+        chat
     }
 
     /// Открывает сообщение в режиме правки.
@@ -1072,13 +1081,7 @@ impl ChatScreen {
     }
 
     /// Применяет запрошенный кликом переход.
-    fn apply_nav(
-        &mut self,
-        nav: Nav,
-        items: &[SidebarSpace],
-        bridge: &mut Bridge,
-        ctx: &egui::Context,
-    ) {
+    fn apply_nav(&mut self, nav: Nav, items: &[SidebarSpace], bridge: &mut Bridge) {
         match nav {
             Nav::Friends => {
                 self.active_space = None;
@@ -1134,7 +1137,7 @@ impl ChatScreen {
             }
             Nav::Settings => {
                 if let Some(cache) = bridge.cache() {
-                    self.settings = Some(SettingsState::from_user(cache.me(), ctx.zoom_factor()));
+                    self.settings = Some(SettingsState::from_user(cache.me()));
                 }
             }
             Nav::VoiceJoin {
@@ -1177,6 +1180,10 @@ impl ChatScreen {
         }
         self.home.ensure_loaded(bridge);
         let ctx = ui.ctx().clone();
+        let binds = crate::prefs::get().keybinds;
+        for hotkey in crate::hotkeys::poll(&ctx, &binds, &mut self.ptt, self.voice.flags().0) {
+            self.voice.apply(hotkey, bridge);
+        }
         let now = ctx.input(|i| i.time);
         if let Some(info) = bridge.take_info() {
             self.toast = Some((info, now + 3.0));
@@ -1208,7 +1215,7 @@ impl ChatScreen {
             self.space_settings = None;
             self.channel_settings = None;
             self.notification_settings = None;
-            self.apply_nav(Nav::Space(opened), &items, bridge, &ctx);
+            self.apply_nav(Nav::Space(opened), &items, bridge);
             self.route_actions(bridge, &ctx);
         }
 
@@ -1324,7 +1331,7 @@ impl ChatScreen {
         self.take_group_events(bridge);
         self.show_toast(&ctx, now);
         if let Some(nav) = nav {
-            self.apply_nav(nav, &items, bridge, &ctx);
+            self.apply_nav(nav, &items, bridge);
         }
         action
     }
@@ -1460,12 +1467,12 @@ impl ChatScreen {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(theme::BG_BUBBLE)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::bg_bubble())
+                    .stroke(egui::Stroke::new(1.0, theme::border()))
                     .corner_radius(CornerRadius::same(10))
                     .inner_margin(Margin::symmetric(16, 10))
                     .show(ui, |ui| {
-                        ui.label(RichText::new(text).color(theme::TEXT_BRIGHT));
+                        ui.label(RichText::new(text).color(theme::text_bright()));
                     });
             });
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
@@ -1487,7 +1494,7 @@ impl ChatScreen {
             .show_separator_line(false)
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG_RAIL)
+                    .fill(theme::bg_rail())
                     .inner_margin(Margin::symmetric(0, 10)),
             )
             .show(ui, |ui| {
@@ -1537,13 +1544,13 @@ impl ChatScreen {
                                 *nav = Some(Nav::Space((space.origin, space.id.clone())));
                             }
                         }
-                        if widgets::rail_action(ui, Icon::Plus, theme::MINT, false)
+                        if widgets::rail_action(ui, Icon::Plus, theme::mint(), false)
                             .on_hover_text("Создать пространство")
                             .clicked()
                         {
                             *nav = Some(Nav::CreateSpace);
                         }
-                        if widgets::rail_action(ui, Icon::Join, theme::SKY, false)
+                        if widgets::rail_action(ui, Icon::Join, theme::sky(), false)
                             .on_hover_text("Присоединиться к пространству")
                             .clicked()
                         {
@@ -1553,7 +1560,7 @@ impl ChatScreen {
                         if widgets::rail_action(
                             ui,
                             Icon::Compass,
-                            theme::SKY,
+                            theme::sky(),
                             self.view == View::Explore,
                         )
                         .on_hover_text("Обзор пространств")
@@ -1579,7 +1586,7 @@ impl ChatScreen {
             .default_size(250.0)
             .size_range(200.0..=360.0)
             .show_separator_line(false)
-            .frame(egui::Frame::new().fill(theme::BG_SIDEBAR))
+            .frame(egui::Frame::new().fill(theme::bg_sidebar()))
             .show(ui, |ui| {
                 egui::Panel::top("sidebar_search")
                     .exact_size(52.0)
@@ -1587,7 +1594,7 @@ impl ChatScreen {
                     .show_separator_line(false)
                     .frame(
                         egui::Frame::new()
-                            .fill(theme::BG_SIDEBAR)
+                            .fill(theme::bg_sidebar())
                             .inner_margin(Margin::symmetric(10, 10)),
                     )
                     .show(ui, |ui| {
@@ -1793,14 +1800,14 @@ impl ChatScreen {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(10.0);
                 if ui
-                    .add(widgets::flat_icon(Icon::Plus, 18.0, theme::TEXT_MUTED))
+                    .add(widgets::flat_icon(Icon::Plus, 18.0, theme::text_muted()))
                     .on_hover_text("Найти человека")
                     .clicked()
                 {
                     *nav = Some(Nav::SearchPeople(String::new()));
                 }
                 if ui
-                    .add(widgets::flat_icon(Icon::Users, 18.0, theme::TEXT_MUTED))
+                    .add(widgets::flat_icon(Icon::Users, 18.0, theme::text_muted()))
                     .on_hover_text("Создать группу")
                     .clicked()
                 {
@@ -1886,13 +1893,13 @@ impl ChatScreen {
             .show_separator_line(false)
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG_SIDEBAR)
+                    .fill(theme::bg_sidebar())
                     .inner_margin(Margin::symmetric(10, 8)),
             )
             .show(ui, |ui| {
                 egui::Frame::new()
-                    .fill(theme::BG_RAIL)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::bg_rail())
+                    .stroke(egui::Stroke::new(1.0, theme::border()))
                     .corner_radius(CornerRadius::same(12))
                     .inner_margin(Margin::symmetric(10, 0))
                     .show(ui, |ui| {
@@ -1907,7 +1914,7 @@ impl ChatScreen {
                                     RichText::new(theme::truncate_chars(&name, 13))
                                         .size(14.0)
                                         .family(theme::bold_family())
-                                        .color(theme::TEXT_BRIGHT),
+                                        .color(theme::text_bright()),
                                 );
                                 let sub = if connected {
                                     handle
@@ -1971,7 +1978,7 @@ impl ChatScreen {
             .resizable(false)
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG_SIDEBAR)
+                    .fill(theme::bg_sidebar())
                     .inner_margin(Margin::symmetric(10, 16)),
             )
             .show(ui, |ui| {
@@ -2021,7 +2028,7 @@ impl ChatScreen {
         {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
-                    .add(widgets::flat_icon(Icon::Users, 22.0, theme::TEXT_FAINT))
+                    .add(widgets::flat_icon(Icon::Users, 22.0, theme::text_faint()))
                     .on_hover_text("Настройки группы")
                     .clicked()
                 {
@@ -2050,9 +2057,9 @@ impl ChatScreen {
             #[allow(clippy::cast_precision_loss, reason = "кнопок в шапке единицы")]
             ui.add_space(34.0 * buttons as f32);
             let color = if self.search.open {
-                theme::TEXT_BRIGHT
+                theme::text_bright()
             } else {
-                theme::TEXT_FAINT
+                theme::text_faint()
             };
             if ui
                 .add(widgets::flat_icon(Icon::Search, 22.0, color))
@@ -2090,17 +2097,17 @@ impl ChatScreen {
             .resizable(false)
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG_CHAT)
+                    .fill(theme::bg_chat())
                     .inner_margin(Margin::symmetric(20, 0)),
             )
             .show(ui, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    ui.label(RichText::new(prefix).size(20.0).color(theme::TEXT_FAINT));
+                    ui.label(RichText::new(prefix).size(20.0).color(theme::text_faint()));
                     ui.label(
                         RichText::new(&title)
                             .family(theme::bold_family())
                             .size(16.5)
-                            .color(theme::TEXT_BRIGHT),
+                            .color(theme::text_bright()),
                     );
                     if let Some(topic) = topic.filter(|t| !t.trim().is_empty()) {
                         ui.add_space(6.0);
@@ -2122,7 +2129,7 @@ impl ChatScreen {
                                 ui.add_space(34.0);
                             }
                             if ui
-                                .add(widgets::flat_icon(Icon::Phone, 22.0, theme::TEXT_FAINT))
+                                .add(widgets::flat_icon(Icon::Phone, 22.0, theme::text_faint()))
                                 .on_hover_text("Позвонить")
                                 .clicked()
                             {
@@ -2140,9 +2147,9 @@ impl ChatScreen {
                     if has_members {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let color = if self.show_members {
-                                theme::TEXT_BRIGHT
+                                theme::text_bright()
                             } else {
-                                theme::TEXT_FAINT
+                                theme::text_faint()
                             };
                             if ui
                                 .add(widgets::flat_icon(Icon::Users, 22.0, color))
@@ -2171,7 +2178,8 @@ fn show_history_header(ui: &mut egui::Ui, history: &HistoryState) -> bool {
     } else if let Some(error) = &history.error {
         ui.vertical_centered(|ui| {
             ui.label(
-                RichText::new(format!("Не удалось загрузить историю: {error}")).color(theme::ROSE),
+                RichText::new(format!("Не удалось загрузить историю: {error}"))
+                    .color(theme::rose()),
             );
         });
         return ui.button("Повторить").clicked();
@@ -2182,7 +2190,7 @@ fn show_history_header(ui: &mut egui::Ui, history: &HistoryState) -> bool {
                 RichText::new("Это начало беседы")
                     .size(18.0)
                     .family(theme::bold_family())
-                    .color(theme::TEXT_BRIGHT),
+                    .color(theme::text_bright()),
             );
             ui.label(theme::muted("Здесь пока всё, что было написано раньше."));
             ui.add_space(16.0);
@@ -2221,7 +2229,7 @@ impl ChatScreen {
             .show_separator_line(false)
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG_CHAT)
+                    .fill(theme::bg_chat())
                     .inner_margin(Margin {
                         left: 20,
                         right: 20,
@@ -2252,7 +2260,7 @@ impl ChatScreen {
                     } else if self.is_editing() {
                         ui.label(
                             RichText::new("Правка сообщения")
-                                .color(theme::AMBER)
+                                .color(theme::amber())
                                 .size(12.5),
                         );
                         if ui.small_button("Отмена (Esc)").clicked() {
@@ -2356,7 +2364,7 @@ impl ChatScreen {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
-                    .fill(theme::BG_CHAT)
+                    .fill(theme::bg_chat())
                     .inner_margin(Margin::symmetric(0, 0)),
             )
             .show(ui, |ui| {
@@ -2542,8 +2550,8 @@ impl ChatScreen {
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
                     egui::Frame::new()
-                        .fill(theme::BG_BUBBLE)
-                        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                        .fill(theme::bg_bubble())
+                        .stroke(egui::Stroke::new(1.0, theme::border()))
                         .corner_radius(egui::CornerRadius::same(18))
                         .inner_margin(Margin::symmetric(14, 7))
                         .show(ui, |ui| {
@@ -2597,7 +2605,13 @@ impl ChatScreen {
         first_id: Option<&str>,
         edit_request: &mut Option<(String, String)>,
     ) {
-        ui.add_space(if show_header { 16.0 } else { 2.0 });
+        let gap = match (show_header, theme::compact()) {
+            (true, false) => 16.0,
+            (true, true) => 6.0,
+            (false, false) => 2.0,
+            (false, true) => 0.0,
+        };
+        ui.add_space(gap);
         let mut hits: Vec<media::Hit> = Vec::new();
         let mut downloads: Vec<media::DownloadHit> = Vec::new();
         let mut profile_rects: Vec<egui::Rect> = Vec::new();
@@ -2619,7 +2633,7 @@ impl ChatScreen {
                             RichText::new(&row.author)
                                 .family(theme::bold_family())
                                 .size(15.5)
-                                .color(theme::TEXT_BRIGHT),
+                                .color(theme::text_bright()),
                         ));
                         profile_rects.push(name.rect);
                         ui.label(theme::muted(theme::stamp(row.created_at, now_ms())).size(11.5));

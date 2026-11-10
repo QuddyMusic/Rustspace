@@ -488,13 +488,13 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
         .show_separator_line(false)
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_SIDEBAR)
+                .fill(theme::bg_sidebar())
                 .inner_margin(Margin::symmetric(10, 4)),
         )
         .show(ctx_ui, |ui| {
             egui::Frame::new()
-                .fill(theme::BG_RAIL)
-                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .fill(theme::bg_rail())
+                .stroke(egui::Stroke::new(1.0, theme::border()))
                 .corner_radius(egui::CornerRadius::same(12))
                 .inner_margin(Margin::symmetric(10, 6))
                 .show(ui, |ui| {
@@ -538,13 +538,13 @@ impl VoiceState {
     fn dock_info(&self) -> Option<DockInfo> {
         if let Some(dm) = &self.dm {
             let status = match (dm.phase, &dm.token, &self.status) {
-                (crate::dmcall::DmPhase::Ringing, _, _) => ("Вызываем…", theme::AMBER),
-                (_, Some(Err(_)), _) => ("Нет токена LiveKit", theme::ROSE),
-                (_, _, MediaStatus::Failed(_)) => ("Нет звукового соединения", theme::ROSE),
-                (_, _, MediaStatus::ListenOnly(_)) => ("Звонок: нет микрофона", theme::AMBER),
-                (_, _, MediaStatus::Live) => ("Звонок идёт", theme::GREEN),
-                (_, _, MediaStatus::Unavailable) => ("Сборка без голоса", theme::TEXT_MUTED),
-                _ => ("Подключение…", theme::AMBER),
+                (crate::dmcall::DmPhase::Ringing, _, _) => ("Вызываем…", theme::amber()),
+                (_, Some(Err(_)), _) => ("Нет токена LiveKit", theme::rose()),
+                (_, _, MediaStatus::Failed(_)) => ("Нет звукового соединения", theme::rose()),
+                (_, _, MediaStatus::ListenOnly(_)) => ("Звонок: нет микрофона", theme::amber()),
+                (_, _, MediaStatus::Live) => ("Звонок идёт", theme::green()),
+                (_, _, MediaStatus::Unavailable) => ("Сборка без голоса", theme::text_muted()),
+                _ => ("Подключение…", theme::amber()),
             };
             return Some(DockInfo {
                 status,
@@ -566,14 +566,14 @@ impl VoiceState {
 
 fn status_line(call: &VoiceCall, media: &MediaStatus) -> (&'static str, egui::Color32) {
     match (&call.token, media, call.confirmed) {
-        _ if call.forced_deafen => ("Звук отключён модератором", theme::AMBER),
-        _ if call.forced_mute => ("Вас заглушил модератор", theme::AMBER),
-        (Some(Err(_)), _, _) => ("Нет токена LiveKit", theme::ROSE),
-        (_, MediaStatus::Failed(_), _) => ("Нет звукового соединения", theme::ROSE),
-        (_, MediaStatus::ListenOnly(_), _) => ("Нет микрофона", theme::AMBER),
-        (_, MediaStatus::Live, _) => ("Голос подключён", theme::GREEN),
-        (_, MediaStatus::Unavailable, true) => ("Сборка без голоса", theme::TEXT_MUTED),
-        _ => ("Подключение…", theme::AMBER),
+        _ if call.forced_deafen => ("Звук отключён модератором", theme::amber()),
+        _ if call.forced_mute => ("Вас заглушил модератор", theme::amber()),
+        (Some(Err(_)), _, _) => ("Нет токена LiveKit", theme::rose()),
+        (_, MediaStatus::Failed(_), _) => ("Нет звукового соединения", theme::rose()),
+        (_, MediaStatus::ListenOnly(_), _) => ("Нет микрофона", theme::amber()),
+        (_, MediaStatus::Live, _) => ("Голос подключён", theme::green()),
+        (_, MediaStatus::Unavailable, true) => ("Сборка без голоса", theme::text_muted()),
+        _ => ("Подключение…", theme::amber()),
     }
 }
 

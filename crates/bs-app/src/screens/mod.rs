@@ -1,5 +1,6 @@
 //! Экраны приложения.
 
+pub(crate) mod appearance;
 pub(crate) mod body;
 pub(crate) mod channel_settings;
 pub(crate) mod chat;
@@ -13,6 +14,7 @@ pub(crate) mod notification_settings;
 pub(crate) mod profile;
 pub(crate) mod register;
 pub(crate) mod search_panel;
+pub(crate) mod settings_app;
 pub(crate) mod settings_extra;
 pub(crate) mod settings_invites;
 pub(crate) mod settings_more;

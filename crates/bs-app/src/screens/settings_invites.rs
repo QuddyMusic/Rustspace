@@ -78,11 +78,11 @@ fn now_ms() -> i64 {
 
 fn status_text(invite: &Invite) -> (&'static str, egui::Color32) {
     match invite.status.as_str() {
-        "active" => ("Действует", theme::GREEN),
-        "expired" => ("Истекла", theme::AMBER),
-        "exhausted" => ("Использована", theme::AMBER),
-        "revoked" => ("Отозвана", theme::ROSE),
-        _ => ("—", theme::TEXT_FAINT),
+        "active" => ("Действует", theme::green()),
+        "expired" => ("Истекла", theme::amber()),
+        "exhausted" => ("Использована", theme::amber()),
+        "revoked" => ("Отозвана", theme::rose()),
+        _ => ("—", theme::text_faint()),
     }
 }
 
@@ -127,7 +127,7 @@ fn show_form(ui: &mut egui::Ui, ui_state: &mut InvitesUi, bridge: &Bridge) {
     let mut submit = false;
     let mut cancel = false;
     card(ui, |ui| {
-        ui.label(RichText::new(title).color(theme::TEXT_BRIGHT));
+        ui.label(RichText::new(title).color(theme::text_bright()));
         if !form.reinstate {
             widgets::field_label(ui, "Название");
             widgets::text_field(ui, &mut form.name, "Например, «для друзей»", 64);
@@ -188,7 +188,7 @@ fn invite_card(ui: &mut egui::Ui, state: &mut InvitesUi, invite: &Invite, bridge
     let (label, color) = status_text(invite);
     card(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(&invite.name).color(theme::TEXT_BRIGHT));
+            ui.label(RichText::new(&invite.name).color(theme::text_bright()));
             ui.label(RichText::new(label).color(color).size(12.5));
         });
         ui.label(theme::muted(uses_text(invite)).size(12.5));
@@ -252,7 +252,7 @@ fn invite_card(ui: &mut egui::Ui, state: &mut InvitesUi, invite: &Invite, bridge
         {
             match result {
                 Err(message) => {
-                    ui.label(RichText::new(message).color(theme::ROSE).size(12.5));
+                    ui.label(RichText::new(message).color(theme::rose()).size(12.5));
                 }
                 Ok(list) if list.is_empty() => {
                     ui.label(theme::muted("Пока никто не воспользовался").size(12.5));

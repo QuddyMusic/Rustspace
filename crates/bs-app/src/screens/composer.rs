@@ -538,10 +538,14 @@ impl Composer {
         let edit_id = edit_id();
 
         egui::Frame::new()
-            .fill(theme::BG_BUBBLE)
+            .fill(theme::bg_bubble())
             .stroke(egui::Stroke::new(
                 1.0,
-                if dragging { theme::MINT } else { theme::BORDER },
+                if dragging {
+                    theme::mint()
+                } else {
+                    theme::border()
+                },
             ))
             .corner_radius(CornerRadius::same(16))
             .inner_margin(Margin::symmetric(14, 10))
@@ -551,7 +555,7 @@ impl Composer {
                 }
                 if let Some(note) = self.note.clone() {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&note).color(theme::ROSE).size(12.5));
+                        ui.label(RichText::new(&note).color(theme::rose()).size(12.5));
                         if ui.small_button("Скрыть").clicked() {
                             self.note = None;
                         }
@@ -564,7 +568,7 @@ impl Composer {
                     if !editing {
                         let response = ui.add_enabled(
                             enabled,
-                            widgets::flat_icon(Icon::Plus, 22.0, theme::TEXT_MUTED),
+                            widgets::flat_icon(Icon::Plus, 22.0, theme::text_muted()),
                         );
                         if response.on_hover_text("Добавить вложение").clicked() {
                             self.open = if self.open == Open::Plus {
@@ -606,9 +610,9 @@ impl Composer {
                             let (rect, response) =
                                 ui.allocate_exact_size(Vec2::splat(32.0), Sense::click());
                             let fill = if response.hovered() {
-                                theme::MINT
+                                theme::mint()
                             } else {
-                                theme::ACCENT
+                                theme::accent()
                             };
                             ui.painter().rect_filled(rect, CornerRadius::same(10), fill);
                             crate::icons::paint(
@@ -628,7 +632,7 @@ impl Composer {
                         }
                         let smile = ui.add_enabled(
                             enabled,
-                            widgets::flat_icon(Icon::Smile, 22.0, theme::TEXT_MUTED),
+                            widgets::flat_icon(Icon::Smile, 22.0, theme::text_muted()),
                         );
                         emoji_rect = Some(smile.rect);
                         if smile.on_hover_text("Эмодзи").clicked() {
@@ -637,7 +641,7 @@ impl Composer {
                         if !editing {
                             let sticker = ui.add_enabled(
                                 enabled,
-                                widgets::flat_icon(Icon::Sticker, 22.0, theme::TEXT_MUTED),
+                                widgets::flat_icon(Icon::Sticker, 22.0, theme::text_muted()),
                             );
                             if sticker.on_hover_text("Стикеры").clicked() {
                                 self.toggle_picker(Picker::Sticker);
@@ -691,7 +695,7 @@ impl Composer {
         ui.horizontal_wrapped(|ui| {
             for item in &self.staged {
                 egui::Frame::new()
-                    .fill(theme::BG_HOVER)
+                    .fill(theme::bg_hover())
                     .corner_radius(CornerRadius::same(10))
                     .inner_margin(Margin::symmetric(10, 7))
                     .show(ui, |ui| {
@@ -709,12 +713,12 @@ impl Composer {
                                 rect.center(),
                                 18.0,
                                 icon,
-                                theme::SKY,
+                                theme::sky(),
                             );
                             ui.vertical(|ui| {
                                 ui.label(
                                     RichText::new(theme::truncate_chars(&item.name, 22))
-                                        .color(theme::TEXT)
+                                        .color(theme::text())
                                         .size(13.0),
                                 );
                                 match &item.state {
@@ -728,7 +732,7 @@ impl Composer {
                                             egui::ProgressBar::new(fraction)
                                                 .desired_width(110.0)
                                                 .desired_height(6.0)
-                                                .fill(theme::ACCENT),
+                                                .fill(theme::accent()),
                                         );
                                     }
                                     StagedState::Done(_) => {
@@ -742,7 +746,7 @@ impl Composer {
                                     StagedState::Failed(message) => {
                                         ui.label(
                                             RichText::new(theme::truncate_chars(message, 30))
-                                                .color(theme::ROSE)
+                                                .color(theme::rose())
                                                 .size(11.5),
                                         )
                                         .on_hover_text(message);
@@ -756,7 +760,7 @@ impl Composer {
                                         .add(widgets::flat_icon(
                                             Icon::Close,
                                             12.0,
-                                            theme::TEXT_FAINT,
+                                            theme::text_faint(),
                                         ))
                                         .on_hover_text("Убрать")
                                         .clicked()
@@ -782,8 +786,8 @@ impl Composer {
             .pivot(Align2::LEFT_BOTTOM)
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(theme::BG_SIDEBAR)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::bg_sidebar())
+                    .stroke(egui::Stroke::new(1.0, theme::border()))
                     .corner_radius(CornerRadius::same(12))
                     .inner_margin(Margin::same(6))
                     .show(ui, |ui| {
@@ -843,8 +847,8 @@ impl Composer {
             .pivot(Align2::RIGHT_BOTTOM)
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(theme::BG_SIDEBAR)
-                    .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::bg_sidebar())
+                    .stroke(egui::Stroke::new(1.0, theme::border()))
                     .corner_radius(CornerRadius::same(14))
                     .inner_margin(Margin::same(10))
                     .show(ui, |ui| {
@@ -976,10 +980,10 @@ impl Composer {
         }
         ui.add_space(6.0);
         if let Some(error) = self.gifs.error.as_ref().filter(|_| !favorites_only) {
-            ui.label(RichText::new(error).color(theme::ROSE).size(12.5));
+            ui.label(RichText::new(error).color(theme::rose()).size(12.5));
         }
         if let Some(note) = &self.note {
-            ui.label(RichText::new(note).color(theme::ROSE).size(12.5));
+            ui.label(RichText::new(note).color(theme::rose()).size(12.5));
         }
         let mut chosen = None;
         let mut toggled: Option<GifItem> = None;
@@ -1037,13 +1041,13 @@ impl Composer {
                     }
                     if !painted {
                         ui.painter()
-                            .rect_filled(rect, CornerRadius::same(8), theme::BG_HOVER);
+                            .rect_filled(rect, CornerRadius::same(8), theme::bg_hover());
                     }
                     if response.hovered() {
                         ui.painter().rect_stroke(
                             rect,
                             CornerRadius::same(8),
-                            egui::Stroke::new(2.0, theme::MINT),
+                            egui::Stroke::new(2.0, theme::mint()),
                             egui::StrokeKind::Inside,
                         );
                     }
@@ -1145,7 +1149,7 @@ impl Composer {
             });
         });
         if let Some(error) = &self.stickers.error {
-            ui.label(RichText::new(error).color(theme::ROSE).size(12.5));
+            ui.label(RichText::new(error).color(theme::rose()).size(12.5));
         }
         ui.add_space(4.0);
         match &self.stickers.items {
@@ -1173,7 +1177,7 @@ impl Composer {
                                         ui.painter().rect_filled(
                                             rect,
                                             CornerRadius::same(10),
-                                            theme::BG_ACTIVE,
+                                            theme::bg_active(),
                                         );
                                     }
                                     images::paint_value(
@@ -1224,10 +1228,10 @@ pub(crate) fn emoji_picker(ui: &mut egui::Ui, category: &mut usize) -> Option<&'
             let (rect, response) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
             if selected {
                 ui.painter()
-                    .rect_filled(rect, CornerRadius::same(8), theme::BG_ACTIVE);
+                    .rect_filled(rect, CornerRadius::same(8), theme::bg_active());
             } else if response.hovered() {
                 ui.painter()
-                    .rect_filled(rect, CornerRadius::same(8), theme::BG_HOVER);
+                    .rect_filled(rect, CornerRadius::same(8), theme::bg_hover());
             }
             paint_emoji(ui, rect.shrink(6.0), tab_glyph, CATEGORIES.get(index));
             if response.on_hover_text(*name).clicked() {
@@ -1254,8 +1258,11 @@ pub(crate) fn emoji_picker(ui: &mut egui::Ui, category: &mut usize) -> Option<&'
                             continue;
                         }
                         if response.hovered() {
-                            ui.painter()
-                                .rect_filled(rect, CornerRadius::same(8), theme::BG_ACTIVE);
+                            ui.painter().rect_filled(
+                                rect,
+                                CornerRadius::same(8),
+                                theme::bg_active(),
+                            );
                         }
                         paint_texture(ui, rect.shrink(5.0), entry);
                         if response.clicked() {
@@ -1327,9 +1334,9 @@ fn gif_button() -> impl egui::Widget {
     |ui: &mut egui::Ui| {
         let (rect, response) = ui.allocate_exact_size(Vec2::new(34.0, 22.0), Sense::click());
         let color = if response.hovered() {
-            theme::TEXT_BRIGHT
+            theme::text_bright()
         } else {
-            theme::TEXT_MUTED
+            theme::text_muted()
         };
         ui.painter().rect_stroke(
             rect,
@@ -1353,21 +1360,21 @@ fn menu_row(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::click());
     if response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), theme::BG_ACTIVE);
+            .rect_filled(rect, CornerRadius::same(8), theme::bg_active());
     }
     crate::icons::paint(
         ui.painter(),
         Pos2::new(rect.left() + 18.0, rect.center().y),
         18.0,
         icon,
-        theme::TEXT_MUTED,
+        theme::text_muted(),
     );
     ui.painter().text(
         Pos2::new(rect.left() + 38.0, rect.center().y),
         Align2::LEFT_CENTER,
         label,
         egui::FontId::proportional(14.0),
-        theme::TEXT,
+        theme::text(),
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

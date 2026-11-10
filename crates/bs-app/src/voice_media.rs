@@ -63,7 +63,8 @@ pub(crate) struct Device {
 
 /// Настройки голоса пользователя.
 #[allow(clippy::struct_excessive_bools, reason = "независимые переключатели")]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub(crate) struct VoicePrefs {
     /// Выбранный микрофон; `None` — системный.
     pub(crate) input: Option<String>,
@@ -75,6 +76,10 @@ pub(crate) struct VoicePrefs {
     pub(crate) noise_suppression: bool,
     /// Автоматическая регулировка усиления.
     pub(crate) auto_gain_control: bool,
+    /// Громкость микрофона, 0–200 (100 — без изменений).
+    pub(crate) input_volume: u16,
+    /// Громкость собеседников, 0–200 (100 — без изменений).
+    pub(crate) output_volume: u16,
 }
 
 impl Default for VoicePrefs {
@@ -85,6 +90,8 @@ impl Default for VoicePrefs {
             echo_cancellation: true,
             noise_suppression: true,
             auto_gain_control: true,
+            input_volume: 100,
+            output_volume: 100,
         }
     }
 }

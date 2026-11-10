@@ -103,7 +103,8 @@ fn header(ui: &mut egui::Ui, state: &ProfileState) {
         crate::images::paint_value(ui.painter(), rect, banner, round, true, Color32::WHITE);
     }
     let center = rect.left_bottom() + Vec2::new(54.0, 0.0);
-    ui.painter().circle_filled(center, 46.0, theme::BG_SIDEBAR);
+    ui.painter()
+        .circle_filled(center, 46.0, theme::bg_sidebar());
     let avatar = egui::Rect::from_center_size(center, Vec2::splat(80.0));
     theme::paint_avatar(
         ui.painter(),
@@ -118,7 +119,7 @@ fn header(ui: &mut egui::Ui, state: &ProfileState) {
 fn body(ui: &mut egui::Ui, state: &ProfileState) {
     let Some(user) = state.user.as_deref() else {
         if let Some(error) = &state.error {
-            ui.colored_label(theme::RED, error);
+            ui.colored_label(theme::red(), error);
         } else {
             ui.label(theme::muted("Загрузка…"));
         }
@@ -129,7 +130,7 @@ fn body(ui: &mut egui::Ui, state: &ProfileState) {
         RichText::new(shown)
             .family(theme::bold_family())
             .size(22.0)
-            .color(theme::TEXT_BRIGHT),
+            .color(theme::text_bright()),
     );
     ui.label(theme::muted(format!(
         "@{} · {}",
@@ -137,7 +138,7 @@ fn body(ui: &mut egui::Ui, state: &ProfileState) {
         social::status_label(user.status)
     )));
     if let Some(custom) = user.custom_status.as_deref().filter(|s| !s.is_empty()) {
-        ui.label(RichText::new(custom).color(theme::TEXT));
+        ui.label(RichText::new(custom).color(theme::text()));
     }
     if let Some(home) = user.home_instance.as_deref() {
         ui.label(theme::muted(format!("Домашний инстанс: {home}")).size(12.5));
@@ -145,11 +146,11 @@ fn body(ui: &mut egui::Ui, state: &ProfileState) {
     if let Some(bio) = user.bio.as_deref().filter(|b| !b.trim().is_empty()) {
         ui.add_space(10.0);
         ui.label(theme::section_title("О СЕБЕ"));
-        ui.label(RichText::new(bio).color(theme::TEXT));
+        ui.label(RichText::new(bio).color(theme::text()));
     }
     ui.add_space(10.0);
     ui.label(theme::section_title("НА ПЛАТФОРМЕ С"));
-    ui.label(RichText::new(date(user.created_at)).color(theme::TEXT));
+    ui.label(RichText::new(date(user.created_at)).color(theme::text()));
     if let Some(mutuals) = &state.mutuals {
         if !mutuals.mutual_friends.is_empty() {
             ui.add_space(10.0);
@@ -207,9 +208,9 @@ pub(crate) fn show(
         .fixed_pos(egui::pos2(right_edge - 4.0, 56.0))
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_SIDEBAR)
+                .fill(theme::bg_sidebar())
                 .corner_radius(CornerRadius::same(12))
-                .stroke(egui::Stroke::new(1.0, theme::BORDER)),
+                .stroke(egui::Stroke::new(1.0, theme::border())),
         )
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 4.0;

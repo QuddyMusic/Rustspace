@@ -185,10 +185,10 @@ fn list(
 ) {
     heading(ui, "Роли");
     ui.label(
-        RichText::new("Роли определяют, какие права есть у участников.").color(theme::TEXT_MUTED),
+        RichText::new("Роли определяют, какие права есть у участников.").color(theme::text_muted()),
     );
     ui.label(
-        RichText::new("Роли выше в списке стоят выше ролей под ними.").color(theme::TEXT_MUTED),
+        RichText::new("Роли выше в списке стоят выше ролей под ними.").color(theme::text_muted()),
     );
     ui.add_space(8.0);
     if rights.manage_roles
@@ -230,13 +230,13 @@ fn role_row(
     let mut open = false;
     let mut mv: Option<(String, RoleSide)> = None;
     egui::Frame::new()
-        .fill(theme::BG_RAIL)
+        .fill(theme::bg_rail())
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                let color = hex_color(&role.color).unwrap_or(theme::TEXT_MUTED);
+                let color = hex_color(&role.color).unwrap_or_else(theme::text_muted);
                 let (dot, _) =
                     ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::hover());
                 ui.painter().circle_filled(dot.center(), 6.0, color);
@@ -247,7 +247,7 @@ fn role_row(
                 };
                 if ui
                     .add(
-                        egui::Label::new(RichText::new(name).color(theme::TEXT_BRIGHT))
+                        egui::Label::new(RichText::new(name).color(theme::text_bright()))
                             .sense(egui::Sense::click()),
                     )
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -350,7 +350,7 @@ fn editor(
             RichText::new(
                 "Эта роль находится на уровне вашей самой высокой роли или выше. Её можно просматривать, но не изменять.",
             )
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
         );
         ui.add_space(6.0);
     }
@@ -366,7 +366,7 @@ fn editor(
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 for preset in PRESETS {
-                    let color = hex_color(preset).unwrap_or(theme::TEXT_MUTED);
+                    let color = hex_color(preset).unwrap_or_else(theme::text_muted);
                     if widgets::color_swatch(
                         ui,
                         color,
@@ -393,7 +393,7 @@ fn permission_grid(ui: &mut egui::Ui, perms: &mut Permissions, rights: Rights, e
     if editable && !rights.perms.contains(Permissions::all()) {
         ui.label(
             RichText::new("Переключать можно только те права, которые есть у вас самих. Остальные заблокированы.")
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
         );
         ui.add_space(4.0);
     }
@@ -409,9 +409,9 @@ fn permission_grid(ui: &mut egui::Ui, perms: &mut Permissions, rights: Rights, e
                         .add_enabled_ui(held, |ui| widgets::toggle(ui, &mut on))
                         .inner;
                     let color = if held {
-                        theme::TEXT_BRIGHT
+                        theme::text_bright()
                     } else {
-                        theme::TEXT_MUTED
+                        theme::text_muted()
                     };
                     ui.label(RichText::new(*label).color(color));
                     changed
@@ -451,9 +451,9 @@ fn buttons(
             });
         let invalid = (!everyone && (name.is_empty() || !valid_hex(&draft.color))) || duplicate;
         if name.is_empty() && !everyone {
-            ui.label(RichText::new("Название роли не может быть пустым").color(theme::ROSE));
+            ui.label(RichText::new("Название роли не может быть пустым").color(theme::rose()));
         } else if duplicate {
-            ui.label(RichText::new("Роль с таким названием уже существует").color(theme::ROSE));
+            ui.label(RichText::new("Роль с таким названием уже существует").color(theme::rose()));
         }
         ui.horizontal(|ui| {
             let label = if state.busy {
@@ -522,8 +522,8 @@ fn buttons(
         };
         let delete = ui.add_enabled(
             foreign.is_empty() && !state.busy,
-            egui::Button::new(RichText::new(label).color(theme::BG_RAIL))
-                .fill(theme::ROSE)
+            egui::Button::new(RichText::new(label).color(theme::bg_rail()))
+                .fill(theme::rose())
                 .corner_radius(CornerRadius::same(8)),
         );
         if delete.clicked() {

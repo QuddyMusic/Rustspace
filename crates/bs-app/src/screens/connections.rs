@@ -200,8 +200,8 @@ impl Filter {
 
 fn home_card(ui: &mut egui::Ui, home: &crate::fleet::HomeRow) {
     egui::Frame::new()
-        .fill(theme::BG_SIDEBAR)
-        .stroke(Stroke::new(1.0, theme::BORDER))
+        .fill(theme::bg_sidebar())
+        .stroke(Stroke::new(1.0, theme::border()))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::symmetric(14, 12))
         .show(ui, |ui| {
@@ -210,9 +210,9 @@ fn home_card(ui: &mut egui::Ui, home: &crate::fleet::HomeRow) {
                 dot(
                     ui,
                     if home.live {
-                        theme::GREEN
+                        theme::green()
                     } else {
-                        theme::AMBER
+                        theme::amber()
                     },
                 );
                 ui.vertical(|ui| {
@@ -221,7 +221,7 @@ fn home_card(ui: &mut egui::Ui, home: &crate::fleet::HomeRow) {
                         RichText::new("Домашний сервер")
                             .family(theme::bold_family())
                             .size(15.0)
-                            .color(theme::TEXT_BRIGHT),
+                            .color(theme::text_bright()),
                     );
                     let host = bs_identity::identity::host_of(&home.base);
                     ui.label(theme::muted(format!("{host} как {}", home.username)).size(12.0));
@@ -269,13 +269,13 @@ fn dot(ui: &mut egui::Ui, color: Color32) {
 }
 
 /// Цвет и подпись значка статуса.
-const fn badge(state: RowState) -> (Color32, &'static str) {
+fn badge(state: RowState) -> (Color32, &'static str) {
     match state {
-        RowState::Connected => (theme::GREEN, "Подключено"),
-        RowState::Connecting => (theme::AMBER, "Подключается…"),
-        RowState::Disconnected => (theme::GRAY, "Отключено"),
-        RowState::Unreachable => (theme::AMBER, "Недоступен"),
-        RowState::AuthExpired => (theme::RED, "Нужен вход"),
+        RowState::Connected => (theme::green(), "Подключено"),
+        RowState::Connecting => (theme::amber(), "Подключается…"),
+        RowState::Disconnected => (theme::gray(), "Отключено"),
+        RowState::Unreachable => (theme::amber(), "Недоступен"),
+        RowState::AuthExpired => (theme::red(), "Нужен вход"),
     }
 }
 
@@ -307,11 +307,11 @@ fn row_card(
         1.0
     };
     let frame = egui::Frame::new()
-        .fill(theme::BG_SIDEBAR.gamma_multiply(alpha))
+        .fill(theme::bg_sidebar().gamma_multiply(alpha))
         .stroke(Stroke::new(
             1.0,
             if expanded {
-                theme::BORDER
+                theme::border()
             } else {
                 Color32::TRANSPARENT
             },
@@ -329,17 +329,18 @@ fn row_card(
                         RichText::new(&row.label)
                             .family(theme::bold_family())
                             .size(15.0)
-                            .color(theme::TEXT_BRIGHT),
+                            .color(theme::text_bright()),
                     );
                     status_badge(ui, row.state);
                     if row.unread > 0 {
                         let (rect, _) =
                             ui.allocate_exact_size(egui::Vec2::splat(8.0), Sense::hover());
-                        ui.painter().circle_filled(rect.center(), 3.5, theme::ROSE);
+                        ui.painter()
+                            .circle_filled(rect.center(), 3.5, theme::rose());
                         ui.label(
                             RichText::new(row.unread.to_string())
                                 .size(12.0)
-                                .color(theme::ROSE),
+                                .color(theme::rose()),
                         )
                         .on_hover_text("Каналов и бесед с непрочитанным");
                     }
@@ -406,7 +407,7 @@ fn chevron(ui: &mut egui::Ui, open: bool) {
     };
     ui.painter().add(egui::Shape::convex_polygon(
         points,
-        theme::TEXT_MUTED,
+        theme::text_muted(),
         Stroke::NONE,
     ));
 }
@@ -472,13 +473,13 @@ fn details(ui: &mut egui::Ui, row: &ConnectionRow) {
     {
         ui.add_space(8.0);
         egui::Frame::new()
-            .fill(theme::RED.gamma_multiply(0.12))
-            .stroke(Stroke::new(1.0, theme::RED.gamma_multiply(0.35)))
+            .fill(theme::red().gamma_multiply(0.12))
+            .stroke(Stroke::new(1.0, theme::red().gamma_multiply(0.35)))
             .corner_radius(CornerRadius::same(6))
             .inner_margin(Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new(text).size(12.5).color(theme::ROSE));
+                ui.label(RichText::new(text).size(12.5).color(theme::rose()));
                 if let Some(detail) = row.detail.as_deref() {
                     ui.label(theme::muted(detail).size(11.0));
                 }
@@ -491,7 +492,7 @@ fn detail_cell(ui: &mut egui::Ui, width: f32, caption: &str, value: &str) {
         ui.set_width(width);
         ui.spacing_mut().item_spacing.y = 2.0;
         ui.label(theme::muted(caption).size(10.5));
-        ui.label(RichText::new(value).size(13.0).color(theme::TEXT));
+        ui.label(RichText::new(value).size(13.0).color(theme::text()));
     });
 }
 
@@ -538,20 +539,20 @@ fn actions(
         match row.state {
             RowState::Connected => {
                 if ui
-                    .add(small_button("Отключиться", theme::TEXT_MUTED))
+                    .add(small_button("Отключиться", theme::text_muted()))
                     .clicked()
                 {
                     *action = ConnAction::Disconnect(origin.clone());
                 }
-                ui.add_enabled(false, small_button("Удалить учётную запись", theme::ROSE))
+                ui.add_enabled(false, small_button("Удалить учётную запись", theme::rose()))
                     .on_disabled_hover_text("Сначала отключитесь, чтобы удалить учётную запись");
             }
             RowState::Connecting => {
-                ui.add_enabled(false, small_button("Подключается…", theme::TEXT_MUTED));
+                ui.add_enabled(false, small_button("Подключается…", theme::text_muted()));
             }
             RowState::Disconnected => {
                 if ui
-                    .add(small_button("Переподключиться", theme::ACCENT))
+                    .add(small_button("Переподключиться", theme::accent()))
                     .clicked()
                 {
                     *action = ConnAction::Reconnect(origin.clone());
@@ -562,7 +563,7 @@ fn actions(
             RowState::Unreachable | RowState::AuthExpired => {
                 if matches!(row.state, RowState::Unreachable)
                     && ui
-                        .add(small_button("Переподключиться", theme::ACCENT))
+                        .add(small_button("Переподключиться", theme::accent()))
                         .clicked()
                 {
                     *action = ConnAction::Reconnect(origin.clone());
@@ -571,7 +572,7 @@ fn actions(
                     reauth_button(ui, state, &origin);
                 }
                 if ui
-                    .add(small_button("Удалить принудительно", theme::TEXT_MUTED))
+                    .add(small_button("Удалить принудительно", theme::text_muted()))
                     .clicked()
                 {
                     state.dialog = Some(Dialog::ForceRemove {
@@ -585,7 +586,10 @@ fn actions(
 }
 
 fn reauth_button(ui: &mut egui::Ui, state: &mut ConnectionsUi, origin: &str) {
-    if ui.add(small_button("Войти заново", theme::AMBER)).clicked() {
+    if ui
+        .add(small_button("Войти заново", theme::amber()))
+        .clicked()
+    {
         state.dialog = Some(Dialog::Reauth {
             origin: origin.to_owned(),
             password: String::new(),
@@ -595,7 +599,7 @@ fn reauth_button(ui: &mut egui::Ui, state: &mut ConnectionsUi, origin: &str) {
 
 fn delete_button(ui: &mut egui::Ui, state: &mut ConnectionsUi, origin: &str) {
     if ui
-        .add(small_button("Удалить учётную запись", theme::ROSE))
+        .add(small_button("Удалить учётную запись", theme::rose()))
         .clicked()
     {
         state.dialog = Some(Dialog::Delete {
@@ -626,7 +630,7 @@ fn dialog(
     };
     ui.add_space(6.0);
     egui::Frame::new()
-        .fill(theme::BG_INPUT)
+        .fill(theme::bg_input())
         .corner_radius(CornerRadius::same(8))
         .inner_margin(Margin::same(12))
         .show(ui, |ui| {
@@ -703,7 +707,7 @@ fn dialog(
                     ui.label(
                         RichText::new("Принудительно удалить запись")
                             .family(theme::bold_family())
-                            .color(theme::TEXT_BRIGHT),
+                            .color(theme::text_bright()),
                     );
                     ui.label(
                         theme::muted(
@@ -716,7 +720,7 @@ fn dialog(
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         if ui
-                            .add(small_button("Удалить принудительно", theme::ROSE))
+                            .add(small_button("Удалить принудительно", theme::rose()))
                             .clicked()
                         {
                             *action = ConnAction::ForceRemove(origin.clone());
@@ -749,7 +753,7 @@ fn own_login_hint(ui: &mut egui::Ui, state: &mut ConnectionsUi, row: &Connection
         .size(12.0),
     );
     if ui
-        .add(small_button("Войти своим паролем", theme::AMBER))
+        .add(small_button("Войти своим паролем", theme::amber()))
         .clicked()
     {
         state.dialog = Some(Dialog::OwnLogin {
@@ -776,7 +780,7 @@ fn delete_form(
     ui.label(
         RichText::new("Удаление учётной записи")
             .family(theme::bold_family())
-            .color(theme::TEXT_BRIGHT),
+            .color(theme::text_bright()),
     );
     ui.label(
         theme::muted(format!(
@@ -819,7 +823,7 @@ fn delete_form(
         } else {
             "Удалить учётную запись"
         };
-        if ui.add(small_button(label, theme::ROSE)).clicked() {
+        if ui.add(small_button(label, theme::rose())).clicked() {
             *action = ConnAction::Delete {
                 origins: if *everywhere {
                     Vec::new()
@@ -847,9 +851,9 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
             Stroke::new(
                 1.0,
                 if hovered {
-                    theme::ACCENT
+                    theme::accent()
                 } else {
-                    theme::BORDER
+                    theme::border()
                 },
             ),
             egui::StrokeKind::Inside,
@@ -860,9 +864,9 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
             "+ Добавить сервер",
             egui::FontId::proportional(14.0),
             if hovered {
-                theme::TEXT_BRIGHT
+                theme::text_bright()
             } else {
-                theme::TEXT_MUTED
+                theme::text_muted()
             },
         );
         if response
@@ -874,8 +878,8 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
         return;
     }
     egui::Frame::new()
-        .fill(theme::BG_SIDEBAR)
-        .stroke(Stroke::new(1.0, theme::BORDER))
+        .fill(theme::bg_sidebar())
+        .stroke(Stroke::new(1.0, theme::border()))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::same(16))
         .show(ui, |ui| {
@@ -883,7 +887,7 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
             ui.label(
                 RichText::new("Добавить удалённый сервер")
                     .family(theme::bold_family())
-                    .color(theme::TEXT_BRIGHT),
+                    .color(theme::text_bright()),
             );
             ui.add_space(6.0);
             widgets::field_label(ui, "Адрес сервера");

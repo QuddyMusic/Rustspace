@@ -349,8 +349,8 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut SpaceSettings, bridge: &mut 
     let response = egui::Modal::new(egui::Id::unique("space_settings"))
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_BUBBLE)
-                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .fill(theme::bg_bubble())
+                .stroke(egui::Stroke::new(1.0, theme::border()))
                 .corner_radius(CornerRadius::same(16))
                 .inner_margin(Margin::same(0)),
         )
@@ -424,7 +424,7 @@ fn heading(ui: &mut egui::Ui, text: &str) {
         RichText::new(text)
             .size(19.0)
             .family(theme::bold_family())
-            .color(theme::TEXT_BRIGHT),
+            .color(theme::text_bright()),
     );
     ui.add_space(8.0);
 }
@@ -432,11 +432,11 @@ fn heading(ui: &mut egui::Ui, text: &str) {
 fn status_lines(ui: &mut egui::Ui, state: &SpaceSettings) {
     if let Some(err) = &state.error {
         ui.add_space(6.0);
-        ui.label(RichText::new(err).color(theme::ROSE));
+        ui.label(RichText::new(err).color(theme::rose()));
     }
     if let Some(note) = &state.notice {
         ui.add_space(6.0);
-        ui.label(RichText::new(note).color(theme::TEXT_MUTED));
+        ui.label(RichText::new(note).color(theme::text_muted()));
     }
 }
 
@@ -448,7 +448,7 @@ fn overview(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, bridge
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for name in theme::PALETTE_NAMES {
-                let color = theme::palette(name).unwrap_or(theme::ACCENT);
+                let color = theme::palette(name).unwrap_or_else(theme::accent);
                 if widgets::color_swatch(ui, color, state.fields.color == name, 30.0).clicked() {
                     name.clone_into(&mut state.fields.color);
                 }
@@ -470,12 +470,12 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge
         RichText::new("ОПАСНАЯ ЗОНА")
             .size(11.0)
             .family(theme::bold_family())
-            .color(theme::ROSE),
+            .color(theme::rose()),
     );
     ui.add_space(6.0);
     ui.label(
         RichText::new("Передать права владельца другому участнику. Вы станете обычным участником.")
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
     ui.add_space(6.0);
     if state.transfer_open {
@@ -487,7 +487,7 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge
     ui.add_space(14.0);
     ui.label(
         RichText::new("Удалить это пространство и все его данные навсегда. Это нельзя отменить.")
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
     ui.add_space(6.0);
     let label = if state.delete_armed {
@@ -497,8 +497,8 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge
     };
     let delete = ui.add_enabled(
         !state.busy,
-        egui::Button::new(RichText::new(label).color(theme::BG_RAIL))
-            .fill(theme::ROSE)
+        egui::Button::new(RichText::new(label).color(theme::bg_rail()))
+            .fill(theme::rose())
             .corner_radius(CornerRadius::same(8)),
     );
     if delete.clicked() {
@@ -572,7 +572,7 @@ fn transfer_picker(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Br
         })
         .unwrap_or_default();
     if candidates.is_empty() {
-        ui.label(RichText::new("Участники не найдены").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("Участники не найдены").color(theme::text_muted()));
     }
     for (id, name) in candidates {
         if ui.button(name).clicked() {
@@ -621,7 +621,9 @@ fn members(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, bridge:
                 .collect()
         })
         .unwrap_or_default();
-    ui.label(RichText::new("Управляйте участниками этого пространства.").color(theme::TEXT_MUTED));
+    ui.label(
+        RichText::new("Управляйте участниками этого пространства.").color(theme::text_muted()),
+    );
     ui.add_space(8.0);
     widgets::section_label(ui, &format!("Участники ({})", rows.len()));
     ui.add_space(6.0);
@@ -655,7 +657,7 @@ fn member_row(
     assignable: &[(String, String, i64)],
 ) {
     egui::Frame::new()
-        .fill(theme::BG_RAIL)
+        .fill(theme::bg_rail())
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
@@ -663,7 +665,7 @@ fn member_row(
             ui.horizontal(|ui| {
                 theme::avatar(ui, &row.name, 32.0, None, None);
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(&row.name).color(theme::TEXT_BRIGHT));
+                    ui.label(RichText::new(&row.name).color(theme::text_bright()));
                     let roles = if row.owner {
                         "Владелец".to_owned()
                     } else if row.roles.is_empty() {
@@ -674,7 +676,7 @@ fn member_row(
                     ui.label(
                         RichText::new(format!("@{} · {roles}", row.username))
                             .size(12.0)
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::text_muted()),
                     );
                 });
                 if row.owner || row.me {
@@ -719,7 +721,7 @@ fn member_roles_menu(
     assignable: &[(String, String, i64)],
 ) {
     if assignable.is_empty() {
-        ui.label(RichText::new("Ролей пока нет").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("Ролей пока нет").color(theme::text_muted()));
     }
     for (id, name, position) in assignable {
         let allowed = can_manage_role_at(rights.top, *position, rights.perms);
@@ -759,7 +761,7 @@ fn confirm_box(
             format!("Исключить {}", row.name)
         })
         .family(theme::bold_family())
-        .color(theme::TEXT_BRIGHT),
+        .color(theme::text_bright()),
     );
     ui.label(
         RichText::new(if ban {
@@ -767,7 +769,7 @@ fn confirm_box(
         } else {
             "Пользователь сможет вернуться по ссылке для приглашения."
         })
-        .color(theme::TEXT_MUTED),
+        .color(theme::text_muted()),
     );
     if ban {
         ui.add_space(4.0);
@@ -782,8 +784,8 @@ fn confirm_box(
         };
         let go = ui.add_enabled(
             !state.busy,
-            egui::Button::new(RichText::new(label).color(theme::BG_RAIL))
-                .fill(theme::ROSE)
+            egui::Button::new(RichText::new(label).color(theme::bg_rail()))
+                .fill(theme::rose())
                 .corner_radius(CornerRadius::same(8)),
         );
         if go.clicked() {
@@ -810,16 +812,16 @@ fn bans(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge) {
         RichText::new(
             "Заблокированные пользователи не могут вернуться в это пространство, пока их не разблокируют.",
         )
-        .color(theme::TEXT_MUTED),
+        .color(theme::text_muted()),
     );
     ui.add_space(8.0);
     status_lines(ui, state);
     let Some(list) = state.bans.clone() else {
-        ui.label(RichText::new("Загрузка блокировок…").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("Загрузка блокировок…").color(theme::text_muted()));
         return;
     };
     if list.is_empty() {
-        ui.label(RichText::new("Нет заблокированных пользователей").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("Нет заблокированных пользователей").color(theme::text_muted()));
         return;
     }
     widgets::section_label(ui, &format!("Блокировки ({})", list.len()));
@@ -830,7 +832,7 @@ fn bans(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge) {
             .as_ref()
             .map_or_else(|| ban.user_id.clone(), display_name);
         egui::Frame::new()
-            .fill(theme::BG_RAIL)
+            .fill(theme::bg_rail())
             .corner_radius(CornerRadius::same(10))
             .inner_margin(Margin::symmetric(10, 8))
             .show(ui, |ui| {
@@ -838,7 +840,7 @@ fn bans(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge) {
                 ui.horizontal(|ui| {
                     theme::avatar(ui, &name, 32.0, None, None);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(&name).color(theme::TEXT_BRIGHT));
+                        ui.label(RichText::new(&name).color(theme::text_bright()));
                         let by = ban
                             .moderator
                             .as_ref()
@@ -847,7 +849,7 @@ fn bans(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge) {
                             || format!("Заблокировано пользователем {by}"),
                             |reason| format!("Заблокировано пользователем {by}: {reason}"),
                         );
-                        ui.label(RichText::new(text).size(12.0).color(theme::TEXT_MUTED));
+                        ui.label(RichText::new(text).size(12.0).color(theme::text_muted()));
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui

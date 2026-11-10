@@ -22,11 +22,13 @@ mod emoji_data;
 mod fake_instance;
 mod fleet;
 mod gif_favorites;
+mod hotkeys;
 mod icons;
 mod images;
 mod logic;
 mod markdown;
 mod media;
+mod prefs;
 mod registry;
 mod saved_session;
 mod screens;
@@ -66,8 +68,8 @@ fn main() -> eframe::Result {
         "Backspace RS",
         options,
         Box::new(move |cc| {
-            theme::apply(&cc.egui_ctx);
-            Ok(Box::new(app::BackspaceApp::new(handle)))
+            theme::install(&cc.egui_ctx);
+            Ok(Box::new(app::BackspaceApp::new(&cc.egui_ctx, handle)))
         }),
     );
 

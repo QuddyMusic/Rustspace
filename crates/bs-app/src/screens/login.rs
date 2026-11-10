@@ -44,13 +44,13 @@ impl LoginScreen {
     /// Рисует экран и по нажатию кнопки (или Enter) запускает логин.
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) {
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(theme::BG_RAIL))
+            .frame(egui::Frame::new().fill(theme::bg_rail()))
             .show(ui, |ui| {
                 ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                     let top = if self.registering { 0.06 } else { 0.18 };
                     ui.add_space((ui.available_height() * top).max(24.0));
                     egui::Frame::new()
-                        .fill(theme::BG_CHAT)
+                        .fill(theme::bg_chat())
                         .corner_radius(egui::CornerRadius::same(10))
                         .inner_margin(egui::Margin::same(28))
                         .show(ui, |ui| {
@@ -89,7 +89,7 @@ impl LoginScreen {
                 egui::RichText::new("С возвращением!")
                     .size(24.0)
                     .family(theme::bold_family())
-                    .color(theme::TEXT_BRIGHT),
+                    .color(theme::text_bright()),
             );
             ui.label(theme::muted("Войдите в свой инстанс Backspace"));
         });
@@ -178,7 +178,7 @@ impl LoginScreen {
 
         if let Some(err) = bridge.last_error() {
             ui.add_space(10.0);
-            ui.label(egui::RichText::new(err).color(theme::ROSE));
+            ui.label(egui::RichText::new(err).color(theme::rose()));
         }
         ui.add_space(10.0);
         ui.vertical_centered(|ui| {

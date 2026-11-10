@@ -31,7 +31,11 @@ pub(super) struct Note {
 
 pub(super) fn show_note(ui: &mut egui::Ui, note: Option<&Note>) {
     if let Some(note) = note {
-        let color = if note.ok { theme::GREEN } else { theme::ROSE };
+        let color = if note.ok {
+            theme::green()
+        } else {
+            theme::rose()
+        };
         ui.label(RichText::new(&note.text).color(color).size(13.0));
         ui.add_space(6.0);
     }
@@ -298,7 +302,7 @@ pub(crate) fn images_card(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
         (ImageKind::Banner, "Баннер", me.banner.is_some()),
     ] {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(title).color(theme::TEXT_BRIGHT));
+            ui.label(RichText::new(title).color(theme::text_bright()));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.add_enabled(has, egui::Button::new("Убрать")).clicked() {
                     bridge.request(BridgeRequest::SetImage {
@@ -350,7 +354,7 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
         if let Some(problem) = problem
             && !(state.new.is_empty() && state.repeat.is_empty())
         {
-            ui.label(RichText::new(problem).color(theme::AMBER).size(12.5));
+            ui.label(RichText::new(problem).color(theme::amber()).size(12.5));
         }
         show_note(ui, state.password_note.as_ref());
         if ui
@@ -371,7 +375,7 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
             ui.add_space(6.0);
             if ui
                 .add(egui::Button::new(
-                    RichText::new("Удалить аккаунт").color(theme::RED),
+                    RichText::new("Удалить аккаунт").color(theme::red()),
                 ))
                 .clicked()
             {
@@ -380,7 +384,8 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
             return;
         }
         ui.label(
-            RichText::new("Чтобы удалить аккаунт, введите свой логин и пароль.").color(theme::ROSE),
+            RichText::new("Чтобы удалить аккаунт, введите свой логин и пароль.")
+                .color(theme::rose()),
         );
         widgets::field_label(ui, &format!("Логин ({})", me.username));
         widgets::text_field(ui, &mut state.delete_username, &me.username, 64);
@@ -393,7 +398,7 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
             if ui
                 .add_enabled(
                     ready,
-                    egui::Button::new(RichText::new("Удалить навсегда").color(theme::RED)),
+                    egui::Button::new(RichText::new("Удалить навсегда").color(theme::red())),
                 )
                 .clicked()
             {
@@ -420,7 +425,7 @@ pub(super) fn setting_row(ui: &mut egui::Ui, title: &str, hint: &str, value: &mu
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width() - 60.0);
-            ui.label(RichText::new(title).color(theme::TEXT_BRIGHT));
+            ui.label(RichText::new(title).color(theme::text_bright()));
             ui.label(theme::muted(hint).size(12.5));
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -440,7 +445,7 @@ pub(super) fn number_row(
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.set_width(ui.available_width() - 120.0);
-            ui.label(RichText::new(title).color(theme::TEXT_BRIGHT));
+            ui.label(RichText::new(title).color(theme::text_bright()));
             ui.label(theme::muted(hint).size(12.5));
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -628,7 +633,7 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
                 RichText::new(&password)
                     .monospace()
                     .size(16.0)
-                    .color(theme::MINT),
+                    .color(theme::mint()),
             );
             if ui.button("Скопировать и скрыть").clicked() {
                 ui.ctx().copy_text(password);
@@ -652,9 +657,9 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
                     let name = user.display_name.as_deref().unwrap_or(&user.username);
                     ui.label(RichText::new(name).family(theme::bold_family()).color(
                         if user.is_deleted {
-                            theme::TEXT_FAINT
+                            theme::text_faint()
                         } else {
-                            theme::TEXT_BRIGHT
+                            theme::text_bright()
                         },
                     ));
                     let mut meta = format!("@{}", user.username);
@@ -697,7 +702,7 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
                 if admin.confirm_delete.as_deref() == Some(user.id.as_str()) {
                     if ui
                         .add(egui::Button::new(
-                            RichText::new("Точно удалить?").color(theme::RED),
+                            RichText::new("Точно удалить?").color(theme::red()),
                         ))
                         .clicked()
                     {
@@ -710,7 +715,7 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
                     }
                 } else if ui
                     .add(egui::Button::new(
-                        RichText::new("Удалить").color(theme::ROSE),
+                        RichText::new("Удалить").color(theme::rose()),
                     ))
                     .clicked()
                 {
@@ -772,7 +777,7 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
             ),
         ] {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(label).color(theme::TEXT_BRIGHT));
+                ui.label(RichText::new(label).color(theme::text_bright()));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(theme::muted(format!("{files} файлов · {}", size(bytes))));
                 });
@@ -816,9 +821,9 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
                 size(done.freed_bytes)
             )
         };
-        ui.label(RichText::new(text).color(theme::GREEN));
+        ui.label(RichText::new(text).color(theme::green()));
         for error in done.errors.iter().take(3) {
-            ui.label(RichText::new(error).color(theme::ROSE).size(12.0));
+            ui.label(RichText::new(error).color(theme::rose()).size(12.0));
         }
         ui.add_space(6.0);
     }
@@ -831,7 +836,7 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
         if admin.confirm_cleanup {
             if ui
                 .add(egui::Button::new(
-                    RichText::new("Удалить сирот").color(theme::RED),
+                    RichText::new("Удалить сирот").color(theme::red()),
                 ))
                 .clicked()
             {

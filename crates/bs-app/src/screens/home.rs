@@ -75,7 +75,7 @@ impl HomeState {
 /// Шапка центральной области: плоская, высотой 52.
 fn header_frame() -> egui::Frame {
     egui::Frame::new()
-        .fill(theme::BG_CHAT)
+        .fill(theme::bg_chat())
         .inner_margin(Margin::symmetric(18, 0))
 }
 
@@ -89,17 +89,17 @@ pub(crate) fn show_friends(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Br
         .frame(header_frame())
         .show(ui, |ui| {
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.add(widgets::flat_icon(Icon::User, 20.0, theme::TEXT_FAINT));
+                ui.add(widgets::flat_icon(Icon::User, 20.0, theme::text_faint()));
                 ui.label(
                     RichText::new("Друзья")
                         .size(16.0)
                         .family(theme::bold_family())
-                        .color(theme::TEXT_BRIGHT),
+                        .color(theme::text_bright()),
                 );
                 ui.add_space(8.0);
                 let (line, _) = ui.allocate_exact_size(egui::vec2(1.0, 22.0), Sense::hover());
                 ui.painter()
-                    .rect_filled(line, CornerRadius::ZERO, theme::BORDER);
+                    .rect_filled(line, CornerRadius::ZERO, theme::border());
                 ui.add_space(8.0);
                 for (tab, label) in [
                     (FriendsTab::Online, "В сети".to_owned()),
@@ -127,12 +127,12 @@ pub(crate) fn show_friends(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Br
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_CHAT)
+                .fill(theme::bg_chat())
                 .inner_margin(Margin::symmetric(24, 6)),
         )
         .show(ui, |ui| {
             if let Some(err) = bridge.social_error() {
-                ui.label(RichText::new(err).color(theme::ROSE));
+                ui.label(RichText::new(err).color(theme::rose()));
                 ui.add_space(6.0);
             }
             egui::ScrollArea::vertical()
@@ -295,12 +295,12 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
         RichText::new("Добавить в друзья")
             .size(16.0)
             .family(theme::bold_family())
-            .color(theme::TEXT_BRIGHT),
+            .color(theme::text_bright()),
     );
     ui.label(theme::muted("Найдите человека по имени пользователя.").size(13.0));
     ui.add_space(10.0);
     egui::Frame::new()
-        .fill(theme::BG_INPUT)
+        .fill(theme::bg_input())
         .corner_radius(CornerRadius::same(9))
         .inner_margin(Margin::symmetric(14, 8))
         .show(ui, |ui| {
@@ -308,7 +308,7 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
                 let width = (ui.available_width() - 100.0).max(80.0);
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut state.add_query)
-                        .hint_text(RichText::new("Имя пользователя").color(theme::TEXT_FAINT))
+                        .hint_text(RichText::new("Имя пользователя").color(theme::text_faint()))
                         .frame(egui::Frame::NONE)
                         .desired_width(width),
                 );
@@ -362,7 +362,7 @@ pub(crate) fn show_active_now(ui: &mut egui::Ui, bridge: &Bridge) {
         .resizable(false)
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_CHAT)
+                .fill(theme::bg_chat())
                 .inner_margin(Margin::symmetric(18, 14)),
         )
         .show(ui, |ui| {
@@ -370,7 +370,7 @@ pub(crate) fn show_active_now(ui: &mut egui::Ui, bridge: &Bridge) {
                 RichText::new("Сейчас онлайн")
                     .size(18.0)
                     .family(theme::bold_family())
-                    .color(theme::TEXT_BRIGHT),
+                    .color(theme::text_bright()),
             );
             ui.add_space(10.0);
             let mut friends: Vec<_> = bridge.friends().iter().collect();
@@ -436,12 +436,12 @@ pub(crate) fn show_explore(
         .frame(header_frame())
         .show(ui, |ui| {
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.add(widgets::flat_icon(Icon::Compass, 20.0, theme::TEXT_FAINT));
+                ui.add(widgets::flat_icon(Icon::Compass, 20.0, theme::text_faint()));
                 ui.label(
                     RichText::new("Обзор")
                         .size(16.0)
                         .family(theme::bold_family())
-                        .color(theme::TEXT_BRIGHT),
+                        .color(theme::text_bright()),
                 );
                 ui.add_space(10.0);
                 ui.allocate_ui(egui::vec2(300.0, 32.0), |ui| {
@@ -466,12 +466,12 @@ pub(crate) fn show_explore(
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_CHAT)
+                .fill(theme::bg_chat())
                 .inner_margin(Margin::symmetric(24, 8)),
         )
         .show(ui, |ui| {
             if let Some(err) = err {
-                ui.label(RichText::new(err).color(theme::ROSE));
+                ui.label(RichText::new(err).color(theme::rose()));
                 ui.add_space(6.0);
             }
             egui::ScrollArea::vertical()
@@ -533,8 +533,8 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
         .unwrap_or_else(|| theme::color_for(&space.name));
     let mut action = None;
     egui::Frame::new()
-        .fill(theme::BG_SIDEBAR)
-        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .fill(theme::bg_sidebar())
+        .stroke(egui::Stroke::new(1.0, theme::border()))
         .corner_radius(CornerRadius::same(10))
         .show(ui, |ui| {
             ui.set_width(CARD_WIDTH);
@@ -563,7 +563,7 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                     egui::Align2::RIGHT_CENTER,
                     tag,
                     egui::FontId::new(10.0, theme::bold_family()),
-                    theme::TEXT_BRIGHT.gamma_multiply(0.8),
+                    theme::text_bright().gamma_multiply(0.8),
                 );
                 let tile = egui::Rect::from_min_size(
                     banner.left_bottom() + egui::vec2(14.0, -26.0),
@@ -572,7 +572,7 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                 ui.painter().rect_filled(
                     tile.expand(3.0),
                     CornerRadius::same(17),
-                    theme::BG_SIDEBAR,
+                    theme::bg_sidebar(),
                 );
                 ui.painter()
                     .rect_filled(tile, CornerRadius::same(14), color);
@@ -592,7 +592,7 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                             RichText::new(theme::truncate_chars(&space.name, 30))
                                 .size(15.5)
                                 .family(theme::bold_family())
-                                .color(theme::TEXT_BRIGHT),
+                                .color(theme::text_bright()),
                         );
                         let description = space
                             .description
@@ -604,26 +604,26 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                                 RichText::new("Нет описания")
                                     .italics()
                                     .size(12.5)
-                                    .color(theme::TEXT_FAINT)
+                                    .color(theme::text_faint())
                             },
                             |text| theme::muted(theme::truncate_chars(text, 70)).size(12.5),
                         ));
                         ui.label(
                             theme::muted(members_text(space.member_count))
                                 .size(12.0)
-                                .color(theme::TEXT_FAINT),
+                                .color(theme::text_faint()),
                         );
                         ui.add_space(6.0);
                         let width = ui.available_width();
                         let (label, fill, text) = if joined {
-                            ("Открыть", theme::MINT_BG, theme::MINT)
+                            ("Открыть", theme::mint_bg(), theme::mint())
                         } else if space.visibility == SpaceVisibility::Public {
-                            ("Вступить", theme::ACCENT, egui::Color32::WHITE)
+                            ("Вступить", theme::accent(), theme::on_accent())
                         } else {
                             (
                                 "Подать заявку",
                                 egui::Color32::from_rgb(0x3d, 0x33, 0x14),
-                                theme::AMBER,
+                                theme::amber(),
                             )
                         };
                         let button = egui::Button::new(RichText::new(label).color(text))

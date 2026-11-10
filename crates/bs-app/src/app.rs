@@ -37,7 +37,12 @@ pub(crate) struct BackspaceApp {
 
 impl BackspaceApp {
     /// Создаёт приложение; `runtime` — handle фонового tokio-runtime.
-    pub(crate) fn new(runtime: Handle) -> Self {
+    ///
+    /// Загружает сохранённые настройки и сразу применяет оформление и масштаб.
+    pub(crate) fn new(ctx: &egui::Context, runtime: Handle) -> Self {
+        let prefs = crate::prefs::load(crate::prefs::default_path());
+        crate::theme::apply(ctx, &prefs.appearance);
+        ctx.set_zoom_factor(prefs.scale);
         let mut bridge = Bridge::new(runtime);
         let mut login = LoginScreen::default();
         // Сохранённая сессия: входим по токену, без пароля.
@@ -48,7 +53,7 @@ impl BackspaceApp {
             screen: Screen::Login,
             bridge,
             login,
-            chat: ChatScreen::default(),
+            chat: ChatScreen::with_prefs(),
             images: ImageHub::default(),
         }
     }
@@ -133,9 +138,9 @@ impl BackspaceApp {
             .frame(
                 egui::Frame::new()
                     .fill(if notice.is_some() {
-                        theme::ROSE
+                        theme::rose()
                     } else {
-                        theme::AMBER
+                        theme::amber()
                     })
                     .inner_margin(egui::Margin::symmetric(16, 6)),
             )
@@ -165,6 +170,10 @@ impl BackspaceApp {
 }
 
 impl eframe::App for BackspaceApp {
+    fn on_exit(&mut self) {
+        crate::prefs::flush(true);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.bridge.poll();
 
@@ -215,6 +224,8 @@ impl eframe::App for BackspaceApp {
                 }
             }
         }
+
+        crate::prefs::flush(false);
 
         // Фоновые события приходят из tokio; без этого окно спало бы вечно.
         if should_wake(self.bridge.is_busy(), self.bridge.cache().is_some()) {

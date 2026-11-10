@@ -1,0 +1,363 @@
+//! Настройки клиента, сохраняемые на диск: масштаб, оформление, голос,
+//! звуки, уведомления, горячие клавиши, язык.
+//!
+//! Файл `prefs.json` лежит в каталоге настроек приложения рядом с
+//! `session.json`. Пишется атомарно (временный файл + rename) и не чаще раза
+//! в секунду: изменения копятся в памяти, [`flush`] сохраняет их, когда
+//! прошла пауза, и при выходе. Неизвестные или битые поля заменяются
+//! значениями по умолчанию — старый файл никогда не мешает запуску.
+//!
+//! Хранилище глобальное: настройки читаются из многих экранов, а egui-кадр
+//! однопоточный, так что блокировка не спорная.
+
+use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
+
+use crate::theme::Appearance;
+use crate::voice_media::VoicePrefs;
+
+/// Имя файла в каталоге настроек.
+const FILE_NAME: &str = "prefs.json";
+/// Пауза перед записью после последнего изменения.
+const SAVE_DELAY: Duration = Duration::from_secs(1);
+
+/// Звуки интерфейса (как `soundEffectVolume`/`messageSoundAllChannels` оригинала).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct SoundPrefs {
+    /// Громкость звуков, 0–200 (100 — как записано).
+    pub(crate) volume: u16,
+    /// Звук сообщения во всех каналах, а не только в ЛС и упоминаниях.
+    pub(crate) message_all_channels: bool,
+}
+
+impl Default for SoundPrefs {
+    fn default() -> Self {
+        Self {
+            volume: 100,
+            message_all_channels: false,
+        }
+    }
+}
+
+/// Системные уведомления рабочего стола.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct DesktopPrefs {
+    /// Показывать системные уведомления о новых сообщениях.
+    pub(crate) notifications: bool,
+    /// Показывать текст сообщения в уведомлении.
+    pub(crate) previews: bool,
+    /// Только когда окно не в фокусе.
+    pub(crate) only_unfocused: bool,
+}
+
+impl Default for DesktopPrefs {
+    fn default() -> Self {
+        Self {
+            notifications: true,
+            previews: true,
+            only_unfocused: true,
+        }
+    }
+}
+
+/// Действия, которым можно назначить сочетание клавиш (как
+/// `BINDABLE_ACTIONS` оригинала).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Action {
+    /// Переключить микрофон.
+    ToggleMute,
+    /// Переключить звук.
+    ToggleDeafen,
+    /// Говорить, пока клавиша зажата.
+    PushToTalk,
+    /// Переключить камеру.
+    ToggleCamera,
+    /// Начать или остановить показ экрана.
+    ToggleScreenShare,
+    /// Выйти из голосового канала.
+    Disconnect,
+}
+
+impl Action {
+    /// Все действия в порядке показа.
+    pub(crate) const ALL: [Self; 6] = [
+        Self::ToggleMute,
+        Self::ToggleDeafen,
+        Self::PushToTalk,
+        Self::ToggleCamera,
+        Self::ToggleScreenShare,
+        Self::Disconnect,
+    ];
+
+    /// Подпись в настройках.
+    pub(crate) const fn title(self) -> &'static str {
+        match self {
+            Self::ToggleMute => "Вкл/выкл микрофон",
+            Self::ToggleDeafen => "Вкл/выкл звук",
+            Self::PushToTalk => "Рация (говорить, пока зажато)",
+            Self::ToggleCamera => "Вкл/выкл камеру",
+            Self::ToggleScreenShare => "Показ экрана",
+            Self::Disconnect => "Выйти из голосового канала",
+        }
+    }
+}
+
+/// Сочетание клавиш: модификаторы и клавиша `egui`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Keybind {
+    /// Ctrl (Cmd на macOS).
+    #[serde(default)]
+    pub(crate) command: bool,
+    /// Shift.
+    #[serde(default)]
+    pub(crate) shift: bool,
+    /// Alt.
+    #[serde(default)]
+    pub(crate) alt: bool,
+    /// Клавиша.
+    pub(crate) key: egui::Key,
+}
+
+impl Keybind {
+    /// Совпадают ли модификаторы с зажатыми сейчас.
+    pub(crate) fn modifiers_match(self, modifiers: egui::Modifiers) -> bool {
+        modifiers.command == self.command
+            && modifiers.shift == self.shift
+            && modifiers.alt == self.alt
+    }
+
+    /// Человеческая подпись: «Ctrl+Shift+M».
+    pub(crate) fn label(self) -> String {
+        let mut out = String::new();
+        if self.command {
+            out.push_str(if cfg!(target_os = "macos") {
+                "⌘+"
+            } else {
+                "Ctrl+"
+            });
+        }
+        if self.shift {
+            out.push_str("Shift+");
+        }
+        if self.alt {
+            out.push_str("Alt+");
+        }
+        out.push_str(self.key.name());
+        out
+    }
+}
+
+/// Язык интерфейса.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Language {
+    /// Русский.
+    #[default]
+    Ru,
+    /// English.
+    En,
+}
+
+/// Все сохраняемые настройки.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct Prefs {
+    /// Масштаб интерфейса (zoom factor `egui`).
+    pub(crate) scale: f32,
+    /// Оформление.
+    pub(crate) appearance: Appearance,
+    /// Голос: устройства и обработка звука.
+    pub(crate) voice: VoicePrefs,
+    /// Звуки интерфейса.
+    pub(crate) sounds: SoundPrefs,
+    /// Системные уведомления.
+    pub(crate) desktop: DesktopPrefs,
+    /// Горячие клавиши (работают, пока окно в фокусе).
+    pub(crate) keybinds: std::collections::BTreeMap<Action, Keybind>,
+    /// Язык интерфейса.
+    pub(crate) language: Language,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            appearance: Appearance::default(),
+            voice: VoicePrefs::default(),
+            sounds: SoundPrefs::default(),
+            desktop: DesktopPrefs::default(),
+            keybinds: std::collections::BTreeMap::new(),
+            language: Language::default(),
+        }
+    }
+}
+
+impl Prefs {
+    /// Приводит значения к допустимым диапазонам.
+    fn sanitize(mut self) -> Self {
+        if !self.scale.is_finite() {
+            self.scale = 1.0;
+        }
+        self.scale = self.scale.clamp(0.5, 3.0);
+        self.sounds.volume = self.sounds.volume.min(200);
+        self.voice.input_volume = self.voice.input_volume.min(200);
+        self.voice.output_volume = self.voice.output_volume.min(200);
+        self.appearance.radius = self.appearance.radius.min(20);
+        self
+    }
+}
+
+#[derive(Debug)]
+struct Store {
+    prefs: Prefs,
+    path: Option<PathBuf>,
+    /// Время последнего несохранённого изменения.
+    dirty_since: Option<Instant>,
+}
+
+static STORE: Mutex<Option<Store>> = Mutex::new(None);
+
+fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
+    f(STORE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(|| Store {
+            prefs: Prefs::default(),
+            path: None,
+            dirty_since: None,
+        }))
+}
+
+/// Путь к файлу настроек по умолчанию.
+pub(crate) fn default_path() -> Option<PathBuf> {
+    crate::saved_session::config_dir().map(|dir| dir.join(FILE_NAME))
+}
+
+/// Загружает настройки из файла (или берёт значения по умолчанию) и
+/// запоминает путь для последующих сохранений.
+pub(crate) fn load(path: Option<PathBuf>) -> Prefs {
+    let prefs = path
+        .as_deref()
+        .and_then(|path| std::fs::read(path).ok())
+        .and_then(|bytes| match serde_json::from_slice::<Prefs>(&bytes) {
+            Ok(prefs) => Some(prefs),
+            Err(err) => {
+                tracing::warn!(%err, "prefs.json повреждён — используются настройки по умолчанию");
+                None
+            }
+        })
+        .unwrap_or_default()
+        .sanitize();
+    with_store(|store| {
+        store.prefs = prefs.clone();
+        store.path = path;
+        store.dirty_since = None;
+    });
+    prefs
+}
+
+/// Копия текущих настроек.
+pub(crate) fn get() -> Prefs {
+    with_store(|store| store.prefs.clone())
+}
+
+/// Меняет настройки; сохранение произойдёт при следующем [`flush`].
+pub(crate) fn update(change: impl FnOnce(&mut Prefs)) {
+    with_store(|store| {
+        let before = store.prefs.clone();
+        change(&mut store.prefs);
+        if store.prefs != before {
+            store.dirty_since = Some(Instant::now());
+        }
+    });
+}
+
+/// Сохраняет изменения, если с последнего прошла пауза (или `force`).
+pub(crate) fn flush(force: bool) {
+    let pending = with_store(|store| {
+        let due = store
+            .dirty_since
+            .is_some_and(|since| force || since.elapsed() >= SAVE_DELAY);
+        if !due {
+            return None;
+        }
+        store.dirty_since = None;
+        store.path.clone().map(|path| (path, store.prefs.clone()))
+    });
+    if let Some((path, prefs)) = pending
+        && let Err(err) = write(&path, &prefs)
+    {
+        tracing::warn!(%err, path = %path.display(), "не удалось сохранить настройки");
+    }
+}
+
+/// Атомарная запись файла.
+fn write(path: &std::path::Path, prefs: &Prefs) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let json = serde_json::to_vec_pretty(prefs).map_err(std::io::Error::other)?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(&tmp, path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Action, Keybind, Prefs, write};
+    use crate::theme::Preset;
+
+    #[test]
+    fn roundtrip_keeps_every_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("prefs.json");
+        let mut prefs = Prefs {
+            scale: 1.25,
+            ..Prefs::default()
+        };
+        prefs.appearance.preset = Preset::Nord;
+        prefs.sounds.volume = 150;
+        prefs.voice.noise_suppression = false;
+        prefs.keybinds.insert(
+            Action::ToggleMute,
+            Keybind {
+                command: true,
+                shift: true,
+                alt: false,
+                key: egui::Key::M,
+            },
+        );
+        write(&path, &prefs).unwrap();
+        let back: Prefs = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(back, prefs);
+    }
+
+    #[test]
+    fn broken_values_fall_back_to_defaults() {
+        let parsed: Prefs =
+            serde_json::from_str(r#"{"scale": 99, "sounds": {"volume": 900}, "unknown": 1}"#)
+                .unwrap();
+        let fixed = parsed.sanitize();
+        assert!((fixed.scale - 3.0).abs() < f32::EPSILON);
+        assert_eq!(fixed.sounds.volume, 200);
+        assert_eq!(fixed.appearance, crate::theme::Appearance::default());
+    }
+
+    #[test]
+    fn keybind_label_is_readable() {
+        let bind = Keybind {
+            command: false,
+            shift: true,
+            alt: true,
+            key: egui::Key::F5,
+        };
+        assert_eq!(bind.label(), "Shift+Alt+F5");
+    }
+}

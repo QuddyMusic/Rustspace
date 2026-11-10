@@ -71,8 +71,8 @@ pub(crate) fn show_create_space(
     let response = egui::Modal::new(egui::Id::unique("create_space"))
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_BUBBLE)
-                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .fill(theme::bg_bubble())
+                .stroke(egui::Stroke::new(1.0, theme::border()))
                 .corner_radius(CornerRadius::same(16))
                 .inner_margin(Margin::same(22)),
         )
@@ -83,7 +83,7 @@ pub(crate) fn show_create_space(
                     RichText::new("Создать пространство")
                         .size(19.0)
                         .family(theme::bold_family())
-                        .color(theme::TEXT_BRIGHT),
+                        .color(theme::text_bright()),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if widgets::icon_button(ui, Icon::Close, 30.0).clicked() {
@@ -94,7 +94,7 @@ pub(crate) fn show_create_space(
             ui.add_space(12.0);
             ui.vertical_centered(|ui| {
                 let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(76.0), Sense::hover());
-                let color = theme::palette(form.color).unwrap_or(theme::ACCENT);
+                let color = theme::palette(form.color).unwrap_or_else(theme::accent);
                 ui.painter().circle_filled(rect.center(), 38.0, color);
                 let letter = form
                     .name
@@ -114,7 +114,7 @@ pub(crate) fn show_create_space(
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 for name in theme::PALETTE_NAMES {
-                    let color = theme::palette(name).unwrap_or(theme::ACCENT);
+                    let color = theme::palette(name).unwrap_or_else(theme::accent);
                     if widgets::color_swatch(ui, color, form.color == name, 30.0).clicked() {
                         form.color = name;
                     }
@@ -161,7 +161,7 @@ pub(crate) fn show_create_space(
                 && let Some(err) = bridge.social_error()
             {
                 ui.add_space(6.0);
-                ui.label(RichText::new(err).color(theme::ROSE));
+                ui.label(RichText::new(err).color(theme::rose()));
             }
             ui.add_space(14.0);
             let request = form.request();
@@ -197,10 +197,12 @@ pub(crate) fn show_create_space(
 pub(crate) enum SettingsSection {
     /// Профиль и статус.
     Account,
-    /// Масштаб интерфейса.
+    /// Темы, масштаб, плотность.
     Appearance,
     /// Голос и видео.
     Voice,
+    /// Горячие клавиши.
+    Hotkeys,
     /// Приватность.
     Privacy,
     /// Соединение с инстансом.
@@ -229,6 +231,7 @@ impl SettingsSection {
             Self::Account => "Аккаунт",
             Self::Appearance => "Внешний вид",
             Self::Voice => "Голос и видео",
+            Self::Hotkeys => "Горячие клавиши",
             Self::Privacy => "Приватность",
             Self::Connections => "Подключения",
             Self::Instance => "Инстанс",
@@ -282,7 +285,10 @@ pub(crate) struct SettingsState {
     avatar_color: Option<String>,
     discoverable: bool,
     show_activity: bool,
-    scale: f32,
+    /// Страница «Внешний вид».
+    appearance: super::appearance::AppearanceState,
+    /// Страница «Горячие клавиши».
+    hotkeys: super::settings_app::HotkeysState,
     /// Состояние панели «Подключения».
     connections: super::connections::ConnectionsUi,
     /// Картинки профиля, пароль и админские разделы.
@@ -309,7 +315,7 @@ const fn chosen_from(status: UserStatus) -> ChosenUserStatus {
 
 impl SettingsState {
     /// Копия текущего профиля для редактирования.
-    pub(crate) fn from_user(user: &User, scale: f32) -> Self {
+    pub(crate) fn from_user(user: &User) -> Self {
         Self {
             section: SettingsSection::Account,
             display_name: user.display_name.clone().unwrap_or_default(),
@@ -319,7 +325,8 @@ impl SettingsState {
             avatar_color: user.avatar_color.clone(),
             discoverable: user.discoverable.unwrap_or(true),
             show_activity: user.show_activity.unwrap_or(true),
-            scale,
+            appearance: super::appearance::AppearanceState::default(),
+            hotkeys: super::settings_app::HotkeysState::default(),
             connections: super::connections::ConnectionsUi::default(),
             extra: super::settings_extra::ExtraUi::default(),
             admin_slots: Vec::new(),
@@ -425,8 +432,8 @@ fn show_settings_inner(
     ui.painter().rect(
         window,
         CornerRadius::same(16),
-        theme::BG_RAIL,
-        egui::Stroke::new(1.0, theme::BORDER),
+        theme::bg_rail(),
+        egui::Stroke::new(1.0, theme::border()),
         egui::StrokeKind::Inside,
     );
     let mut ui = ui.new_child(
@@ -491,8 +498,8 @@ fn settings_nav(
 ) {
     let name = user_display_name(me.display_name.as_deref(), &me.username);
     egui::Frame::new()
-        .fill(theme::BG_SIDEBAR)
-        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .fill(theme::bg_sidebar())
+        .stroke(egui::Stroke::new(1.0, theme::border()))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::symmetric(12, 10))
         .show(ui, |ui| {
@@ -504,7 +511,7 @@ fn settings_nav(
                     ui.label(
                         RichText::new(theme::truncate_chars(&name, 18))
                             .family(theme::bold_family())
-                            .color(theme::TEXT_BRIGHT),
+                            .color(theme::text_bright()),
                     );
                     ui.label(theme::muted(format!("@{}", me.username)).size(12.0));
                 });
@@ -512,8 +519,8 @@ fn settings_nav(
         });
     ui.add_space(10.0);
     egui::Frame::new()
-        .fill(theme::BG_SIDEBAR)
-        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .fill(theme::bg_sidebar())
+        .stroke(egui::Stroke::new(1.0, theme::border()))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::symmetric(8, 12))
         .show(ui, |ui| {
@@ -542,7 +549,11 @@ fn settings_nav(
                     SettingsSection::Privacy,
                 ],
             );
-            group(ui, "Приложение", &[SettingsSection::Connections]);
+            group(
+                ui,
+                "Приложение",
+                &[SettingsSection::Hotkeys, SettingsSection::Connections],
+            );
             if !state.admin_slots.is_empty() {
                 if state.admin_slots.len() > 1 {
                     let current = state.admin_slot.unwrap_or(state.admin_slots[0].0);
@@ -592,7 +603,7 @@ fn settings_nav(
                 ui.painter().rect_filled(
                     rect.shrink2(egui::vec2(8.0, 1.0)),
                     CornerRadius::same(8),
-                    theme::BG_HOVER,
+                    theme::bg_hover(),
                 );
             }
             ui.painter().text(
@@ -600,7 +611,7 @@ fn settings_nav(
                 egui::Align2::LEFT_CENTER,
                 "Выйти",
                 egui::FontId::proportional(15.0),
-                theme::ROSE,
+                theme::rose(),
             );
             if response.clicked() {
                 *action = SettingsAction::Logout;
@@ -616,8 +627,8 @@ fn settings_nav(
 /// Карточка раздела: подложка с тонкой рамкой.
 pub(super) fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
-        .fill(theme::BG_SIDEBAR)
-        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .fill(theme::bg_sidebar())
+        .stroke(egui::Stroke::new(1.0, theme::border()))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::same(16))
         .show(ui, |ui| {
@@ -632,7 +643,7 @@ pub(super) fn page_title(ui: &mut egui::Ui, text: &str) {
         RichText::new(text)
             .size(22.0)
             .family(theme::bold_family())
-            .color(theme::TEXT_BRIGHT),
+            .color(theme::text_bright()),
     );
     ui.add_space(14.0);
 }
@@ -648,8 +659,9 @@ fn section_content(
 ) {
     match state.section {
         SettingsSection::Account => account(ui, state, me, bridge),
-        SettingsSection::Appearance => appearance(ui, state),
+        SettingsSection::Appearance => super::appearance::page(ui, &mut state.appearance),
         SettingsSection::Voice => voice_settings(ui, state, bridge, voice),
+        SettingsSection::Hotkeys => super::settings_app::hotkeys(ui, &mut state.hotkeys),
         SettingsSection::Privacy => privacy(ui, state, me, bridge),
         SettingsSection::Connections => connections(ui, state, bridge, action),
         SettingsSection::Instance if me.is_admin => {
@@ -697,7 +709,7 @@ fn save_bar(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Br
     let request = state.diff(me);
     ui.add_space(14.0);
     if let Some(err) = bridge.social_error() {
-        ui.label(RichText::new(err).color(theme::ROSE));
+        ui.label(RichText::new(err).color(theme::rose()));
         ui.add_space(6.0);
     }
     ui.horizontal(|ui| {
@@ -712,7 +724,7 @@ fn save_bar(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Br
             .add_enabled(state.diff(me).is_some(), egui::Button::new("Сбросить"))
             .clicked()
         {
-            *state = SettingsState::from_user(me, state.scale);
+            *state = SettingsState::from_user(me);
             state.section = SettingsSection::Account;
         }
     });
@@ -736,10 +748,10 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
         .avatar_color
         .as_deref()
         .and_then(theme::palette)
-        .unwrap_or(theme::ACCENT);
+        .unwrap_or_else(theme::accent);
     egui::Frame::new()
-        .fill(theme::BG_SIDEBAR)
-        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .fill(theme::bg_sidebar())
+        .stroke(egui::Stroke::new(1.0, theme::border()))
         .corner_radius(CornerRadius::same(10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -775,7 +787,7 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
                 egui::Vec2::splat(64.0),
             );
             ui.painter()
-                .circle_filled(avatar_rect.center(), 35.0, theme::BG_SIDEBAR);
+                .circle_filled(avatar_rect.center(), 35.0, theme::bg_sidebar());
             theme::paint_avatar(
                 ui.painter(),
                 avatar_rect,
@@ -793,7 +805,7 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
                         RichText::new(&shown)
                             .size(16.0)
                             .family(theme::bold_family())
-                            .color(theme::TEXT_BRIGHT),
+                            .color(theme::text_bright()),
                     );
                     ui.label(theme::muted(format!("@{}", me.username)).size(12.5));
                     if !state.bio.trim().is_empty() {
@@ -811,7 +823,7 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for name in theme::PALETTE_NAMES {
-                let color = theme::palette(name).unwrap_or(theme::ACCENT);
+                let color = theme::palette(name).unwrap_or_else(theme::accent);
                 let selected = state.avatar_color.as_deref() == Some(name);
                 if widgets::color_swatch(ui, color, selected, 32.0).clicked() {
                     state.avatar_color = Some(name.to_owned());
@@ -856,25 +868,6 @@ const fn chosen_label(status: ChosenUserStatus) -> &'static str {
         ChosenUserStatus::Idle => "Нет на месте",
         ChosenUserStatus::DoNotDisturb => "Не беспокоить",
     }
-}
-
-/// «Внешний вид»: масштаб интерфейса.
-fn appearance(ui: &mut egui::Ui, state: &mut SettingsState) {
-    page_title(ui, "Внешний вид");
-    card(ui, |ui| {
-        widgets::section_label(ui, "Масштаб интерфейса");
-        ui.add_space(6.0);
-        let response = ui.add(
-            egui::Slider::new(&mut state.scale, 0.8..=1.5)
-                .step_by(0.05)
-                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
-        );
-        if response.drag_stopped() || (response.changed() && !response.dragged()) {
-            ui.ctx().set_zoom_factor(state.scale);
-        }
-        ui.add_space(6.0);
-        ui.label(theme::muted("Применяется после того, как вы отпустите ползунок.").size(12.5));
-    });
 }
 
 /// «Голос и видео»: устройства и обработка звука.
@@ -958,6 +951,7 @@ fn voice_settings(
     if changed {
         let prefs = voice.prefs.clone();
         voice.media(bridge).apply_prefs(&prefs);
+        crate::prefs::update(|saved| saved.voice = prefs);
     }
 }
 
@@ -1004,7 +998,7 @@ fn privacy(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.set_width(ui.available_width() - 60.0);
-                    ui.label(RichText::new(title).color(theme::TEXT_BRIGHT));
+                    ui.label(RichText::new(title).color(theme::text_bright()));
                     ui.label(theme::muted(hint).size(12.5));
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1055,13 +1049,13 @@ mod tests {
     #[test]
     fn unchanged_settings_produce_no_request() {
         let me = user();
-        assert!(SettingsState::from_user(&me, 1.0).diff(&me).is_none());
+        assert!(SettingsState::from_user(&me).diff(&me).is_none());
     }
 
     #[test]
     fn only_changed_fields_are_sent() {
         let me = user();
-        let mut state = SettingsState::from_user(&me, 1.0);
+        let mut state = SettingsState::from_user(&me);
         state.custom_status = "  busy  ".into();
         state.discoverable = false;
         let request = state.diff(&me).expect("есть изменения");

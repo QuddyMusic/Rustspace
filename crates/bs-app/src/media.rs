@@ -146,7 +146,7 @@ fn download_badge(
     let fill = if overlay {
         Color32::from_black_alpha(if hover { 200 } else { 150 })
     } else if hover {
-        theme::BG_HOVER
+        theme::bg_hover()
     } else {
         Color32::TRANSPARENT
     };
@@ -161,12 +161,18 @@ fn download_badge(
                 Align2::CENTER_CENTER,
                 text,
                 FontId::proportional(10.5),
-                theme::TEXT_BRIGHT,
+                theme::text_bright(),
             );
             ui.ctx().request_repaint();
         }
         Some(Download::Done) => {
-            crate::icons::paint(ui.painter(), rect.center(), 16.0, Icon::Check, theme::GREEN);
+            crate::icons::paint(
+                ui.painter(),
+                rect.center(),
+                16.0,
+                Icon::Check,
+                theme::green(),
+            );
         }
         Some(Download::Failed(_)) => {
             crate::icons::paint(
@@ -174,14 +180,14 @@ fn download_badge(
                 rect.center(),
                 16.0,
                 Icon::Download,
-                theme::RED,
+                theme::red(),
             );
         }
         None => {
             let color = if hover {
-                theme::TEXT_BRIGHT
+                theme::text_bright()
             } else {
-                theme::TEXT_MUTED
+                theme::text_muted()
             };
             crate::icons::paint(ui.painter(), rect.center(), 16.0, Icon::Download, color);
         }
@@ -242,11 +248,11 @@ pub(crate) fn show_download_all(
         rect,
         CornerRadius::same(8),
         if hover {
-            theme::BG_HOVER
+            theme::bg_hover()
         } else {
-            theme::BG_BUBBLE
+            theme::bg_bubble()
         },
-        egui::Stroke::new(1.0, theme::BORDER),
+        egui::Stroke::new(1.0, theme::border()),
         egui::StrokeKind::Inside,
     );
     crate::icons::paint(
@@ -259,9 +265,9 @@ pub(crate) fn show_download_all(
             Icon::Download
         },
         if done == attachments.len() {
-            theme::GREEN
+            theme::green()
         } else {
-            theme::TEXT_MUTED
+            theme::text_muted()
         },
     );
     ui.painter().text(
@@ -269,7 +275,7 @@ pub(crate) fn show_download_all(
         Align2::LEFT_CENTER,
         label,
         FontId::proportional(13.0),
-        theme::TEXT,
+        theme::text(),
     );
     if hover {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -414,21 +420,21 @@ pub(crate) fn show_gif(ui: &mut egui::Ui, url: &str) -> Option<Hit> {
 
 fn placeholder(ui: &egui::Ui, rect: Rect, text: &str) {
     ui.painter()
-        .rect_filled(rect, CornerRadius::same(10), theme::BG_BUBBLE);
+        .rect_filled(rect, CornerRadius::same(10), theme::bg_bubble());
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
         theme::truncate_chars(text, 28),
         FontId::proportional(12.5),
-        theme::TEXT_FAINT,
+        theme::text_faint(),
     );
 }
 
 fn file_card(ui: &mut egui::Ui, att: &AttachmentView, downloads: &mut Vec<DownloadHit>) {
     let state = download_of(ui, att);
     egui::Frame::new()
-        .fill(theme::BG_BUBBLE)
-        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+        .fill(theme::bg_bubble())
+        .stroke(egui::Stroke::new(1.0, theme::border()))
         .corner_radius(10)
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
@@ -436,7 +442,8 @@ fn file_card(ui: &mut egui::Ui, att: &AttachmentView, downloads: &mut Vec<Downlo
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.label(
-                        egui::RichText::new(theme::truncate_chars(&att.name, 40)).color(theme::SKY),
+                        egui::RichText::new(theme::truncate_chars(&att.name, 40))
+                            .color(theme::sky()),
                     );
                     ui.label(theme::muted(human_size(att.size)).size(11.5));
                 });
@@ -483,7 +490,7 @@ pub(crate) fn viewer(ctx: &egui::Context, value: &str) -> bool {
                         Align2::CENTER_CENTER,
                         "Загрузка…",
                         FontId::proportional(16.0),
-                        theme::TEXT_MUTED,
+                        theme::text_muted(),
                     );
                 }
                 _ => {
@@ -492,7 +499,7 @@ pub(crate) fn viewer(ctx: &egui::Context, value: &str) -> bool {
                         Align2::CENTER_CENTER,
                         "Не удалось показать картинку",
                         FontId::proportional(16.0),
-                        theme::TEXT_MUTED,
+                        theme::text_muted(),
                     );
                 }
             }
@@ -505,7 +512,7 @@ pub(crate) fn viewer(ctx: &egui::Context, value: &str) -> bool {
             let color = if close_resp.hovered() {
                 Color32::WHITE
             } else {
-                theme::TEXT_MUTED
+                theme::text_muted()
             };
             crate::icons::paint(
                 ui.painter(),

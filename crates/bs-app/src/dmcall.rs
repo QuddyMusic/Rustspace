@@ -406,7 +406,7 @@ pub(crate) fn show_incoming(ctx: &egui::Context, state: &VoiceState) -> Option<I
                 ui.label(
                     RichText::new(&call.caller)
                         .size(18.0)
-                        .color(theme::TEXT_BRIGHT),
+                        .color(theme::text_bright()),
                 );
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {

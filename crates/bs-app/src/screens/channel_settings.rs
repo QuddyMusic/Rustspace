@@ -207,8 +207,8 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut ChannelSettings, bridge: &mu
     let response = egui::Modal::new(egui::Id::unique("channel_settings"))
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_BUBBLE)
-                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .fill(theme::bg_bubble())
+                .stroke(egui::Stroke::new(1.0, theme::border()))
                 .corner_radius(CornerRadius::same(16))
                 .inner_margin(Margin::same(0)),
         )
@@ -263,7 +263,7 @@ fn nav(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, keep_open
                 "# "
             };
             ui.label(
-                RichText::new(format!("{prefix}{}", state.saved_name)).color(theme::TEXT_MUTED),
+                RichText::new(format!("{prefix}{}", state.saved_name)).color(theme::text_muted()),
             );
         });
         ui.add_space(8.0);
@@ -293,7 +293,7 @@ fn heading(ui: &mut egui::Ui, text: &str) {
         RichText::new(text)
             .size(19.0)
             .family(theme::bold_family())
-            .color(theme::TEXT_BRIGHT),
+            .color(theme::text_bright()),
     );
     ui.add_space(8.0);
 }
@@ -301,11 +301,11 @@ fn heading(ui: &mut egui::Ui, text: &str) {
 fn status_lines(ui: &mut egui::Ui, state: &ChannelSettings) {
     if let Some(err) = &state.error {
         ui.add_space(6.0);
-        ui.label(RichText::new(err).color(theme::ROSE));
+        ui.label(RichText::new(err).color(theme::rose()));
     }
     if let Some(note) = &state.notice {
         ui.add_space(6.0);
-        ui.label(RichText::new(note).color(theme::TEXT_MUTED));
+        ui.label(RichText::new(note).color(theme::text_muted()));
     }
 }
 
@@ -329,7 +329,7 @@ fn overview(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
                 "Показывается в заголовке канала. Оттуда любой может открыть полный текст.",
             )
             .size(12.0)
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
         );
     }
     privacy(ui, state, bridge);
@@ -411,18 +411,18 @@ fn privacy(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) 
     let mut flipped = private;
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.label(RichText::new(label).color(theme::TEXT_BRIGHT));
+            ui.label(RichText::new(label).color(theme::text_bright()));
             ui.label(
                 RichText::new(description)
                     .size(12.0)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             );
         });
         ui.add_enabled_ui(!state.busy, |ui| widgets::toggle(ui, &mut flipped));
     });
     if private {
         ui.add_space(4.0);
-        ui.label(RichText::new(note).size(12.0).color(theme::TEXT_MUTED));
+        ui.label(RichText::new(note).size(12.0).color(theme::text_muted()));
     }
     if flipped != private {
         toggle_private(state, bridge, flipped);
@@ -472,7 +472,7 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Brid
         RichText::new("ОПАСНАЯ ЗОНА")
             .size(11.0)
             .family(theme::bold_family())
-            .color(theme::ROSE),
+            .color(theme::rose()),
     );
     ui.add_space(6.0);
     let channel = state.is_channel();
@@ -483,7 +483,7 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Brid
     } else {
         "Категория будет удалена навсегда. Каналы внутри неё будут перемещены на верхний уровень. Это действие нельзя отменить."
     };
-    ui.label(RichText::new(description).color(theme::TEXT_MUTED));
+    ui.label(RichText::new(description).color(theme::text_muted()));
     ui.add_space(6.0);
     let label = if state.delete_armed {
         "Нажмите ещё раз, чтобы подтвердить удаление"
@@ -494,8 +494,8 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Brid
     };
     let button = ui.add_enabled(
         !state.busy,
-        egui::Button::new(RichText::new(label).color(theme::BG_RAIL))
-            .fill(theme::ROSE)
+        egui::Button::new(RichText::new(label).color(theme::bg_rail()))
+            .fill(theme::rose())
             .corner_radius(CornerRadius::same(8)),
     );
     if button.clicked() {
@@ -523,7 +523,7 @@ fn access(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, bridge
     heading(ui, "Права доступа");
     status_lines(ui, state);
     let Some(list) = state.overrides.clone() else {
-        ui.label(RichText::new("Загрузка…").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("Загрузка…").color(theme::text_muted()));
         return;
     };
     let (roles, members) = bridge
@@ -564,7 +564,7 @@ fn access(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, bridge
         .unwrap_or_default();
     ui.label(
         RichText::new("Без переопределения здесь действуют права всего пространства.")
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
     ui.add_space(8.0);
     let has = |kind: OverrideTargetType, id: &str| {
@@ -583,7 +583,7 @@ fn access(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, bridge
         )
     });
     if shown.is_empty() {
-        ui.label(RichText::new("Переопределений для ролей нет. Здесь для каждой роли действуют права всего пространства.").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("Переопределений для ролей нет. Здесь для каждой роли действуют права всего пространства.").color(theme::text_muted()));
     }
     for entry in shown {
         entry_row(ui, state, rights, bridge, &list, entry);
@@ -611,7 +611,9 @@ fn add_menus(
         ui.menu_button("Добавить роль", |ui| {
             let candidates: Vec<_> = roles.iter().filter(free).collect();
             if candidates.is_empty() {
-                ui.label(RichText::new("Больше нет ролей для добавления").color(theme::TEXT_MUTED));
+                ui.label(
+                    RichText::new("Больше нет ролей для добавления").color(theme::text_muted()),
+                );
             }
             for entry in candidates {
                 if ui.button(&entry.name).clicked() {
@@ -654,7 +656,7 @@ fn entry_row(
         .find(|o| o.target_type == entry.kind && o.target_id == entry.id);
     let open = state.selected.as_ref() == Some(&(entry.kind, entry.id.clone()));
     egui::Frame::new()
-        .fill(theme::BG_RAIL)
+        .fill(theme::bg_rail())
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
@@ -666,14 +668,14 @@ fn entry_row(
             };
             let header = ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(format!("{prefix}{}", entry.name)).color(theme::TEXT_BRIGHT),
+                    RichText::new(format!("{prefix}{}", entry.name)).color(theme::text_bright()),
                 );
                 if let Some(o) = stored {
                     let n = (bits(&o.allow) | bits(&o.deny)).bits().count_ones();
                     ui.label(
                         RichText::new(format!("· {}", plural_overrides(n)))
                             .size(12.0)
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::text_muted()),
                     );
                 }
             });
@@ -741,9 +743,9 @@ fn tri_state_row(
             }
         });
         let color = if held {
-            theme::TEXT_BRIGHT
+            theme::text_bright()
         } else {
-            theme::TEXT_MUTED
+            theme::text_muted()
         };
         ui.label(RichText::new(label).color(color))
             .on_hover_text(if held {
@@ -780,7 +782,7 @@ fn editor(
                 "Этот участник находится на вашем уровне или выше. Его переопределение можно просматривать, но не изменять и не удалять."
             })
             .size(12.0)
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
         );
     }
     for (group, list) in PERMISSION_GROUPS {

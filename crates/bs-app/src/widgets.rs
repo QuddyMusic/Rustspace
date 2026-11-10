@@ -7,20 +7,20 @@ use egui::{Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, Sense, 
 
 use crate::icons::Icon;
 use crate::theme::{
-    ACCENT, BG_ACTIVE, BG_HOVER, BG_INPUT, BORDER, MINT, ROSE, TEXT, TEXT_BRIGHT, TEXT_FAINT,
-    TEXT_MUTED, avatar, bold_family, muted, paint_avatar, truncate_chars,
+    accent, avatar, bg_active, bg_hover, bg_input, bold_family, border, mint, muted, paint_avatar,
+    rose, text, text_bright, text_faint, text_muted, truncate_chars,
 };
 
 /// Поле поиска: скруглённая «утопленная» подложка без рамки.
 pub(crate) fn search_box(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::Response {
     egui::Frame::new()
-        .fill(BG_INPUT)
+        .fill(bg_input())
         .corner_radius(CornerRadius::same(8))
         .inner_margin(Margin::symmetric(10, 7))
         .show(ui, |ui| {
             ui.add(
                 egui::TextEdit::singleline(text)
-                    .hint_text(egui::RichText::new(hint).color(TEXT_FAINT))
+                    .hint_text(egui::RichText::new(hint).color(text_faint()))
                     .frame(egui::Frame::NONE)
                     .desired_width(ui.available_width()),
             )
@@ -32,14 +32,14 @@ pub(crate) fn search_box(ui: &mut egui::Ui, text: &mut String, hint: &str) -> eg
 pub(crate) fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(size), Sense::click());
     let hovered = response.hovered();
-    let fill = if hovered { BG_ACTIVE } else { BG_HOVER };
+    let fill = if hovered { bg_active() } else { bg_hover() };
     ui.painter().rect_filled(rect, CornerRadius::same(9), fill);
     crate::icons::paint(
         ui.painter(),
         rect.center(),
         size * 0.5,
         icon,
-        if hovered { TEXT_BRIGHT } else { TEXT_MUTED },
+        if hovered { text_bright() } else { text_muted() },
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -50,7 +50,7 @@ pub(crate) fn flat_icon(icon: Icon, size: f32, color: Color32) -> impl egui::Wid
         let (rect, response) =
             ui.allocate_exact_size(egui::Vec2::splat(size + 6.0), Sense::click());
         let tint = if response.hovered() {
-            TEXT_BRIGHT
+            text_bright()
         } else {
             color
         };
@@ -64,28 +64,32 @@ pub(crate) fn pill_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::
     let galley = ui.painter().layout_no_wrap(
         label.to_owned(),
         FontId::proportional(14.5),
-        if selected { TEXT_BRIGHT } else { TEXT_MUTED },
+        if selected {
+            text_bright()
+        } else {
+            text_muted()
+        },
     );
     let size = galley.size() + egui::vec2(18.0, 10.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     if selected {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(7), BG_ACTIVE);
+            .rect_filled(rect, CornerRadius::same(7), bg_active());
     } else if response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(7), BG_HOVER);
+            .rect_filled(rect, CornerRadius::same(7), bg_hover());
     }
     let pos = rect.center() - galley.size() / 2.0;
-    ui.painter().galley(pos, galley, TEXT_MUTED);
+    ui.painter().galley(pos, galley, text_muted());
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Яркая мятная кнопка («Добавить друга»): тёмный текст на мятном фоне.
 pub(crate) fn mint_button(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
     let fill = if selected {
-        MINT
+        mint()
     } else {
-        MINT.gamma_multiply(0.92)
+        mint().gamma_multiply(0.92)
     };
     let galley = ui.painter().layout_no_wrap(
         label.to_owned(),
@@ -96,7 +100,7 @@ pub(crate) fn mint_button(ui: &mut egui::Ui, label: &str, selected: bool) -> egu
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
     let pos = rect.center() - galley.size() / 2.0;
-    ui.painter().galley(pos, galley, TEXT);
+    ui.painter().galley(pos, galley, text());
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -106,7 +110,7 @@ pub(crate) fn section_label(ui: &mut egui::Ui, text: &str) {
         egui::RichText::new(text.to_uppercase())
             .size(11.0)
             .family(bold_family())
-            .color(TEXT_FAINT),
+            .color(text_faint()),
     );
 }
 
@@ -134,7 +138,7 @@ pub(crate) fn person_row(
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 62.0), Sense::hover());
     ui.painter()
-        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, BORDER));
+        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, border()));
     let avatar_rect = egui::Rect::from_min_size(
         rect.left_top() + egui::vec2(12.0, 15.0),
         egui::Vec2::splat(32.0),
@@ -161,7 +165,7 @@ pub(crate) fn person_row(
             egui::RichText::new(truncate_chars(person.name, 28))
                 .size(15.0)
                 .family(bold_family())
-                .color(TEXT_BRIGHT),
+                .color(text_bright()),
         );
         if let Some(handle) = person.handle {
             ui.label(muted(truncate_chars(handle, 36)).size(13.0));
@@ -204,10 +208,10 @@ pub(crate) fn dm_entry(ui: &mut egui::Ui, dm: &DmEntry<'_>) -> egui::Response {
     let row = rect.shrink2(egui::vec2(8.0, 1.0));
     if dm.selected {
         ui.painter()
-            .rect_filled(row, CornerRadius::same(8), BG_ACTIVE);
+            .rect_filled(row, CornerRadius::same(8), bg_active());
     } else if response.hovered() {
         ui.painter()
-            .rect_filled(row, CornerRadius::same(8), BG_HOVER);
+            .rect_filled(row, CornerRadius::same(8), bg_hover());
     }
     let avatar_rect = egui::Rect::from_min_size(
         row.left_top() + egui::vec2(8.0, 7.0),
@@ -223,9 +227,9 @@ pub(crate) fn dm_entry(ui: &mut egui::Ui, dm: &DmEntry<'_>) -> egui::Response {
     );
     let text_left = avatar_rect.right() + 10.0;
     let name_color = if dm.selected || dm.unread {
-        TEXT_BRIGHT
+        text_bright()
     } else {
-        TEXT_MUTED
+        text_muted()
     };
     let name_font = if dm.unread {
         FontId::new(14.5, bold_family())
@@ -234,7 +238,7 @@ pub(crate) fn dm_entry(ui: &mut egui::Ui, dm: &DmEntry<'_>) -> egui::Response {
     };
     let stamp_width = dm.stamp.map_or(0.0, |s| {
         ui.painter()
-            .layout_no_wrap(s.to_owned(), FontId::proportional(11.0), TEXT_FAINT)
+            .layout_no_wrap(s.to_owned(), FontId::proportional(11.0), text_faint())
             .size()
             .x
             + 8.0
@@ -256,7 +260,7 @@ pub(crate) fn dm_entry(ui: &mut egui::Ui, dm: &DmEntry<'_>) -> egui::Response {
             Align2::RIGHT_CENTER,
             stamp,
             FontId::proportional(11.0),
-            TEXT_FAINT,
+            text_faint(),
         );
     }
     if let Some(preview) = dm.preview.filter(|p| !p.is_empty()) {
@@ -269,12 +273,15 @@ pub(crate) fn dm_entry(ui: &mut egui::Ui, dm: &DmEntry<'_>) -> egui::Response {
             Align2::LEFT_CENTER,
             preview.replace('\n', " "),
             FontId::proportional(12.0),
-            TEXT_FAINT,
+            text_faint(),
         );
     }
     if dm.unread {
-        ui.painter()
-            .circle_filled(egui::pos2(row.right() - 12.0, row.top() + 33.0), 4.0, ROSE);
+        ui.painter().circle_filled(
+            egui::pos2(row.right() - 12.0, row.top() + 33.0),
+            4.0,
+            rose(),
+        );
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -291,12 +298,16 @@ pub(crate) fn nav_row(
     let row = rect.shrink2(egui::vec2(8.0, 1.0));
     if selected {
         ui.painter()
-            .rect_filled(row, CornerRadius::same(8), BG_ACTIVE);
+            .rect_filled(row, CornerRadius::same(8), bg_active());
     } else if response.hovered() {
         ui.painter()
-            .rect_filled(row, CornerRadius::same(8), BG_HOVER);
+            .rect_filled(row, CornerRadius::same(8), bg_hover());
     }
-    let color = if selected { TEXT_BRIGHT } else { TEXT_MUTED };
+    let color = if selected {
+        text_bright()
+    } else {
+        text_muted()
+    };
     crate::icons::paint(
         ui.painter(),
         egui::pos2(row.left() + 22.0, row.center().y),
@@ -329,7 +340,7 @@ pub(crate) fn compact_person(
         ui.painter().rect_filled(
             rect.shrink2(egui::vec2(0.0, 1.0)),
             CornerRadius::same(8),
-            BG_HOVER,
+            bg_hover(),
         );
     }
     let offline = status == UserStatus::Offline;
@@ -346,7 +357,7 @@ pub(crate) fn compact_person(
         image,
     );
     let x = avatar_rect.right() + 10.0;
-    let color = if offline { TEXT_FAINT } else { TEXT };
+    let color = if offline { text_faint() } else { text() };
     let clip = egui::Rect::from_min_max(
         egui::pos2(x, rect.top()),
         egui::pos2(rect.right() - 4.0, rect.bottom()),
@@ -365,7 +376,7 @@ pub(crate) fn compact_person(
             Align2::LEFT_CENTER,
             subtitle,
             FontId::proportional(11.0),
-            TEXT_FAINT,
+            text_faint(),
         );
     } else {
         painter.text(
@@ -394,7 +405,7 @@ pub(crate) fn rail_action(
     let fill = if selected || hovered {
         color.gamma_multiply(0.30)
     } else {
-        BG_ACTIVE
+        bg_active()
     };
     ui.painter()
         .rect_filled(icon, CornerRadius::same(radius), fill);
@@ -405,7 +416,7 @@ pub(crate) fn rail_action(
             egui::vec2(5.0, 32.0),
         );
         ui.painter()
-            .rect_filled(pill, CornerRadius::same(3), TEXT_BRIGHT);
+            .rect_filled(pill, CornerRadius::same(3), text_bright());
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -424,7 +435,7 @@ pub(crate) fn color_swatch(
         ui.painter().circle_stroke(
             rect.center(),
             size / 2.0 - 0.5,
-            Stroke::new(2.0, TEXT_BRIGHT),
+            Stroke::new(2.0, text_bright()),
         );
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -445,13 +456,13 @@ pub(crate) fn text_field(
     max_chars: usize,
 ) -> egui::Response {
     egui::Frame::new()
-        .fill(BG_INPUT)
+        .fill(bg_input())
         .corner_radius(CornerRadius::same(8))
         .inner_margin(Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.add(
                 egui::TextEdit::singleline(text)
-                    .hint_text(egui::RichText::new(hint).color(TEXT_FAINT))
+                    .hint_text(egui::RichText::new(hint).color(text_faint()))
                     .frame(egui::Frame::NONE)
                     .char_limit(max_chars)
                     .desired_width(ui.available_width()),
@@ -468,14 +479,14 @@ pub(crate) fn secret_field(
     max_chars: usize,
 ) -> egui::Response {
     egui::Frame::new()
-        .fill(BG_INPUT)
+        .fill(bg_input())
         .corner_radius(CornerRadius::same(8))
         .inner_margin(Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.add(
                 egui::TextEdit::singleline(text)
                     .password(true)
-                    .hint_text(egui::RichText::new(hint).color(TEXT_FAINT))
+                    .hint_text(egui::RichText::new(hint).color(text_faint()))
                     .frame(egui::Frame::NONE)
                     .char_limit(max_chars)
                     .desired_width(ui.available_width()),
@@ -493,13 +504,13 @@ pub(crate) fn text_area(
     rows: usize,
 ) -> egui::Response {
     let response = egui::Frame::new()
-        .fill(BG_INPUT)
+        .fill(bg_input())
         .corner_radius(CornerRadius::same(8))
         .inner_margin(Margin::symmetric(12, 9))
         .show(ui, |ui| {
             ui.add(
                 egui::TextEdit::multiline(text)
-                    .hint_text(egui::RichText::new(hint).color(TEXT_FAINT))
+                    .hint_text(egui::RichText::new(hint).color(text_faint()))
                     .frame(egui::Frame::NONE)
                     .char_limit(max_chars)
                     .desired_rows(rows)
@@ -524,33 +535,33 @@ pub(crate) fn radio_card(
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 52.0), Sense::click());
     if selected {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), BG_ACTIVE);
+            .rect_filled(rect, CornerRadius::same(8), bg_active());
     } else if response.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), BG_HOVER);
+            .rect_filled(rect, CornerRadius::same(8), bg_hover());
     }
     let center = egui::pos2(rect.left() + 20.0, rect.center().y);
     ui.painter().circle_stroke(
         center,
         8.0,
-        Stroke::new(1.5, if selected { ACCENT } else { TEXT_FAINT }),
+        Stroke::new(1.5, if selected { accent() } else { text_faint() }),
     );
     if selected {
-        ui.painter().circle_filled(center, 4.5, ACCENT);
+        ui.painter().circle_filled(center, 4.5, accent());
     }
     ui.painter().text(
         egui::pos2(rect.left() + 40.0, rect.center().y - 8.0),
         Align2::LEFT_CENTER,
         title,
         FontId::new(14.5, bold_family()),
-        TEXT_BRIGHT,
+        text_bright(),
     );
     ui.painter().text(
         egui::pos2(rect.left() + 40.0, rect.center().y + 10.0),
         Align2::LEFT_CENTER,
         subtitle,
         FontId::proportional(12.0),
-        TEXT_FAINT,
+        text_faint(),
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -563,7 +574,7 @@ pub(crate) fn big_avatar(ui: &mut egui::Ui, name: &str, size: f32, image: Option
 /// Выключатель «таблеткой». Возвращает `true`, если значение изменилось.
 pub(crate) fn toggle(ui: &mut egui::Ui, value: &mut bool) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(40.0, 22.0), Sense::click());
-    let fill = if *value { ACCENT } else { BG_ACTIVE };
+    let fill = if *value { accent() } else { bg_active() };
     ui.painter().rect_filled(rect, CornerRadius::same(11), fill);
     let x = if *value {
         rect.right() - 11.0
@@ -571,7 +582,7 @@ pub(crate) fn toggle(ui: &mut egui::Ui, value: &mut bool) -> bool {
         rect.left() + 11.0
     };
     ui.painter()
-        .circle_filled(egui::pos2(x, rect.center().y), 8.0, TEXT_BRIGHT);
+        .circle_filled(egui::pos2(x, rect.center().y), 8.0, text_bright());
     if response.clicked() {
         *value = !*value;
         return true;
@@ -583,8 +594,8 @@ pub(crate) fn toggle(ui: &mut egui::Ui, value: &mut bool) -> bool {
 pub(crate) fn origin_badge(ui: &egui::Ui, rect: egui::Rect, host: &str) {
     let center = rect.center() + egui::vec2(17.0, 17.0);
     let painter = ui.painter();
-    painter.circle_filled(center, 9.0, crate::theme::BG_RAIL);
-    painter.circle_filled(center, 7.5, crate::theme::SKY);
+    painter.circle_filled(center, 9.0, crate::theme::bg_rail());
+    painter.circle_filled(center, 7.5, crate::theme::sky());
     painter.text(
         center,
         egui::Align2::CENTER_CENTER,

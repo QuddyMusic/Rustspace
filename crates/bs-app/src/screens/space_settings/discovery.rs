@@ -113,7 +113,7 @@ fn image_row(
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
         let radius = CornerRadius::same(if banner { 10 } else { 16 });
-        ui.painter().rect_filled(rect, radius, theme::BG_RAIL);
+        ui.painter().rect_filled(rect, radius, theme::bg_rail());
         let shown = !value.is_empty()
             && images::paint_value(
                 ui.painter(),
@@ -129,7 +129,7 @@ fn image_row(
                 egui::Align2::CENTER_CENTER,
                 "…",
                 egui::FontId::proportional(18.0),
-                theme::TEXT_MUTED,
+                theme::text_muted(),
             );
         }
         ui.vertical(|ui| {
@@ -200,7 +200,7 @@ pub(super) fn show(
             RichText::new(
                 "Управляйте тем, кто может находить это пространство и присоединяться к нему.",
             )
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
         );
         ui.add_space(4.0);
         for (value, title, hint) in [
@@ -230,7 +230,7 @@ pub(super) fn show(
         widgets::field_label(ui, "Описание");
         ui.label(
             RichText::new("Краткое описание, отображаемое на странице «Обзор».")
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
         );
         widgets::text_area(
             ui,
@@ -251,7 +251,7 @@ fn directory(ui: &mut egui::Ui, state: &mut SpaceSettings) {
     widgets::section_label(ui, "Внешний каталог Backspace");
     ui.add_space(4.0);
     egui::Frame::new()
-        .fill(theme::BG_RAIL)
+        .fill(theme::bg_rail())
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::same(12))
         .show(ui, |ui| {
@@ -261,14 +261,14 @@ fn directory(ui: &mut egui::Ui, state: &mut SpaceSettings) {
                 ui.vertical(|ui| {
                     ui.label(
                         RichText::new("Добавить во внешний каталог Backspace")
-                            .color(theme::TEXT_BRIGHT),
+                            .color(theme::text_bright()),
                     );
                     ui.label(
                         RichText::new(
                             "Показывать это пространство во внешнем пространстве на каждом сервере Backspace.",
                         )
                         .size(12.0)
-                        .color(theme::TEXT_MUTED),
+                        .color(theme::text_muted()),
                     );
                 });
                 ui.add_enabled_ui(!locked, |ui| {
@@ -279,7 +279,7 @@ fn directory(ui: &mut egui::Ui, state: &mut SpaceSettings) {
                 ui.label(
                     RichText::new("Сначала сделайте пространство открытым или доступным по запросу.")
                         .size(12.0)
-                        .color(theme::TEXT_MUTED),
+                        .color(theme::text_muted()),
                 );
             }
             ui.add_space(4.0);
@@ -288,7 +288,7 @@ fn directory(ui: &mut egui::Ui, state: &mut SpaceSettings) {
                     "После добавления становятся общедоступными: название, описание, значок, баннер и число участников пространства, а также адрес этого сервера. Те, кто просматривает внешний каталог, загружают значок и баннер с этого сервера.",
                 )
                 .size(12.0)
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
             );
         });
 }
@@ -298,11 +298,11 @@ fn join_requests(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Brid
     widgets::section_label(ui, "Ожидающие запросы на вступление");
     ui.add_space(6.0);
     let Some(list) = state.requests.clone() else {
-        ui.label(RichText::new("Загрузка…").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("Загрузка…").color(theme::text_muted()));
         return;
     };
     if list.is_empty() {
-        ui.label(RichText::new("Нет ожидающих запросов на вступление").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("Нет ожидающих запросов на вступление").color(theme::text_muted()));
         return;
     }
     for request in &list {
@@ -311,7 +311,7 @@ fn join_requests(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Brid
             .as_ref()
             .map_or_else(|| "Неизвестно".to_owned(), super::display_name);
         egui::Frame::new()
-            .fill(theme::BG_RAIL)
+            .fill(theme::bg_rail())
             .corner_radius(CornerRadius::same(10))
             .inner_margin(Margin::symmetric(10, 8))
             .show(ui, |ui| {
@@ -319,10 +319,10 @@ fn join_requests(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Brid
                 ui.horizontal(|ui| {
                     theme::avatar(ui, &name, 32.0, None, None);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(&name).color(theme::TEXT_BRIGHT));
+                        ui.label(RichText::new(&name).color(theme::text_bright()));
                         if let Some(message) = request.message.as_deref().filter(|m| !m.is_empty())
                         {
-                            ui.label(RichText::new(message).size(12.0).color(theme::TEXT_MUTED));
+                            ui.label(RichText::new(message).size(12.0).color(theme::text_muted()));
                         }
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

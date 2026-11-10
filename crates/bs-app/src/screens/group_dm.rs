@@ -145,8 +145,8 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut GroupDialog, bridge: &mut Br
     let response = egui::Modal::new(egui::Id::unique("group_dm"))
         .frame(
             egui::Frame::new()
-                .fill(theme::BG_BUBBLE)
-                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .fill(theme::bg_bubble())
+                .stroke(egui::Stroke::new(1.0, theme::border()))
                 .corner_radius(CornerRadius::same(16))
                 .inner_margin(Margin::same(20)),
         )
@@ -170,7 +170,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut GroupDialog, bridge: &mut Br
             }
             if let Some(err) = &state.error {
                 ui.add_space(6.0);
-                ui.label(RichText::new(err).color(theme::ROSE));
+                ui.label(RichText::new(err).color(theme::rose()));
             }
             ui.add_space(10.0);
             if ui.button("Закрыть").clicked() {
@@ -185,7 +185,7 @@ fn title(ui: &mut egui::Ui, text: &str) {
         RichText::new(text)
             .size(18.0)
             .family(theme::bold_family())
-            .color(theme::TEXT_BRIGHT),
+            .color(theme::text_bright()),
     );
     ui.add_space(8.0);
 }
@@ -197,7 +197,7 @@ fn create(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge) {
             "Выберите от 2 до {} друзей. Вы добавитесь в группу автоматически.",
             GROUP_MAX_MEMBERS - 1
         ))
-        .color(theme::TEXT_MUTED),
+        .color(theme::text_muted()),
     );
     ui.add_space(6.0);
     let friends: Vec<Friend> = bridge.friends().to_vec();
@@ -232,7 +232,7 @@ fn create(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge) {
                 });
             }
             if friends.is_empty() {
-                ui.label(RichText::new("Сначала добавьте друзей").color(theme::TEXT_MUTED));
+                ui.label(RichText::new("Сначала добавьте друзей").color(theme::text_muted()));
             }
         });
     ui.add_space(8.0);
@@ -305,7 +305,7 @@ fn name_row(
         ui.label(
             RichText::new(format!("{}/{GROUP_NAME_MAX}", name.chars().count()))
                 .size(12.0)
-                .color(theme::TEXT_MUTED),
+                .color(theme::text_muted()),
         );
         let trimmed = name.trim().to_owned();
         if owner && trimmed != saved.trim() {
@@ -344,12 +344,12 @@ fn member_row(
     };
     ui.horizontal(|ui| {
         theme::avatar(ui, &name, 28.0, None, None);
-        ui.label(RichText::new(&name).color(theme::TEXT_BRIGHT));
+        ui.label(RichText::new(&name).color(theme::text_bright()));
         if is_owner {
             ui.label(
                 RichText::new("· Владелец группы")
                     .size(12.0)
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             );
         }
         if owner && user.id != me {
@@ -391,11 +391,11 @@ fn member_row(
 fn confirm_box(ui: &mut egui::Ui, text: &str, button: &str, busy: bool) -> Option<bool> {
     let mut pressed = None;
     egui::Frame::new()
-        .fill(theme::BG_RAIL)
+        .fill(theme::bg_rail())
         .corner_radius(CornerRadius::same(8))
         .inner_margin(Margin::same(8))
         .show(ui, |ui| {
-            ui.label(RichText::new(text).color(theme::TEXT_MUTED));
+            ui.label(RichText::new(text).color(theme::text_muted()));
             ui.horizontal(|ui| {
                 if ui.add_enabled(!busy, egui::Button::new(button)).clicked() {
                     pressed = Some(true);
@@ -416,7 +416,7 @@ fn set_confirm(state: &mut GroupDialog, value: Option<Confirm>) {
 
 fn add_member(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &DmChannel) {
     if dm.members.len() >= GROUP_MAX_MEMBERS {
-        ui.label(RichText::new("Группа заполнена").color(theme::TEXT_MUTED));
+        ui.label(RichText::new("Группа заполнена").color(theme::text_muted()));
         return;
     }
     let adding = matches!(&state.mode, Mode::Manage { adding: true, .. });
@@ -441,7 +441,7 @@ fn add_member(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, d
         .max_height(140.0)
         .show(ui, |ui| {
             if candidates.is_empty() {
-                ui.label(RichText::new("Нет подходящих друзей").color(theme::TEXT_MUTED));
+                ui.label(RichText::new("Нет подходящих друзей").color(theme::text_muted()));
             }
             for friend in &candidates {
                 ui.horizontal(|ui| {
@@ -472,7 +472,7 @@ fn leave(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &D
     if !asked {
         if ui
             .add(egui::Button::new(
-                RichText::new("Покинуть группу").color(theme::ROSE),
+                RichText::new("Покинуть группу").color(theme::rose()),
             ))
             .clicked()
         {

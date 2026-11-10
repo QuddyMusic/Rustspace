@@ -358,7 +358,7 @@ pub(crate) fn updates_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridg
             }
         }
         ui.add_space(6.0);
-        ui.label(RichText::new(state_label(&status)).color(theme::TEXT_BRIGHT));
+        ui.label(RichText::new(state_label(&status)).color(theme::text_bright()));
     });
     ui.add_space(10.0);
     if ui
@@ -369,7 +369,7 @@ pub(crate) fn updates_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridg
     }
     ui.add_space(10.0);
     card(ui, |ui| {
-        ui.label(RichText::new("Как обновить вручную").color(theme::TEXT_BRIGHT));
+        ui.label(RichText::new("Как обновить вручную").color(theme::text_bright()));
         let hint = match status.channel.as_str() {
             "prebuilt" => "Установка из готового образа: на сервере выполните ./update.sh.",
             "source" => {
@@ -386,14 +386,14 @@ pub(crate) fn updates_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridg
 
 fn status_text(peer: &Peer) -> (&'static str, egui::Color32) {
     match peer.status.as_str() {
-        "active" => ("Активен", theme::GREEN),
-        "pending" => ("Ожидает ответа", theme::AMBER),
-        "awaiting_approval" => ("Ждёт одобрения", theme::AMBER),
-        "unreachable" => ("Недоступен", theme::ROSE),
-        "needs_attention" => ("Требует внимания", theme::ROSE),
-        "rejected" => ("Отклонён", theme::ROSE),
-        "revoked" => ("Отозван", theme::TEXT_FAINT),
-        _ => ("Неизвестно", theme::TEXT_FAINT),
+        "active" => ("Активен", theme::green()),
+        "pending" => ("Ожидает ответа", theme::amber()),
+        "awaiting_approval" => ("Ждёт одобрения", theme::amber()),
+        "unreachable" => ("Недоступен", theme::rose()),
+        "needs_attention" => ("Требует внимания", theme::rose()),
+        "rejected" => ("Отклонён", theme::rose()),
+        "revoked" => ("Отозван", theme::text_faint()),
+        _ => ("Неизвестно", theme::text_faint()),
     }
 }
 
@@ -417,7 +417,7 @@ fn peer_card(ui: &mut egui::Ui, more: &mut MoreUi, peer: &Peer, bridge: &Bridge)
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(peer.instance_name.as_deref().unwrap_or(&peer.origin))
-                    .color(theme::TEXT_BRIGHT),
+                    .color(theme::text_bright()),
             );
             ui.label(RichText::new(label).color(color).size(12.5));
         });
@@ -452,7 +452,7 @@ fn peer_card(ui: &mut egui::Ui, more: &mut MoreUi, peer: &Peer, bridge: &Bridge)
         }) {
             let op = more.confirm.clone();
             if let Some(op) = op {
-                ui.label(RichText::new(confirm_text(&op)).color(theme::AMBER));
+                ui.label(RichText::new(confirm_text(&op)).color(theme::amber()));
                 ui.horizontal(|ui| {
                     if ui.button("Подтвердить").clicked() {
                         request(bridge, AdminRequest::Peer(op));
@@ -610,7 +610,7 @@ pub(crate) fn federation_panel(
                 };
                 ui.label(
                     RichText::new(req.instance_name.as_deref().unwrap_or(&req.origin))
-                        .color(theme::TEXT_BRIGHT),
+                        .color(theme::text_bright()),
                 );
                 ui.label(theme::muted(format!("{dir} · {}", req.origin)).size(12.5));
                 ui.horizontal(|ui| {
