@@ -14,6 +14,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod channel;
+pub mod dm_system;
 pub mod error;
 pub mod events;
 pub mod id;
@@ -26,6 +27,7 @@ pub mod transport;
 pub mod user;
 
 pub use channel::*;
+pub use dm_system::{DmSystemEvent, GENERIC_SYSTEM_TEXT, SpaceInvite, SpaceInviteSnapshot};
 pub use error::*;
 pub use events::*;
 pub use id::*;

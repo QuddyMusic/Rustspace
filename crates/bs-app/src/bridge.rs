@@ -306,6 +306,13 @@ pub(crate) enum BridgeRequest {
     DmVoiceToken(String),
     /// Код приглашения в пространство.
     SpaceInvite(String),
+    /// Отправить другу приглашение в пространство в ЛС.
+    InviteFriend {
+        /// Друг (для сопоставления ответа).
+        friend_id: String,
+        /// Тело запроса.
+        request: bs_api::SpaceInviteRequest,
+    },
     /// Вступить по коду (с адресом инстанса, если он указан в ссылке).
     JoinByCode(String),
     /// Выйти из пространства.
@@ -662,6 +669,8 @@ pub(crate) enum GroupOp {
     Leave,
     /// Передать права владельца.
     Transfer(String),
+    /// Новая иконка (байты картинки) или `None` — убрать.
+    Icon(Option<Vec<u8>>),
 }
 
 /// Итог действия над группой.
@@ -784,6 +793,13 @@ pub(crate) enum SpaceEvent {
     Invite {
         /// Код или текст ошибки.
         result: Result<String, String>,
+    },
+    /// Приглашение другу в ЛС отправлено (или нет).
+    InviteSent {
+        /// Друг.
+        friend_id: String,
+        /// Итог.
+        result: Result<(), String>,
     },
     /// Канал или категория созданы (или нет).
     Created(Result<(), String>),
@@ -3261,10 +3277,56 @@ async fn group_admin(client: &bs_api::ApiClient, dm_id: String, op: GroupOp) -> 
         GroupOp::Remove(user) => client.remove_group_member(&dm_id, user).await.map(|_| ()),
         GroupOp::Leave => client.leave_group_dm(&dm_id).await.map(|_| ()),
         GroupOp::Transfer(user) => client.transfer_group_owner(&dm_id, user).await.map(|_| ()),
+        GroupOp::Icon(bytes) => match group_icon(client, &dm_id, bytes.as_deref()).await {
+            Ok(()) => Ok(()),
+            Err(message) => {
+                let event = GroupEvent {
+                    dm_id,
+                    op,
+                    result: Err(message),
+                };
+                return BridgeResponse::GroupAction(event, None);
+            }
+        },
     }
     .map_err(|err| space_message(&err));
     let dm_id = created.as_ref().map_or(dm_id, |dm| dm.id.clone());
     BridgeResponse::GroupAction(GroupEvent { dm_id, op, result }, created)
+}
+
+/// Сторона иконки группы после обрезки.
+const GROUP_ICON_SIDE: u32 = 512;
+
+/// Обрезает картинку до квадрата, загружает и ставит иконкой группы;
+/// `None` убирает иконку.
+async fn group_icon(
+    client: &bs_api::ApiClient,
+    dm_id: &str,
+    bytes: Option<&[u8]>,
+) -> Result<(), String> {
+    let icon = match bytes {
+        None => None,
+        Some(bytes) => {
+            let png = bs_media::square_icon(bytes, GROUP_ICON_SIDE, &bs_media::Limits::default())
+                .map_err(|err| format!("Картинка не подходит: {err}"))?;
+            let attachment = client
+                .upload_file("group-icon.png", "image/png", &png, |_, _| {})
+                .await
+                .map_err(|err| space_message(&err))?;
+            Some(attachment.filename)
+        }
+    };
+    client
+        .update_group_dm(
+            dm_id,
+            &bs_api::GroupUpdate {
+                name: None,
+                icon: Some(icon),
+            },
+        )
+        .await
+        .map(|_| ())
+        .map_err(|err| space_message(&err))
 }
 
 fn space_message(err: &bs_api::ApiError) -> String {
@@ -3379,6 +3441,14 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                 .await
                 .map_err(|err| space_message(&err));
             BridgeResponse::SpaceAction(SpaceEvent::Invite { result })
+        }
+        BridgeRequest::InviteFriend { friend_id, request } => {
+            let result = client
+                .send_space_invite(&request)
+                .await
+                .map(|_| ())
+                .map_err(|err| space_message(&err));
+            BridgeResponse::SpaceAction(SpaceEvent::InviteSent { friend_id, result })
         }
         BridgeRequest::JoinByCode(code) => {
             let joined = match client.join_by_code(&code).await {

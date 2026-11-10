@@ -450,6 +450,38 @@ async fn full_client_scenario_against_real_server() {
         check_typed::<bs_types::DmChannel>("rest.dm_channel", item, &mut findings).unwrap();
     }
 
+    // ─── Приглашение в пространство через ЛС ───────────────────────────────
+    let sent = alice
+        .api
+        .send_space_invite(&bs_api::SpaceInviteRequest {
+            target: bs_api::InviteTarget::Local {
+                user_id: bob.id.clone(),
+            },
+            space_id: space_id.clone(),
+            space_instance_origin: String::new(),
+            invite_code: code.clone(),
+        })
+        .await
+        .unwrap();
+    let invite = bob_ws
+        .wait_for("dm_message_created(space_invite)", |e| match e {
+            ServerEvent::DmMessageCreated { message } if message.message.id == sent.message_id => {
+                Some(message.clone())
+            }
+            _ => None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        invite.message.message_type,
+        Some(bs_types::MessageType::System)
+    );
+    let parsed = bs_types::DmSystemEvent::parse(invite.message.content.as_deref().unwrap())
+        .expect("клиент разбирает space_invite сервера");
+    assert!(
+        matches!(parsed, bs_types::DmSystemEvent::SpaceInvite(ref i) if i.space_id == space_id)
+    );
+
     // ─── Групповая беседа (только с друзьями) ──────────────────────────────
     let carol_request = alice
         .api
@@ -487,6 +519,25 @@ async fn full_client_scenario_against_real_server() {
         .await
         .unwrap();
     carol.api.leave_group_dm(&group.id).await.unwrap();
+    // Системные события группы клиент должен понимать все до одного.
+    let history = alice
+        .api
+        .dm_messages(&group.id, None, Some(50))
+        .await
+        .unwrap();
+    let system: Vec<_> = history
+        .messages
+        .iter()
+        .filter(|m| m.message.message_type == Some(bs_types::MessageType::System))
+        .collect();
+    assert!(system.len() >= 3, "added×2, name_changed, member_removed");
+    for message in system {
+        let content = message.message.content.as_deref().unwrap_or_default();
+        assert!(
+            bs_types::DmSystemEvent::parse(content).is_some(),
+            "не разобрано системное событие: {content}"
+        );
+    }
 
     // ─── Уведомления, профиль, стикеры, GIF ────────────────────────────────
     bob.api

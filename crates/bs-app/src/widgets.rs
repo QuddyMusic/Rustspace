@@ -338,9 +338,9 @@ pub(crate) fn nav_row(
 }
 
 /// Компактная строка для панели «Сейчас онлайн».
-pub(crate) fn compact_person(
+pub(crate) fn compact_person<'a>(
     ui: &mut egui::Ui,
-    name: &str,
+    face: impl Into<crate::theme::Face<'a>>,
     subtitle: Option<&str>,
     status: UserStatus,
     image: Option<&str>,
@@ -355,6 +355,8 @@ pub(crate) fn compact_person(
             bg_hover(),
         );
     }
+    let face = face.into();
+    let name = face.name;
     let offline = status == UserStatus::Offline;
     let avatar_rect = egui::Rect::from_min_size(
         egui::pos2(rect.left() + 4.0, rect.center().y - 16.0),
@@ -363,7 +365,7 @@ pub(crate) fn compact_person(
     paint_avatar(
         ui.painter(),
         avatar_rect,
-        name,
+        face,
         Some(status),
         offline,
         image,

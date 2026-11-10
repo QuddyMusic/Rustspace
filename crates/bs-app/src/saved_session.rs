@@ -85,6 +85,18 @@ pub(crate) fn load(path: &Path) -> Option<SavedSession> {
     })
 }
 
+/// Адрес и флаг http из файла сессии, даже если токена уже нет (например,
+/// хранилище ключей недоступно): чтобы форма входа была заполнена.
+pub(crate) fn hint(path: &Path) -> Option<(String, bool)> {
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let base = value.get("base")?.as_str()?.trim().to_owned();
+    let insecure = value
+        .get("allowInsecure")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    (!base.is_empty()).then_some((base, insecure))
+}
+
 /// Сохраняет сессию (атомарно, права `0600`).
 pub(crate) fn save(
     path: &Path,

@@ -87,11 +87,41 @@ pub(crate) fn dm_display_name(channel: &DmChannel, me: &str) -> String {
 }
 
 /// Последнее сообщение личного канала, если есть.
+///
+/// Системное сообщение показывается текстом события, а не сырым JSON
+/// (`formatDmSidebarPreview` оригинала).
 pub(crate) fn dm_last_text(channel: &DmChannel) -> Option<String> {
-    match channel.last_message.as_ref()? {
-        DmChannelLastMessage::Preview(preview) => preview.content.clone(),
-        DmChannelLastMessage::Full(message) => message.message.content.clone(),
+    let (content, kind, author) = match channel.last_message.as_ref()? {
+        DmChannelLastMessage::Preview(preview) => (
+            preview.content.clone(),
+            preview.message_type,
+            preview.user_id.as_str(),
+        ),
+        DmChannelLastMessage::Full(message) => (
+            message.message.content.clone(),
+            message.message.message_type,
+            message.message.user_id.as_str(),
+        ),
+    };
+    if kind != Some(bs_types::MessageType::System) {
+        return content;
     }
+    let actor = channel
+        .members
+        .iter()
+        .find(|member| member.id == author)
+        .map_or_else(String::new, |member| {
+            user_display_name(member.display_name.as_deref(), &member.username)
+        });
+    Some(
+        content
+            .as_deref()
+            .and_then(bs_types::DmSystemEvent::parse)
+            .map_or_else(
+                || bs_types::GENERIC_SYSTEM_TEXT.to_owned(),
+                |event| event.text(&actor, false),
+            ),
+    )
 }
 
 /// Уже ли пользователь `id` в друзьях.

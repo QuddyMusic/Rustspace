@@ -15,9 +15,9 @@ use std::fmt::Debug;
 
 use bs_api::{
     ApiClient, ChangePasswordRequest, ChannelUpdate, CreateDmRequest, CreateSpaceRequest,
-    FriendRequestDecision, GroupMember, InstanceSettingsPatch, InvitePatch, MessageSearchQuery,
-    NewChannel, NewInvite, NewRole, OverrideScope, PermissionOverride, RegisterRequest, RoleUpdate,
-    SendFriendRequest, SendMessageBody, StreamingPatch,
+    FriendRequestDecision, GroupMember, GroupUpdate, InstanceSettingsPatch, InvitePatch,
+    MessageSearchQuery, NewChannel, NewInvite, NewRole, OverrideScope, PermissionOverride,
+    RegisterRequest, RoleUpdate, SendFriendRequest, SendMessageBody, StreamingPatch,
 };
 use bs_contract::{server_url, unique};
 use bs_types::{OverrideTargetType, SpaceVisibility, UpdateNotificationSettingRequest};
@@ -345,6 +345,27 @@ async fn rest_surface_matches_real_server() {
             "add_group_member",
             owner.api.add_group_member(&group.id, &third.id).await,
         );
+        if let Some(icon) = log.check(
+            "upload_file(group icon)",
+            owner
+                .api
+                .upload_file("group-icon.png", "image/png", PNG, |_, _| {})
+                .await,
+        ) {
+            log.check(
+                "update_group_dm(icon)",
+                owner
+                    .api
+                    .update_group_dm(
+                        &group.id,
+                        &GroupUpdate {
+                            name: None,
+                            icon: Some(Some(icon.filename)),
+                        },
+                    )
+                    .await,
+            );
+        }
         log.check(
             "transfer_group_owner",
             owner.api.transfer_group_owner(&group.id, &guest.id).await,

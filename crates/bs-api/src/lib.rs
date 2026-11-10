@@ -57,7 +57,10 @@ pub use federation::{
     AttachProofResponse, ChangePasswordRequest, ChangePasswordResponse,
     FederationCredentialRequest, FederationCredentialResponse, ReattachRequest, ReattachResponse,
 };
-pub use groups::{GROUP_MAX_MEMBERS, GROUP_NAME_MAX, GroupMember, GroupUpdate};
+pub use groups::{
+    GROUP_MAX_MEMBERS, GROUP_NAME_MAX, GroupMember, GroupUpdate, InviteTarget, SpaceInviteRequest,
+    SpaceInviteResponse,
+};
 pub use instance::{
     InstanceInfo, InviteCheck, PeerEnsureResponse, RegisterRequest, ReplicatedEntry, UsernameCheck,
     VerifyPasswordResponse,

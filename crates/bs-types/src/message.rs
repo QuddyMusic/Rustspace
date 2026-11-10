@@ -153,11 +153,11 @@ pub struct Embed {
 
 /// Короткое превью последнего сообщения DM-канала для сайдбара.
 ///
-/// `deny_unknown_fields` нужен, чтобы в [`DmChannelLastMessage`] этот вариант
-/// не «съедал» полное сообщение: у полного есть `user`/`embeds`/`reactions`,
-/// которых здесь нет.
+/// Лишние поля допускаются: если сервер добавит новое, ЛС не должны
+/// перестать разбираться. Полное сообщение отличается обязательным `user`,
+/// поэтому в [`DmChannelLastMessage`] оно проверяется первым.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct DmLastMessagePreview {
     pub id: MessageId,
     pub dm_channel_id: String,
@@ -226,8 +226,8 @@ pub struct DmMessageWithUser {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum DmChannelLastMessage {
-    Preview(DmLastMessagePreview),
     Full(Box<DmMessageWithUser>),
+    Preview(DmLastMessagePreview),
 }
 
 /// Личный канал (или группа).
@@ -465,6 +465,25 @@ mod tests {
             Some(DmChannelLastMessage::Preview(p)) => assert_eq!(p.content.as_deref(), Some("hi")),
             other => panic!("ожидалось превью, получено {other:?}"),
         }
+    }
+
+    #[test]
+    fn preview_with_unknown_field_still_parses() {
+        let json = format!(
+            r#"{{
+                "id":"dm1","federatedId":null,"ownerId":null,
+                "ownerHomeUserId":null,"ownerHomeInstance":null,"createdAt":1,
+                "members":[{ALICE}],
+                "lastMessage":{{"id":"m1","dmChannelId":"dm1","userId":"u1",
+                    "content":"hi","createdAt":2,"type":"user","futureField":7}},
+                "name":null,"icon":null,"metadataUpdatedAt":3
+            }}"#
+        );
+        let dm: DmChannel = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            dm.last_message,
+            Some(DmChannelLastMessage::Preview(_))
+        ));
     }
 
     #[test]

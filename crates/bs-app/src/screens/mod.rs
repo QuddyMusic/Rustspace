@@ -9,6 +9,8 @@ pub(crate) mod connections;
 pub(crate) mod dialogs;
 pub(crate) mod group_dm;
 pub(crate) mod home;
+pub(crate) mod invite_card;
+pub(crate) mod invite_dialog;
 pub(crate) mod login;
 pub(crate) mod notification_settings;
 pub(crate) mod profile;

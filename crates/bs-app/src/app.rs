@@ -46,8 +46,13 @@ impl BackspaceApp {
         let mut bridge = Bridge::new(runtime);
         let mut login = LoginScreen::default();
         // Сохранённая сессия: входим по токену, без пароля.
-        if let Some(base) = bridge.restore(crate::saved_session::default_path()) {
+        let path = crate::saved_session::default_path();
+        if let Some(base) = bridge.restore(path.clone()) {
             login.base = base;
+        } else if let Some((base, insecure)) = path.as_deref().and_then(crate::saved_session::hint)
+        {
+            login.base = base;
+            login.allow_insecure = insecure;
         }
         Self {
             screen: Screen::Login,

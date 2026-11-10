@@ -1,7 +1,7 @@
 //! Групповые личные беседы: создание, состав, владелец, название.
 
 use bs_types::DmChannel;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::client::ApiClient;
 use crate::error::ApiError;
@@ -65,7 +65,63 @@ pub struct GroupUpdate {
     pub icon: Option<Option<String>>,
 }
 
+/// Кому отправить приглашение в пространство.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum InviteTarget {
+    /// Пользователь этого инстанса.
+    #[serde(rename_all = "camelCase")]
+    Local {
+        /// Его id.
+        user_id: String,
+    },
+    /// Пользователь другого инстанса.
+    #[serde(rename_all = "camelCase")]
+    Remote {
+        /// Id на домашнем инстансе.
+        home_user_id: String,
+        /// Домашний инстанс.
+        home_instance: String,
+    },
+}
+
+/// Тело `POST /api/dm/space-invite`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceInviteRequest {
+    /// Получатель (должен быть в друзьях).
+    pub target: InviteTarget,
+    /// Пространство на его инстансе.
+    pub space_id: String,
+    /// Инстанс пространства; пустая строка — этот же.
+    pub space_instance_origin: String,
+    /// Уже выданный код приглашения.
+    pub invite_code: String,
+}
+
+/// Ответ `POST /api/dm/space-invite`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceInviteResponse {
+    /// Беседа, куда ушло приглашение.
+    pub dm_channel_id: String,
+    /// Id системного сообщения.
+    pub message_id: String,
+}
+
 impl ApiClient {
+    /// `POST /api/dm/space-invite` — отправить другу приглашение в
+    /// пространство системным сообщением в ЛС.
+    ///
+    /// # Errors
+    /// Сеть или отказ сервера (`not_a_friend`, `invite_invalid`, …).
+    pub async fn send_space_invite(
+        &self,
+        request: &SpaceInviteRequest,
+    ) -> Result<SpaceInviteResponse, ApiError> {
+        self.post_json("/api/dm/space-invite", request).await
+    }
+
     /// `POST /api/dm/group` — создать группу из `users` (без себя, от 2 человек).
     ///
     /// # Errors

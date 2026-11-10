@@ -255,6 +255,37 @@ pub fn encode_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, Media
     Ok(out)
 }
 
+/// Квадратная иконка: первый кадр, обрезка по центру до квадрата,
+/// уменьшение до `side` и PNG. Для иконок групп и пространств.
+///
+/// # Errors
+/// Файл не картинка, слишком большой или повреждён.
+pub fn square_icon(bytes: &[u8], side: u32, limits: &Limits) -> Result<Vec<u8>, MediaError> {
+    let decoded = decode(bytes, limits)?;
+    let frame = decoded
+        .frames
+        .first()
+        .ok_or_else(|| MediaError::Decode("нет кадров".to_owned()))?;
+    let image = image::RgbaImage::from_raw(decoded.width, decoded.height, frame.rgba.clone())
+        .ok_or_else(|| MediaError::Decode("неверный размер пикселей".to_owned()))?;
+    let edge = decoded.width.min(decoded.height);
+    let x = (decoded.width - edge) / 2;
+    let y = (decoded.height - edge) / 2;
+    let cropped = image::imageops::crop_imm(&image, x, y, edge, edge).to_image();
+    let target = edge.min(side.max(1));
+    let resized = if target == edge {
+        cropped
+    } else {
+        image::imageops::resize(
+            &cropped,
+            target,
+            target,
+            image::imageops::FilterType::Lanczos3,
+        )
+    };
+    encode_png(resized.as_raw(), target, target)
+}
+
 /// Статичная картинка из декодера: ориентация EXIF и уменьшение.
 fn still_from(
     mut decoder: impl image::ImageDecoder,
@@ -358,7 +389,7 @@ fn animated(
 
 #[cfg(test)]
 mod tests {
-    use super::{Limits, MediaError, THUMB_SIDE, decode, fit};
+    use super::{Limits, MediaError, THUMB_SIDE, decode, encode_png, fit, square_icon};
     use image::{
         Delay, Frame as ImgFrame, ImageEncoder as _, Rgba, RgbaImage,
         codecs::{gif::GifEncoder, png::PngEncoder},
@@ -527,5 +558,28 @@ mod tests {
                 .iter()
                 .all(|t| t.width.max(t.height) < THUMB_SIDE)
         );
+    }
+
+    #[test]
+    fn square_icon_crops_center_and_shrinks() {
+        // 40×20: левая половина красная, правая — синяя; центр 20×20 — граница.
+        let mut rgba = Vec::new();
+        for _y in 0..20 {
+            for x in 0..40 {
+                rgba.extend_from_slice(if x < 20 {
+                    &[255, 0, 0, 255]
+                } else {
+                    &[0, 0, 255, 255]
+                });
+            }
+        }
+        let png = encode_png(&rgba, 40, 20).unwrap();
+        let icon = square_icon(&png, 8, &Limits::default()).unwrap();
+        let decoded = decode(&icon, &Limits::default()).unwrap();
+        assert_eq!((decoded.width, decoded.height), (8, 8));
+        let px = |x: usize| &decoded.frames[0].rgba[x * 4..x * 4 + 3];
+        assert!(px(0)[0] > 200, "слева красный");
+        assert!(px(7)[2] > 200, "справа синий");
+        assert!(square_icon(b"not an image", 8, &Limits::default()).is_err());
     }
 }

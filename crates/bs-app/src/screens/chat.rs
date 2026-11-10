@@ -502,6 +502,30 @@ pub(crate) fn member_rows(cache: &Cache, space_id: &str) -> Vec<MemberRow> {
     rows
 }
 
+/// Участники групповой беседы: владелец, затем в сети, затем остальные.
+#[must_use]
+pub(crate) fn group_member_rows(cache: &Cache, dm: &bs_types::DmChannel) -> Vec<MemberRow> {
+    let mut rows: Vec<MemberRow> = dm
+        .members
+        .iter()
+        .map(|user| MemberRow {
+            user_id: user.id.clone(),
+            name: author_name(user.display_name.as_deref(), &user.username).to_owned(),
+            status: cache.user_status(&user.id).unwrap_or(user.status),
+            owner: dm.owner_id.as_deref() == Some(user.id.as_str()),
+            avatar: user.avatar.clone(),
+            face: face_of(user),
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        (a.section() as u8)
+            .cmp(&(b.section() as u8))
+            .then_with(|| status_rank(a.status).cmp(&status_rank(b.status)))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    rows
+}
+
 /// Одна строка ленты: одинаковая для каналов и личных сообщений.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MessageRow {
@@ -522,6 +546,17 @@ struct MessageRow {
     reactions: Vec<super::body::ReactionGroup>,
     /// Автор и текст сообщения, на которое это — ответ.
     reply: Option<(String, String)>,
+    /// Системное сообщение беседы (`type: "system"`); `None` — обычное.
+    system: Option<SystemLine>,
+}
+
+/// Содержимое системного сообщения.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SystemLine {
+    /// Известное событие.
+    Event(Box<bs_types::DmSystemEvent>),
+    /// Событие, которое клиент не знает: показывается нейтрально.
+    Unknown,
 }
 
 /// Окно, в котором подряд идущие сообщения одного автора склеиваются.
@@ -536,7 +571,9 @@ fn needs_header(prev: Option<&MessageRow>, cur: &MessageRow) -> bool {
     let Some(prev) = prev else {
         return true;
     };
-    prev.author_id != cur.author_id
+    prev.system.is_some()
+        || cur.system.is_some()
+        || prev.author_id != cur.author_id
         || cur.created_at.saturating_sub(prev.created_at) > GROUP_WINDOW_MS
         || theme::local_day(prev.created_at) != theme::local_day(cur.created_at)
 }
@@ -639,6 +676,7 @@ fn message_rows(
                     .reply_to
                     .as_ref()
                     .map(|r| quote(&r.user, r.message.content.as_ref())),
+                system: None,
             })
             .collect(),
         ChannelKind::Dm => cache
@@ -664,6 +702,17 @@ fn message_rows(
                     .reply_to
                     .as_ref()
                     .map(|r| quote(&r.user, r.message.content.as_ref())),
+                system: (msg.message.message_type == Some(bs_types::MessageType::System)).then(
+                    || {
+                        msg.message
+                            .content
+                            .as_deref()
+                            .and_then(bs_types::DmSystemEvent::parse)
+                            .map_or(SystemLine::Unknown, |event| {
+                                SystemLine::Event(Box::new(event))
+                            })
+                    },
+                ),
             })
             .collect(),
     }
@@ -935,6 +984,10 @@ pub(crate) struct ChatScreen {
     pub(crate) voice: crate::voice::VoiceState,
     /// Рация (push-to-talk) между кадрами.
     ptt: crate::hotkeys::PushToTalk,
+    /// Нажата «Вступить» на приглашении: (инстанс, код).
+    pending_join: Option<(usize, String)>,
+    /// Окно «Пригласить людей».
+    invite_dialog: Option<super::invite_dialog::InviteDialog>,
     /// Выбранный канал и его инстанс.
     pub(crate) selected_channel: Option<SelectedChannel>,
     pub(crate) draft: String,
@@ -1165,8 +1218,9 @@ impl ChatScreen {
                 );
             }
             Nav::Invite { origin, space_id } => {
-                bridge.focus_on(origin);
-                bridge.request(BridgeRequest::SpaceInvite(space_id));
+                self.invite_dialog = Some(super::invite_dialog::InviteDialog::open(
+                    bridge, origin, space_id,
+                ));
             }
             Nav::Settings => {
                 if let Some(cache) = bridge.cache() {
@@ -1293,38 +1347,47 @@ impl ChatScreen {
                 }
             }
             View::Channel => {
-                if self.show_members
-                    && let Some(space_id) = self.active_space.clone()
-                {
-                    if let Some((id, name)) = Self::show_member_panel(ui, bridge, &space_id.1) {
+                if self.show_members {
+                    let rows = self.member_panel_rows(bridge);
+                    if let Some(rows) = rows
+                        && let Some((id, name)) = Self::show_member_panel(ui, &rows)
+                    {
                         self.profile = Some(super::profile::ProfileState::open(bridge, &id, &name));
                     }
                 }
                 self.show_header(ui, bridge);
                 self.show_composer(ui, bridge);
                 self.show_messages(ui, bridge);
+                if let Some((origin, code)) = self.pending_join.take() {
+                    let previous = bridge.focus_index();
+                    bridge.focus_on(origin);
+                    bridge.request(BridgeRequest::JoinByCode(code));
+                    bridge.focus_on(previous);
+                }
                 self.show_search(&ctx, bridge);
             }
         }
 
+        if let Some(dialog) = self.invite_dialog.as_mut()
+            && !super::invite_dialog::show(&ctx, dialog, bridge)
+        {
+            self.invite_dialog = None;
+        }
         if let Some(value) = self.viewer.clone()
             && media::viewer(&ctx, &value)
         {
             self.viewer = None;
         }
+        let panel_open = self.show_members
+            && self.view == View::Channel
+            && self.member_panel_rows(bridge).is_some();
         if let Some(state) = self.profile.as_mut() {
             state.poll(bridge);
             let me = bridge
                 .cache()
                 .map(|cache| cache.me().id.clone())
                 .unwrap_or_default();
-            let right_edge = ctx.content_rect().right()
-                - if self.show_members && self.active_space.is_some() && self.view == View::Channel
-                {
-                    236.0
-                } else {
-                    0.0
-                };
+            let right_edge = ctx.content_rect().right() - if panel_open { 236.0 } else { 0.0 };
             if super::profile::show(&ctx, state, bridge, &me, right_edge)
                 == super::profile::ProfileAction::Close
             {
@@ -1410,7 +1473,20 @@ impl ChatScreen {
         use crate::bridge::{SpaceEvent, SpaceOp};
         for (origin, event) in bridge.take_space_events() {
             match &event {
+                SpaceEvent::InviteSent { friend_id, result } => {
+                    if let Some(dialog) = self.invite_dialog.as_mut() {
+                        dialog.accept_sent(friend_id, result);
+                    }
+                    continue;
+                }
                 SpaceEvent::Invite { result, .. } => {
+                    if self
+                        .invite_dialog
+                        .as_mut()
+                        .is_some_and(|dialog| dialog.accept_code(origin, result))
+                    {
+                        continue;
+                    }
                     let text = match result {
                         Ok(code) => {
                             let base = bridge.base_at(origin).unwrap_or_default();
@@ -2002,16 +2078,30 @@ impl ChatScreen {
     }
 
     /// Правая панель: участники пространства по секциям.
-    fn show_member_panel(
-        ui: &mut egui::Ui,
-        bridge: &Bridge,
-        space_id: &str,
-    ) -> Option<(String, String)> {
+    /// Строки правой панели: участники пространства или групповой беседы;
+    /// `None` — панели здесь нет (личная беседа один на один).
+    fn member_panel_rows(&self, bridge: &Bridge) -> Option<Vec<MemberRow>> {
+        if let Some((_, space_id)) = &self.active_space {
+            return Some(
+                bridge
+                    .cache()
+                    .map(|cache| member_rows(cache, space_id))
+                    .unwrap_or_default(),
+            );
+        }
+        let selected = self
+            .selected_channel
+            .as_ref()
+            .filter(|s| s.kind == ChannelKind::Dm)?;
+        let cache = bridge.cache_at(selected.origin)?;
+        let dm = cache
+            .dm_channel(&selected.channel)
+            .filter(|dm| dm.owner_id.is_some())?;
+        Some(group_member_rows(cache, dm))
+    }
+
+    fn show_member_panel(ui: &mut egui::Ui, rows: &[MemberRow]) -> Option<(String, String)> {
         let mut clicked = None;
-        let rows = bridge
-            .cache()
-            .map(|cache| member_rows(cache, space_id))
-            .unwrap_or_default();
         egui::Panel::right("members")
             .exact_size(236.0)
             .resizable(false)
@@ -2026,7 +2116,7 @@ impl ChatScreen {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let mut current: Option<MemberSection> = None;
-                        for row in &rows {
+                        for row in rows {
                             let section = row.section();
                             if current != Some(section) {
                                 if current.is_some() {
@@ -2059,60 +2149,74 @@ impl ChatScreen {
         clicked
     }
 
-    /// Кнопка «Настройки группы» в шапке групповой беседы.
-    fn group_button(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
-        if let Some(selected) = self
-            .selected_channel
-            .as_ref()
-            .filter(|s| s.kind == ChannelKind::Dm)
-            && let Some(dm) = bridge
-                .cache_at(selected.origin)
-                .and_then(|c| c.dm_channel(&selected.channel))
-                .filter(|dm| dm.owner_id.is_some())
-        {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .add(widgets::flat_icon(Icon::Users, 22.0, theme::text_faint()))
-                    .on_hover_text("Настройки группы")
-                    .clicked()
-                {
-                    self.group_dialog =
-                        Some(super::group_dm::GroupDialog::manage(selected.origin, dm));
-                }
-            });
-        }
-    }
-
-    /// Лупа в шапке: открывает поиск по сообщениям. Стоит левее остальных
-    /// кнопок шапки, поэтому отступает на ширину каждой из них.
-    fn search_button(&mut self, ui: &mut egui::Ui, bridge: &Bridge, has_members: bool) {
+    /// Кнопки справа в шапке, справа налево: участники, настройки группы,
+    /// звонок, поиск. Один ряд — кнопки не наезжают друг на друга.
+    fn header_buttons(
+        &mut self,
+        ui: &mut egui::Ui,
+        bridge: &Bridge,
+        has_members: bool,
+        title: &str,
+    ) {
         let Some(selected) = self.selected_channel.clone() else {
             return;
         };
-        let mut buttons = usize::from(has_members);
-        if selected.kind == ChannelKind::Dm {
-            let is_group = bridge
-                .cache_at(selected.origin)
-                .and_then(|c| c.dm_channel(&selected.channel))
-                .is_some_and(|dm| dm.owner_id.is_some());
-            buttons += usize::from(is_group) + usize::from(self.voice.dm.is_none());
-        }
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            #[allow(clippy::cast_precision_loss, reason = "кнопок в шапке единицы")]
-            ui.add_space(34.0 * buttons as f32);
-            let color = if self.search.open {
+        if has_members {
+            let color = if self.show_members {
                 theme::text_bright()
             } else {
                 theme::text_faint()
             };
             if ui
-                .add(widgets::flat_icon(Icon::Search, 22.0, color))
-                .on_hover_text("Поиск по сообщениям")
+                .add(widgets::flat_icon(Icon::Users, 22.0, color))
+                .on_hover_text(if self.show_members {
+                    "Скрыть участников"
+                } else {
+                    "Показать участников"
+                })
                 .clicked()
             {
-                self.search.toggle();
+                self.show_members = !self.show_members;
             }
-        });
+        }
+        if selected.kind == ChannelKind::Dm
+            && let Some(dm) = bridge
+                .cache_at(selected.origin)
+                .and_then(|c| c.dm_channel(&selected.channel))
+        {
+            if dm.owner_id.is_some()
+                && ui
+                    .add(widgets::flat_icon(Icon::Gear, 22.0, theme::text_faint()))
+                    .on_hover_text("Настройки группы")
+                    .clicked()
+            {
+                self.group_dialog = Some(super::group_dm::GroupDialog::manage(selected.origin, dm));
+            }
+            if self.voice.dm.is_none()
+                && ui
+                    .add(widgets::flat_icon(Icon::Phone, 22.0, theme::text_faint()))
+                    .on_hover_text("Позвонить")
+                    .clicked()
+            {
+                self.pending_call = Some((
+                    selected.channel.clone(),
+                    dm.federated_id.clone(),
+                    title.to_owned(),
+                ));
+            }
+        }
+        let color = if self.search.open {
+            theme::text_bright()
+        } else {
+            theme::text_faint()
+        };
+        if ui
+            .add(widgets::flat_icon(Icon::Search, 22.0, color))
+            .on_hover_text("Поиск по сообщениям")
+            .clicked()
+        {
+            self.search.toggle();
+        }
     }
 
     /// Шапка ленты: название канала, тема, переключатель участников.
@@ -2135,7 +2239,7 @@ impl ChatScreen {
                 }
             },
         );
-        let has_members = self.active_space.is_some();
+        let has_members = self.member_panel_rows(bridge).is_some();
         egui::Panel::top("chat_header")
             .exact_size(52.0)
             .resizable(false)
@@ -2157,57 +2261,9 @@ impl ChatScreen {
                         ui.add_space(6.0);
                         ui.label(theme::muted(theme::truncate_chars(&topic, 80)).size(13.0));
                     }
-                    if let Some(selected) = self
-                        .selected_channel
-                        .as_ref()
-                        .filter(|s| s.kind == ChannelKind::Dm)
-                        && self.voice.dm.is_none()
-                    {
-                        let is_group = bridge
-                            .cache()
-                            .and_then(|c| c.dm_channel(&selected.channel))
-                            .is_some_and(|dm| dm.owner_id.is_some());
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if is_group {
-                                // Правее телефона стоит кнопка настроек группы.
-                                ui.add_space(34.0);
-                            }
-                            if ui
-                                .add(widgets::flat_icon(Icon::Phone, 22.0, theme::text_faint()))
-                                .on_hover_text("Позвонить")
-                                .clicked()
-                            {
-                                let federated = bridge
-                                    .cache()
-                                    .and_then(|c| c.dm_channel(&selected.channel))
-                                    .and_then(|dm| dm.federated_id.clone());
-                                self.pending_call =
-                                    Some((selected.channel.clone(), federated, title.clone()));
-                            }
-                        });
-                    }
-                    self.group_button(ui, bridge);
-                    self.search_button(ui, bridge, has_members);
-                    if has_members {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let color = if self.show_members {
-                                theme::text_bright()
-                            } else {
-                                theme::text_faint()
-                            };
-                            if ui
-                                .add(widgets::flat_icon(Icon::Users, 22.0, color))
-                                .on_hover_text(if self.show_members {
-                                    "Скрыть участников"
-                                } else {
-                                    "Показать участников"
-                                })
-                                .clicked()
-                            {
-                                self.show_members = !self.show_members;
-                            }
-                        });
-                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        self.header_buttons(ui, bridge, has_members, &title);
+                    });
                 });
             });
     }
@@ -2636,6 +2692,56 @@ impl ChatScreen {
         }
     }
 
+    /// Системное сообщение беседы: строка события или карточка приглашения.
+    fn show_system_message(
+        &mut self,
+        ui: &mut egui::Ui,
+        bridge: &Bridge,
+        selected: &SelectedChannel,
+        row: &MessageRow,
+        event: Option<&bs_types::DmSystemEvent>,
+    ) {
+        ui.add_space(6.0);
+        if let Some(bs_types::DmSystemEvent::SpaceInvite(invite)) = event {
+            ui.horizontal(|ui| {
+                ui.add_space(70.0);
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(format!("{} приглашает в пространство", row.author))
+                            .size(12.5)
+                            .color(theme::text_muted()),
+                    );
+                    if let Some(join) =
+                        super::invite_card::show(ui, bridge, selected.origin, invite)
+                    {
+                        self.pending_join = Some(join);
+                    }
+                });
+            });
+            ui.add_space(4.0);
+            return;
+        }
+        let text = event.map_or_else(
+            || bs_types::GENERIC_SYSTEM_TEXT.to_owned(),
+            |event| event.text(&row.author, true),
+        );
+        let glyph = event
+            .and_then(bs_types::DmSystemEvent::glyph)
+            .unwrap_or("•");
+        ui.horizontal(|ui| {
+            ui.add_space(34.0);
+            ui.label(RichText::new(glyph).size(14.0).color(theme::text_faint()));
+            ui.add_space(6.0);
+            ui.label(RichText::new(text).size(13.5).color(theme::text_muted()));
+            ui.label(
+                RichText::new(theme::stamp(row.created_at, now_ms()))
+                    .size(11.5)
+                    .color(theme::text_faint()),
+            );
+        });
+        ui.add_space(2.0);
+    }
+
     /// Одно сообщение: аватар и имя у первого в группе, тело, контекстное меню.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn show_message(
@@ -2649,6 +2755,14 @@ impl ChatScreen {
         first_id: Option<&str>,
         edit_request: &mut Option<(String, String)>,
     ) {
+        if let Some(line) = &row.system {
+            let event = match line {
+                SystemLine::Event(event) => Some(event.as_ref()),
+                SystemLine::Unknown => None,
+            };
+            self.show_system_message(ui, bridge, selected, row, event);
+            return;
+        }
         let gap = match (show_header, theme::compact()) {
             (true, false) => 16.0,
             (true, true) => 6.0,
@@ -3110,6 +3224,7 @@ mod tests {
             attachments: Vec::new(),
             reactions: Vec::new(),
             reply: None,
+            system: None,
         }
     }
 

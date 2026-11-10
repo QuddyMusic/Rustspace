@@ -416,7 +416,11 @@ pub(crate) fn show_active_now(ui: &mut egui::Ui, bridge: &Bridge) {
                                 .filter(|s| !s.is_empty());
                             let response = widgets::compact_person(
                                 ui,
-                                &name,
+                                theme::Face {
+                                    name: &name,
+                                    key: Some(friend.home_user_id.as_deref().unwrap_or(&friend.id)),
+                                    color: friend.avatar_color.as_deref(),
+                                },
                                 subtitle,
                                 friend.status,
                                 friend.avatar.as_deref(),

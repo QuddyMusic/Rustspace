@@ -265,6 +265,8 @@ fn manage(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &
         .unwrap_or_default();
     let owner = dm.owner_id.as_deref() == Some(me.as_str());
     title(ui, "Настройки группы");
+    icon_row(ui, state, bridge, dm, owner);
+    ui.add_space(8.0);
     name_row(ui, state, bridge, dm, owner);
     ui.add_space(10.0);
     widgets::section_label(
@@ -285,6 +287,74 @@ fn manage(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &
     ui.separator();
     ui.add_space(6.0);
     leave(ui, state, bridge, dm);
+}
+
+/// Предел размера файла иконки (`GROUP_DM_ICON_MAX_BYTES` оригинала).
+const ICON_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Иконка группы: превью, «Загрузить…» и «Убрать» (только владелец).
+fn icon_row(
+    ui: &mut egui::Ui,
+    state: &mut GroupDialog,
+    bridge: &mut Bridge,
+    dm: &DmChannel,
+    owner: bool,
+) {
+    let mut op = None;
+    ui.horizontal(|ui| {
+        let base = bridge.base_at(state.origin).map(str::to_owned);
+        let icon = dm.icon.as_deref().map(|value| {
+            base.as_deref().map_or_else(
+                || value.to_owned(),
+                |base| crate::images::absolute(base, value),
+            )
+        });
+        let name = dm.name.clone().unwrap_or_else(|| "Группа".to_owned());
+        theme::avatar(
+            ui,
+            theme::Face {
+                name: &name,
+                key: Some(&dm.id),
+                color: None,
+            },
+            56.0,
+            None,
+            icon.as_deref(),
+        );
+        ui.add_space(8.0);
+        ui.vertical(|ui| {
+            widgets::field_label(ui, "Иконка группы");
+            ui.add_enabled_ui(owner && !state.busy, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.add(theme::primary_button("Загрузить…")).clicked() {
+                        op = pick_icon()
+                            .map(|picked| picked.map(|bytes| GroupOp::Icon(Some(bytes))));
+                    }
+                    if dm.icon.is_some() && ui.button("Убрать").clicked() {
+                        op = Some(Ok(GroupOp::Icon(None)));
+                    }
+                });
+            });
+            ui.label(theme::muted("Квадрат по центру картинки, до 8 МБ.").size(12.0));
+        });
+    });
+    match op {
+        Some(Ok(op)) => state.send(bridge, dm.id.clone(), op),
+        Some(Err(err)) => state.error = Some(err),
+        None => {}
+    }
+}
+
+/// Диалог выбора картинки; `None` — пользователь передумал.
+fn pick_icon() -> Option<Result<Vec<u8>, String>> {
+    let path = rfd::FileDialog::new()
+        .add_filter("Картинки", &["png", "jpg", "jpeg", "gif", "webp"])
+        .pick_file()?;
+    let size = std::fs::metadata(&path).map_or(0, |m| m.len());
+    if size > ICON_MAX_BYTES {
+        return Some(Err("Файл больше 8 МБ".to_owned()));
+    }
+    Some(std::fs::read(&path).map_err(|err| format!("Не удалось прочитать файл: {err}")))
 }
 
 fn name_row(
