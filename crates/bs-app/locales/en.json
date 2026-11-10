@@ -1082,5 +1082,8 @@
   "Нет права прикреплять файлы": "You are not allowed to attach files",
   "декодер упал: {err}": "decoder failed: {err}",
   "Картинка не подходит: {err}": "Unsuitable image: {err}",
-  "Сообщение длиннее {max} символов: сократите правку": "The message is longer than {max} characters: shorten the edit"
+  "Сообщение длиннее {max} символов: сократите правку": "The message is longer than {max} characters: shorten the edit",
+  "Выбрать экран или окно в системном окне": "Choose a screen or window in the system dialog",
+  "Экран: {name}": "Screen: {name}",
+  "Окно: {name}": "Window: {name}"
 }

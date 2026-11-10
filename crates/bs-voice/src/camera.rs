@@ -171,11 +171,12 @@ mod native {
                     match frame {
                         Ok(image) => {
                             let (width, height) = image.dimensions();
-                            let frame = CapturedFrame {
-                                width,
-                                height,
-                                rgba: rgb_to_rgba(image.as_raw()),
+                            let rgba = rgb_to_rgba(image.as_raw());
+                            let Ok(i420) = crate::convert::rgba_to_i420(&rgba, width, height)
+                            else {
+                                continue;
                             };
+                            let frame = CapturedFrame { i420 };
                             if let Err(mpsc::error::TrySendError::Closed(_)) = tx.try_send(frame) {
                                 break;
                             }

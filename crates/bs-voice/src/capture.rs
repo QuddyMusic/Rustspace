@@ -1,20 +1,32 @@
-//! Захват экрана через xcap.
+//! Захват экрана захватчиком самой libwebrtc — тем же, что в Chrome.
 //!
-//! Объекты xcap (`Monitor`, `Window`) не `Send`: на X11 они держат
-//! соединение с сервером, на Wayland — дескриптор PipeWire. Поэтому захват
-//! живёт в собственном потоке: он сам создаёт захватчик, снимает кадры и
-//! отправляет в канал обычные байты. Наружу торчит только `Send + Sync`
-//! ручка [`ScreenCapture`].
+//! - **Wayland**: системный портал ScreenCast (xdg-desktop-portal + PipeWire).
+//!   Экран или окно выбирает пользователь в диалоге системы, кадры идут
+//!   потоком PipeWire с частотой композитора. Прежний захват через
+//!   wlr-screencopy делал полный скриншот на каждый кадр, путал мониторы
+//!   и давал единицы кадров в секунду.
+//! - **X11**: XShm/XDamage; **Windows**: DXGI/WGC; **macOS**: ScreenCaptureKit
+//!   (по умолчанию тоже системный выбор).
+//!
+//! Захватчик живёт в своём потоке: тот раз в 1/fps просит кадр, переводит
+//! его из BGRA в I420 (libyuv) с уменьшением под предел и отдаёт в канал.
+//! Если получатель не успевает, лишний кадр просто пропускается.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use livekit::webrtc::desktop_capturer::{
+    CaptureError, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions, DesktopFrame,
+};
+use livekit::webrtc::prelude::VideoBuffer as _;
+use livekit::webrtc::video_frame::I420Buffer;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
+use crate::convert::{PackedFormat, fit_i420, packed_to_i420};
 use crate::error::{VoiceError, VoiceResult};
 
 /// Что именно показываем.
@@ -25,30 +37,41 @@ pub enum CaptureTarget {
     Monitor,
     /// Одно окно.
     Window,
+    /// Выбор в системном диалоге (портал Wayland, ScreenCaptureKit).
+    System,
 }
 
 /// Описание источника захвата.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScreenSource {
-    /// Идентификатор монитора или окна (xcap id).
-    pub id: u32,
+    /// Идентификатор источника у захватчика (для `System` — 0).
+    pub id: u64,
     /// Человекочитаемое имя для UI.
     pub name: String,
-    /// Монитор или окно.
+    /// Монитор, окно или системный выбор.
     pub target: CaptureTarget,
-    /// Ширина источника в пикселях.
-    pub width: u32,
-    /// Высота источника в пикселях.
-    pub height: u32,
 }
 
-/// Готовый кадр в RGBA8.
-#[derive(Debug, Clone)]
+/// Готовый кадр для отправки.
+#[derive(Debug)]
 pub struct CapturedFrame {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
+    /// Кадр в I420, уже уменьшенный под предел.
+    pub i420: I420Buffer,
+}
+
+impl CapturedFrame {
+    /// Ширина кадра.
+    #[must_use]
+    pub fn width(&self) -> u32 {
+        self.i420.width()
+    }
+
+    /// Высота кадра.
+    #[must_use]
+    pub fn height(&self) -> u32 {
+        self.i420.height()
+    }
 }
 
 /// Параметры захвата.
@@ -57,18 +80,21 @@ pub struct CapturedFrame {
 pub struct CaptureConfig {
     /// Кадров в секунду.
     pub fps: u32,
-    /// Максимальная ширина; больше — уменьшаем пропорционально.
+    /// Предел ширины кадра; больше — уменьшаем пропорционально.
     pub max_width: u32,
-    /// Уменьшать ли кадр под `max_width`.
-    pub downscale: bool,
+    /// Предел высоты кадра.
+    pub max_height: u32,
+    /// Показывать курсор.
+    pub cursor: bool,
 }
 
 impl Default for CaptureConfig {
     fn default() -> Self {
         Self {
-            fps: 15,
+            fps: 30,
             max_width: 1920,
-            downscale: true,
+            max_height: 1080,
+            cursor: true,
         }
     }
 }
@@ -78,7 +104,7 @@ impl CaptureConfig {
     ///
     /// # Errors
     ///
-    /// Если fps или ширина равны нулю.
+    /// fps вне 1..=60 или предел размера меньше 2.
     pub fn validate(&self) -> VoiceResult<()> {
         if self.fps == 0 || self.fps > 60 {
             return Err(VoiceError::Config(format!(
@@ -86,231 +112,142 @@ impl CaptureConfig {
                 self.fps
             )));
         }
-        if self.max_width < 2 {
+        if self.max_width < 2 || self.max_height < 2 {
             return Err(VoiceError::Config(
-                "max_width должен быть не меньше 2 для I420".into(),
+                "предел размера должен быть не меньше 2 для I420".into(),
             ));
         }
         Ok(())
     }
+}
 
-    /// Итоговый размер кадра после возможного уменьшения.
-    #[must_use]
-    pub fn output_size(&self, width: u32, height: u32) -> (u32, u32) {
-        if width == 0 || height == 0 {
-            return (0, 0);
-        }
-        if !self.downscale || width <= self.max_width {
-            return (width.max(2) & !1, height.max(2) & !1);
-        }
-        let scale = f64::from(self.max_width) / f64::from(width);
-        let out_h = (f64::from(height) * scale).round() as u32;
-        (self.max_width.max(2) & !1, out_h.max(2) & !1)
+/// Работаем ли под Wayland (тогда выбор только через портал).
+#[must_use]
+pub fn is_wayland() -> bool {
+    cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
+fn system_source() -> ScreenSource {
+    ScreenSource {
+        id: 0,
+        name: "system".into(),
+        target: CaptureTarget::System,
     }
 }
 
-/// Перечисляет доступные мониторы.
-///
-/// # Errors
-///
-/// Ошибка xcap, если сервер не отвечает или нет прав на захват.
-pub fn list_monitors() -> VoiceResult<Vec<ScreenSource>> {
-    let monitors = xcap::Monitor::all().map_err(|e| VoiceError::Capture(e.to_string()))?;
-    Ok(monitors
+fn list_of(kind: DesktopCaptureSourceType, target: CaptureTarget) -> Vec<ScreenSource> {
+    let mut options = DesktopCapturerOptions::new(kind);
+    #[cfg(target_os = "macos")]
+    options.set_sck_system_picker(false);
+    options.set_include_cursor(false);
+    let Some(capturer) = DesktopCapturer::new(options) else {
+        return Vec::new();
+    };
+    capturer
+        .get_source_list()
         .into_iter()
-        .filter_map(|m| {
-            let id = m.id().ok()?;
-            let width = m.width().ok()?;
-            let height = m.height().ok()?;
-            let name = m
-                .friendly_name()
-                .or_else(|_| m.name())
-                .unwrap_or_else(|_| format!("Монитор {id}"));
-            Some(ScreenSource {
-                id,
-                name,
-                target: CaptureTarget::Monitor,
-                width,
-                height,
-            })
+        .map(|source| ScreenSource {
+            id: source.id(),
+            name: source.title(),
+            target,
         })
-        .collect())
+        .collect()
 }
 
-/// Перечисляет окна, которые имеет смысл показывать.
+/// Источники, которые можно показать.
+///
+/// Под Wayland приложение не видит чужие окна и мониторы — это делает
+/// системный диалог, поэтому источник один: [`CaptureTarget::System`].
+/// Если система не отдала ни одного источника (macOS без разрешения),
+/// тоже предлагается системный выбор.
 ///
 /// # Errors
 ///
-/// Ошибка xcap при получении списка окон.
-pub fn list_windows() -> VoiceResult<Vec<ScreenSource>> {
-    let windows = xcap::Window::all().map_err(|e| VoiceError::Capture(e.to_string()))?;
-    Ok(windows
-        .into_iter()
-        .filter(|w| !w.is_minimized().unwrap_or(true))
-        .filter_map(|w| {
-            let id = w.id().ok()?;
-            let width = w.width().ok()?;
-            let height = w.height().ok()?;
-            if width == 0 || height == 0 {
-                return None;
-            }
-            let title = w.title().unwrap_or_default();
-            let app = w.app_name().unwrap_or_default();
-            let name = if title.is_empty() {
-                app
-            } else {
-                format!("{app} — {title}")
-            };
-            Some(ScreenSource {
-                id,
-                name,
-                target: CaptureTarget::Window,
-                width,
-                height,
-            })
-        })
-        .collect())
-}
-
-enum CaptureHandle {
-    Monitor(xcap::Monitor),
-    Window(xcap::Window),
-}
-
-impl CaptureHandle {
-    fn capture_frame(&self) -> VoiceResult<CapturedFrame> {
-        let image = match self {
-            Self::Monitor(monitor) => monitor.capture_image(),
-            Self::Window(window) => window.capture_image(),
-        }
-        .map_err(|e| VoiceError::Capture(e.to_string()))?;
-        Ok(CapturedFrame {
-            width: image.width(),
-            height: image.height(),
-            rgba: image.into_raw(),
-        })
+/// Сейчас не возвращает ошибок; сигнатура оставлена на будущее.
+pub fn list_sources() -> VoiceResult<Vec<ScreenSource>> {
+    if is_wayland() {
+        return Ok(vec![system_source()]);
     }
-}
-
-/// Ищет источник по id в текущем списке мониторов или окон.
-fn find_source(source: &ScreenSource) -> VoiceResult<CaptureHandle> {
-    let missing = || VoiceError::Capture(format!("источник {} не найден", source.id));
-    match source.target {
-        CaptureTarget::Monitor => {
-            let monitors = xcap::Monitor::all().map_err(|e| VoiceError::Capture(e.to_string()))?;
-            monitors
-                .into_iter()
-                .find(|m| m.id().is_ok_and(|id| id == source.id))
-                .map(CaptureHandle::Monitor)
-                .ok_or_else(missing)
-        }
-        CaptureTarget::Window => {
-            let windows = xcap::Window::all().map_err(|e| VoiceError::Capture(e.to_string()))?;
-            windows
-                .into_iter()
-                .find(|w| w.id().is_ok_and(|id| id == source.id))
-                .map(CaptureHandle::Window)
-                .ok_or_else(missing)
+    let mut sources = list_of(DesktopCaptureSourceType::Screen, CaptureTarget::Monitor);
+    // У мониторов WebRTC отдаёт служебные имена («screen», «\\.\\DISPLAY1»):
+    // нумеруем их по порядку, как в системных настройках.
+    if sources.len() > 1 || sources.iter().any(|s| s.name.trim().is_empty()) {
+        for (index, source) in sources.iter_mut().enumerate() {
+            source.name = format!("{}", index + 1);
         }
     }
+    sources.extend(
+        list_of(DesktopCaptureSourceType::Window, CaptureTarget::Window)
+            .into_iter()
+            .filter(|window| !window.name.trim().is_empty()),
+    );
+    if sources.is_empty() {
+        sources.push(system_source());
+    }
+    Ok(sources)
 }
 
-/// Захватывает один кадр монитора или окна по описанию источника.
-///
-/// # Errors
-///
-/// Ошибка xcap или неверные параметры конфигурации.
-pub fn capture_once(source: &ScreenSource) -> VoiceResult<CapturedFrame> {
-    find_source(source)?.capture_frame()
+/// Кадр захвата → I420 под предел размера.
+fn convert(frame: &DesktopFrame, config: &CaptureConfig) -> Option<I420Buffer> {
+    let (width, height) = (
+        u32::try_from(frame.width()).ok()?,
+        u32::try_from(frame.height()).ok()?,
+    );
+    if width < 2 || height < 2 {
+        return None;
+    }
+    let i420 = packed_to_i420(
+        frame.data(),
+        frame.stride(),
+        width,
+        height,
+        PackedFormat::Bgra,
+    )
+    .map_err(|err| debug!(%err, "кадр захвата пропущен"))
+    .ok()?;
+    Some(fit_i420(i420, config.max_width, config.max_height))
 }
 
-/// Ручка активного захвата экрана.
-///
-/// Поток захвата останавливается при вызове [`ScreenCapture::stop`] или
-/// при удалении ручки.
+/// Ручка идущего захвата. Останавливает поток при `Drop`.
 #[derive(Debug)]
 pub struct ScreenCapture {
     running: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
-    source: ScreenSource,
-    config: CaptureConfig,
 }
 
 impl ScreenCapture {
-    /// Запускает захват и возвращает ручку и приёмник кадров.
-    ///
-    /// Канал ограничен: если потребитель не успевает, новые кадры
-    /// пропускаются без блокировки потока захвата.
+    /// Запускает захват источника; кадры I420 приходят в канал.
     ///
     /// # Errors
     ///
-    /// Неверная конфигурация или недоступный источник.
+    /// Неверные настройки или захватчик не создался.
     pub fn start(
-        source: ScreenSource,
+        source: &ScreenSource,
         config: CaptureConfig,
     ) -> VoiceResult<(Self, mpsc::Receiver<CapturedFrame>)> {
         config.validate()?;
-        find_source(&source)?;
-
         let (tx, rx) = mpsc::channel(2);
         let running = Arc::new(AtomicBool::new(true));
         let flag = Arc::clone(&running);
-        let interval = Duration::from_millis(u64::from(1000 / config.fps.max(1)));
-        let thread_source = source.clone();
-
+        let source = source.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<VoiceResult<()>>();
         let handle = std::thread::Builder::new()
             .name("bs-voice-capture".into())
-            .spawn(move || {
-                let capture = match find_source(&thread_source) {
-                    Ok(handle) => handle,
-                    Err(e) => {
-                        warn!(error = %e, "захват не запущен");
-                        return;
-                    }
-                };
-                while flag.load(Ordering::Relaxed) {
-                    match capture.capture_frame() {
-                        Ok(frame) => match tx.try_send(frame) {
-                            Ok(()) => {}
-                            Err(mpsc::error::TrySendError::Full(_frame)) => {
-                                debug!("кадр пропущен: потребитель не успевает");
-                            }
-                            Err(mpsc::error::TrySendError::Closed(_frame)) => {
-                                debug!("приёмник кадров закрыт");
-                                break;
-                            }
-                        },
-                        Err(e) => warn!(error = %e, "кадр не захвачен"),
-                    }
-                    std::thread::sleep(interval);
-                }
-            })
-            .map_err(|e| VoiceError::Capture(e.to_string()))?;
-
+            .spawn(move || capture_loop(&source, config, &flag, &tx, &ready_tx))
+            .map_err(|err| VoiceError::Capture(err.to_string()))?;
+        ready_rx
+            .recv()
+            .unwrap_or_else(|_| Err(VoiceError::Capture("поток захвата завершился".into())))?;
         Ok((
             Self {
                 running,
                 handle: Some(handle),
-                source,
-                config,
             },
             rx,
         ))
     }
 
-    /// Источник, с которого идёт захват.
-    #[must_use]
-    pub fn source(&self) -> &ScreenSource {
-        &self.source
-    }
-
-    /// Конфигурация захвата.
-    #[must_use]
-    pub const fn config(&self) -> CaptureConfig {
-        self.config
-    }
-
-    /// Останавливает поток захвата и дожидается его завершения.
+    /// Останавливает захват и ждёт поток.
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
         if let Some(handle) = self.handle.take() {
@@ -325,6 +262,83 @@ impl Drop for ScreenCapture {
     }
 }
 
+fn capture_loop(
+    source: &ScreenSource,
+    config: CaptureConfig,
+    running: &AtomicBool,
+    tx: &mpsc::Sender<CapturedFrame>,
+    ready: &std::sync::mpsc::Sender<VoiceResult<()>>,
+) {
+    let kind = match source.target {
+        CaptureTarget::Monitor => DesktopCaptureSourceType::Screen,
+        CaptureTarget::Window => DesktopCaptureSourceType::Window,
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        CaptureTarget::System => DesktopCaptureSourceType::Generic,
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        CaptureTarget::System => DesktopCaptureSourceType::Screen,
+    };
+    let mut options = DesktopCapturerOptions::new(kind);
+    options.set_include_cursor(config.cursor);
+    #[cfg(target_os = "macos")]
+    options.set_sck_system_picker(source.target == CaptureTarget::System);
+    let Some(mut capturer) = DesktopCapturer::new(options) else {
+        let _ = ready.send(Err(VoiceError::Capture(
+            "система не дала захватить экран".into(),
+        )));
+        return;
+    };
+    let selected = (source.target != CaptureTarget::System)
+        .then(|| {
+            capturer
+                .get_source_list()
+                .into_iter()
+                .find(|candidate| candidate.id() == source.id)
+        })
+        .flatten();
+    if source.target != CaptureTarget::System && selected.is_none() {
+        let _ = ready.send(Err(VoiceError::Capture(format!(
+            "источник «{}» больше недоступен",
+            source.name
+        ))));
+        return;
+    }
+    let sender = tx.clone();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stop_flag = Arc::clone(&stopped);
+    capturer.start_capture(selected, move |result| match result {
+        Ok(frame) => {
+            if let Some(i420) = convert(&frame, &config) {
+                // Полный канал — кадр устарел ещё до отправки, пропускаем.
+                if let Err(mpsc::error::TrySendError::Closed(_)) =
+                    sender.try_send(CapturedFrame { i420 })
+                {
+                    stop_flag.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+        Err(CaptureError::Temporary) => {}
+        Err(CaptureError::Permanent) => {
+            warn!("захват экрана прерван системой");
+            stop_flag.store(true, Ordering::Relaxed);
+        }
+    });
+    let _ = ready.send(Ok(()));
+    info!(target = ?source.target, fps = config.fps, "захват экрана начат");
+    let interval = Duration::from_secs(1) / config.fps;
+    let mut next = Instant::now();
+    while running.load(Ordering::Relaxed) && !stopped.load(Ordering::Relaxed) {
+        capturer.capture_frame();
+        next += interval;
+        let now = Instant::now();
+        if next > now {
+            std::thread::sleep(next - now);
+        } else {
+            next = now;
+        }
+    }
+    debug!("захват экрана остановлен");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,101 +349,22 @@ mod tests {
     }
 
     #[test]
-    fn zero_fps_is_rejected() {
-        let cfg = CaptureConfig {
-            fps: 0,
-            ..CaptureConfig::default()
-        };
-        assert!(matches!(cfg.validate(), Err(VoiceError::Config(_))));
-    }
-
-    #[test]
-    fn too_high_fps_is_rejected() {
-        let cfg = CaptureConfig {
-            fps: 120,
-            ..CaptureConfig::default()
-        };
-        assert!(matches!(cfg.validate(), Err(VoiceError::Config(_))));
-    }
-
-    #[test]
-    fn too_small_width_is_rejected() {
-        let cfg = CaptureConfig {
-            max_width: 1,
-            ..CaptureConfig::default()
-        };
-        assert!(matches!(cfg.validate(), Err(VoiceError::Config(_))));
-    }
-
-    #[test]
-    fn small_frames_are_not_scaled() {
-        let cfg = CaptureConfig {
-            max_width: 1920,
-            downscale: true,
-            fps: 15,
-        };
-        assert_eq!(cfg.output_size(1280, 720), (1280, 720));
-    }
-
-    #[test]
-    fn large_frames_keep_aspect_ratio() {
-        let cfg = CaptureConfig {
-            max_width: 1920,
-            downscale: true,
-            fps: 15,
-        };
-        assert_eq!(cfg.output_size(3840, 2160), (1920, 1080));
-    }
-
-    #[test]
-    fn scaled_height_is_even() {
-        let cfg = CaptureConfig {
-            max_width: 1000,
-            downscale: true,
-            fps: 15,
-        };
-        let (w, h) = cfg.output_size(1920, 1080);
-        assert_eq!(w, 1000);
-        assert_eq!(h % 2, 0, "высота {h} должна быть чётной для I420");
-    }
-
-    #[test]
-    fn downscale_disabled_keeps_size() {
-        let cfg = CaptureConfig {
-            max_width: 640,
-            downscale: false,
-            fps: 15,
-        };
-        assert_eq!(cfg.output_size(3840, 2160), (3840, 2160));
-    }
-
-    #[test]
-    fn output_size_never_becomes_zero_for_nonzero_tiny_frames() {
-        let cfg = CaptureConfig {
-            max_width: 2,
-            downscale: false,
-            fps: 15,
-        };
-        assert_eq!(cfg.output_size(1, 1), (2, 2));
-        let cfg = CaptureConfig {
-            max_width: 2,
-            downscale: true,
-            fps: 15,
-        };
-        assert_eq!(cfg.output_size(2, 1), (2, 2));
-    }
-
-    #[test]
-    fn source_roundtrip_through_json() {
-        let src = ScreenSource {
-            id: 7,
-            name: "Монитор 1".into(),
-            target: CaptureTarget::Monitor,
-            width: 1920,
-            height: 1080,
-        };
-        let json = serde_json::to_string(&src).unwrap();
-        assert!(json.contains("\"target\":\"monitor\""), "{json}");
-        assert_eq!(serde_json::from_str::<ScreenSource>(&json).unwrap(), src);
+    fn bad_config_is_rejected() {
+        for config in [
+            CaptureConfig {
+                fps: 0,
+                ..CaptureConfig::default()
+            },
+            CaptureConfig {
+                fps: 61,
+                ..CaptureConfig::default()
+            },
+            CaptureConfig {
+                max_height: 1,
+                ..CaptureConfig::default()
+            },
+        ] {
+            assert!(config.validate().is_err(), "{config:?}");
+        }
     }
 }

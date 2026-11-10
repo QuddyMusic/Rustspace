@@ -60,19 +60,27 @@ pub(crate) struct Feed {
     pub(crate) generation: u64,
 }
 
-/// Что можно показать: монитор или окно.
+/// Вид источника демонстрации.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(feature = "voice"), allow(dead_code, reason = "источники есть только с LiveKit"))]
+pub(crate) enum ShareKind {
+    /// Монитор.
+    Screen,
+    /// Окно.
+    Window,
+    /// Выбор в системном диалоге (Wayland, macOS).
+    System,
+}
+
+/// Что можно показать.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ShareSource {
-    /// Идентификатор источника.
-    pub(crate) id: u32,
+    /// Идентификатор источника у захватчика.
+    pub(crate) id: u64,
     /// Имя для списка.
     pub(crate) name: String,
-    /// Окно (иначе монитор).
-    pub(crate) window: bool,
-    /// Ширина.
-    pub(crate) width: u32,
-    /// Высота.
-    pub(crate) height: u32,
+    /// Монитор, окно или системный выбор.
+    pub(crate) kind: ShareKind,
 }
 
 /// Камера в системе.
@@ -136,14 +144,11 @@ impl ShareQuality {
         not(feature = "voice"),
         allow(dead_code, reason = "нужно только с LiveKit")
     )]
-    /// Ширина кадра для источника с заданными размерами (не шире источника).
+    /// Предел кадра: высота из настройки, ширина — с запасом под
+    /// широкие мониторы (21:9 и шире); пропорции сохраняются при уменьшении.
     #[must_use]
-    pub(crate) fn max_width(self, width: u32, height: u32) -> u32 {
-        if height == 0 || height <= self.height {
-            return width;
-        }
-        let scaled = u64::from(width) * u64::from(self.height) / u64::from(height);
-        u32::try_from(scaled).unwrap_or(width)
+    pub(crate) const fn max_size(self) -> (u32, u32) {
+        (self.height * 32 / 9, self.height)
     }
 
     #[cfg_attr(
@@ -195,13 +200,11 @@ mod real {
 
     use bs_voice::VideoPublishConfig;
     use bs_voice::camera::{CameraConfig, list_cameras};
-    use bs_voice::capture::{
-        CaptureConfig, CaptureTarget, ScreenSource, list_monitors, list_windows,
-    };
+    use bs_voice::capture::{CaptureConfig, CaptureTarget, ScreenSource, list_sources};
 
     use super::{
-        CameraDevice, Feed, FeedImage, MediaEngine, ShareQuality, ShareSource, VideoControl,
-        VoicePrefs, lock,
+        CameraDevice, Feed, FeedImage, MediaEngine, ShareKind, ShareQuality, ShareSource,
+        VideoControl, VoicePrefs, lock,
     };
 
     impl VideoControl {
@@ -238,18 +241,19 @@ mod real {
             })
         }
 
-        /// Мониторы и окна, которые можно показать.
+        /// Мониторы и окна, которые можно показать (под Wayland — системный выбор).
         pub(crate) fn screen_sources() -> Result<Vec<ShareSource>, String> {
-            let mut sources = list_monitors().map_err(|err| err.to_string())?;
-            sources.extend(list_windows().unwrap_or_default());
+            let sources = list_sources().map_err(|err| err.to_string())?;
             Ok(sources
                 .into_iter()
                 .map(|source| ShareSource {
                     id: source.id,
-                    window: source.target == CaptureTarget::Window,
+                    kind: match source.target {
+                        CaptureTarget::Monitor => ShareKind::Screen,
+                        CaptureTarget::Window => ShareKind::Window,
+                        CaptureTarget::System => ShareKind::System,
+                    },
                     name: source.name,
-                    width: source.width,
-                    height: source.height,
                 })
                 .collect())
         }
@@ -305,18 +309,18 @@ mod real {
             let source = ScreenSource {
                 id: source.id,
                 name: source.name.clone(),
-                target: if source.window {
-                    CaptureTarget::Window
-                } else {
-                    CaptureTarget::Monitor
+                target: match source.kind {
+                    ShareKind::Screen => CaptureTarget::Monitor,
+                    ShareKind::Window => CaptureTarget::Window,
+                    ShareKind::System => CaptureTarget::System,
                 },
-                width: source.width,
-                height: source.height,
             };
+            let (max_width, max_height) = quality.max_size();
             let capture = CaptureConfig {
                 fps: quality.fps,
-                max_width: quality.max_width(source.width, source.height).max(2),
-                downscale: true,
+                max_width,
+                max_height,
+                cursor: true,
             };
             let publish = VideoPublishConfig {
                 max_bitrate: quality.bitrate(),
@@ -436,13 +440,12 @@ mod tests {
     use super::ShareQuality;
 
     #[test]
-    fn quality_never_upscales_and_keeps_aspect() {
+    fn quality_limits_height_and_leaves_room_for_ultrawide() {
         let quality = ShareQuality {
-            height: 720,
-            fps: 30,
+            height: 1080,
+            fps: 60,
         };
-        assert_eq!(quality.max_width(2560, 1440), 1280);
-        assert_eq!(quality.max_width(1280, 600), 1280);
+        assert_eq!(quality.max_size(), (3840, 1080));
     }
 
     #[test]

@@ -2,25 +2,21 @@
 //!
 //! Публикация идёт через `NativeVideoSource`: мы сами скармливаем ему
 //! кадры I420 (`capture_frame`), а libwebrtc кодирует и отправляет их.
-//! Для приёма удалённого видео используем `NativeVideoStream` и отдаём
-//! наружу RGBA — его напрямую принимает egui как текстуру.
+//! Приём удалённого видео — в [`crate::stage`].
 
 use std::sync::Arc;
 
 use livekit::options::{TrackPublishOptions, VideoCodec, VideoEncoding};
 use livekit::prelude::*;
 use livekit::webrtc::prelude::*;
+use livekit::webrtc::video_frame::I420Buffer;
 use livekit::webrtc::video_source::native::NativeVideoSource;
-use livekit::webrtc::video_stream::native::NativeVideoStream;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
-use tracing::{debug, info};
+use tracing::info;
 
-use crate::capture::{CaptureConfig, ScreenCapture, ScreenSource};
-use crate::convert::{RgbaFrame, buffer_to_rgba, frame_from_i420, rgba_to_i420};
+use crate::convert::{fit_i420, frame_from_i420};
 use crate::error::{VoiceError, VoiceResult};
-use crate::state::TrackKind;
 
 /// Кодек для публикации видео.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,7 +140,8 @@ struct PublisherInner {
     source: NativeVideoSource,
     track: LocalVideoTrack,
     publication: RwLock<Option<LocalTrackPublication>>,
-    size: (u32, u32),
+    /// Предел размера кадра; меньшие кадры уходят как есть.
+    max: (u32, u32),
 }
 
 /// Публикуемая дорожка видео.
@@ -157,7 +154,8 @@ pub struct VideoPublisher {
 }
 
 impl VideoPublisher {
-    /// Создаёт источник и локальный трек нужного размера.
+    /// Создаёт источник и локальный трек. `width`×`height` — предел
+    /// размера: кадры крупнее уменьшаются с сохранением пропорций.
     ///
     /// # Errors
     ///
@@ -175,15 +173,15 @@ impl VideoPublisher {
                 source,
                 track,
                 publication: RwLock::new(None),
-                size: (width, height),
+                max: (width, height),
             }),
         })
     }
 
-    /// Размер кадра, под который создан источник.
+    /// Предел размера кадра.
     #[must_use]
-    pub fn size(&self) -> (u32, u32) {
-        self.inner.size
+    pub fn max_size(&self) -> (u32, u32) {
+        self.inner.max
     }
 
     /// Публикует трек в комнате.
@@ -208,21 +206,14 @@ impl VideoPublisher {
         Ok(())
     }
 
-    /// Отправляет кадр RGBA в источник.
-    ///
-    /// Если размер кадра не совпадает с источником, он масштабируется
-    /// силами libwebrtc (быстрый билинейный ресайз в I420).
+    /// Отправляет кадр I420 (крупный — уменьшив под предел).
     ///
     /// # Errors
     ///
-    /// Неверный размер буфера или сбой масштабирования.
-    pub fn push_rgba(&self, rgba: &[u8], width: u32, height: u32) -> VoiceResult<()> {
-        let mut buffer = rgba_to_i420(rgba, width, height)?;
-        if (width, height) != self.inner.size {
-            let (tw, th) = self.inner.size;
-            buffer = buffer.scale(tw as i32, th as i32);
-        }
-        let frame = frame_from_i420(buffer);
+    /// Источник отклонил кадр.
+    pub fn push_i420(&self, buffer: I420Buffer) -> VoiceResult<()> {
+        let (max_width, max_height) = self.inner.max;
+        let frame = frame_from_i420(fit_i420(buffer, max_width, max_height));
         if !self.inner.source.capture_frame(&frame) {
             return Err(VoiceError::Video("источник отклонил кадр".into()));
         }
@@ -246,209 +237,9 @@ impl VideoPublisher {
     }
 }
 
-/// Активная демонстрация экрана: захват в своём потоке + публикация.
-#[derive(Debug)]
-pub struct ScreenShareSession {
-    capture: ScreenCapture,
-    publisher: VideoPublisher,
-    task: Option<tokio::task::JoinHandle<()>>,
-    source: ScreenSource,
-}
-
-impl ScreenShareSession {
-    /// Запускает захват, публикует дорожку и начинает пересылку кадров.
-    ///
-    /// # Errors
-    ///
-    /// Источник недоступен, неверные настройки захвата или ошибка публикации.
-    pub async fn start(
-        room: &Room,
-        source: ScreenSource,
-        capture_config: CaptureConfig,
-        publish_config: VideoPublishConfig,
-    ) -> VoiceResult<Self> {
-        capture_config.validate()?;
-        publish_config.validate()?;
-
-        let (width, height) = capture_config.output_size(source.width, source.height);
-        let (width, height) = (width & !1, height & !1);
-
-        let (capture, mut frames) = ScreenCapture::start(source.clone(), capture_config)?;
-        let publisher = VideoPublisher::new("screen", width, height, true)?;
-        publisher
-            .publish(room, &publish_config, TrackSource::Screenshare)
-            .await?;
-
-        let push_target = publisher.clone();
-        let task = tokio::spawn(async move {
-            while let Some(frame) = frames.recv().await {
-                if let Err(e) = push_target.push_rgba(&frame.rgba, frame.width, frame.height) {
-                    debug!(error = %e, "кадр пропущен");
-                }
-            }
-            debug!("поток кадров демонстрации завершён");
-        });
-
-        Ok(Self {
-            capture,
-            publisher,
-            task: Some(task),
-            source,
-        })
-    }
-
-    /// Источник, который показываем.
-    #[must_use]
-    pub const fn source(&self) -> &ScreenSource {
-        &self.source
-    }
-
-    /// Останавливает захват и снимает публикацию.
-    ///
-    /// # Errors
-    ///
-    /// Ошибка LiveKit при отмене публикации.
-    pub async fn stop(&mut self, room: &Room) -> VoiceResult<()> {
-        if let Some(task) = self.task.take() {
-            task.abort();
-        }
-        self.capture.stop();
-        self.publisher.unpublish(room).await
-    }
-}
-
-// ── приём удалённого видео ───────────────────────────────────────────────
-
-/// Один кадр удалённого видео, готовый к показу.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReceivedVideoFrame {
-    /// Кто прислал (identity участника).
-    pub identity: String,
-    /// SID дорожки.
-    pub sid: String,
-    /// Что это: камера или демонстрация экрана.
-    pub kind: TrackKind,
-    /// Кадр RGBA8.
-    pub frame: RgbaFrame,
-}
-
-/// Приёмник одного удалённого видеотрека.
-///
-/// Читает [`NativeVideoStream`] в отдельной задаче и складывает
-/// последний кадр в общий слот: рендер забирает его без блокировки.
-#[derive(Debug)]
-struct ReceiverTask(JoinHandle<()>);
-
-impl Drop for ReceiverTask {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct RemoteVideoReceiver {
-    latest: Arc<RwLock<Option<RgbaFrame>>>,
-    // Задача живёт, пока существует хотя бы одна копия приёмника.
-    _task: Arc<ReceiverTask>,
-    identity: String,
-    sid: String,
-    kind: TrackKind,
-}
-
-impl RemoteVideoReceiver {
-    /// Запускает чтение трека в фоне.
-    ///
-    /// Кадры декодируются в RGBA прямо в задаче чтения, поэтому
-    /// вызывающему достаётся уже готовая картинка.
-    #[must_use]
-    pub fn spawn(
-        identity: impl Into<String>,
-        sid: impl Into<String>,
-        kind: TrackKind,
-        track: &RemoteVideoTrack,
-    ) -> Self {
-        let latest = Arc::new(RwLock::new(None));
-        let sink = Arc::clone(&latest);
-        let mut stream = NativeVideoStream::new(track.rtc_track());
-
-        let task = tokio::spawn(async move {
-            use tokio_stream::StreamExt as _;
-
-            while let Some(frame) = stream.next().await {
-                match buffer_to_rgba(frame.buffer.as_ref()) {
-                    Ok(rgba) => *sink.write().await = Some(rgba),
-                    Err(e) => debug!(error = %e, "кадр видео пропущен"),
-                }
-            }
-            debug!("поток удалённого видео завершён");
-        });
-
-        Self {
-            latest,
-            _task: Arc::new(ReceiverTask(task)),
-            identity: identity.into(),
-            sid: sid.into(),
-            kind,
-        }
-    }
-
-    /// Кто прислал.
-    #[must_use]
-    pub fn identity(&self) -> &str {
-        &self.identity
-    }
-
-    /// SID дорожки.
-    #[must_use]
-    pub fn sid(&self) -> &str {
-        &self.sid
-    }
-
-    /// Камера или демонстрация экрана.
-    #[must_use]
-    pub const fn kind(&self) -> TrackKind {
-        self.kind
-    }
-
-    /// Забирает последний кадр, если с прошлого раза появился новый.
-    pub async fn take_latest(&self) -> Option<ReceivedVideoFrame> {
-        let frame = self.latest.write().await.take()?;
-        Some(ReceivedVideoFrame {
-            identity: self.identity.clone(),
-            sid: self.sid.clone(),
-            kind: self.kind,
-            frame,
-        })
-    }
-
-    /// Смотрит последний кадр, не забирая его.
-    pub async fn peek(&self) -> Option<RgbaFrame> {
-        self.latest.read().await.clone()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::future::pending;
-
-    #[tokio::test]
-    async fn receiver_task_is_aborted_when_last_guard_drops() {
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        let task = tokio::spawn(async move {
-            let _tx = tx;
-            pending::<()>().await;
-        });
-        let guard = Arc::new(ReceiverTask(task));
-        let clone = Arc::clone(&guard);
-        drop(guard);
-        assert!(
-            rx.is_empty(),
-            "задача не должна завершиться при наличии копии"
-        );
-        drop(clone);
-        assert!(rx.await.is_err(), "последняя копия должна отменить задачу");
-    }
 
     #[test]
     fn default_config_is_valid() {

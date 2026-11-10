@@ -11,7 +11,7 @@ use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Vec2};
 use crate::fleet::Bridge;
 use crate::i18n::tr;
 use crate::theme;
-use crate::video_media::{Feed, ShareQuality, ShareSource, VideoControl};
+use crate::video_media::{Feed, ShareKind, ShareQuality, ShareSource, VideoControl};
 use crate::voice::VoiceState;
 use crate::voice_media::AudioSource;
 
@@ -53,9 +53,16 @@ impl std::fmt::Debug for StageState {
 impl StageState {
     /// Открывает выбор источника.
     pub(crate) fn open_picker(&mut self, quality: ShareQuality) {
+        let sources = VideoControl::screen_sources();
+        // Единственный вариант (системный выбор под Wayland) — сразу отмечен.
+        let selected = sources
+            .as_ref()
+            .ok()
+            .filter(|list| list.len() == 1)
+            .map(|_| 0);
         self.picker = Some(Picker {
-            sources: VideoControl::screen_sources(),
-            selected: None,
+            sources,
+            selected,
             quality,
         });
     }
@@ -175,7 +182,12 @@ fn update_textures(ctx: &egui::Context, stage: &mut StageState, feeds: &[Feed]) 
             continue;
         }
         let pixels = image.rgba();
-        if pixels.len() != image.size[0] * image.size[1] * 4 {
+        // Пустой кадр (бывает в начале захвата) wgpu не переживает: текстура
+        // нулевой ширины — фатальная ошибка валидации.
+        if image.size[0] == 0
+            || image.size[1] == 0
+            || pixels.len() != image.size[0] * image.size[1] * 4
+        {
             continue;
         }
         let color = egui::ColorImage::from_rgba_unmultiplied(image.size, pixels);
@@ -403,15 +415,17 @@ pub(crate) fn show_picker(ctx: &egui::Context, voice: &mut VoiceState) {
                         .max_height(280.0)
                         .show(ui, |ui| {
                             for (index, source) in sources.iter().enumerate() {
-                                let kind = if source.window {
-                                    tr("Окно")
-                                } else {
-                                    tr("Экран")
+                                let text = match source.kind {
+                                    ShareKind::System => {
+                                        tr("Выбрать экран или окно в системном окне").to_owned()
+                                    }
+                                    ShareKind::Screen => {
+                                        crate::tf!("Экран: {name}", name = source.name)
+                                    }
+                                    ShareKind::Window => {
+                                        crate::tf!("Окно: {name}", name = source.name)
+                                    }
                                 };
-                                let text = format!(
-                                    "{kind}: {} — {}×{}",
-                                    source.name, source.width, source.height
-                                );
                                 if ui
                                     .selectable_label(picker.selected == Some(index), text)
                                     .clicked()

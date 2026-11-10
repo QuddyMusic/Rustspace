@@ -313,8 +313,8 @@ impl VoiceSession {
         publish: VideoPublishConfig,
     ) -> VoiceResult<()> {
         capture.validate()?;
-        let size = capture.output_size(source.width, source.height);
-        let (handle, frames) = ScreenCapture::start(source, capture)?;
+        let size = (capture.max_width, capture.max_height);
+        let (handle, frames) = ScreenCapture::start(&source, capture)?;
         self.stage
             .start_local(
                 &self.room,

@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use livekit::prelude::*;
+use livekit::webrtc::prelude::VideoBuffer as _;
 use livekit::webrtc::video_stream::native::NativeVideoStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -17,10 +18,15 @@ use tracing::debug;
 
 use crate::camera::CameraCapture;
 use crate::capture::{CapturedFrame, ScreenCapture};
-use crate::convert::{RgbaFrame, buffer_to_rgba};
+use crate::convert::{RgbaFrame, buffer_to_rgba_fit, fit_size, i420_to_rgba};
 use crate::error::VoiceResult;
 use crate::state::{TrackKind, user_id_of};
 use crate::video::{VideoPublishConfig, VideoPublisher};
+
+/// Свой поток в предпросмотре: каждый какой кадр и до какого размера.
+const PREVIEW_EVERY: u64 = 3;
+const PREVIEW_WIDTH: u32 = 640;
+const PREVIEW_HEIGHT: u32 = 360;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -145,7 +151,8 @@ impl VideoStage {
                 let Some(stage) = stage.upgrade() else {
                     break;
                 };
-                match buffer_to_rgba(frame.buffer.as_ref()) {
+                // Больше 1080p на экране всё равно не показать.
+                match buffer_to_rgba_fit(frame.buffer.as_ref(), 1920, 1080) {
                     Ok(rgba) => stage.store(&owner, kind, rgba),
                     Err(err) => debug!(error = %err, "кадр видео пропущен"),
                 }
@@ -198,22 +205,26 @@ impl VideoStage {
         let stage = Arc::downgrade(self);
         let owner = local_identity.to_owned();
         let forward = tokio::spawn(async move {
+            let mut count = 0_u64;
             while let Some(frame) = frames.recv().await {
-                if let Err(err) = target.push_rgba(&frame.rgba, frame.width, frame.height) {
+                let mut i420 = frame.i420;
+                // Предпросмотр себе — маленький и не на каждом кадре.
+                if count % PREVIEW_EVERY == 0 {
+                    let Some(stage) = stage.upgrade() else {
+                        break;
+                    };
+                    let (width, height) =
+                        fit_size(i420.width(), i420.height(), PREVIEW_WIDTH, PREVIEW_HEIGHT);
+                    if width > 0 {
+                        #[allow(clippy::cast_possible_wrap, reason = "размер превью мал")]
+                        let preview = i420.scale(width as i32, height as i32);
+                        stage.store(&owner, kind, i420_to_rgba(&preview));
+                    }
+                }
+                count += 1;
+                if let Err(err) = target.push_i420(i420) {
                     debug!(error = %err, "кадр не отправлен");
                 }
-                let Some(stage) = stage.upgrade() else {
-                    break;
-                };
-                stage.store(
-                    &owner,
-                    kind,
-                    RgbaFrame {
-                        width: frame.width,
-                        height: frame.height,
-                        rgba: frame.rgba,
-                    },
-                );
             }
         });
         self.insert(local_identity, kind, true, None);

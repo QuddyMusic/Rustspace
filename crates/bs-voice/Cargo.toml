@@ -24,7 +24,6 @@ tracing = { workspace = true }
 livekit = { version = "0.9.7", default-features = false, features = ["native", "rustls-tls-webpki-roots", "tokio", "glib-main-loop"] }
 cpal = "0.18"
 nokhwa = { version = "0.10", features = ["input-native"], optional = true }
-xcap = { version = "0.9", default-features = false }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
