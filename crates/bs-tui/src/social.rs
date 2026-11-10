@@ -202,11 +202,38 @@ fn dm_name(channel: &DmChannel, me: &str) -> String {
 }
 
 fn dm_last(channel: &DmChannel) -> Option<String> {
-    use bs_types::DmChannelLastMessage;
-    match channel.last_message.as_ref()? {
-        DmChannelLastMessage::Preview(preview) => preview.content.clone(),
-        DmChannelLastMessage::Full(message) => message.message.content.clone(),
+    use bs_types::{DmChannelLastMessage, DmSystemEvent, GENERIC_SYSTEM_TEXT, MessageType};
+    let (content, kind, author) = match channel.last_message.as_ref()? {
+        DmChannelLastMessage::Preview(preview) => (
+            preview.content.clone(),
+            preview.message_type,
+            preview.user_id.as_str(),
+        ),
+        DmChannelLastMessage::Full(message) => (
+            message.message.content.clone(),
+            message.message.message_type,
+            message.message.user_id.as_str(),
+        ),
+    };
+    if kind != Some(MessageType::System) {
+        return content;
     }
+    // Системное событие — текстом, а не сырым JSON.
+    let actor = channel
+        .members
+        .iter()
+        .find(|member| member.id == author)
+        .map(display_name)
+        .unwrap_or_default();
+    Some(
+        content
+            .as_deref()
+            .and_then(DmSystemEvent::parse)
+            .map_or_else(
+                || GENERIC_SYSTEM_TEXT.to_owned(),
+                |event| event.text(&actor, false),
+            ),
+    )
 }
 
 /// Результаты поиска: пользователи, уже друзья, помечаются.
