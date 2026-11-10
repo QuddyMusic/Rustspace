@@ -181,21 +181,166 @@ fn link_end(text: &str) -> usize {
     trimmed.len()
 }
 
-#[allow(clippy::too_many_lines)]
+/// Разбор строки: текст, стиль снаружи и как назвать упомянутого.
+struct Inline<'a> {
+    text: &'a str,
+    style: Style,
+    name_of: &'a dyn Fn(&str) -> Option<String>,
+}
+
+/// Найденная разметка: сколько байт съедено и что вывести.
+type Found = Option<(usize, Vec<Span>)>;
+
+impl Inline<'_> {
+    /// Перед позицией `i` — не буква и не цифра (граница слова).
+    fn word_start(&self, i: usize) -> bool {
+        i == 0 || !self.text.as_bytes()[i - 1].is_ascii_alphanumeric()
+    }
+
+    /// Вложенный разбор с изменённым стилем.
+    fn nested(&self, inner: &str, style: Style) -> Vec<Span> {
+        let mut spans = Vec::new();
+        inline_into(inner, style, self.name_of, &mut spans);
+        spans
+    }
+
+    /// `` `код` ``.
+    fn code(&self, i: usize) -> Found {
+        let body = self.text[i..].strip_prefix('`')?;
+        let end = body.find('`').filter(|end| *end > 0)?;
+        Some((
+            end + 2,
+            vec![Span::of(&body[..end], Kind::Code, self.style)],
+        ))
+    }
+
+    /// `**жирный**`, `~~зачёркнутый~~`, `||спойлер||`.
+    fn paired(&self, i: usize) -> Found {
+        let rest = &self.text[i..];
+        for token in ["**", "~~", "||"] {
+            let Some(body) = rest.strip_prefix(token) else {
+                continue;
+            };
+            let Some(end) = body.find(token).filter(|end| *end > 0) else {
+                continue;
+            };
+            let inner = &body[..end];
+            let spans = match token {
+                "**" => self.nested(
+                    inner,
+                    Style {
+                        bold: true,
+                        ..self.style
+                    },
+                ),
+                "~~" => self.nested(
+                    inner,
+                    Style {
+                        strike: true,
+                        ..self.style
+                    },
+                ),
+                _ => vec![Span::of(inner, Kind::Spoiler, self.style)],
+            };
+            return Some((end + token.len() * 2, spans));
+        }
+        None
+    }
+
+    /// `*курсив*` и `_курсив_` (подчёркивание — только по границам слов).
+    fn italic(&self, i: usize) -> Found {
+        let rest = &self.text[i..];
+        let (marker, body) = if let Some(body) = rest.strip_prefix('*') {
+            ('*', body)
+        } else {
+            ('_', rest.strip_prefix('_').filter(|_| self.word_start(i))?)
+        };
+        if body.starts_with([marker, ' ']) {
+            return None;
+        }
+        let end = body.find(marker).filter(|end| *end > 0)?;
+        if body[..end].ends_with(' ') {
+            return None;
+        }
+        if marker == '_'
+            && body[end + 1..]
+                .chars()
+                .next()
+                .is_some_and(char::is_alphanumeric)
+        {
+            return None;
+        }
+        let spans = self.nested(
+            &body[..end],
+            Style {
+                italic: true,
+                ..self.style
+            },
+        );
+        Some((end + 2, spans))
+    }
+
+    /// Голая ссылка `https://…`.
+    fn autolink(&self, i: usize) -> Found {
+        let rest = &self.text[i..];
+        if !(rest.starts_with("http://") || rest.starts_with("https://")) || !self.word_start(i) {
+            return None;
+        }
+        let end = link_end(rest);
+        (end > "https://".len() - 1)
+            .then(|| (end, vec![Span::of(&rest[..end], Kind::Link, self.style)]))
+    }
+
+    /// Упоминание `<@id>` (`<@&id>` — роль), если имя известно.
+    fn mention(&self, i: usize) -> Found {
+        let body = self.text[i..].strip_prefix("<@")?;
+        let end = body.find('>')?;
+        let id = &body[..end];
+        let valid = !id.is_empty()
+            && id
+                .trim_start_matches('&')
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        let name = valid.then(|| (self.name_of)(id)).flatten()?;
+        Some((
+            end + 3,
+            vec![Span::of(format!("@{name}"), Kind::Mention, self.style)],
+        ))
+    }
+
+    /// `@everyone` и `@here` отдельным словом.
+    fn everyone(&self, i: usize) -> Found {
+        let rest = &self.text[i..];
+        ["@everyone", "@here"].into_iter().find_map(|keyword| {
+            (rest.starts_with(keyword)
+                && self.word_start(i)
+                && rest[keyword.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(|c| !c.is_alphanumeric()))
+            .then(|| {
+                (
+                    keyword.len(),
+                    vec![Span::of(keyword, Kind::Mention, self.style)],
+                )
+            })
+        })
+    }
+}
+
 fn inline_into(
     text: &str,
     style: Style,
     name_of: &dyn Fn(&str) -> Option<String>,
     out: &mut Vec<Span>,
 ) {
+    let parser = Inline {
+        text,
+        style,
+        name_of,
+    };
     let mut plain = String::new();
     let mut i = 0;
-    let bytes = text.as_bytes();
-    let flush = |plain: &mut String, out: &mut Vec<Span>| {
-        if !plain.is_empty() {
-            out.push(Span::plain(std::mem::take(plain), style));
-        }
-    };
     while i < text.len() {
         let rest = &text[i..];
         // Экранирование.
@@ -207,149 +352,30 @@ fn inline_into(
             i += 1 + next.len_utf8();
             continue;
         }
-        if let Some(body) = rest.strip_prefix('`')
-            && let Some(end) = body.find('`')
-            && end > 0
-        {
-            flush(&mut plain, out);
-            out.push(Span::of(&body[..end], Kind::Code, style));
-            i += end + 2;
-            continue;
-        }
-        let paired = [("**", 0_u8), ("~~", 1), ("||", 2)];
-        let mut matched = false;
-        for (token, which) in paired {
-            if let Some(body) = rest.strip_prefix(token)
-                && let Some(end) = body.find(token)
-                && end > 0
-            {
-                flush(&mut plain, out);
-                let inner = &body[..end];
-                match which {
-                    0 => inline_into(
-                        inner,
-                        Style {
-                            bold: true,
-                            ..style
-                        },
-                        name_of,
-                        out,
-                    ),
-                    1 => inline_into(
-                        inner,
-                        Style {
-                            strike: true,
-                            ..style
-                        },
-                        name_of,
-                        out,
-                    ),
-                    _ => out.push(Span::of(inner, Kind::Spoiler, style)),
-                }
-                i += end + token.len() * 2;
-                matched = true;
-                break;
+        let found = parser
+            .code(i)
+            .or_else(|| parser.paired(i))
+            .or_else(|| parser.italic(i))
+            .or_else(|| parser.autolink(i))
+            .or_else(|| parser.mention(i))
+            .or_else(|| parser.everyone(i));
+        if let Some((used, spans)) = found {
+            if !plain.is_empty() {
+                out.push(Span::plain(std::mem::take(&mut plain), style));
             }
-        }
-        if matched {
+            out.extend(spans);
+            i += used;
             continue;
         }
-        if let Some(body) = rest.strip_prefix('*')
-            && !body.starts_with(['*', ' '])
-            && let Some(end) = body.find('*')
-            && end > 0
-            && !body[..end].ends_with(' ')
-        {
-            flush(&mut plain, out);
-            inline_into(
-                &body[..end],
-                Style {
-                    italic: true,
-                    ..style
-                },
-                name_of,
-                out,
-            );
-            i += end + 2;
-            continue;
-        }
-        if let Some(body) = rest.strip_prefix('_')
-            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
-            && !body.starts_with(['_', ' '])
-            && let Some(end) = body.find('_')
-            && end > 0
-            && !body[..end].ends_with(' ')
-            && body[end + 1..]
-                .chars()
-                .next()
-                .is_none_or(|c| !c.is_alphanumeric())
-        {
-            flush(&mut plain, out);
-            inline_into(
-                &body[..end],
-                Style {
-                    italic: true,
-                    ..style
-                },
-                name_of,
-                out,
-            );
-            i += end + 2;
-            continue;
-        }
-        if (rest.starts_with("http://") || rest.starts_with("https://"))
-            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
-        {
-            let end = link_end(rest);
-            if end > "https://".len() - 1 {
-                flush(&mut plain, out);
-                out.push(Span::of(&rest[..end], Kind::Link, style));
-                i += end;
-                continue;
-            }
-        }
-        if let Some(body) = rest.strip_prefix("<@")
-            && let Some(end) = body.find('>')
-        {
-            let id = &body[..end];
-            let valid = !id.is_empty()
-                && id
-                    .trim_start_matches('&')
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-            if valid && let Some(name) = name_of(id) {
-                flush(&mut plain, out);
-                out.push(Span::of(format!("@{name}"), Kind::Mention, style));
-                i += end + 3;
-                continue;
-            }
-        }
-        for keyword in ["@everyone", "@here"] {
-            if rest.starts_with(keyword)
-                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
-                && rest[keyword.len()..]
-                    .chars()
-                    .next()
-                    .is_none_or(|c| !c.is_alphanumeric())
-            {
-                flush(&mut plain, out);
-                out.push(Span::of(keyword, Kind::Mention, style));
-                i += keyword.len();
-                matched = true;
-                break;
-            }
-        }
-        if matched {
-            continue;
-        }
-        if let Some(ch) = rest.chars().next() {
-            plain.push(ch);
-            i += ch.len_utf8();
-        } else {
+        let Some(ch) = rest.chars().next() else {
             break;
-        }
+        };
+        plain.push(ch);
+        i += ch.len_utf8();
     }
-    flush(&mut plain, out);
+    if !plain.is_empty() {
+        out.push(Span::plain(plain, style));
+    }
 }
 
 #[cfg(test)]

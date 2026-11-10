@@ -82,9 +82,32 @@ fn arc(center: Pos2, radius: f32, from: f32, to: f32, steps: usize) -> Vec<Pos2>
         .collect()
 }
 
-#[allow(clippy::too_many_lines, reason = "по ветке на значок")]
 /// Рисует значок по центру `center`; `size` — сторона квадрата в пикселях.
 pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: Color32) {
+    match icon {
+        Icon::Close
+        | Icon::Check
+        | Icon::Plus
+        | Icon::Gear
+        | Icon::Chat
+        | Icon::Compass
+        | Icon::Join
+        | Icon::User
+        | Icon::Download
+        | Icon::Search => paint_shapes(painter, center, size, icon, color),
+        Icon::Users
+        | Icon::Speaker
+        | Icon::Smile
+        | Icon::File
+        | Icon::Image
+        | Icon::Sticker
+        | Icon::Send => paint_objects(painter, center, size, icon, color),
+        _ => paint_call(painter, center, size, icon, color),
+    }
+}
+
+/// Простые значки: крестик, галочка, плюс, шестерёнка, навигация.
+fn paint_shapes(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: Color32) {
     let unit = size / 24.0;
     let width = (unit * 2.0).max(1.4);
     let stroke = Stroke::new(width, color);
@@ -157,6 +180,23 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
             painter.circle_stroke(p(10.5, 10.5), 6.0 * unit, stroke);
             line(vec![p(15.0, 15.0), p(20.5, 20.5)]);
         }
+        _ => {}
+    }
+}
+
+/// Люди, звук, эмодзи, файлы, отправка.
+fn paint_objects(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: Color32) {
+    let unit = size / 24.0;
+    let width = (unit * 2.0).max(1.4);
+    let stroke = Stroke::new(width, color);
+    let p = |x: f32, y: f32| center + Vec2::new(x - 12.0, y - 12.0) * unit;
+    let line = |points: Vec<Pos2>| {
+        painter.add(Shape::line(points, stroke));
+    };
+    let ring = |points: Vec<Pos2>| {
+        painter.add(Shape::closed_line(points, stroke));
+    };
+    match icon {
         Icon::Users => {
             painter.circle_stroke(p(9.0, 8.5), 3.5 * unit, stroke);
             line(arc(p(9.0, 20.0), 6.5 * unit, 180.0, 360.0, 12));
@@ -224,6 +264,23 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
             ring(vec![p(3.5, 4.5), p(21.0, 12.0), p(3.5, 19.5), p(6.5, 12.0)]);
             line(vec![p(6.5, 12.0), p(13.0, 12.0)]);
         }
+        _ => {}
+    }
+}
+
+/// Звонок: микрофон, наушники, трубка, камера, экран.
+fn paint_call(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: Color32) {
+    let unit = size / 24.0;
+    let width = (unit * 2.0).max(1.4);
+    let stroke = Stroke::new(width, color);
+    let p = |x: f32, y: f32| center + Vec2::new(x - 12.0, y - 12.0) * unit;
+    let line = |points: Vec<Pos2>| {
+        painter.add(Shape::line(points, stroke));
+    };
+    let ring = |points: Vec<Pos2>| {
+        painter.add(Shape::closed_line(points, stroke));
+    };
+    match icon {
         Icon::Mic | Icon::MicOff => {
             let mut body = arc(p(12.0, 8.0), 3.5 * unit, 180.0, 360.0, 8);
             body.extend(arc(p(12.0, 12.0), 3.5 * unit, 0.0, 180.0, 8));
@@ -288,6 +345,7 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
             line(vec![p(12.0, 13.0), p(12.0, 7.5)]);
             line(vec![p(9.5, 10.0), p(12.0, 7.5), p(14.5, 10.0)]);
         }
+        _ => {}
     }
 }
 
