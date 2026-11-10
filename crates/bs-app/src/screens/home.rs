@@ -586,10 +586,6 @@ fn outer_space(ui: &mut egui::Ui, bridge: &mut Bridge, open: &mut Option<(usize,
 
 /// Карточка пространства. `origin` — чужой инстанс (общий каталог).
 /// Возвращает (инстанс, id), если нажали «Открыть».
-#[allow(
-    clippy::too_many_lines,
-    reason = "раскладка egui читается лучше одним блоком"
-)]
 fn space_card(
     ui: &mut egui::Ui,
     space: &ExploreSpace,
@@ -603,8 +599,6 @@ fn space_card(
         || slot
             .and_then(|slot| bridge.cache_at(slot))
             .is_some_and(|cache| cache.space(&space.id).is_some());
-    let gradient = theme::space_gradient(&space.id, space.avatar_color.as_deref());
-    let color = gradient.from.lerp_to_gamma(gradient.to, 0.5);
     let mut action = None;
     egui::Frame::new()
         .fill(theme::bg_sidebar())
@@ -615,127 +609,21 @@ fn space_card(
             ui.vertical(|ui| {
                 ui.set_min_height(210.0);
                 ui.spacing_mut().item_spacing.y = 4.0;
-                let (banner, _) =
-                    ui.allocate_exact_size(egui::vec2(CARD_WIDTH, 76.0), Sense::hover());
-                ui.painter().rect_filled(
-                    banner,
-                    CornerRadius {
-                        nw: 10,
-                        ne: 10,
-                        sw: 0,
-                        se: 0,
-                    },
-                    color.gamma_multiply(0.55),
-                );
-                let tag = match (joined, space.visibility) {
-                    (true, _) => tr("В ПРОСТРАНСТВАХ"),
-                    (false, SpaceVisibility::Public) => tr("ОТКРЫТОЕ"),
-                    (false, _) => tr("ПО ЗАЯВКЕ"),
-                };
-                ui.painter().text(
-                    banner.right_top() + egui::vec2(-10.0, 12.0),
-                    egui::Align2::RIGHT_CENTER,
-                    tag,
-                    egui::FontId::new(10.0, theme::bold_family()),
-                    theme::text_bright().gamma_multiply(0.8),
-                );
-                let tile = egui::Rect::from_min_size(
-                    banner.left_bottom() + egui::vec2(14.0, -26.0),
-                    egui::Vec2::splat(56.0),
-                );
-                ui.painter().rect_filled(
-                    tile.expand(3.0),
-                    CornerRadius::same(17),
-                    theme::bg_sidebar(),
-                );
-                theme::fill_gradient(ui.painter(), tile, 14.0, gradient, 1.0);
-                ui.painter().text(
-                    tile.center(),
-                    egui::Align2::CENTER_CENTER,
-                    theme::first_letter(&space.name),
-                    egui::FontId::new(20.0, theme::bold_family()),
-                    egui::Color32::WHITE,
-                );
+                card_banner(ui, space, joined);
                 ui.add_space(32.0);
                 ui.horizontal(|ui| {
                     ui.add_space(14.0);
                     ui.vertical(|ui| {
                         ui.set_width(CARD_WIDTH - 28.0);
-                        ui.label(
-                            RichText::new(theme::truncate_chars(&space.name, 30))
-                                .size(15.5)
-                                .family(theme::bold_family())
-                                .color(theme::text_bright()),
-                        );
-                        let description = space
-                            .description
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|d| !d.is_empty());
-                        ui.label(description.map_or_else(
-                            || {
-                                RichText::new(tr("Нет описания"))
-                                    .italics()
-                                    .size(12.5)
-                                    .color(theme::text_faint())
-                            },
-                            |text| theme::muted(theme::truncate_chars(text, 70)).size(12.5),
-                        ));
-                        ui.label(
-                            theme::muted(members_text(space.member_count))
-                                .size(12.0)
-                                .color(theme::text_faint()),
-                        );
-                        ui.add_space(6.0);
-                        let width = ui.available_width();
-                        if let Some(origin) = origin {
-                            ui.label(
-                                theme::muted(theme::truncate_chars(
-                                    origin.trim_start_matches("https://"),
-                                    40,
-                                ))
-                                .size(11.5),
-                            );
-                        }
-                        let remote = origin.is_some() && slot.is_none();
-                        let (label, fill, text) = if joined {
-                            (tr("Открыть"), theme::mint_bg(), theme::mint())
-                        } else if space.visibility == SpaceVisibility::Public {
-                            let label = if remote {
-                                tr("Подключиться и вступить")
-                            } else {
-                                tr("Вступить")
-                            };
-                            (label, theme::accent(), theme::on_accent())
-                        } else {
-                            (
-                                if remote {
-                                    tr("Подключиться и подать заявку")
-                                } else {
-                                    tr("Подать заявку")
-                                },
-                                egui::Color32::from_rgb(0x3d, 0x33, 0x14),
-                                theme::amber(),
-                            )
+                        card_text(ui, space, origin);
+                        let join = JoinTarget {
+                            space,
+                            origin,
+                            slot,
+                            joined,
                         };
-                        let button = egui::Button::new(RichText::new(label).color(text))
-                            .fill(fill)
-                            .corner_radius(crate::theme::rounded(7))
-                            .min_size(egui::vec2(width, 34.0));
-                        if ui.add(button).clicked() {
-                            let by_request = space.visibility != SpaceVisibility::Public;
-                            match (joined, origin, slot) {
-                                (true, _, Some(slot)) => action = Some((slot, space.id.clone())),
-                                (_, Some(origin), _) => {
-                                    bridge.connect_and_join_space(origin, &space.id, by_request);
-                                }
-                                _ => {
-                                    bridge.request(BridgeRequest::JoinSpace {
-                                        id: space.id.clone(),
-                                        by_request,
-                                    });
-                                }
-                            }
+                        if let Some(open) = join_button(ui, &join, bridge) {
+                            action = Some(open);
                         }
                         ui.add_space(12.0);
                     });
@@ -743,6 +631,161 @@ fn space_card(
             });
         });
     action
+}
+
+/// Баннер карточки с меткой и плиткой пространства.
+fn card_banner(ui: &mut egui::Ui, space: &ExploreSpace, joined: bool) {
+    let gradient = theme::space_gradient(&space.id, space.avatar_color.as_deref());
+    let color = gradient.from.lerp_to_gamma(gradient.to, 0.5);
+    let (banner, _) = ui.allocate_exact_size(egui::vec2(CARD_WIDTH, 76.0), Sense::hover());
+    let top = crate::theme::rounded(10).nw;
+    ui.painter().rect_filled(
+        banner,
+        CornerRadius {
+            nw: top,
+            ne: top,
+            sw: 0,
+            se: 0,
+        },
+        color.gamma_multiply(0.55),
+    );
+    let tag = match (joined, space.visibility) {
+        (true, _) => tr("В ПРОСТРАНСТВАХ"),
+        (false, SpaceVisibility::Public) => tr("ОТКРЫТОЕ"),
+        (false, _) => tr("ПО ЗАЯВКЕ"),
+    };
+    ui.painter().text(
+        banner.right_top() + egui::vec2(-10.0, 12.0),
+        egui::Align2::RIGHT_CENTER,
+        tag,
+        egui::FontId::new(10.0, theme::bold_family()),
+        theme::text_bright().gamma_multiply(0.8),
+    );
+    let tile = egui::Rect::from_min_size(
+        banner.left_bottom() + egui::vec2(14.0, -26.0),
+        egui::Vec2::splat(56.0),
+    );
+    ui.painter().rect_filled(
+        tile.expand(3.0),
+        crate::theme::rounded(17),
+        theme::bg_sidebar(),
+    );
+    theme::fill_gradient(
+        ui.painter(),
+        tile,
+        f32::from(crate::theme::rounded(14).nw),
+        gradient,
+        1.0,
+    );
+    ui.painter().text(
+        tile.center(),
+        egui::Align2::CENTER_CENTER,
+        theme::first_letter(&space.name),
+        egui::FontId::new(20.0, theme::bold_family()),
+        egui::Color32::WHITE,
+    );
+}
+
+/// Название, описание, число участников и адрес чужого инстанса.
+fn card_text(ui: &mut egui::Ui, space: &ExploreSpace, origin: Option<&str>) {
+    ui.label(
+        RichText::new(theme::truncate_chars(&space.name, 30))
+            .size(15.5)
+            .family(theme::bold_family())
+            .color(theme::text_bright()),
+    );
+    let description = space
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty());
+    ui.label(description.map_or_else(
+        || {
+            RichText::new(tr("Нет описания"))
+                .italics()
+                .size(12.5)
+                .color(theme::text_faint())
+        },
+        |text| theme::muted(theme::truncate_chars(text, 70)).size(12.5),
+    ));
+    ui.label(
+        theme::muted(members_text(space.member_count))
+            .size(12.0)
+            .color(theme::text_faint()),
+    );
+    ui.add_space(6.0);
+    if let Some(origin) = origin {
+        ui.label(
+            theme::muted(theme::truncate_chars(
+                origin.trim_start_matches("https://"),
+                40,
+            ))
+            .size(11.5),
+        );
+    }
+}
+
+/// Куда ведёт кнопка карточки.
+struct JoinTarget<'a> {
+    space: &'a ExploreSpace,
+    origin: Option<&'a str>,
+    slot: Option<usize>,
+    joined: bool,
+}
+
+/// «Открыть», «Вступить» или «Подать заявку» (с подключением к чужому
+/// инстансу, если нужно). Возвращает пространство, которое надо открыть.
+fn join_button(
+    ui: &mut egui::Ui,
+    target: &JoinTarget<'_>,
+    bridge: &mut Bridge,
+) -> Option<(usize, String)> {
+    let JoinTarget {
+        space,
+        origin,
+        slot,
+        joined,
+    } = *target;
+    let remote = origin.is_some() && slot.is_none();
+    let (label, fill, text) = if joined {
+        (tr("Открыть"), theme::mint_bg(), theme::mint())
+    } else if space.visibility == SpaceVisibility::Public {
+        let label = if remote {
+            tr("Подключиться и вступить")
+        } else {
+            tr("Вступить")
+        };
+        (label, theme::accent(), theme::on_accent())
+    } else {
+        (
+            if remote {
+                tr("Подключиться и подать заявку")
+            } else {
+                tr("Подать заявку")
+            },
+            egui::Color32::from_rgb(0x3d, 0x33, 0x14),
+            theme::amber(),
+        )
+    };
+    let button = egui::Button::new(RichText::new(label).color(text))
+        .fill(fill)
+        .corner_radius(crate::theme::rounded(7))
+        .min_size(egui::vec2(ui.available_width(), 34.0));
+    if !ui.add(button).clicked() {
+        return None;
+    }
+    let by_request = space.visibility != SpaceVisibility::Public;
+    match (joined, origin, slot) {
+        (true, _, Some(slot)) => return Some((slot, space.id.clone())),
+        (_, Some(origin), _) => bridge.connect_and_join_space(origin, &space.id, by_request),
+        _ => {
+            bridge.request(BridgeRequest::JoinSpace {
+                id: space.id.clone(),
+                by_request,
+            });
+        }
+    }
+    None
 }
 
 /// «1 участник», «2 участника», «5 участников».

@@ -190,7 +190,6 @@ fn show_form(ui: &mut egui::Ui, ui_state: &mut InvitesUi, bridge: &Bridge) {
     ui.add_space(8.0);
 }
 
-#[allow(clippy::too_many_lines, reason = "карточка ссылки с действиями")]
 fn invite_card(ui: &mut egui::Ui, state: &mut InvitesUi, invite: &Invite, bridge: &Bridge) {
     let (label, color) = status_text(invite);
     card(ui, |ui| {
@@ -203,89 +202,99 @@ fn invite_card(ui: &mut egui::Ui, state: &mut InvitesUi, invite: &Invite, bridge
         if let Some(by) = &invite.created_by_username {
             ui.label(theme::muted(crate::tf!("Создал: {by}", by = by)).size(12.5));
         }
-        ui.horizontal_wrapped(|ui| {
-            if invite.status == "active" && ui.button(tr("Копировать ссылку")).clicked()
-            {
-                ui.ctx().copy_text(invite.url.clone());
-                state.note = Some(ok(tr("Ссылка скопирована")));
-            }
-            if invite.status == "active" {
-                if ui.button(tr("Изменить")).clicked() {
-                    state.form = Some(Form {
-                        id: Some(invite.id.clone()),
-                        name: invite.name.clone(),
-                        max_uses: invite.max_uses.unwrap_or(0),
-                        keep_expiry: true,
-                        ..Form::default()
-                    });
-                }
-                if ui.button(tr("Отозвать")).clicked() {
-                    send(
-                        bridge,
-                        AdminRequest::Invite(InviteOp::Revoke(invite.id.clone())),
-                    );
-                }
-            } else if ui.button(tr("Восстановить")).clicked() {
+        invite_actions(ui, state, invite, bridge);
+        redemptions(ui, state, invite);
+    });
+    ui.add_space(8.0);
+}
+
+/// Кнопки карточки: копировать, изменить, отозвать/восстановить, удалить.
+fn invite_actions(ui: &mut egui::Ui, state: &mut InvitesUi, invite: &Invite, bridge: &Bridge) {
+    ui.horizontal_wrapped(|ui| {
+        if invite.status == "active" && ui.button(tr("Копировать ссылку")).clicked()
+        {
+            ui.ctx().copy_text(invite.url.clone());
+            state.note = Some(ok(tr("Ссылка скопирована")));
+        }
+        if invite.status == "active" {
+            if ui.button(tr("Изменить")).clicked() {
                 state.form = Some(Form {
                     id: Some(invite.id.clone()),
-                    reinstate: true,
+                    name: invite.name.clone(),
                     max_uses: invite.max_uses.unwrap_or(0),
-                    expiry: 3,
+                    keep_expiry: true,
                     ..Form::default()
                 });
             }
-            if ui.button(tr("Кто использовал")).clicked() {
+            if ui.button(tr("Отозвать")).clicked() {
                 send(
                     bridge,
-                    AdminRequest::Invite(InviteOp::Redemptions(invite.id.clone())),
+                    AdminRequest::Invite(InviteOp::Revoke(invite.id.clone())),
                 );
             }
-            if state.confirm_delete.as_deref() == Some(invite.id.as_str()) {
-                if ui.button(tr("Точно удалить")).clicked() {
-                    send(
-                        bridge,
-                        AdminRequest::Invite(InviteOp::Delete(invite.id.clone())),
-                    );
-                }
-                if ui.button(tr("Отмена")).clicked() {
-                    state.confirm_delete = None;
-                }
-            } else if ui.button(tr("Удалить")).clicked() {
-                state.confirm_delete = Some(invite.id.clone());
+        } else if ui.button(tr("Восстановить")).clicked() {
+            state.form = Some(Form {
+                id: Some(invite.id.clone()),
+                reinstate: true,
+                max_uses: invite.max_uses.unwrap_or(0),
+                expiry: 3,
+                ..Form::default()
+            });
+        }
+        if ui.button(tr("Кто использовал")).clicked() {
+            send(
+                bridge,
+                AdminRequest::Invite(InviteOp::Redemptions(invite.id.clone())),
+            );
+        }
+        if state.confirm_delete.as_deref() == Some(invite.id.as_str()) {
+            if ui.button(tr("Точно удалить")).clicked() {
+                send(
+                    bridge,
+                    AdminRequest::Invite(InviteOp::Delete(invite.id.clone())),
+                );
             }
-        });
-        if let Some((id, result)) = &state.redemptions
-            && *id == invite.id
-        {
-            match result {
-                Err(message) => {
-                    ui.label(RichText::new(message).color(theme::rose()).size(12.5));
-                }
-                Ok(list) if list.is_empty() => {
-                    ui.label(theme::muted(tr("Пока никто не воспользовался")).size(12.5));
-                }
-                Ok(list) => {
-                    for r in list {
-                        let name = if r.is_deleted {
-                            crate::tf!("{a0} (удалён)", a0 = r.registrant_username)
-                        } else {
-                            r.current_username
-                                .clone()
-                                .unwrap_or_else(|| r.registrant_username.clone())
-                        };
-                        ui.label(
-                            theme::muted(format!(
-                                "{name} · {}",
-                                theme::stamp(r.redeemed_at, now_ms())
-                            ))
-                            .size(12.5),
-                        );
-                    }
+            if ui.button(tr("Отмена")).clicked() {
+                state.confirm_delete = None;
+            }
+        } else if ui.button(tr("Удалить")).clicked() {
+            state.confirm_delete = Some(invite.id.clone());
+        }
+    });
+}
+
+/// Кто воспользовался ссылкой (если список открыт для неё).
+fn redemptions(ui: &mut egui::Ui, state: &InvitesUi, invite: &Invite) {
+    if let Some((id, result)) = &state.redemptions
+        && *id == invite.id
+    {
+        match result {
+            Err(message) => {
+                ui.label(RichText::new(message).color(theme::rose()).size(12.5));
+            }
+            Ok(list) if list.is_empty() => {
+                ui.label(theme::muted(tr("Пока никто не воспользовался")).size(12.5));
+            }
+            Ok(list) => {
+                for r in list {
+                    let name = if r.is_deleted {
+                        crate::tf!("{a0} (удалён)", a0 = r.registrant_username)
+                    } else {
+                        r.current_username
+                            .clone()
+                            .unwrap_or_else(|| r.registrant_username.clone())
+                    };
+                    ui.label(
+                        theme::muted(format!(
+                            "{name} · {}",
+                            theme::stamp(r.redeemed_at, now_ms())
+                        ))
+                        .size(12.5),
+                    );
                 }
             }
         }
-    });
-    ui.add_space(8.0);
+    }
 }
 
 /// «Регистрация».

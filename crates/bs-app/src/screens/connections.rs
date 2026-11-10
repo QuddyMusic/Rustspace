@@ -636,7 +636,6 @@ fn delete_button(ui: &mut egui::Ui, state: &mut ConnectionsUi, origin: &str) {
 }
 
 /// Встроенная форма под кнопками карточки.
-#[allow(clippy::too_many_lines, reason = "по ветке на каждую форму")]
 fn dialog(
     ui: &mut egui::Ui,
     state: &mut ConnectionsUi,
@@ -662,100 +661,14 @@ fn dialog(
             ui.set_width(ui.available_width());
             match current {
                 Dialog::Reauth { origin, password } => {
-                    widgets::field_label(ui, tr("Пароль учётной записи на домашнем сервере"));
-                    let field = widgets::secret_field(ui, password, tr("пароль"), 200);
-                    ui.label(
-                        theme::muted(tr(
-                            "Пароль проверяет ваш домашний сервер и никогда не отправляется \
-                             на этот сервер: для него создаются отдельные учётные данные.",
-                        ))
-                        .size(11.5),
-                    );
-                    ui.add_space(6.0);
-                    let ready = !password.is_empty();
-                    let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(ready, theme::primary_button(tr("Войти")))
-                            .clicked()
-                            || (ready && enter)
-                        {
-                            *action = ConnAction::Reauthenticate {
-                                origin: origin.clone(),
-                                password: std::mem::take(password),
-                            };
-                            close = true;
-                        }
-                        if ui.button(tr("Отмена")).clicked() {
-                            close = true;
-                        }
-                    });
+                    reauth_form(ui, origin, password, action, &mut close);
                 }
                 Dialog::OwnLogin {
                     origin,
                     username,
                     password,
-                } => {
-                    ui.label(
-                        theme::muted(tr(
-                            "Сервер не принимает учётные данные, выданные вашим домашним \
-                             сервером. Войдите с паролем, который вы задали на том сервере: \
-                             после входа аккаунт будет переведён на выданные данные.",
-                        ))
-                        .size(12.0),
-                    );
-                    ui.add_space(6.0);
-                    widgets::field_label(ui, tr("Ваше имя на этом сервере"));
-                    widgets::text_field(ui, username, tr("имя пользователя"), 100);
-                    widgets::field_label(ui, tr("Пароль для этого сервера"));
-                    widgets::secret_field(ui, password, tr("пароль на удалённом сервере"), 200);
-                    ui.add_space(6.0);
-                    let ready = !username.trim().is_empty() && !password.is_empty();
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(ready, theme::primary_button(tr("Войти и подключиться")))
-                            .clicked()
-                        {
-                            *action = ConnAction::OwnLogin {
-                                origin: origin.clone(),
-                                username: username.trim().to_owned(),
-                                password: std::mem::take(password),
-                            };
-                            close = true;
-                        }
-                        if ui.button(tr("Отмена")).clicked() {
-                            close = true;
-                        }
-                    });
-                }
-                Dialog::ForceRemove { origin } => {
-                    ui.label(
-                        RichText::new(tr("Принудительно удалить запись"))
-                            .family(theme::bold_family())
-                            .color(theme::text_bright()),
-                    );
-                    ui.label(
-                        theme::muted(tr(
-                            "Запись о сервере будет удалена из списка. Удалённый сервер не \
-                             получит уведомления. Используйте это только если сервер \
-                             недоступен навсегда.",
-                        ))
-                        .size(12.0),
-                    );
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add(small_button(tr("Удалить принудительно"), theme::rose()))
-                            .clicked()
-                        {
-                            *action = ConnAction::ForceRemove(origin.clone());
-                            close = true;
-                        }
-                        if ui.button(tr("Отмена")).clicked() {
-                            close = true;
-                        }
-                    });
-                }
+                } => own_login_form(ui, origin, username, password, action, &mut close),
+                Dialog::ForceRemove { origin } => force_remove_form(ui, origin, action, &mut close),
                 Dialog::Delete {
                     origin,
                     mode,
@@ -766,6 +679,116 @@ fn dialog(
     if close {
         state.dialog = None;
     }
+}
+
+/// Повторный вход паролем домашнего сервера.
+fn reauth_form(
+    ui: &mut egui::Ui,
+    origin: &str,
+    password: &mut String,
+    action: &mut ConnAction,
+    close: &mut bool,
+) {
+    widgets::field_label(ui, tr("Пароль учётной записи на домашнем сервере"));
+    let field = widgets::secret_field(ui, password, tr("пароль"), 200);
+    ui.label(
+        theme::muted(tr(
+            "Пароль проверяет ваш домашний сервер и никогда не отправляется \
+             на этот сервер: для него создаются отдельные учётные данные.",
+        ))
+        .size(11.5),
+    );
+    ui.add_space(6.0);
+    let ready = !password.is_empty();
+    let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(ready, theme::primary_button(tr("Войти")))
+            .clicked()
+            || (ready && enter)
+        {
+            *action = ConnAction::Reauthenticate {
+                origin: origin.to_owned(),
+                password: std::mem::take(password),
+            };
+            *close = true;
+        }
+        if ui.button(tr("Отмена")).clicked() {
+            *close = true;
+        }
+    });
+}
+
+/// Вход собственным паролем аккаунта на удалённом сервере.
+fn own_login_form(
+    ui: &mut egui::Ui,
+    origin: &str,
+    username: &mut String,
+    password: &mut String,
+    action: &mut ConnAction,
+    close: &mut bool,
+) {
+    ui.label(
+        theme::muted(tr(
+            "Сервер не принимает учётные данные, выданные вашим домашним \
+             сервером. Войдите с паролем, который вы задали на том сервере: \
+             после входа аккаунт будет переведён на выданные данные.",
+        ))
+        .size(12.0),
+    );
+    ui.add_space(6.0);
+    widgets::field_label(ui, tr("Ваше имя на этом сервере"));
+    widgets::text_field(ui, username, tr("имя пользователя"), 100);
+    widgets::field_label(ui, tr("Пароль для этого сервера"));
+    widgets::secret_field(ui, password, tr("пароль на удалённом сервере"), 200);
+    ui.add_space(6.0);
+    let ready = !username.trim().is_empty() && !password.is_empty();
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(ready, theme::primary_button(tr("Войти и подключиться")))
+            .clicked()
+        {
+            *action = ConnAction::OwnLogin {
+                origin: origin.to_owned(),
+                username: username.trim().to_owned(),
+                password: std::mem::take(password),
+            };
+            *close = true;
+        }
+        if ui.button(tr("Отмена")).clicked() {
+            *close = true;
+        }
+    });
+}
+
+/// Подтверждение принудительного удаления записи о сервере.
+fn force_remove_form(ui: &mut egui::Ui, origin: &str, action: &mut ConnAction, close: &mut bool) {
+    ui.label(
+        RichText::new(tr("Принудительно удалить запись"))
+            .family(theme::bold_family())
+            .color(theme::text_bright()),
+    );
+    ui.label(
+        theme::muted(tr(
+            "Запись о сервере будет удалена из списка. Удалённый сервер не \
+             получит уведомления. Используйте это только если сервер \
+             недоступен навсегда.",
+        ))
+        .size(12.0),
+    );
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if ui
+            .add(small_button(tr("Удалить принудительно"), theme::rose()))
+            .clicked()
+        {
+            *action = ConnAction::ForceRemove(origin.to_owned());
+            *close = true;
+        }
+        if ui.button(tr("Отмена")).clicked() {
+            *close = true;
+        }
+    });
 }
 
 fn own_login_hint(ui: &mut egui::Ui, state: &mut ConnectionsUi, row: &ConnectionRow) {

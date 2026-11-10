@@ -143,10 +143,6 @@ impl SpaceSettings {
     }
 
     /// Учитывает итог действия. `false` — окно надо закрыть.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "плоская таблица итогов по видам действий"
-    )]
     pub(crate) fn apply(&mut self, event: &SpaceEvent) -> bool {
         match event {
             SpaceEvent::Admin {
@@ -156,87 +152,13 @@ impl SpaceSettings {
                 ..
             } if *space_id == self.space_id => {
                 self.busy = false;
-                match (op, result) {
-                    (SpaceOp::Delete, Ok(())) => return false,
-                    (op, Err(err)) => {
-                        if matches!(op, SpaceOp::UpdateRole(_, _))
-                            && err.starts_with(tr("Кто-то другой"))
-                        {
-                            self.roles.reload();
-                        }
-                        self.error = Some(err.clone());
-                    }
-                    (SpaceOp::DecideRequest(id, _), Ok(())) => {
-                        if let Some(list) = self.requests.as_mut() {
-                            list.retain(|r| r.id != *id);
-                        }
-                    }
-                    (SpaceOp::Update(_), Ok(())) => {
-                        self.saved = self.fields.clone();
-                        self.notice = Some(tr("Настройки сохранены").to_owned());
-                    }
-                    (SpaceOp::Transfer(_), Ok(())) => {
-                        self.transfer_open = false;
-                        self.confirm = None;
-                        self.notice = Some(tr("Права владельца переданы").to_owned());
-                    }
-                    (SpaceOp::Kick(_) | SpaceOp::Ban(_, _), Ok(())) => {
-                        self.confirm = None;
-                        self.reason.clear();
-                        self.bans = None;
-                        self.bans_requested = false;
-                    }
-                    (SpaceOp::Unban(user), Ok(())) => {
-                        if let Some(bans) = self.bans.as_mut() {
-                            bans.retain(|b| b.user_id != *user);
-                        }
-                    }
-                    (SpaceOp::UpdateRole(_, _), Ok(())) => {
-                        self.roles.reload();
-                        self.notice = Some(tr("Роль сохранена").to_owned());
-                    }
-                    (SpaceOp::DeleteRole(_), Ok(())) => self.roles.closed(),
-                    (SpaceOp::CreateRole(_), Ok(())) => {
-                        self.notice = Some(tr("Роль создана. Настройте её ниже.").to_owned());
-                    }
-                    (
-                        SpaceOp::ListBans
-                        | SpaceOp::ListJoinRequests
-                        | SpaceOp::UploadImage(..)
-                        | SpaceOp::AddMemberRole(_, _)
-                        | SpaceOp::RemoveMemberRole(_, _)
-                        | SpaceOp::Notify(..)
-                        | SpaceOp::UpdateChannel(..)
-                        | SpaceOp::DeleteChannel(_)
-                        | SpaceOp::RenameCategory(..)
-                        | SpaceOp::DeleteCategory(_)
-                        | SpaceOp::ListOverrides(_)
-                        | SpaceOp::PutOverride(..)
-                        | SpaceOp::DeleteOverride(..),
-                        Ok(()),
-                    ) => {}
-                }
+                return self.apply_admin(op, result);
             }
             SpaceEvent::Uploaded {
                 space_id,
                 banner,
                 result,
-            } if *space_id == self.space_id => {
-                self.busy = false;
-                self.uploading = None;
-                match result {
-                    Ok(file) if *banner => self.fields.banner.clone_from(file),
-                    Ok(file) => self.fields.icon.clone_from(file),
-                    Err(err) => {
-                        let _ = err;
-                        self.error = Some(if *banner {
-                            tr("Не удалось загрузить баннер").to_owned()
-                        } else {
-                            tr("Не удалось загрузить значок").to_owned()
-                        });
-                    }
-                }
-            }
+            } if *space_id == self.space_id => self.apply_upload(*banner, result),
             SpaceEvent::Requests { space_id, result } if *space_id == self.space_id => match result
             {
                 Ok(list) => self.requests = Some(list.clone()),
@@ -259,6 +181,87 @@ impl SpaceSettings {
             _ => {}
         }
         true
+    }
+
+    /// Итог административного действия. `false` — пространство удалено.
+    fn apply_admin(&mut self, op: &SpaceOp, result: &Result<(), String>) -> bool {
+        match (op, result) {
+            (SpaceOp::Delete, Ok(())) => return false,
+            (op, Err(err)) => {
+                if matches!(op, SpaceOp::UpdateRole(_, _)) && err.starts_with(tr("Кто-то другой"))
+                {
+                    self.roles.reload();
+                }
+                self.error = Some(err.clone());
+            }
+            (SpaceOp::DecideRequest(id, _), Ok(())) => {
+                if let Some(list) = self.requests.as_mut() {
+                    list.retain(|r| r.id != *id);
+                }
+            }
+            (SpaceOp::Update(_), Ok(())) => {
+                self.saved = self.fields.clone();
+                self.notice = Some(tr("Настройки сохранены").to_owned());
+            }
+            (SpaceOp::Transfer(_), Ok(())) => {
+                self.transfer_open = false;
+                self.confirm = None;
+                self.notice = Some(tr("Права владельца переданы").to_owned());
+            }
+            (SpaceOp::Kick(_) | SpaceOp::Ban(_, _), Ok(())) => {
+                self.confirm = None;
+                self.reason.clear();
+                self.bans = None;
+                self.bans_requested = false;
+            }
+            (SpaceOp::Unban(user), Ok(())) => {
+                if let Some(bans) = self.bans.as_mut() {
+                    bans.retain(|b| b.user_id != *user);
+                }
+            }
+            (SpaceOp::UpdateRole(_, _), Ok(())) => {
+                self.roles.reload();
+                self.notice = Some(tr("Роль сохранена").to_owned());
+            }
+            (SpaceOp::DeleteRole(_), Ok(())) => self.roles.closed(),
+            (SpaceOp::CreateRole(_), Ok(())) => {
+                self.notice = Some(tr("Роль создана. Настройте её ниже.").to_owned());
+            }
+            (
+                SpaceOp::ListBans
+                | SpaceOp::ListJoinRequests
+                | SpaceOp::UploadImage(..)
+                | SpaceOp::AddMemberRole(_, _)
+                | SpaceOp::RemoveMemberRole(_, _)
+                | SpaceOp::Notify(..)
+                | SpaceOp::UpdateChannel(..)
+                | SpaceOp::DeleteChannel(_)
+                | SpaceOp::RenameCategory(..)
+                | SpaceOp::DeleteCategory(_)
+                | SpaceOp::ListOverrides(_)
+                | SpaceOp::PutOverride(..)
+                | SpaceOp::DeleteOverride(..),
+                Ok(()),
+            ) => {}
+        }
+        true
+    }
+
+    /// Загружен (или нет) значок либо баннер.
+    fn apply_upload(&mut self, banner: bool, result: &Result<String, String>) {
+        self.busy = false;
+        self.uploading = None;
+        match result {
+            Ok(file) if banner => self.fields.banner.clone_from(file),
+            Ok(file) => self.fields.icon.clone_from(file),
+            Err(_) => {
+                self.error = Some(if banner {
+                    tr("Не удалось загрузить баннер").to_owned()
+                } else {
+                    tr("Не удалось загрузить значок").to_owned()
+                });
+            }
+        }
     }
 
     fn rights(&self, bridge: &Bridge) -> Option<Rights> {
