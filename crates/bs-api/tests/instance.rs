@@ -44,6 +44,7 @@ async fn closed_federated_registration_is_a_distinct_error() {
         display_name: None,
         home_instance: Some("home.example".into()),
         home_user_id: Some("7".into()),
+        ..RegisterRequest::default()
     };
     let err = ApiClient::home(server.uri())
         .unwrap()
@@ -116,4 +117,125 @@ async fn replicated_instances_are_sent_in_camel_case() {
         }])
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn check_username_maps_every_server_answer() {
+    use bs_api::UsernameCheck;
+    use wiremock::matchers::query_param;
+    let server = MockServer::start().await;
+    for (name, status, body) in [
+        ("free", 200, serde_json::json!({"available": true})),
+        ("taken", 200, serde_json::json!({"available": false})),
+        (
+            "x",
+            200,
+            serde_json::json!({"available": false, "reason": "short", "code": "username_length_invalid"}),
+        ),
+        (
+            "closed",
+            403,
+            serde_json::json!({"available": false, "reason": "closed", "code": "registration_closed"}),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path("/api/auth/check-username"))
+            .and(query_param("username", name))
+            .respond_with(ResponseTemplate::new(status).set_body_json(body))
+            .mount(&server)
+            .await;
+    }
+    let api = ApiClient::home(server.uri()).unwrap();
+    assert_eq!(
+        api.check_username("free").await.unwrap(),
+        UsernameCheck::Available
+    );
+    assert_eq!(
+        api.check_username("taken").await.unwrap(),
+        UsernameCheck::Taken
+    );
+    assert_eq!(
+        api.check_username("x").await.unwrap(),
+        UsernameCheck::Invalid {
+            code: "username_length_invalid".into()
+        }
+    );
+    assert_eq!(
+        api.check_username("closed").await.unwrap(),
+        UsernameCheck::RegistrationClosed
+    );
+}
+
+#[tokio::test]
+async fn check_invite_reports_reason() {
+    use bs_api::InviteCheck;
+    use wiremock::matchers::query_param;
+    let server = MockServer::start().await;
+    for (token, body) in [
+        ("ok", serde_json::json!({"valid": true, "name": "Друзья"})),
+        (
+            "old",
+            serde_json::json!({"valid": false, "reason": "expired"}),
+        ),
+        (
+            "used",
+            serde_json::json!({"valid": false, "reason": "exhausted"}),
+        ),
+        (
+            "bad",
+            serde_json::json!({"valid": false, "reason": "invalid"}),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path("/api/auth/check-invite"))
+            .and(query_param("token", token))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+    }
+    let api = ApiClient::home(server.uri()).unwrap();
+    assert_eq!(
+        api.check_invite("ok").await.unwrap(),
+        InviteCheck::Valid {
+            name: "Друзья".into()
+        }
+    );
+    assert_eq!(api.check_invite("old").await.unwrap(), InviteCheck::Expired);
+    assert_eq!(
+        api.check_invite("used").await.unwrap(),
+        InviteCheck::Exhausted
+    );
+    assert_eq!(api.check_invite("bad").await.unwrap(), InviteCheck::Invalid);
+}
+
+#[tokio::test]
+async fn local_registration_sends_invite_and_color() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/auth/register"))
+        .and(body_json(serde_json::json!({
+            "username": "alice", "password": "password1",
+            "avatarColor": "mint", "inviteToken": "tok-secret"
+        })))
+        .respond_with(
+            ResponseTemplate::new(403).set_body_json(serde_json::json!({"error": "nope"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let request = RegisterRequest {
+        username: "alice".into(),
+        password: "password1".into(),
+        avatar_color: Some("mint".into()),
+        invite_token: Some("tok-secret".into()),
+        ..RegisterRequest::default()
+    };
+    let err = ApiClient::home(server.uri())
+        .unwrap()
+        .register(&request)
+        .await
+        .unwrap_err();
+    assert_eq!(err.status().map(|s| s.as_u16()), Some(403));
+    let debug = format!("{request:?}");
+    assert!(!debug.contains("tok-secret") && !debug.contains("password1"));
 }

@@ -293,17 +293,6 @@ impl ApiClient {
         Ok(reply.id)
     }
 
-    /// `GET /api/spaces/:id` — пространство целиком.
-    ///
-    /// # Errors
-    /// Сеть или отказ сервера.
-    pub async fn space_full(
-        &self,
-        space_id: &str,
-    ) -> Result<bs_types::SpaceWithChannelsAndMembers, ApiError> {
-        self.get_json(&format!("/api/spaces/{space_id}")).await
-    }
-
     /// `DELETE /api/spaces/:id/members/:uid` — выйти (себя) из пространства.
     ///
     /// # Errors

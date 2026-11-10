@@ -120,15 +120,17 @@ async fn sends_friend_request_by_username() {
     Mock::given(method("POST"))
         .and(path("/api/social/requests"))
         .and(body_json(json!({"username":"bob"})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(request_json()))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(json!({"success": true, "requestId": "r1"})),
+        )
         .mount(&server)
         .await;
 
-    let request = client(&server)
+    let id = client(&server)
         .send_friend_request(&SendFriendRequest::username("bob"))
         .await
         .unwrap();
-    assert_eq!(request.id, "r1");
+    assert_eq!(id, "r1");
 }
 
 #[tokio::test]
@@ -139,15 +141,17 @@ async fn sends_federated_friend_request() {
         .and(body_json(json!({
             "homeUserId":"home-u2","homeInstance":"remote.example"
         })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(request_json()))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"success": true, "requestId": "r9"})),
+        )
         .mount(&server)
         .await;
 
-    let request = client(&server)
+    let id = client(&server)
         .send_friend_request(&SendFriendRequest::identity("home-u2", "remote.example"))
         .await
         .unwrap();
-    assert_eq!(request.to_id, "u1");
+    assert_eq!(id, "r9");
 }
 
 #[tokio::test]

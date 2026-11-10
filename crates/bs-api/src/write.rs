@@ -7,7 +7,7 @@ use bs_types::{
     DiscoverResponse, DmChannel, DmSearchResponse, Friend, FriendRequest, LiveKitTokenRequest,
     LiveKitTokenResponse, MessageSearchResponse, User,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use url::form_urlencoded;
 
 use crate::client::ApiClient;
@@ -184,6 +184,13 @@ fn with_query(path: String, query: &str) -> String {
     path
 }
 
+/// Ответ на отправку заявки в друзья.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FriendRequestCreated {
+    request_id: String,
+}
+
 impl ApiClient {
     /// `GET /api/social/friends` — список друзей.
     pub async fn friends(&self) -> Result<Vec<Friend>, ApiError> {
@@ -196,11 +203,15 @@ impl ApiClient {
     }
 
     /// `POST /api/social/requests` — отправить заявку в друзья.
+    ///
+    /// Сервер отвечает `{ success, requestId }`; саму заявку присылает
+    /// событием `friend_request_sent`. Возвращается id заявки.
     pub async fn send_friend_request(
         &self,
         request: &SendFriendRequest,
-    ) -> Result<FriendRequest, ApiError> {
-        self.post_json("/api/social/requests", request).await
+    ) -> Result<String, ApiError> {
+        let reply: FriendRequestCreated = self.post_json("/api/social/requests", request).await?;
+        Ok(reply.request_id)
     }
 
     /// `PATCH /api/social/requests/:id` — принять или отклонить входящую заявку.

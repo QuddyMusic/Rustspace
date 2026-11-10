@@ -1634,6 +1634,7 @@ impl Session {
                 display_name,
                 home_instance: Some(credential.home_host.clone()),
                 home_user_id: Some(credential.home_user_id.clone()),
+                ..RegisterRequest::default()
             }),
             resume: None,
             persist: None,
@@ -2655,6 +2656,14 @@ fn is_network_error(err: &bs_instances::InstanceError) -> bool {
     )
 }
 
+/// Пространство целиком (каналы, участники, роли) для кэша.
+async fn full_space(client: &bs_api::ApiClient, space_id: &str) -> BridgeResponse {
+    match client.space(space_id).await {
+        Ok(space) => BridgeResponse::Space(Box::new(space)),
+        Err(err) => BridgeResponse::Failed(err.to_string()),
+    }
+}
+
 /// Пытается создать аккаунт; отказ «занято/закрыто» не ошибка, дальше идёт вход.
 async fn try_register(
     origin: &Origin,
@@ -2905,7 +2914,7 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
             SpaceOp::Delete | SpaceOp::Unban(_) | SpaceOp::DecideRequest(_, false)
         );
     let space = if refresh {
-        client.space_full(&space_id).await.ok().map(Box::new)
+        client.space(&space_id).await.ok().map(Box::new)
     } else {
         None
     };
@@ -3301,7 +3310,7 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
         }
         BridgeRequest::JoinByCode(code) => {
             let joined = match client.join_by_code(&code).await {
-                Ok(id) => client.space_full(&id).await,
+                Ok(id) => client.space(&id).await,
                 Err(err) => Err(err),
             };
             match joined {
@@ -3418,8 +3427,11 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                 Err(err) => BridgeResponse::Failed(err.to_string()),
             }
         }
+        // Сервер отвечает голым пространством без каналов и участников:
+        // детали берём отдельным запросом, иначе в кэше оказалось бы пустое
+        // пространство до переподключения.
         BridgeRequest::CreateSpace(body) => match client.create_space(&body).await {
-            Ok(space) => BridgeResponse::Space(Box::new(space)),
+            Ok(space) => full_space(client, &space.id).await,
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
         BridgeRequest::Explore(query) => match client.explore_spaces(&query, 50, 0).await {
@@ -3434,7 +3446,7 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
                 }
             } else {
                 match client.join_public_space(&id).await {
-                    Ok(space) => BridgeResponse::Space(Box::new(space)),
+                    Ok(space) => full_space(client, &space.id).await,
                     Err(err) => BridgeResponse::Failed(err.to_string()),
                 }
             }

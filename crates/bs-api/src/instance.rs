@@ -11,6 +11,10 @@ use crate::client::ApiClient;
 use crate::error::ApiError;
 
 /// Ответ `GET /api/instance/info` (без авторизации).
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "повторяет JSON сервера: флаги независимы"
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstanceInfo {
@@ -32,25 +36,49 @@ pub struct InstanceInfo {
     /// Короткий хеш сборки.
     #[serde(default)]
     pub commit: Option<String>,
+    /// Постоянный идентификатор инстанса (эпоха федерации).
+    #[serde(default)]
+    pub instance_id: Option<String>,
+    /// Настроен ли у инстанса каталог пространств (хаб).
+    #[serde(default)]
+    pub directory_configured: bool,
+    /// Можно ли просматривать каталог с этого инстанса.
+    #[serde(default)]
+    pub directory_available: bool,
+    /// Включил ли администратор публикацию в каталоге.
+    #[serde(default)]
+    pub directory_enabled: bool,
+    /// Показывать ли карточку поддержки проекта.
+    #[serde(default = "default_true")]
+    pub support_card_enabled: bool,
 }
 
 const fn default_true() -> bool {
     true
 }
 
-/// Тело `POST /api/auth/register` для федеративного аккаунта.
+/// Тело `POST /api/auth/register`.
 ///
-/// `Debug` не печатает пароль.
-#[derive(Clone, Serialize)]
+/// Без `home_instance` это обычная регистрация на этом инстансе; с ним —
+/// федеративный аккаунт, выданный домашним инстансом. `Debug` не печатает
+/// пароль и токен приглашения.
+#[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegisterRequest {
-    /// Имя вида `alice@home.example`.
+    /// Имя: `alice` для обычной регистрации, `alice@home.example` для
+    /// федеративной.
     pub username: String,
-    /// Секрет, выданный домашним инстансом.
+    /// Пароль (для федеративной — секрет, выданный домашним инстансом).
     pub password: String,
     /// Отображаемое имя.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    /// Цвет аватара из палитры (`mint`, `sky`, …).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_color: Option<String>,
+    /// Токен ссылки-приглашения, когда открытая регистрация выключена.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invite_token: Option<String>,
     /// Хост домашнего инстанса.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub home_instance: Option<String>,
@@ -65,8 +93,60 @@ impl std::fmt::Debug for RegisterRequest {
             .field("username", &self.username)
             .field("password", &"<redacted>")
             .field("home_instance", &self.home_instance)
+            .field(
+                "invite_token",
+                &self.invite_token.as_ref().map(|_| "<redacted>"),
+            )
             .finish_non_exhaustive()
     }
+}
+
+/// Результат `GET /api/auth/check-username`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UsernameCheck {
+    /// Имя свободно.
+    Available,
+    /// Имя уже занято.
+    Taken,
+    /// Имя не проходит правила сервера; `code` — машинный код причины.
+    Invalid {
+        /// Например, `username_length_invalid`.
+        code: String,
+    },
+    /// Регистрация на инстансе закрыта.
+    RegistrationClosed,
+}
+
+/// Результат `GET /api/auth/check-invite`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InviteCheck {
+    /// Приглашение действует; `name` — его название.
+    Valid {
+        /// Название ссылки, которое задал администратор.
+        name: String,
+    },
+    /// Срок действия истёк.
+    Expired,
+    /// Использования закончились.
+    Exhausted,
+    /// Ссылки нет, она отозвана или токен испорчен.
+    Invalid,
+}
+
+#[derive(Deserialize)]
+struct UsernameCheckBody {
+    available: bool,
+    #[serde(default)]
+    code: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct InviteCheckBody {
+    valid: bool,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 /// Результат проверки пароля.
@@ -129,6 +209,60 @@ impl ApiClient {
     /// `409` — имя занято, `403` — регистрация закрыта.
     pub async fn register(&self, request: &RegisterRequest) -> Result<AuthResponse, ApiError> {
         self.post_json("/api/auth/register", request).await
+    }
+
+    /// `GET /api/auth/check-username` — свободно ли имя для регистрации.
+    ///
+    /// Сервер отвечает `403`, если регистрация закрыта, и `400` на пустое
+    /// имя: оба случая возвращаются как значения, а не ошибки.
+    ///
+    /// # Errors
+    /// Сетевые ошибки и неожиданные ответы.
+    pub async fn check_username(&self, username: &str) -> Result<UsernameCheck, ApiError> {
+        let path = {
+            let mut ser = url::form_urlencoded::Serializer::new(String::new());
+            ser.append_pair("username", username);
+            format!("/api/auth/check-username?{}", ser.finish())
+        };
+        match self.get_json::<UsernameCheckBody>(&path).await {
+            Ok(body) if body.available => Ok(UsernameCheck::Available),
+            Ok(body) => Ok(body
+                .code
+                .map_or(UsernameCheck::Taken, |code| UsernameCheck::Invalid { code })),
+            Err(err) if err.status() == Some(reqwest::StatusCode::FORBIDDEN) => {
+                Ok(UsernameCheck::RegistrationClosed)
+            }
+            Err(err) if err.status() == Some(reqwest::StatusCode::BAD_REQUEST) => {
+                Ok(UsernameCheck::Invalid {
+                    code: "username_required".to_owned(),
+                })
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// `GET /api/auth/check-invite` — действует ли токен приглашения.
+    ///
+    /// # Errors
+    /// Сетевые ошибки и неожиданные ответы.
+    pub async fn check_invite(&self, token: &str) -> Result<InviteCheck, ApiError> {
+        let path = {
+            let mut ser = url::form_urlencoded::Serializer::new(String::new());
+            ser.append_pair("token", token);
+            format!("/api/auth/check-invite?{}", ser.finish())
+        };
+        let body: InviteCheckBody = self.get_json(&path).await?;
+        Ok(if body.valid {
+            InviteCheck::Valid {
+                name: body.name.unwrap_or_default(),
+            }
+        } else {
+            match body.reason.as_deref() {
+                Some("expired") => InviteCheck::Expired,
+                Some("exhausted") => InviteCheck::Exhausted,
+                _ => InviteCheck::Invalid,
+            }
+        })
     }
 
     /// `POST /api/users/@me/verify-password` — проверяет пароль аккаунта.

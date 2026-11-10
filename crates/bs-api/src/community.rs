@@ -3,9 +3,7 @@
 //!
 //! Маршруты и поля — как в `packages/server/src/routes/{spaces,explore,users}.ts`.
 
-use bs_types::{
-    ChosenUserStatus, ExploreSpace, SpaceVisibility, SpaceWithChannelsAndMembers, User,
-};
+use bs_types::{ChosenUserStatus, ExploreSpace, Space, SpaceVisibility, User};
 use serde::{Deserialize, Serialize};
 use url::form_urlencoded;
 
@@ -85,10 +83,10 @@ struct RequestJoinBody<'a> {
 
 impl ApiClient {
     /// `POST /api/spaces` — создать пространство.
-    pub async fn create_space(
-        &self,
-        request: &CreateSpaceRequest,
-    ) -> Result<SpaceWithChannelsAndMembers, ApiError> {
+    ///
+    /// Сервер возвращает только само пространство, без каналов и
+    /// участников: детали нужно запросить отдельно ([`ApiClient::space`]).
+    pub async fn create_space(&self, request: &CreateSpaceRequest) -> Result<Space, ApiError> {
         self.post_json("/api/spaces", request).await
     }
 
@@ -113,10 +111,9 @@ impl ApiClient {
     }
 
     /// `POST /api/spaces/:id/public-join` — вступить в публичное пространство.
-    pub async fn join_public_space(
-        &self,
-        space_id: &str,
-    ) -> Result<SpaceWithChannelsAndMembers, ApiError> {
+    ///
+    /// Как и при создании, в ответе только пространство без деталей.
+    pub async fn join_public_space(&self, space_id: &str) -> Result<Space, ApiError> {
         let path = format!("/api/spaces/{space_id}/public-join");
         self.post_json(&path, &serde_json::json!({})).await
     }

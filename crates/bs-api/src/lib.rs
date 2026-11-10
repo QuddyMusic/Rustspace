@@ -59,7 +59,8 @@ pub use federation::{
 };
 pub use groups::{GROUP_MAX_MEMBERS, GROUP_NAME_MAX, GroupMember, GroupUpdate};
 pub use instance::{
-    InstanceInfo, PeerEnsureResponse, RegisterRequest, ReplicatedEntry, VerifyPasswordResponse,
+    InstanceInfo, InviteCheck, PeerEnsureResponse, RegisterRequest, ReplicatedEntry, UsernameCheck,
+    VerifyPasswordResponse,
 };
 pub use invites::{Invite, InvitePatch, NewInvite, Redemption};
 pub use peers::{ApprovalRequest, Peer, Recheck};
