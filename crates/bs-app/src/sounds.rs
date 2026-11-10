@@ -132,6 +132,8 @@ pub(crate) struct MessageAlert {
     pub(crate) suppress_everyone: bool,
     /// В пространстве отключены упоминания ролей.
     pub(crate) suppress_roles: bool,
+    /// Настройка «звук на каждое сообщение» (`messageSoundAllChannels`).
+    pub(crate) all_channels: bool,
 }
 
 /// Правило оригинала (`isMessageAlert`): свои — никогда, личные — всегда,
@@ -152,7 +154,10 @@ pub(crate) const fn message_alerts(m: &MessageAlert) -> bool {
         Nothing => false,
         All => true,
         Mentions => {
-            m.direct || (m.everyone && !m.suppress_everyone) || (m.role && !m.suppress_roles)
+            m.all_channels
+                || m.direct
+                || (m.everyone && !m.suppress_everyone)
+                || (m.role && !m.suppress_roles)
         }
     }
 }
@@ -174,13 +179,19 @@ pub(crate) const fn ringtone(incoming: bool, calling: bool, do_not_disturb: bool
 #[cfg(feature = "sounds")]
 const BASE_VOLUME: f32 = 0.8;
 
+/// Итоговая громкость: база × настройка 0–200 % (`getSfxVolume` оригинала).
+#[cfg(feature = "sounds")]
+fn volume() -> f32 {
+    BASE_VOLUME * f32::from(crate::prefs::get().sounds.volume) / 100.0
+}
+
 #[cfg(feature = "sounds")]
 mod real {
     use std::io::Cursor;
 
     use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 
-    use super::{BASE_VOLUME, Sound};
+    use super::Sound;
 
     /// Проигрыватель: устройство открывается при первом звуке.
     #[derive(Default)]
@@ -228,7 +239,7 @@ mod real {
             match Decoder::new_vorbis(Cursor::new(sound.bytes())) {
                 Ok(decoder) => {
                     let player = Player::connect_new(sink.mixer());
-                    player.set_volume(BASE_VOLUME);
+                    player.set_volume(super::volume());
                     player.append(decoder);
                     player.detach();
                 }
@@ -253,7 +264,7 @@ mod real {
             match Decoder::new_looped(Cursor::new(sound.bytes())) {
                 Ok(decoder) => {
                     let player = Player::connect_new(sink.mixer());
-                    player.set_volume(BASE_VOLUME);
+                    player.set_volume(super::volume());
                     player.append(decoder);
                     self.looping = Some((sound, player));
                 }
@@ -361,6 +372,7 @@ mod tests {
             role: false,
             suppress_everyone: false,
             suppress_roles: false,
+            all_channels: false,
         }
     }
 
@@ -430,6 +442,21 @@ mod tests {
             ..everyone
         };
         assert!(message_alerts(&both));
+        // «Звук на каждое сообщение» включает обычные сообщения при уровне
+        // «упоминания», но не пробивает «ничего» и mute.
+        let every = MessageAlert {
+            all_channels: true,
+            ..alert()
+        };
+        assert!(message_alerts(&every));
+        assert!(!message_alerts(&MessageAlert {
+            level: bs_types::NotificationLevel::Nothing,
+            ..every
+        }));
+        assert!(!message_alerts(&MessageAlert {
+            muted: true,
+            ..every
+        }));
     }
 
     #[test]

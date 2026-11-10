@@ -234,7 +234,7 @@ impl VoiceState {
     }
 
     /// Играет звуки по изменениям в комнате и держит вызов, пока звонят.
-    pub(crate) fn cue(&mut self, bridge: &mut Bridge) {
+    pub(crate) fn cue(&mut self, bridge: &mut Bridge, focused: bool) {
         let calling = self
             .dm
             .as_ref()
@@ -245,7 +245,7 @@ impl VoiceState {
                 cache.user_status(&me.id).unwrap_or(me.status) == bs_types::UserStatus::DoNotDisturb
             })
         });
-        self.cue_messages(bridge);
+        self.cue_messages(bridge, focused);
         self.sounds.set_loop(crate::sounds::ringtone(
             self.incoming.is_some(),
             calling,
@@ -289,26 +289,28 @@ impl VoiceState {
         self.room_view = next;
     }
 
-    /// Звук нового сообщения: один на кадр, как бы много их ни пришло.
-    fn cue_messages(&mut self, bridge: &mut Bridge) {
+    /// Звук и системное уведомление о новых сообщениях: звук один на кадр,
+    /// как бы много их ни пришло. «Не беспокоить» гасит и то, и другое
+    /// (свой статус берётся с того же инстанса, что и сообщение).
+    fn cue_messages(&mut self, bridge: &mut Bridge, focused: bool) {
         let arrived = bridge.take_new_messages();
-        let loud = arrived.iter().any(|(origin, message)| {
-            bridge
-                .cache_at(*origin)
-                .is_some_and(|cache| message_alerts_user(cache, message))
-        });
-        if !loud {
-            return;
+        let mut loud = false;
+        for (origin, message) in &arrived {
+            let Some(cache) = bridge.cache_at(*origin) else {
+                continue;
+            };
+            if !message_alerts_user(cache, message) {
+                continue;
+            }
+            let me = cache.me();
+            if cache.user_status(&me.id).unwrap_or(me.status) == bs_types::UserStatus::DoNotDisturb
+            {
+                continue;
+            }
+            loud = true;
+            crate::notify::message(cache, message, focused);
         }
-        // «Не беспокоить» гасит все оповещения; свой статус берём с того же
-        // инстанса, что и сообщение.
-        let quiet = arrived.iter().all(|(origin, _)| {
-            bridge.cache_at(*origin).is_none_or(|cache| {
-                let me = cache.me();
-                cache.user_status(&me.id).unwrap_or(me.status) == bs_types::UserStatus::DoNotDisturb
-            })
-        });
-        if !quiet {
+        if loud {
             self.sounds.play(crate::sounds::Sound::Message);
         }
     }
@@ -694,6 +696,7 @@ pub(crate) fn message_alerts_user(
             role: false,
             suppress_everyone: false,
             suppress_roles: false,
+            all_channels: false,
         });
     }
     let Some(channel) = cache.channel(&message.channel_id) else {
@@ -722,6 +725,7 @@ pub(crate) fn message_alerts_user(
             .any(|id| my_roles.contains(&id.as_str())),
         suppress_everyone: policy.suppress_everyone,
         suppress_roles: policy.suppress_roles,
+        all_channels: crate::prefs::get().sounds.message_all_channels,
     })
 }
 

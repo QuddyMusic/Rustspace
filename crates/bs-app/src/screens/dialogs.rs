@@ -203,6 +203,8 @@ pub(crate) enum SettingsSection {
     Voice,
     /// Горячие клавиши.
     Hotkeys,
+    /// Системные уведомления.
+    Notifications,
     /// Приватность.
     Privacy,
     /// Соединение с инстансом.
@@ -232,6 +234,7 @@ impl SettingsSection {
             Self::Appearance => "Внешний вид",
             Self::Voice => "Голос и видео",
             Self::Hotkeys => "Горячие клавиши",
+            Self::Notifications => "Уведомления",
             Self::Privacy => "Приватность",
             Self::Connections => "Подключения",
             Self::Instance => "Инстанс",
@@ -558,7 +561,11 @@ fn settings_nav(
             group(
                 ui,
                 "Приложение",
-                &[SettingsSection::Hotkeys, SettingsSection::Connections],
+                &[
+                    SettingsSection::Notifications,
+                    SettingsSection::Hotkeys,
+                    SettingsSection::Connections,
+                ],
             );
             if !state.admin_slots.is_empty() {
                 if state.admin_slots.len() > 1 {
@@ -668,6 +675,7 @@ fn section_content(
         SettingsSection::Appearance => super::appearance::page(ui, &mut state.appearance),
         SettingsSection::Voice => voice_settings(ui, state, bridge, voice),
         SettingsSection::Hotkeys => super::settings_app::hotkeys(ui, &mut state.hotkeys),
+        SettingsSection::Notifications => super::settings_app::notifications(ui),
         SettingsSection::Privacy => privacy(ui, state, me, bridge),
         SettingsSection::Connections => connections(ui, state, bridge, action),
         SettingsSection::Instance if me.is_admin => {
@@ -964,6 +972,8 @@ fn voice_settings(
         voice.media(bridge).apply_prefs(&prefs);
         crate::prefs::update(|saved| saved.voice = prefs);
     }
+    ui.add_space(10.0);
+    super::settings_app::sounds_card(ui);
 }
 
 /// Выпадающий список устройств; `None` — системное по умолчанию.

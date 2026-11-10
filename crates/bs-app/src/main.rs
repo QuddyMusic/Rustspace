@@ -28,6 +28,7 @@ mod images;
 mod logic;
 mod markdown;
 mod media;
+mod notify;
 mod prefs;
 mod registry;
 mod saved_session;
