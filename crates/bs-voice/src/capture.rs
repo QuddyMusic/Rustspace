@@ -180,10 +180,8 @@ pub fn list_sources() -> VoiceResult<Vec<ScreenSource>> {
     let mut sources = list_of(DesktopCaptureSourceType::Screen, CaptureTarget::Monitor);
     // У мониторов WebRTC отдаёт служебные имена («screen», «\\.\\DISPLAY1»):
     // нумеруем их по порядку, как в системных настройках.
-    if sources.len() > 1 || sources.iter().any(|s| s.name.trim().is_empty()) {
-        for (index, source) in sources.iter_mut().enumerate() {
-            source.name = format!("{}", index + 1);
-        }
+    for (index, source) in sources.iter_mut().enumerate() {
+        source.name = format!("{}", index + 1);
     }
     sources.extend(
         list_of(DesktopCaptureSourceType::Window, CaptureTarget::Window)

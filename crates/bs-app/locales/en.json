@@ -1084,7 +1084,6 @@
   "Картинка не подходит: {err}": "Unsuitable image: {err}",
   "Сообщение длиннее {max} символов: сократите правку": "The message is longer than {max} characters: shorten the edit",
   "Выбрать экран или окно в системном окне": "Choose a screen or window in the system dialog",
-  "Экран: {name}": "Screen: {name}",
   "Окно: {name}": "Window: {name}",
   "Как есть": "Native",
   "Разрешение": "Resolution",
@@ -1145,5 +1144,6 @@
   "Раз в шесть часов клиент смотрит релизы своего репозитория на GitHub.": "Every six hours the client looks at the releases of its repository on GitHub.",
   "Репозиторий клиента": "Client repository",
   "Снова напоминать об этой версии": "Remind me about this version again",
-  "укажите репозиторий в виде owner/repo": "set the repository as owner/repo"
+  "укажите репозиторий в виде owner/repo": "set the repository as owner/repo",
+  "Экран {name}": "Screen {name}"
 }

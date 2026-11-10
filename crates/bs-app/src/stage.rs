@@ -421,7 +421,7 @@ pub(crate) fn show_picker(ctx: &egui::Context, voice: &mut VoiceState) {
                                         tr("Выбрать экран или окно в системном окне").to_owned()
                                     }
                                     ShareKind::Screen => {
-                                        crate::tf!("Экран: {name}", name = source.name)
+                                        crate::tf!("Экран {name}", name = source.name)
                                     }
                                     ShareKind::Window => {
                                         crate::tf!("Окно: {name}", name = source.name)
