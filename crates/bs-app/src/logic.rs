@@ -28,6 +28,115 @@ pub(crate) fn outgoing_text(draft: &str) -> Option<String> {
     }
 }
 
+/// Предел длины сообщения на сервере (`MAX_MESSAGE_LENGTH` оригинала).
+///
+/// Сервер меряет `content.length` в JavaScript, то есть в единицах UTF-16.
+pub(crate) const MAX_MESSAGE_LENGTH: usize = 4000;
+
+/// Длина строки так, как её считает сервер (UTF-16).
+#[must_use]
+pub(crate) fn js_len(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+/// Ограда блока кода (` ``` ` в начале строки, можно с отступом и языком).
+fn fence(line: &str) -> bool {
+    line.trim_start().starts_with("```")
+}
+
+/// Режет длинный текст на сообщения не длиннее `limit` (в UTF-16).
+///
+/// Режем по строкам; строку длиннее предела — по пробелу, а если его нет,
+/// то по символам. Если разрыв приходится внутрь блока кода, текущая часть
+/// закрывается ` ``` `, а следующая снова открывается той же оградой
+/// (с языком), так что каждая часть — корректный Markdown.
+#[must_use]
+pub(crate) fn split_message(text: &str, limit: usize) -> Vec<String> {
+    if js_len(text) <= limit {
+        return vec![text.to_owned()];
+    }
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut open: Option<String> = None;
+    let flush = |current: &mut String, parts: &mut Vec<String>, open: &Option<String>| {
+        if open.is_some() {
+            if !current.ends_with('\n') {
+                current.push('\n');
+            }
+            current.push_str("```");
+        }
+        let part = current.trim_end_matches('\n').to_owned();
+        if !part.trim().is_empty() {
+            parts.push(part);
+        }
+        current.clear();
+        if let Some(line) = open {
+            current.push_str(line);
+            current.push('\n');
+        }
+    };
+    for line in text.split_inclusive('\n') {
+        let mut rest = line;
+        while !rest.is_empty() {
+            // Внутри кода оставляем место под закрывающую ограду.
+            let reserve = if open.is_some() { 4 } else { 0 };
+            let room = limit.saturating_sub(js_len(&current) + reserve);
+            if js_len(rest) <= room {
+                current.push_str(rest);
+                break;
+            }
+            let fresh = open.as_ref().map_or(0, |line| js_len(line) + 1);
+            if js_len(&current) > fresh {
+                // Строка не влезает в начатую часть: переносим её целиком.
+                flush(&mut current, &mut parts, &open);
+                continue;
+            }
+            // Строка длиннее целой части: режем её саму.
+            let cut = cut_point(rest, room.max(1));
+            current.push_str(&rest[..cut]);
+            rest = &rest[cut..];
+            flush(&mut current, &mut parts, &open);
+        }
+        if fence(line) {
+            open = if open.is_some() {
+                None
+            } else {
+                Some(line.trim_end_matches(['\n', '\r']).to_owned())
+            };
+        }
+    }
+    // Хвост: незакрытый пользователем блок не закрываем за него.
+    let tail = current.trim_end_matches('\n');
+    if !tail.trim().is_empty() && tail != open.as_deref().unwrap_or_default() {
+        parts.push(tail.to_owned());
+    }
+    parts
+}
+
+/// Байтовая позиция, до которой `text` укладывается в `room` единиц UTF-16:
+/// по последнему пробелу, если он есть, иначе по границе символа.
+fn cut_point(text: &str, room: usize) -> usize {
+    let mut used = 0;
+    let mut end = 0;
+    let mut space = None;
+    for (index, ch) in text.char_indices() {
+        let width = ch.len_utf16();
+        if used + width > room {
+            break;
+        }
+        used += width;
+        end = index + ch.len_utf8();
+        if ch == ' ' {
+            space = Some(end);
+        }
+    }
+    match space {
+        Some(at) if at > end / 2 => at,
+        _ if end == 0 => text.chars().next().map_or(text.len(), char::len_utf8),
+        _ => end,
+    }
+}
+
 /// Следующий экран после обработки событий моста.
 ///
 /// Приоритеты: потеря сессии всегда возвращает на логин (даже из чата),
@@ -320,8 +429,9 @@ mod tests {
     use bs_instances::ConnectionState;
 
     use super::{
-        author_name, can_manage_message, connection_label, describe_server_error, message_actions,
-        next_screen, outgoing_text, should_ack, should_load_older, should_wake,
+        author_name, can_manage_message, connection_label, describe_server_error, js_len,
+        message_actions, next_screen, outgoing_text, should_ack, should_load_older, should_wake,
+        split_message,
     };
     use crate::app::Screen;
 
@@ -339,6 +449,66 @@ mod tests {
     fn author_name_keeps_empty_display_name() {
         // Пустая строка — валидное значение поля, не повод подменять его.
         assert_eq!(author_name(Some(""), "alice42"), "");
+    }
+
+    #[test]
+    fn short_message_is_not_split() {
+        assert_eq!(split_message("привет", 10), vec!["привет".to_owned()]);
+    }
+
+    #[test]
+    fn long_text_splits_on_lines_within_limit() {
+        let text = "aaaa\nbbbb\ncccc\ndddd";
+        let parts = split_message(text, 10);
+        assert_eq!(parts, vec!["aaaa\nbbbb", "cccc\ndddd"]);
+        assert!(parts.iter().all(|p| js_len(p) <= 10));
+    }
+
+    #[test]
+    fn code_block_is_closed_and_reopened_at_the_break() {
+        let code = (0..30).fold(String::new(), |acc, i| acc + &format!("let x{i} = {i};\n"));
+        let text = format!("Смотри:\n```rust\n{code}```\nвсё");
+        let parts = split_message(&text, 120);
+        assert!(parts.len() > 2);
+        for part in &parts {
+            assert!(js_len(part) <= 120, "{part}");
+            let fences = part
+                .lines()
+                .filter(|l| l.trim_start().starts_with("```"))
+                .count();
+            assert_eq!(fences % 2, 0, "ограды парные: {part}");
+        }
+        assert!(
+            parts[1].starts_with("```rust\n"),
+            "язык сохранён: {}",
+            parts[1]
+        );
+        let rebuilt: String = parts
+            .iter()
+            .flat_map(|p| p.lines())
+            .filter(|l| !l.trim_start().starts_with("```"))
+            .fold(String::new(), |acc, l| acc + l + "\n");
+        assert!(rebuilt.contains("let x29 = 29;"));
+        assert_eq!(
+            rebuilt.matches("let x").count(),
+            30,
+            "строки не потерялись и не задвоились"
+        );
+    }
+
+    #[test]
+    fn long_line_is_cut_on_space_and_counts_utf16() {
+        let text = "😀".repeat(5) + " " + &"слово ".repeat(10);
+        let parts = split_message(&text, 12);
+        assert!(parts.iter().all(|p| js_len(p) <= 12));
+        assert_eq!(parts.concat().replace(' ', ""), text.replace(' ', ""));
+    }
+
+    #[test]
+    fn unbroken_line_is_cut_by_characters() {
+        let text = "x".repeat(25);
+        let parts = split_message(&text, 10);
+        assert_eq!(parts, vec!["x".repeat(10), "x".repeat(10), "x".repeat(5)]);
     }
 
     #[test]

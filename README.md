@@ -27,7 +27,10 @@ every WebSocket frame and REST response the client receives.
   bans, invites, join requests, the instance directory, notification settings per space and
   per channel (including timed mute).
 - **Messages.** Send, edit, delete, replies, reactions, mentions, markdown, read state,
-  history paging, message search with filters and jump-to-result.
+  history paging, message search with filters and jump-to-result. Text longer than the
+  server limit (4000 characters) is sent as several messages in a row; a code block cut at
+  the break is closed with ` ``` ` and reopened with the same fence (and language) in the
+  next message.
 - **Files and media.** Uploads with progress, image viewer, downloading attachments (one or
   all), avatars, banners, stickers, GIFs (Klipy search, favourites).
 - **Direct messages.** One-to-one and group DMs, friends and requests, user profiles, space
@@ -69,25 +72,61 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
 | `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, data-channel signals | 75 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 211 |
+| `bs-app` | The GUI and its entry point | 215 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
 ## Building and running
 
-Rust is pinned in `rust-toolchain.toml`; `rustup` fetches it automatically.
+Rust is pinned in `rust-toolchain.toml`; `rustup` fetches it automatically. Features (voice,
+camera, tray…) are chosen **at build time**; the program itself has no feature switches.
+
+### Build
 
 ```sh
-cargo run -p bs-app                                    # GUI, no voice
-cargo run -p bs-app --features voice                   # with voice and screen sharing
-cargo run -p bs-app --features voice,camera,desktop    # everything
-cargo build --release -p bs-app --features voice,camera,desktop
+cargo build --release -p bs-app                                     # GUI without voice
+cargo build --release -p bs-app --features voice,camera,desktop     # everything
+cargo build --release -p bs-tui                                     # terminal client
 ```
 
-The login form asks for the instance address, username and password. For an `http://`
-instance outside loopback, tick "Allow insecure connection (http)". Detailed log:
-`RUST_LOG=bs_app=debug,bs_voice=debug`.
+The package `bs-app` has a single binary called **`backspace-rs`**, `bs-tui` has **`bs-tui`**.
+A release build ends up in `target/release/` (a debug build — without `--release` — in
+`target/debug/`).
+
+### Run what you built
+
+```sh
+./target/release/backspace-rs            # Linux and macOS
+.\target\release\backspace-rs.exe        # Windows
+./target/release/bs-tui                  # terminal client
+./target/release/bs-tui --allow-insecure # bs-tui: allow http outside loopback
+```
+
+The binary is self-contained: copy it anywhere and run it. `backspace-rs` takes no
+command-line options; everything is set in the app (*Settings*). Only the environment is
+read: `RUST_LOG` for logging, e.g.
+`RUST_LOG=bs_app=debug,bs_voice=debug ./target/release/backspace-rs`. The login form asks
+for the instance address, username and password; for an `http://` instance outside loopback
+tick "Allow insecure connection (http)".
+
+To put it on your `PATH` instead:
+
+```sh
+cargo install --path crates/bs-app --features voice,camera,desktop   # → ~/.cargo/bin/backspace-rs
+backspace-rs
+```
+
+### Build and run in one step (for development)
+
+`cargo run` builds the package and starts its binary (`backspace-rs` for `bs-app`), with the
+same features you pass:
+
+```sh
+cargo run -p bs-app                                    # debug build, no voice
+cargo run --release -p bs-app --features voice         # optimised, with voice
+cargo run -p bs-tui -- --allow-insecure                # arguments after `--` go to the program
+```
 
 ### Cargo features of `bs-app`
 
@@ -123,13 +162,6 @@ cargo packager --release -p bs-app --formats nsis           # Windows
 ```
 
 Packages land in `target/packages`; the icon and `.desktop` file are in `packaging/linux`.
-
-### Terminal client
-
-```sh
-cargo run -p bs-tui
-cargo run -p bs-tui -- --allow-insecure     # allow http outside loopback
-```
 
 ### Checks
 

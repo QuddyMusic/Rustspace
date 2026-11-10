@@ -1081,5 +1081,6 @@
   "Слишком много загрузок, подождите минуту": "Too many uploads, wait a minute",
   "Нет права прикреплять файлы": "You are not allowed to attach files",
   "декодер упал: {err}": "decoder failed: {err}",
-  "Картинка не подходит: {err}": "Unsuitable image: {err}"
+  "Картинка не подходит: {err}": "Unsuitable image: {err}",
+  "Сообщение длиннее {max} символов: сократите правку": "The message is longer than {max} characters: shorten the edit"
 }

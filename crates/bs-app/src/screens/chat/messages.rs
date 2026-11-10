@@ -6,6 +6,7 @@ use super::{
     message_rows, name_map, needs_header, now_ms, outgoing_text, should_ack, should_load_older,
     theme, tr, typing_text,
 };
+use crate::logic::{MAX_MESSAGE_LENGTH, js_len, split_message};
 
 /// Строка состояния истории над лентой. Возвращает `true`, если нажали «Повторить».
 pub(super) fn show_history_header(ui: &mut egui::Ui, history: &HistoryState) -> bool {
@@ -122,14 +123,20 @@ impl ChatScreen {
                     self.cancel_edit();
                 }
                 if let Some(outgoing) = outgoing {
-                    self.submit(bridge, outgoing);
+                    let now = ui.input(|i| i.time);
+                    self.submit(bridge, outgoing, now);
                     ui.memory_mut(|m| m.request_focus(crate::screens::composer::edit_id()));
                 }
             });
     }
 
     /// Отправляет черновик: новое сообщение или правку.
-    pub(super) fn submit(&mut self, bridge: &Bridge, outgoing: crate::screens::composer::Outgoing) {
+    pub(super) fn submit(
+        &mut self,
+        bridge: &Bridge,
+        outgoing: crate::screens::composer::Outgoing,
+        now: f64,
+    ) {
         let Some(selected) = self.selected_channel.clone() else {
             return;
         };
@@ -138,36 +145,82 @@ impl ChatScreen {
             && let Some(edit) = self.edit.take()
         {
             if let Some(text) = outgoing_text(&content) {
+                // Правку не разбить на несколько сообщений: просим сократить.
+                if js_len(&text) > MAX_MESSAGE_LENGTH {
+                    self.edit = Some(edit);
+                    self.toast = Some((
+                        crate::tf!(
+                            "Сообщение длиннее {max} символов: сократите правку",
+                            max = MAX_MESSAGE_LENGTH
+                        ),
+                        now + 4.0,
+                    ));
+                    return;
+                }
                 bridge.edit_message(selected.kind, edit.message_id, text);
             }
             self.draft.clear();
             return;
         }
-        let text = outgoing_text(&content);
-        let reply_to_id = self.reply.as_ref().map(|r| r.message_id.clone());
-        match selected.kind {
-            ChannelKind::Space if outgoing.attachments.is_empty() => {
-                if let Some(text) = text {
-                    bridge.send_message(selected.kind, selected.channel, text, reply_to_id);
-                }
-            }
-            ChannelKind::Space => bridge.send_rest(
-                selected.channel,
-                bs_api::SendMessageBody {
-                    content: text.unwrap_or_default(),
-                    attachments: outgoing.attachments,
-                    reply_to_id,
-                },
-            ),
-            ChannelKind::Dm => {
-                if text.is_some() || !outgoing.attachments.is_empty() {
-                    bridge.send_dm_with(selected.channel, text, outgoing.attachments, reply_to_id);
-                }
-            }
+        // Длинный текст уходит несколькими сообщениями подряд; блоки кода на
+        // разрыве закрываются и открываются заново. Ответ и вложения — у первого.
+        let parts = outgoing_text(&content)
+            .map(|text| split_message(&text, MAX_MESSAGE_LENGTH))
+            .unwrap_or_default();
+        let mut reply_to_id = self.reply.as_ref().map(|r| r.message_id.clone());
+        let mut attachments = outgoing.attachments;
+        if parts.is_empty() {
+            Self::send_part(
+                bridge,
+                &selected,
+                None,
+                std::mem::take(&mut attachments),
+                None,
+            );
+        }
+        for text in parts {
+            Self::send_part(
+                bridge,
+                &selected,
+                Some(text),
+                std::mem::take(&mut attachments),
+                reply_to_id.take(),
+            );
         }
         if !outgoing.keep_draft {
             self.draft.clear();
             self.reply = None;
+        }
+    }
+
+    /// Отправляет одно сообщение. С вложениями в пространстве — через REST;
+    /// запросы моста выполняются по очереди, так что порядок частей сохраняется.
+    fn send_part(
+        bridge: &Bridge,
+        selected: &SelectedChannel,
+        text: Option<String>,
+        attachments: Vec<String>,
+        reply_to_id: Option<String>,
+    ) {
+        match selected.kind {
+            ChannelKind::Space if attachments.is_empty() => {
+                if let Some(text) = text {
+                    bridge.send_message(selected.kind, selected.channel.clone(), text, reply_to_id);
+                }
+            }
+            ChannelKind::Space => bridge.send_rest(
+                selected.channel.clone(),
+                bs_api::SendMessageBody {
+                    content: text.unwrap_or_default(),
+                    attachments,
+                    reply_to_id,
+                },
+            ),
+            ChannelKind::Dm => {
+                if text.is_some() || !attachments.is_empty() {
+                    bridge.send_dm_with(selected.channel.clone(), text, attachments, reply_to_id);
+                }
+            }
         }
     }
 
