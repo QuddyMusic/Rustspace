@@ -126,6 +126,8 @@ pub(crate) struct PersonRow<'a> {
     pub(crate) status: Option<UserStatus>,
     /// Значение поля `avatar` (имя файла или путь).
     pub(crate) avatar: Option<&'a str>,
+    /// Ключ цвета заглушки и `avatarColor`.
+    pub(crate) face: (Option<&'a str>, Option<&'a str>),
 }
 
 /// Строка списка людей: аватар, имя, «@handle», статус; справа — кнопки.
@@ -146,7 +148,11 @@ pub(crate) fn person_row(
     paint_avatar(
         ui.painter(),
         avatar_rect,
-        person.name,
+        crate::theme::Face {
+            name: person.name,
+            key: person.face.0,
+            color: person.face.1,
+        },
         person.status,
         person.status == Some(UserStatus::Offline),
         person.avatar,
@@ -187,6 +193,8 @@ pub(crate) fn person_row(
 pub(crate) struct DmEntry<'a> {
     /// Имя собеседника.
     pub(crate) name: &'a str,
+    /// Ключ цвета заглушки и `avatarColor`.
+    pub(crate) face: (Option<&'a str>, Option<&'a str>),
     /// Присутствие собеседника (для личных бесед).
     pub(crate) status: Option<UserStatus>,
     /// Начало последнего сообщения.
@@ -220,7 +228,11 @@ pub(crate) fn dm_entry(ui: &mut egui::Ui, dm: &DmEntry<'_>) -> egui::Response {
     paint_avatar(
         ui.painter(),
         avatar_rect,
-        dm.name,
+        crate::theme::Face {
+            name: dm.name,
+            key: dm.face.0,
+            color: dm.face.1,
+        },
         dm.status,
         false,
         dm.avatar,
@@ -567,8 +579,13 @@ pub(crate) fn radio_card(
 }
 
 /// Аватар-кружок крупного размера для карточек (без статуса).
-pub(crate) fn big_avatar(ui: &mut egui::Ui, name: &str, size: f32, image: Option<&str>) {
-    avatar(ui, name, size, None, image);
+pub(crate) fn big_avatar<'a>(
+    ui: &mut egui::Ui,
+    face: impl Into<crate::theme::Face<'a>>,
+    size: f32,
+    image: Option<&str>,
+) {
+    avatar(ui, face, size, None, image);
 }
 
 /// Выключатель «таблеткой». Возвращает `true`, если значение изменилось.

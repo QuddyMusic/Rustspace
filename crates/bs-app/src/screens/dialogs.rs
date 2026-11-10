@@ -505,7 +505,13 @@ fn settings_nav(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                widgets::big_avatar(ui, &name, 38.0, me.avatar.as_deref());
+                let pair = super::chat::face_of(me);
+                widgets::big_avatar(
+                    ui,
+                    super::chat::face(&name, &pair),
+                    38.0,
+                    me.avatar.as_deref(),
+                );
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.label(
@@ -791,7 +797,12 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
             theme::paint_avatar(
                 ui.painter(),
                 avatar_rect,
-                &shown,
+                theme::Face {
+                    name: &shown,
+                    key: Some(me.home_user_id.as_deref().unwrap_or(&me.id)),
+                    // Предпросмотр показывает ещё не сохранённый выбор цвета.
+                    color: state.avatar_color.as_deref(),
+                },
                 None,
                 false,
                 me.avatar.as_deref(),

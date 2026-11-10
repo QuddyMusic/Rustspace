@@ -109,7 +109,11 @@ fn header(ui: &mut egui::Ui, state: &ProfileState) {
     theme::paint_avatar(
         ui.painter(),
         avatar,
-        &state.name,
+        theme::Face {
+            name: &state.name,
+            key: user.map(|u| u.home_user_id.as_deref().unwrap_or(&u.id)),
+            color: user.and_then(|u| u.avatar_color.as_deref()),
+        },
         user.map(|u| u.status),
         false,
         user.and_then(|u| u.avatar.as_deref()),

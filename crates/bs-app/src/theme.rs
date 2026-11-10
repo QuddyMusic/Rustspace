@@ -685,71 +685,178 @@ pub(crate) fn status_color(status: UserStatus) -> Color32 {
     }
 }
 
-/// Палитра аватаров-заглушек: насыщенные тона, на которых читается белая буква.
-const AVATAR_PALETTE: [Color32; 8] = [
-    Color32::from_rgb(0x8f, 0x7c, 0xf7),
-    Color32::from_rgb(0xe5, 0x55, 0x7f),
-    Color32::from_rgb(0xf0, 0x8a, 0x3c),
-    Color32::from_rgb(0x3d, 0xbf, 0x86),
-    Color32::from_rgb(0x4a, 0xa8, 0xe8),
-    Color32::from_rgb(0xd9, 0xa2, 0x3b),
-    Color32::from_rgb(0xc2, 0x64, 0xd6),
-    Color32::from_rgb(0x5b, 0x7b, 0xe0),
-];
-
-/// Устойчивый цвет по строке (FNV-1a): одно имя — один цвет.
-#[must_use]
-pub(crate) fn color_for(seed: &str) -> Color32 {
-    let mut hash: u32 = 0x811c_9dc5;
-    for byte in seed.bytes() {
-        hash ^= u32::from(byte);
-        hash = hash.wrapping_mul(0x0100_0193);
-    }
-    AVATAR_PALETTE[(hash as usize) % AVATAR_PALETTE.len()]
+/// Градиент заглушки: начало, конец (135°, как CSS-градиенты оригинала).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Gradient {
+    /// Цвет левого верхнего угла.
+    pub(crate) from: Color32,
+    /// Цвет правого нижнего угла.
+    pub(crate) to: Color32,
 }
 
-/// До двух заглавных букв из имени для аватара-заглушки.
+const fn grad(from: u32, to: u32) -> Gradient {
+    Gradient {
+        from: rgb(from),
+        to: rgb(to),
+    }
+}
+
+/// `AVATAR_GRADIENTS` оригинала, в порядке `mint, sky, lavender, coral,
+/// rose, teal, amber`.
+#[allow(clippy::unreadable_literal, reason = "цвета записаны как #rrggbb")]
+const AVATAR_GRADIENTS: [Gradient; 7] = [
+    grad(0x059669, 0x10b981),
+    grad(0x3b82f6, 0x6366f1),
+    grad(0xa78bfa, 0xc084fc),
+    grad(0xf97316, 0xef4444),
+    grad(0xf43f5e, 0xec4899),
+    grad(0x14b8a6, 0x06b6d4),
+    grad(0xf59e0b, 0xeab308),
+];
+
+/// `SPACE_GRADIENTS` оригинала (порядок для хэша: red-orange, pink,
+/// teal-cyan, amber-yellow, blue-indigo, lavender, mint).
+#[allow(clippy::unreadable_literal, reason = "цвета записаны как #rrggbb")]
+const SPACE_GRADIENTS: [Gradient; 7] = [
+    grad(0xef4444, 0xf97316),
+    grad(0xec4899, 0xf472b6),
+    grad(0x14b8a6, 0x06b6d4),
+    grad(0xf59e0b, 0xeab308),
+    grad(0x3b82f6, 0x6366f1),
+    grad(0xa78bfa, 0xc084fc),
+    grad(0x059669, 0x10b981),
+];
+
+/// djb2 по UTF-16, как `hashString` оригинала: одинаковый цвет у одного
+/// пользователя во всех клиентах.
+fn djb2(text: &str) -> u32 {
+    text.encode_utf16().fold(5381_u32, |hash, unit| {
+        (hash << 5).wrapping_add(hash).wrapping_add(u32::from(unit))
+    })
+}
+
+fn named_index(color: &str) -> Option<usize> {
+    PALETTE_NAMES.iter().position(|name| *name == color)
+}
+
+/// Градиент аватара пользователя: сохранённый `avatarColor` или хэш id
+/// (а без id — имени).
 #[must_use]
-pub(crate) fn initials(name: &str) -> String {
-    let words: Vec<&str> = name
-        .split(|c: char| c.is_whitespace() || c == '-' || c == '_' || c == '.')
-        .filter(|w| !w.is_empty())
-        .collect();
-    let mut out = String::new();
-    match words.as_slice() {
-        [] => out.push('?'),
-        [one] => out.extend(one.chars().take(2).flat_map(char::to_uppercase)),
-        [first, second, ..] => {
-            out.extend(first.chars().take(1).flat_map(char::to_uppercase));
-            out.extend(second.chars().take(1).flat_map(char::to_uppercase));
+pub(crate) fn avatar_gradient(key: &str, color: Option<&str>) -> Gradient {
+    color.and_then(named_index).map_or_else(
+        || AVATAR_GRADIENTS[djb2(key) as usize % AVATAR_GRADIENTS.len()],
+        |index| AVATAR_GRADIENTS[index],
+    )
+}
+
+/// Градиент иконки пространства.
+#[must_use]
+pub(crate) fn space_gradient(key: &str, color: Option<&str>) -> Gradient {
+    // Порядок SPACE_GRADIENT_MAP оригинала по именам палитры.
+    const BY_NAME: [usize; 7] = [6, 4, 5, 0, 1, 2, 3];
+    color.and_then(named_index).map_or_else(
+        || SPACE_GRADIENTS[djb2(key) as usize % SPACE_GRADIENTS.len()],
+        |index| SPACE_GRADIENTS[BY_NAME[index]],
+    )
+}
+
+/// Средний цвет градиента — для мест, где нужна одна заливка.
+#[must_use]
+pub(crate) fn color_for(seed: &str) -> Color32 {
+    let g = avatar_gradient(seed, None);
+    g.from.lerp_to_gamma(g.to, 0.5)
+}
+
+/// Заливает прямоугольник со скруглением диагональным градиентом.
+pub(crate) fn fill_gradient(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    rounding: f32,
+    gradient: Gradient,
+    alpha: f32,
+) {
+    let shape = egui::epaint::RectShape::filled(
+        rect,
+        CornerRadius::same(rounding.round().clamp(0.0, 255.0) as u8),
+        Color32::WHITE,
+    );
+    let mut mesh = egui::epaint::Mesh::default();
+    let mut tess = egui::epaint::Tessellator::new(
+        painter.pixels_per_point(),
+        egui::epaint::TessellationOptions::default(),
+        [1, 1],
+        Vec::new(),
+    );
+    tess.tessellate_rect(&shape, &mut mesh);
+    let span = (rect.width() + rect.height()).max(1.0);
+    for vertex in &mut mesh.vertices {
+        let t = ((vertex.pos.x - rect.left()) + (vertex.pos.y - rect.top())) / span;
+        let color = gradient.from.lerp_to_gamma(gradient.to, t.clamp(0.0, 1.0));
+        vertex.color = color.gamma_multiply(alpha * f32::from(vertex.color.a()) / 255.0);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// Кто изображён на аватаре: имя для буквы, ключ для цвета, `avatarColor`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Face<'a> {
+    /// Отображаемое имя (первая буква — на заглушке).
+    pub(crate) name: &'a str,
+    /// id пользователя (а для федеративного — `homeUserId`).
+    pub(crate) key: Option<&'a str>,
+    /// Сохранённый цвет аватара.
+    pub(crate) color: Option<&'a str>,
+}
+
+impl<'a> From<&'a str> for Face<'a> {
+    fn from(name: &'a str) -> Self {
+        Self {
+            name,
+            key: None,
+            color: None,
         }
     }
-    out
+}
+
+impl<'a> From<&'a String> for Face<'a> {
+    fn from(name: &'a String) -> Self {
+        Self::from(name.as_str())
+    }
+}
+
+/// Первая буква имени заглавной (`name.charAt(0).toUpperCase()` оригинала).
+#[must_use]
+pub(crate) fn first_letter(name: &str) -> String {
+    name.trim()
+        .chars()
+        .next()
+        .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect())
 }
 
 /// Рисует круглый аватар-заглушку (инициалы на цветном фоне) и, если
 /// задан статус, индикатор присутствия в правом нижнем углу.
-pub(crate) fn avatar(
+pub(crate) fn avatar<'a>(
     ui: &mut egui::Ui,
-    name: &str,
+    face: impl Into<Face<'a>>,
     size: f32,
     status: Option<UserStatus>,
     image: Option<&str>,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(size), egui::Sense::hover());
-    paint_avatar(ui.painter(), rect, name, status, false, image);
+    paint_avatar(ui.painter(), rect, face, status, false, image);
     response
 }
 
 /// Отрисовка аватара в заданный прямоугольник.
-pub(crate) fn paint_avatar(
+pub(crate) fn paint_avatar<'a>(
     painter: &egui::Painter,
     rect: egui::Rect,
-    name: &str,
+    face: impl Into<Face<'a>>,
     status: Option<UserStatus>,
     dim: bool,
     image: Option<&str>,
 ) {
+    let face = face.into();
     let size = rect.width();
     let tint = if dim {
         Color32::WHITE.gamma_multiply(0.45)
@@ -767,17 +874,19 @@ pub(crate) fn paint_avatar(
         )
     });
     if !drawn {
-        let fill = if dim {
-            color_for(name).gamma_multiply(0.45)
-        } else {
-            color_for(name)
-        };
-        painter.circle_filled(rect.center(), size / 2.0, fill);
+        let gradient = avatar_gradient(face.key.unwrap_or(face.name), face.color);
+        fill_gradient(
+            painter,
+            rect,
+            size / 2.0,
+            gradient,
+            if dim { 0.45 } else { 1.0 },
+        );
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            initials(name),
-            FontId::proportional(size * 0.42),
+            first_letter(face.name),
+            FontId::new((size * 0.4).round(), bold_family()),
             if dim { text_muted() } else { Color32::WHITE },
         );
     }
@@ -849,7 +958,7 @@ fn paint_rail_pill(
 pub(crate) fn rail_button(
     ui: &mut egui::Ui,
     text: &str,
-    color: Color32,
+    gradient: Gradient,
     selected: bool,
     unread: bool,
     image: Option<&str>,
@@ -871,12 +980,12 @@ pub(crate) fn rail_button(
         )
     });
     if !drawn {
-        painter.rect_filled(icon, CornerRadius::same(radius), color);
+        fill_gradient(painter, icon, f32::from(radius), gradient, 1.0);
         painter.text(
             icon.center(),
             egui::Align2::CENTER_CENTER,
             text,
-            FontId::proportional(16.0),
+            FontId::new(17.0, bold_family()),
             Color32::WHITE,
         );
     }
@@ -1106,9 +1215,9 @@ pub(crate) fn section_title(text: &str) -> egui::RichText {
 }
 
 /// Участник в правой панели: аватар со статусом и имя; офлайн — приглушён.
-pub(crate) fn member_row(
+pub(crate) fn member_row<'a>(
     ui: &mut egui::Ui,
-    name: &str,
+    face: impl Into<Face<'a>>,
     status: UserStatus,
     image: Option<&str>,
 ) -> egui::Response {
@@ -1118,6 +1227,8 @@ pub(crate) fn member_row(
         ui.painter()
             .rect_filled(rect, CornerRadius::same(8), bg_hover());
     }
+    let face = face.into();
+    let name = face.name;
     let offline = status == UserStatus::Offline;
     let avatar_rect = egui::Rect::from_min_size(
         rect.left_top() + egui::vec2(8.0, 6.0),
@@ -1126,7 +1237,7 @@ pub(crate) fn member_row(
     paint_avatar(
         ui.painter(),
         avatar_rect,
-        name,
+        face,
         Some(status),
         offline,
         image,
@@ -1231,7 +1342,7 @@ pub(crate) fn day_label(ms: i64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{color_for, initials, stamp, truncate_chars};
+    use super::{stamp, truncate_chars};
 
     #[test]
     fn stamp_words_for_today_and_yesterday() {
@@ -1255,24 +1366,38 @@ mod tests {
     }
 
     #[test]
-    fn initials_cover_common_shapes() {
-        assert_eq!(initials("alice"), "AL");
-        assert_eq!(initials("Alice Cooper"), "AC");
-        assert_eq!(initials("mary-jane_doe"), "MJ");
-        assert_eq!(initials("  "), "?");
-        assert_eq!(initials(""), "?");
-        assert_eq!(initials("Борис"), "БО");
-        assert_eq!(initials("Иван Петров"), "ИП");
+    fn gradients_match_the_original_client() {
+        use super::{avatar_gradient, djb2, rgb, space_gradient};
+        // Значения hashString из web/src/utils/gradients.ts.
+        assert_eq!(djb2(""), 5381);
+        assert_eq!(djb2("a"), 177_670);
+        assert_eq!(djb2("alice"), 253_185_475);
+        // Сохранённый цвет главнее хэша.
+        assert_eq!(
+            avatar_gradient("whatever", Some("teal")).from,
+            rgb(0x14_b8a6)
+        );
+        assert_eq!(
+            space_gradient("whatever", Some("mint")).from,
+            rgb(0x05_9669)
+        );
+        assert_eq!(
+            space_gradient("whatever", Some("coral")).from,
+            rgb(0xef_4444)
+        );
+        // Без цвета — устойчивый выбор по ключу.
+        assert_eq!(avatar_gradient("42", None), avatar_gradient("42", None));
+        assert_eq!(
+            avatar_gradient("x", Some("unknown")),
+            avatar_gradient("x", None)
+        );
     }
 
     #[test]
-    fn color_is_stable_per_name() {
-        assert_eq!(color_for("alice"), color_for("alice"));
-        // Разные имена обычно дают разные цвета (хотя бы среди нескольких).
-        let colors: std::collections::HashSet<_> = ["a", "b", "c", "d", "e", "f"]
-            .iter()
-            .map(|n| color_for(n))
-            .collect();
-        assert!(colors.len() > 1);
+    fn first_letter_is_uppercase() {
+        use super::first_letter;
+        assert_eq!(first_letter("alice"), "A");
+        assert_eq!(first_letter("  борис"), "Б");
+        assert_eq!(first_letter(""), "?");
     }
 }

@@ -209,6 +209,10 @@ fn friends_list(ui: &mut egui::Ui, bridge: &Bridge, online_only: bool) {
                 subtitle: Some(&subtitle),
                 status: Some(friend.status),
                 avatar: friend.avatar.as_deref(),
+                face: (
+                    Some(friend.home_user_id.as_deref().unwrap_or(&friend.id)),
+                    friend.avatar_color.as_deref(),
+                ),
             },
             |ui| {
                 if widgets::icon_button(ui, Icon::Close, 34.0)
@@ -256,6 +260,12 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
                 }),
                 status: None,
                 avatar: request.user.as_ref().and_then(|u| u.avatar.as_deref()),
+                face: request.user.as_ref().map_or((None, None), |u| {
+                    (
+                        Some(u.home_user_id.as_deref().unwrap_or(&u.id)),
+                        u.avatar_color.as_deref(),
+                    )
+                }),
             },
             |ui| {
                 if incoming {
@@ -339,6 +349,10 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
                 subtitle: already.then_some("Уже в друзьях"),
                 status: Some(user.status),
                 avatar: user.avatar.as_deref(),
+                face: (
+                    Some(user.home_user_id.as_deref().unwrap_or(&user.id)),
+                    user.avatar_color.as_deref(),
+                ),
             },
             |ui| {
                 if !already && ui.add(theme::positive_button("В друзья")).clicked() {
@@ -526,11 +540,8 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
         || bridge
             .cache()
             .is_some_and(|cache| cache.space(&space.id).is_some());
-    let color = space
-        .avatar_color
-        .as_deref()
-        .and_then(theme::palette)
-        .unwrap_or_else(|| theme::color_for(&space.name));
+    let gradient = theme::space_gradient(&space.id, space.avatar_color.as_deref());
+    let color = gradient.from.lerp_to_gamma(gradient.to, 0.5);
     let mut action = None;
     egui::Frame::new()
         .fill(theme::bg_sidebar())
@@ -574,12 +585,11 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                     CornerRadius::same(17),
                     theme::bg_sidebar(),
                 );
-                ui.painter()
-                    .rect_filled(tile, CornerRadius::same(14), color);
+                theme::fill_gradient(ui.painter(), tile, 14.0, gradient, 1.0);
                 ui.painter().text(
                     tile.center(),
                     egui::Align2::CENTER_CENTER,
-                    theme::initials(&space.name),
+                    theme::first_letter(&space.name),
                     egui::FontId::new(20.0, theme::bold_family()),
                     egui::Color32::WHITE,
                 );

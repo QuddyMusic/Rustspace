@@ -187,6 +187,8 @@ pub(crate) struct SidebarDm {
     pub(crate) at: Option<i64>,
     /// Аватар собеседника (беседа один на один) или иконка группы.
     pub(crate) avatar: Option<String>,
+    /// Ключ цвета заглушки и `avatarColor` (собеседник или сама группа).
+    pub(crate) face: (String, Option<String>),
 }
 
 /// Кто сидит в голосовом канале, с флагами микрофона и звука.
@@ -315,6 +317,13 @@ pub(crate) fn dm_sidebar_items(cache: &Cache) -> Vec<SidebarDm> {
                     _ => dm.icon.clone(),
                 }
             },
+            face: {
+                let mut others = dm.members.iter().filter(|m| m.id != me);
+                match (others.next(), others.next()) {
+                    (Some(other), None) => face_of(other),
+                    _ => (dm.id.clone(), None),
+                }
+            },
         })
         .collect()
 }
@@ -396,6 +405,25 @@ pub(crate) struct MemberRow {
     pub(crate) owner: bool,
     /// Аватар.
     pub(crate) avatar: Option<String>,
+    /// Ключ цвета заглушки и `avatarColor`.
+    pub(crate) face: (String, Option<String>),
+}
+
+/// Ключ цвета заглушки аватара и сохранённый цвет пользователя.
+pub(crate) fn face_of(user: &bs_types::User) -> (String, Option<String>) {
+    (
+        user.home_user_id.clone().unwrap_or_else(|| user.id.clone()),
+        user.avatar_color.clone(),
+    )
+}
+
+/// Лицо для отрисовки по паре из [`face_of`].
+pub(crate) fn face<'a>(name: &'a str, pair: &'a (String, Option<String>)) -> theme::Face<'a> {
+    theme::Face {
+        name,
+        key: Some(&pair.0),
+        color: pair.1.as_deref(),
+    }
 }
 
 /// Секция правой панели.
@@ -462,6 +490,7 @@ pub(crate) fn member_rows(cache: &Cache, space_id: &str) -> Vec<MemberRow> {
             status: cache.user_status(&m.user.id).unwrap_or(m.user.status),
             owner: &m.user.id == owner_id,
             avatar: m.user.avatar.clone(),
+            face: face_of(&m.user),
         })
         .collect();
     rows.sort_by(|a, b| {
@@ -485,6 +514,8 @@ struct MessageRow {
     created_at: i64,
     /// Аватар автора.
     avatar: Option<String>,
+    /// Ключ цвета заглушки (`homeUserId` или id) и сохранённый `avatarColor`.
+    face: (String, Option<String>),
     /// Вложения.
     attachments: Vec<AttachmentView>,
     /// Реакции, сгруппированные по эмодзи.
@@ -597,6 +628,7 @@ fn message_rows(
                 edited: msg.message.edited_at.is_some(),
                 created_at: msg.message.created_at,
                 avatar: msg.user.avatar.clone(),
+                face: face_of(&msg.user),
                 attachments: msg
                     .attachments
                     .iter()
@@ -621,6 +653,7 @@ fn message_rows(
                 edited: msg.message.edited_at.is_some(),
                 created_at: msg.message.created_at,
                 avatar: msg.user.avatar.clone(),
+                face: face_of(&msg.user),
                 attachments: msg
                     .attachments
                     .iter()
@@ -1516,15 +1549,11 @@ impl ChatScreen {
                                 .active_space
                                 .as_ref()
                                 .is_some_and(|(o, id)| *o == space.origin && *id == space.id);
-                            let color = space
-                                .color
-                                .as_deref()
-                                .and_then(theme::palette)
-                                .unwrap_or_else(|| theme::color_for(&space.name));
+                            let gradient = theme::space_gradient(&space.id, space.color.as_deref());
                             let response = theme::rail_button(
                                 ui,
-                                &theme::initials(&space.name),
-                                color,
+                                &theme::first_letter(&space.name),
+                                gradient,
                                 selected,
                                 space.has_unread(),
                                 space.icon.as_deref(),
@@ -1834,6 +1863,7 @@ impl ChatScreen {
                 ui,
                 &widgets::DmEntry {
                     name: &dm.label,
+                    face: (Some(dm.face.0.as_str()), dm.face.1.as_deref()),
                     status: dm.status,
                     preview: dm.preview.as_deref(),
                     stamp: stamp.as_deref(),
@@ -1870,6 +1900,9 @@ impl ChatScreen {
         nav: &mut Option<Nav>,
     ) {
         let (muted, deafened) = voice.flags();
+        let my_face = bridge
+            .cache_at(0)
+            .map_or_else(|| (String::new(), None), |cache| face_of(cache.me()));
         let (name, handle, status, my_avatar) = bridge.cache_at(0).map_or_else(
             || (String::new(), String::new(), UserStatus::Online, None),
             |cache| {
@@ -1906,7 +1939,13 @@ impl ChatScreen {
                         ui.set_height(48.0);
                         ui.set_width(ui.available_width());
                         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            theme::avatar(ui, &name, 32.0, Some(status), my_avatar.as_deref());
+                            theme::avatar(
+                                ui,
+                                face(&name, &my_face),
+                                32.0,
+                                Some(status),
+                                my_avatar.as_deref(),
+                            );
                             ui.vertical(|ui| {
                                 ui.spacing_mut().item_spacing.y = 0.0;
                                 ui.add_space(8.0);
@@ -2004,8 +2043,13 @@ impl ChatScreen {
                                 ui.add_space(4.0);
                                 current = Some(section);
                             }
-                            if theme::member_row(ui, &row.name, row.status, row.avatar.as_deref())
-                                .clicked()
+                            if theme::member_row(
+                                ui,
+                                face(&row.name, &row.face),
+                                row.status,
+                                row.avatar.as_deref(),
+                            )
+                            .clicked()
                             {
                                 clicked = Some((row.user_id.clone(), row.name.clone()));
                             }
@@ -2619,7 +2663,13 @@ impl ChatScreen {
         let inner = ui.horizontal_top(|ui| {
             ui.add_space(20.0);
             if show_header {
-                let response = theme::avatar(ui, &row.author, 40.0, None, row.avatar.as_deref());
+                let response = theme::avatar(
+                    ui,
+                    face(&row.author, &row.face),
+                    40.0,
+                    None,
+                    row.avatar.as_deref(),
+                );
                 profile_rects.push(response.rect);
             } else {
                 ui.allocate_space(egui::vec2(40.0, 1.0));
@@ -2978,6 +3028,7 @@ mod tests {
             preview: None,
             at: Some(at),
             avatar: Some("a.png".to_owned()),
+            face: (id.to_owned(), None),
         }
     }
 
@@ -3055,6 +3106,7 @@ mod tests {
             edited: false,
             created_at: at,
             avatar: None,
+            face: (author.to_owned(), None),
             attachments: Vec::new(),
             reactions: Vec::new(),
             reply: None,
