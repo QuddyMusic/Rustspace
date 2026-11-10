@@ -1,117 +1,84 @@
-# Дорожная карта backspace-rs
+# backspace-rs roadmap
 
-Кроссплатформенный клиент Backspace, полностью на Rust. Цель — паритет с веб-клиентом оригинала.
+*English · [Русский](ROADMAP.ru.md)*
 
-## Этап 0 — Фундамент ✅
-- Каркас воркспейса, CI (`cargo clippy -- -D warnings`, `cargo fmt --check`, `cargo test`).
-- `bs-types`: User, Space, Channel, Message, DmChannel, Role, Member, ServerEvent, ClientEvent.
-  Тесты десериализации на JSON-фикстурах с реального сервера.
-- `bs-permissions`: биты, иерархия, held-bits, версии (FNV-1a 64).
-- `bs-api`: reqwest + HttpError с code/details, авторизация Bearer.
+A cross-platform Backspace client written entirely in Rust, and later a Rust server. Both must
+stay fully compatible with existing Backspace instances and support everything the original
+does. Compatibility is checked by the contract stand (`cargo xtask contract`), which runs the
+original server.
 
-## Этап 1 — Один инстанс, только чтение ✅
-- `bs-ws`: подключение, auth, ready, heartbeat (ping/pong), реконнект с экспоненциальной задержкой.
-- `bs-core`: состояние spaces → channels → messages, обработка message_created/updated/deleted, typing, presence_update.
-- REST: GET /spaces, GET /spaces/:id, GET /channels/:id/messages (пагинация и учёт forward).
-- TUI на ratatui — проверка протокола без GUI.
+## Done
 
-## Этап 2 — Один инстанс, запись ✅
-- Отправка, редактирование, удаление сообщений, реакции, ответы.
-- Read state (channel_ack, mark_unread), unread counts.
-- DMs: список, отправка, dm_typing.
-- Друзья: запросы, принятие. Поиск пользователей.
+### Foundation and protocol
+- Workspace, CI (fmt, clippy `-D warnings` with all features, tests, `cargo doc`, `cargo audit`,
+  contract job against the real server), clang 21 toolchain for `libwebrtc`.
+- `bs-types`, `bs-permissions`, `bs-api`, `bs-ws`, `bs-instances`, `bs-identity`, `bs-core`,
+  `bs-media`: the full protocol, REST and WebSocket, reconnects, permissions, cache.
+- Multiple instances at once; federated instances signed in through the home account.
 
-## Этап 3 — Мультиинстанс ✅
-- `bs-instances`, `bs-identity`: реестр соединений, токены, UserKey/myRowIds, per-remote credentials.
-- Маршрутизация событий по origin (`MultiCache`).
-- В GUI несколько инстансов подключаются одновременно (федеративные — через домашний инстанс), в TUI — один.
+### GUI client
+- Sign-in, registration, session restore with the token in the system keyring.
+- Spaces, channels, categories, roles, overrides, members, bans, invites, join requests,
+  directory, notification settings; DMs and group DMs, friends, profiles.
+- Messages: edit, delete, replies, reactions, mentions, markdown, read state, history,
+  search with jump-to-result; uploads, downloads, image viewer, stickers, GIFs.
+- Account and instance administration.
+- Themes (six built in, custom colours, radius, compact mode, import/export), UI scale,
+  interface sounds, system notifications, hotkeys, all client settings in `prefs.json`.
+- Packaging metadata for deb, AppImage, dmg and nsis.
 
-## Этап 3.5 — Графический клиент ✅ (основное)
-Современный тёмный интерфейс в стиле оригинала на `egui`.
-- Вход и регистрация, сохранение сессии между запусками (0039).
-- Рейл серверов, каналы и категории, лента, участники, история с подгрузкой.
-- Аватарки, баннеры, стикеры, картинки и GIF (с лимитами размера и пикселей), просмотр картинок.
-- Загрузка файлов с прогрессом; скачивание вложений на диск и «Скачать все» (0041).
-- Пространства: настройки, роли и права, переопределения прав канала, участники, баны,
-  приглашения, заявки, каталог (0036), настройки уведомлений пространства и канала (0037).
-- Личные и групповые каналы (0038), друзья, профили.
-- Поиск по сообщениям с фильтрами и переходом к найденному (0040).
-- Аккаунт: профиль, смена пароля, удаление; панель администратора инстанса.
+### This iteration
+- **Localization.** Every interface string goes through a gettext-style catalog: Russian
+  (source) and English built in, switchable live in *Settings → Language*; extra languages
+  as JSON files in the config directory. A test keeps the English catalog complete.
+- **Own audio pipeline.** `PlatformAudio` in libwebrtc gave neither input gain nor per-track
+  volume, and its local track produced no PCM (the microphone test meter stayed silent).
+  Audio now runs through cpal: microphone → APM (echo, noise, AGC) → gain → LiveKit, and
+  remote tracks → mixer → speakers, with the playback signal fed back for echo cancellation.
+  This brings input and output volume 0–200 %, per-user volume and local mute, stream volume
+  and attenuation while someone speaks — the same settings as the original. Checked
+  end-to-end against a local LiveKit server.
+- **LiveKit identities.** The server issues `homeUserId:displayName`; the client compared the
+  whole string with user ids, so speaking indicators never lit up. Fixed.
+- **Camera and screen sharing.** Call stage above the chat with local previews and remote
+  streams; monitor or window picker, 720/1080/1440p at 15/30/60 fps; webcam through nokhwa
+  (`camera` feature). Remote streams are watched on demand and their audio is heard only by
+  viewers; the data-channel protocol of the original (`stream_watch`, `stream_stop`,
+  `stream_republish`, `stream_resume`, `deafen`) is implemented both ways, so the sharer sees
+  who is watching. `voice_status` now carries camera and screen flags (DM calls included),
+  and channel members show camera and LIVE badges.
+- **Tray and global hotkeys** (`desktop` feature). Tray menu (show, hide, mute, deafen, quit)
+  and hide-to-tray on close, like the original desktop app; the client keeps working while
+  hidden. Global hotkeys on X11, Windows and macOS, including push-to-talk release.
+- **Federated join.** Invites and the join dialog connect an instance that is not connected
+  yet through the home account and then join the space. Explore shows the shared directory
+  of other instances (`GET /api/directory`) with "connect and join / request".
+- **Refactoring.** `chat.rs`, `bridge.rs` and `dialogs.rs` are split into modules; long
+  functions are broken up and those modules no longer need `allow(clippy::too_many_lines)`.
 
-## Этап 4 — Голос (в работе)
-Сделано:
-- `bs-voice`: подключение к комнате LiveKit, публикация микрофона, mute/deafen, громкость
-  участников (миксер), VAD, выбор устройств, эхо-/шумоподавление, координатор звонков в ЛС,
-  транспорт камеры и демонстрации экрана (захват через xcap).
-- GUI (сборка с `--features voice`): голосовые каналы, звонки в ЛС, индикатор речи, панель
-  устройств в настройках.
-- Понятный статус голоса вместо «нет LiveKit»: причина и что делать — в подсказке (0043).
-- Сбой открытия микрофона не рвёт сессию: пробуются остальные устройства, а если ни одно не
-  открылось — режим «только слушаю» со статусом «Нет микрофона» (0044).
-- Кнопки микрофона и наушников больше не дублируются (0045).
-- Аватарки участников в голосовом канале, зелёное кольцо у говорящего (0046).
-- Звуки интерфейса (rodio, фича `sounds`, входит в `voice`; файлы из оригинала): вход/выход из
-  канала (свой и чужие), mute/unmute, deafen/undeafen (0049); вызов в личных звонках — входящий
-  и исходящий, «не беспокоить» глушит входящий (0050); новое сообщение по правилам оригинала:
-  уровень уведомлений, mute, DND, упоминания (0051).
+## Remaining client work
+- **Not verified on real hardware**: the new audio pipeline was tested with virtual
+  PulseAudio devices and a local LiveKit, the camera only builds (no webcam on the
+  development machine). Needs a run on a real machine with a microphone, speakers and camera.
+- Global hotkeys under pure Wayland need the XDG GlobalShortcuts portal (the original uses
+  it); today they fall back to in-window hotkeys there.
+- System audio in screen sharing (the original desktop captures it on some platforms).
+- Streaming limits set by the instance admin are not yet enforced on the sender side.
+- The "Backspace" project hub entry in the sidebar; the update checker of the desktop app.
+- `allow(clippy::too_many_lines)` remains in a few UI files outside the refactored modules
+  (composer, admin panels, markdown, icons).
+- **TUI** lags behind the GUI (no DM feed, groups, space settings or voice UI). Postponed by
+  the owner's decision.
 
-Сделано в этой итерации:
-- Проверка микрофона в настройках: индикатор уровня без звонка (0053).
-- Громкость звуков интерфейса 0–200 % и «звук на каждое сообщение»; все настройки голоса
-  на диске (0054).
-- Сборка голоса проверена: libwebrtc + clang 21, clippy и тесты зелёные.
+## Next stages (after the owner's go-ahead)
+1. **Security audit** of client and server code.
+2. **Rust server** (Axum), compatible with existing clients and instances and checked by the
+   same contract stand: core → everything else → federation.
+3. **PostgreSQL** as a storage option for the server.
+4. **Two-factor authentication.**
+5. **End-to-end encryption for DMs only**, without breaking compatibility with instances that
+   do not support it (so that an instance admin can no longer read private messages).
 
-Осталось:
-- громкость входа 0–200 %: в libwebrtc 0.3.54 у `PlatformAudio` нет усиления захвата —
-  нужен собственный тракт обработки;
-- тест устройства воспроизведения;
-- камера и демонстрация экрана в интерфейсе (транспорт есть; нужно решение по зависимости
-  для веб-камеры).
-
-Не проверено на настоящем железе (нет микрофона и колонок на машине разработки): запуск захвата
-с запасным микрофоном, проверка микрофона, воспроизведение звуков вместе с `libwebrtc`,
-остановка рингтона при ответе. Проверяет владелец на своей машине.
-
-## Этап 5 — Полировка
-Сделано: бейджи непрочитанного, отключение уведомлений на время; избранные GIF (0047, 0048).
-В этой итерации:
-- регистрация нового аккаунта в GUI (с приглашением и проверкой имени на лету);
-- темы оформления: 6 встроенных, свой акцент, правка любого цвета, скругление, компактная
-  лента, импорт/экспорт темы JSON;
-- все настройки клиента на диске (`prefs.json`): масштаб, оформление, голос, звуки,
-  уведомления, горячие клавиши;
-- горячие клавиши (при фокусе окна): микрофон, звук, рация, выход из канала;
-- системные уведомления о сообщениях по правилам оригинала;
-- токен в системном хранилище ключей;
-- приглашение друзей в пространство через ЛС и карточка приглашения в ленте (0056, первая
-  часть); системные сообщения бесед текстом;
-- иконка группового канала (загрузка с обрезкой) и панель участников группы (0057);
-- цвета аватаров и иконок как в оригинале;
-- упаковка: метаданные `cargo-packager` (deb, AppImage, dmg, nsis), иконка, `.desktop`;
-- контрактный стенд против настоящего сервера (`cargo xtask contract`).
-
-Осталось:
-- «Язык» и локализация (i18next-совместимые JSON из `locales/`): весь интерфейс сейчас
-  на русском, строки не вынесены в каталоги — это отдельная большая работа;
-- запись «Backspace» (проектный хаб) в сайдбаре; tray;
-- глобальные горячие клавиши (вне фокуса окна) — нужна системная зависимость;
-- вход на федеративный сервер, к которому ещё нет подключения (0056, вторая часть);
-- TUI отстаёт от GUI: нет ленты ЛС, групп, настроек пространств и голосового интерфейса.
-
-## Порядок ближайших патчей
-1. Локализация: вынос строк, `locales/{ru,en}`.
-2. 0058 — камера и демонстрация экрана.
-3. 0059 — финальный рефакторинг (разбор `chat.rs`, `bridge.rs`, `dialogs.rs`).
-4. Паритет TUI с GUI.
-5. Сервер на Rust: ядро → остальное → федерация, с проверкой тем же контрактным стендом.
-
-## Технический долг
-- Финальный рефакторинг без смены поведения: разбить `chat.rs`, `bridge.rs`, `dialogs.rs`,
-  убрать временные `allow(clippy::too_many_lines)`.
-- Права (`bs-permissions`) используются в интерфейсе только для показа и скрытия элементов;
-  окончательное решение всегда за сервером.
-
-## Серверная часть (по решению владельца)
-Сервер на Rust (Axum + SQLite), совместимый с клиентом: auth/JWT, пространства, каналы, роли,
-сообщения, ЛС, друзья, WebSocket, загрузки. Федерация, LiveKit и админка — позже. Работа
-начнётся после подтверждения владельца.
+## Technical notes
+- Permissions (`bs-permissions`) only drive what the UI shows; the server always decides.
+- `unsafe` is denied workspace-wide (`forbid` in `bs-voice`).
