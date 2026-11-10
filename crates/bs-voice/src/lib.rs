@@ -16,6 +16,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod audio;
+pub mod camera;
 pub mod capture;
 pub mod config;
 pub mod convert;
@@ -26,6 +27,8 @@ pub mod mixer;
 mod monitor;
 pub mod protocol;
 pub mod session;
+pub mod signal;
+pub mod stage;
 pub mod state;
 pub mod vad;
 pub mod video;
@@ -44,6 +47,7 @@ pub use protocol::{
     VoiceCoordinator,
 };
 pub use session::VoiceSession;
+pub use stage::VideoFeed;
 pub use state::{ParticipantInfo, RoomSnapshot, RoomState, TrackKind, user_id_of};
 pub use vad::VoiceDetector;
 pub use video::{

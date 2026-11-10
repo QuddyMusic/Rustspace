@@ -40,6 +40,8 @@ bins = []
 [features]
 # Голос через LiveKit: нужна libwebrtc (скачивается при сборке `webrtc-sys`).
 voice = ["dep:bs-voice", "sounds"]
+# Камера (nokhwa); вместе с голосом.
+camera = ["voice", "bs-voice/camera"]
 # Звуки интерфейса (rodio): нужна библиотека ALSA на Linux (libasound2-dev).
 sounds = ["dep:rodio"]
 

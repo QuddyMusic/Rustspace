@@ -8,11 +8,16 @@ use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, info};
 
 use crate::audio::{AudioEngine, map_track_kind, mix_source};
+use crate::camera::{CameraConfig, start_camera};
+use crate::capture::{CaptureConfig, ScreenCapture, ScreenSource};
 use crate::config::VoiceConfig;
 use crate::error::{VoiceError, VoiceResult};
 use crate::events::VoiceEvent;
 use crate::mixer::SourceKind;
-use crate::state::{ParticipantInfo, RoomSnapshot, RoomState, user_id_of};
+use crate::signal::{DataMessage, watch_key};
+use crate::stage::{LocalCapture, VideoFeed, VideoStage};
+use crate::state::{ParticipantInfo, RoomSnapshot, RoomState, TrackKind, user_id_of};
+use crate::video::VideoPublishConfig;
 use crate::volume::{Volume, VolumeMap};
 
 /// Ёмкость канала событий.
@@ -32,6 +37,8 @@ pub struct VoiceSession {
     deafened: Arc<RwLock<bool>>,
     /// Почему микрофон не опубликован (сессия при этом работает на приём).
     mic_error: Arc<std::sync::Mutex<Option<String>>>,
+    /// Видеопотоки звонка.
+    stage: Arc<VideoStage>,
 }
 
 impl VoiceSession {
@@ -83,6 +90,7 @@ impl VoiceSession {
             muted: Arc::new(RwLock::new(config.start_muted)),
             deafened: Arc::new(RwLock::new(config.start_deafened)),
             mic_error: Arc::new(std::sync::Mutex::new(None)),
+            stage: Arc::new(VideoStage::default()),
         };
 
         if let Err(err) = session.audio.start_playback() {
@@ -212,6 +220,8 @@ impl VoiceSession {
     pub async fn set_deafened(&self, deafened: bool) -> VoiceResult<()> {
         *self.deafened.write().await = deafened;
         self.audio.set_deafened(deafened);
+        // Как utils/voice.ts оригинала: остальные узнают о выключенном звуке.
+        self.send_data(&DataMessage::Deafen { deafened }).await;
         for participant in self.room.remote_participants().into_values() {
             for publication in participant.track_publications().into_values() {
                 if publication.kind() == TrackKindLk::Audio {
@@ -268,8 +278,168 @@ impl VoiceSession {
         self.audio.set_output(device_id)
     }
 
+    /// Отправляет сообщение в канал данных (надёжно, всем участникам).
+    async fn send_data(&self, message: &DataMessage) {
+        let packet = DataPacket {
+            payload: message.encode(),
+            reliable: true,
+            ..DataPacket::default()
+        };
+        if let Err(err) = self.room.local_participant().publish_data(packet).await {
+            debug!(error = %err, "сообщение канала данных не отправлено");
+        }
+    }
+
+    /// Видеопотоки звонка (свои — как предпросмотр).
+    #[must_use]
+    pub fn video_feeds(&self) -> Vec<VideoFeed> {
+        self.stage.feeds()
+    }
+
+    /// Identity локального участника в LiveKit (`userId:имя`).
+    #[must_use]
+    pub fn local_identity(&self) -> String {
+        self.room.local_participant().identity().to_string()
+    }
+
+    /// Начинает демонстрацию экрана.
+    ///
+    /// # Errors
+    /// Источник недоступен, неверные настройки или ошибка публикации.
+    pub async fn start_screen_share(
+        &self,
+        source: ScreenSource,
+        capture: CaptureConfig,
+        publish: VideoPublishConfig,
+    ) -> VoiceResult<()> {
+        capture.validate()?;
+        let size = capture.output_size(source.width, source.height);
+        let (handle, frames) = ScreenCapture::start(source, capture)?;
+        self.stage
+            .start_local(
+                &self.room,
+                &self.local_identity(),
+                LocalCapture::Screen(handle),
+                frames,
+                size,
+                &publish,
+            )
+            .await
+    }
+
+    /// Останавливает демонстрацию экрана и сообщает зрителям, что она окончена.
+    ///
+    /// # Errors
+    /// Ошибка LiveKit при снятии публикации.
+    pub async fn stop_screen_share(&self) -> VoiceResult<()> {
+        if self
+            .stage
+            .stop_local(&self.room, TrackKind::ScreenShare)
+            .await?
+        {
+            self.send_data(&DataMessage::StreamStop).await;
+        }
+        Ok(())
+    }
+
+    /// Идёт ли наша демонстрация экрана.
+    pub async fn is_screen_sharing(&self) -> bool {
+        self.stage.is_local_running(TrackKind::ScreenShare).await
+    }
+
+    /// Включает камеру.
+    ///
+    /// # Errors
+    /// Камера не открылась, сборка без камеры или ошибка публикации.
+    pub async fn start_camera(
+        &self,
+        index: u32,
+        config: CameraConfig,
+        publish: VideoPublishConfig,
+    ) -> VoiceResult<()> {
+        let (handle, frames) = start_camera(index, config)?;
+        let size = (config.width.max(2) & !1, config.height.max(2) & !1);
+        self.stage
+            .start_local(
+                &self.room,
+                &self.local_identity(),
+                LocalCapture::Camera(handle),
+                frames,
+                size,
+                &publish,
+            )
+            .await
+    }
+
+    /// Выключает камеру.
+    ///
+    /// # Errors
+    /// Ошибка LiveKit при снятии публикации.
+    pub async fn stop_camera(&self) -> VoiceResult<()> {
+        self.stage.stop_local(&self.room, TrackKind::Video).await?;
+        Ok(())
+    }
+
+    /// Включена ли наша камера.
+    pub async fn is_camera_on(&self) -> bool {
+        self.stage.is_local_running(TrackKind::Video).await
+    }
+
+    /// Сообщает ведущему, что мы смотрим (или нет) его трансляцию.
+    pub async fn set_watching(&self, sharer_identity: &str, watching: bool) {
+        let message = DataMessage::watch(user_id_of(sharer_identity), sharer_identity, watching);
+        self.send_data(&message).await;
+    }
+
+    /// Кто смотрит нашу трансляцию (identity зрителей).
+    #[must_use]
+    pub fn my_watchers(&self) -> Vec<String> {
+        self.stage.watchers_of(&self.local_identity())
+    }
+
+    async fn on_data(&self, payload: &[u8], participant: Option<&RemoteParticipant>) {
+        let (Some(message), Some(participant)) = (DataMessage::decode(payload), participant) else {
+            return;
+        };
+        let sender = participant.identity().to_string();
+        match message {
+            DataMessage::StreamWatch {
+                target,
+                target_identity,
+                watching,
+            } => {
+                let mut identities: Vec<String> = self
+                    .room
+                    .remote_participants()
+                    .keys()
+                    .map(ToString::to_string)
+                    .collect();
+                identities.push(self.local_identity());
+                if let Some(sharer) = watch_key(
+                    &target,
+                    target_identity.as_deref(),
+                    identities.iter().map(String::as_str),
+                ) {
+                    self.stage.record_watch(sharer, &sender, watching);
+                }
+            }
+            DataMessage::Deafen { deafened } => {
+                let _ = self
+                    .snapshot
+                    .write()
+                    .await
+                    .update(&sender, |p| p.deafened = deafened);
+            }
+            DataMessage::StreamStop => self.stage.detach(&sender, TrackKind::ScreenShare),
+            DataMessage::StreamRepublish | DataMessage::StreamResume => {}
+        }
+    }
+
     /// Отключается от комнаты.
     pub async fn disconnect(&self) -> VoiceResult<()> {
+        let _ = self.stop_screen_share().await;
+        let _ = self.stop_camera().await;
+        self.stage.clear();
         self.audio.release_mic_track();
         self.audio.stop().ok();
         self.audio.stop_playback();
@@ -326,6 +496,13 @@ impl VoiceSession {
                 self.on_track_mute_changed(&participant, &publication, false)
                     .await;
             }
+            RoomEvent::DataReceived {
+                payload,
+                participant,
+                ..
+            } => {
+                self.on_data(&payload, participant.as_ref()).await;
+            }
             RoomEvent::ConnectionStateChanged(state) => {
                 debug!(?state, "состояние соединения изменилось");
             }
@@ -367,6 +544,9 @@ impl VoiceSession {
             sid: publication.sid().to_string(),
             kind,
         });
+        if let RemoteTrack::Video(video) = track {
+            self.stage.attach_remote(&identity, kind, video);
+        }
         if let (Some(source), RemoteTrack::Audio(audio)) = (mix_source(kind), track) {
             let deafened = *self.deafened.read().await;
             publication.set_enabled(!deafened);
@@ -384,6 +564,8 @@ impl VoiceSession {
             if let Some(source) = mix_source(kind) {
                 self.audio
                     .detach_remote(user_id_of(participant.identity().as_str()), source);
+            } else {
+                self.stage.detach(participant.identity().as_str(), kind);
             }
             self.emit(VoiceEvent::TrackUnsubscribed {
                 identity: participant.identity().to_string(),
@@ -427,6 +609,7 @@ impl VoiceSession {
         let identity = participant.identity().to_string();
         self.snapshot.write().await.remove(&identity);
         self.volumes.write().await.forget(&identity);
+        self.stage.forget_participant(&identity);
         self.audio
             .detach_remote(user_id_of(&identity), SourceKind::Voice);
         self.audio

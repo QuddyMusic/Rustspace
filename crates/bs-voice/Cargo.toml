@@ -8,6 +8,10 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Захват камеры (nokhwa: V4L2 / Media Foundation / AVFoundation).
+camera = ["dep:nokhwa"]
+
 [dependencies]
 bs-types = { workspace = true }
 serde = { workspace = true }
@@ -19,6 +23,7 @@ url = { workspace = true }
 tracing = { workspace = true }
 livekit = { version = "0.9.7", default-features = false, features = ["native", "rustls-tls-webpki-roots", "tokio", "glib-main-loop"] }
 cpal = "0.18"
+nokhwa = { version = "0.10", features = ["input-native"], optional = true }
 xcap = { version = "0.9", default-features = false }
 
 [dev-dependencies]

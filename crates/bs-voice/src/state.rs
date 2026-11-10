@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{VoiceError, VoiceResult};
 
 /// Тип медиа-трека.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TrackKind {
     Audio,
