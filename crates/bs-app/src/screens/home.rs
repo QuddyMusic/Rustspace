@@ -439,13 +439,13 @@ pub(crate) fn show_active_now(ui: &mut egui::Ui, bridge: &Bridge) {
 /// Ширина карточки пространства в обзоре.
 const CARD_WIDTH: f32 = 318.0;
 
-/// Обзор пространств. Возвращает id пространства, которое нужно открыть.
+/// Обзор пространств. Возвращает (инстанс, id) пространства, которое нужно открыть.
 pub(crate) fn show_explore(
     ui: &mut egui::Ui,
     state: &mut HomeState,
     bridge: &mut Bridge,
     create: &mut bool,
-) -> Option<String> {
+) -> Option<(usize, String)> {
     let mut open = None;
     let mut search = false;
     egui::Panel::top("explore_header")
@@ -516,34 +516,104 @@ pub(crate) fn show_explore(
                     }
                     if page.spaces.is_empty() {
                         theme::empty_state(ui, tr("Ничего не найдено"));
-                        return;
+                    } else {
+                        let cards: Vec<(ExploreSpace, Option<String>)> =
+                            page.spaces.iter().map(|s| (s.clone(), None)).collect();
+                        card_grid(ui, &cards, bridge, &mut open);
                     }
-                    let columns = ((ui.available_width() / (CARD_WIDTH + 16.0)) as usize).max(1);
-                    for row in page.spaces.chunks(columns) {
-                        ui.horizontal_top(|ui| {
-                            ui.spacing_mut().item_spacing.x = 16.0;
-                            for space in row {
-                                if let Some(id) = space_card(ui, space, bridge) {
-                                    open = Some(id);
-                                }
-                            }
-                        });
-                        ui.add_space(16.0);
-                    }
+                    outer_space(ui, bridge, &mut open);
                 });
         });
     open
 }
 
-/// Карточка пространства. Возвращает id, если нажали «Открыть».
+/// Карточки рядами по ширине окна.
+fn card_grid(
+    ui: &mut egui::Ui,
+    cards: &[(ExploreSpace, Option<String>)],
+    bridge: &mut Bridge,
+    open: &mut Option<(usize, String)>,
+) {
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "число колонок"
+    )]
+    let columns = ((ui.available_width() / (CARD_WIDTH + 16.0)) as usize).max(1);
+    for row in cards.chunks(columns) {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 16.0;
+            for (space, origin) in row {
+                if let Some(target) = space_card(ui, space, origin.as_deref(), bridge) {
+                    *open = Some(target);
+                }
+            }
+        });
+        ui.add_space(16.0);
+    }
+}
+
+/// Раздел «Другие инстансы»: общий каталог, прочитанный через свой инстанс.
+fn outer_space(ui: &mut egui::Ui, bridge: &mut Bridge, open: &mut Option<(usize, String)>) {
+    // Каталог не настроен или выключен — раздела нет, как в оригинале
+    // (`directoryAvailable`).
+    let Some(Ok(entries)) = bridge.directory().cloned() else {
+        return;
+    };
+    ui.add_space(12.0);
+    widgets::section_label(ui, tr("Другие инстансы"));
+    ui.label(
+        theme::muted(tr(
+            "Сообщества с других серверов: вы войдёте туда своим домашним аккаунтом.",
+        ))
+        .size(13.0),
+    );
+    ui.add_space(10.0);
+    let home = bridge.base_at(0).map(str::to_owned);
+    let cards: Vec<(ExploreSpace, Option<String>)> = entries
+        .into_iter()
+        .filter(|entry| home.as_deref() != Some(entry.origin.trim_end_matches('/')))
+        .map(|entry| {
+            let space = ExploreSpace {
+                id: entry.id,
+                name: entry.name,
+                icon: entry.icon,
+                banner: entry.banner,
+                avatar_color: entry.avatar_color,
+                description: entry.description,
+                visibility: entry.visibility,
+                member_count: entry.member_count,
+                created_at: entry.created_at,
+                joined: None,
+            };
+            (space, Some(entry.origin))
+        })
+        .collect();
+    if cards.is_empty() {
+        theme::empty_state(ui, tr("Ничего не найдено"));
+    } else {
+        card_grid(ui, &cards, bridge, open);
+    }
+}
+
+/// Карточка пространства. `origin` — чужой инстанс (общий каталог).
+/// Возвращает (инстанс, id), если нажали «Открыть».
 #[allow(
     clippy::too_many_lines,
     reason = "раскладка egui читается лучше одним блоком"
 )]
-fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Option<String> {
-    let joined = space.joined == Some(true)
-        || bridge
-            .cache()
+fn space_card(
+    ui: &mut egui::Ui,
+    space: &ExploreSpace,
+    origin: Option<&str>,
+    bridge: &mut Bridge,
+) -> Option<(usize, String)> {
+    let slot = origin.map_or(Some(0), |origin| {
+        super::invite_card::slot_for_origin(bridge, 0, origin)
+    });
+    let joined = (origin.is_none() && space.joined == Some(true))
+        || slot
+            .and_then(|slot| bridge.cache_at(slot))
             .is_some_and(|cache| cache.space(&space.id).is_some());
     let gradient = theme::space_gradient(&space.id, space.avatar_color.as_deref());
     let color = gradient.from.lerp_to_gamma(gradient.to, 0.5);
@@ -630,13 +700,32 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                         );
                         ui.add_space(6.0);
                         let width = ui.available_width();
+                        if let Some(origin) = origin {
+                            ui.label(
+                                theme::muted(theme::truncate_chars(
+                                    origin.trim_start_matches("https://"),
+                                    40,
+                                ))
+                                .size(11.5),
+                            );
+                        }
+                        let remote = origin.is_some() && slot.is_none();
                         let (label, fill, text) = if joined {
                             (tr("Открыть"), theme::mint_bg(), theme::mint())
                         } else if space.visibility == SpaceVisibility::Public {
-                            (tr("Вступить"), theme::accent(), theme::on_accent())
+                            let label = if remote {
+                                tr("Подключиться и вступить")
+                            } else {
+                                tr("Вступить")
+                            };
+                            (label, theme::accent(), theme::on_accent())
                         } else {
                             (
-                                tr("Подать заявку"),
+                                if remote {
+                                    tr("Подключиться и подать заявку")
+                                } else {
+                                    tr("Подать заявку")
+                                },
                                 egui::Color32::from_rgb(0x3d, 0x33, 0x14),
                                 theme::amber(),
                             )
@@ -646,13 +735,18 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                             .corner_radius(CornerRadius::same(7))
                             .min_size(egui::vec2(width, 34.0));
                         if ui.add(button).clicked() {
-                            if joined {
-                                action = Some(space.id.clone());
-                            } else {
-                                bridge.request(BridgeRequest::JoinSpace {
-                                    id: space.id.clone(),
-                                    by_request: space.visibility != SpaceVisibility::Public,
-                                });
+                            let by_request = space.visibility != SpaceVisibility::Public;
+                            match (joined, origin, slot) {
+                                (true, _, Some(slot)) => action = Some((slot, space.id.clone())),
+                                (_, Some(origin), _) => {
+                                    bridge.connect_and_join_space(origin, &space.id, by_request);
+                                }
+                                _ => {
+                                    bridge.request(BridgeRequest::JoinSpace {
+                                        id: space.id.clone(),
+                                        by_request,
+                                    });
+                                }
                             }
                         }
                         ui.add_space(12.0);

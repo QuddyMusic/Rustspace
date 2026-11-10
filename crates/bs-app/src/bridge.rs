@@ -254,6 +254,8 @@ pub(crate) enum BridgeRequest {
     CreateSpace(bs_api::CreateSpaceRequest),
     /// Каталог пространств по подстроке.
     Explore(String),
+    /// Общий каталог пространств других инстансов (через свой инстанс).
+    Directory(String),
     /// Вступить в пространство: сразу (публичное) или заявкой.
     JoinSpace {
         /// Идентификатор пространства.
@@ -907,6 +909,8 @@ pub(crate) enum BridgeResponse {
     DmChannel(Box<bs_types::DmChannel>),
     /// Пришёл каталог пространств.
     Explore(bs_api::ExplorePage),
+    /// Пришёл общий каталог (или почему его нет).
+    Directory(Result<Vec<bs_api::DirectoryEntry>, String>),
     /// Пространство создано или принято вступление.
     Space(Box<bs_types::SpaceWithChannelsAndMembers>),
     /// Профиль сохранён; пришла его новая версия.
@@ -1132,6 +1136,8 @@ pub(crate) struct Session {
     images_ready: Vec<(bs_api::AssetPath, Result<bs_media::Decoded, String>)>,
     /// Последняя страница каталога пространств.
     explore: Option<bs_api::ExplorePage>,
+    /// Общий каталог других инстансов: пространства или причина, почему его нет.
+    directory: Option<Result<Vec<bs_api::DirectoryEntry>, String>>,
     /// Идёт ли запрос каталога.
     explore_loading: bool,
     /// Пространство, только что созданное или в которое вступили.
@@ -1221,6 +1227,7 @@ impl Session {
             synced: false,
             images_ready: Vec::new(),
             explore: None,
+            directory: None,
             explore_loading: false,
             opened_space: None,
             info: None,
@@ -2062,11 +2069,17 @@ impl Session {
         self.info.take()
     }
 
-    /// Запрашивает каталог и помечает загрузку.
+    /// Запрашивает каталог (свой и общий) и помечает загрузку.
     pub(crate) fn load_explore(&mut self, query: &str) {
         if self.request(BridgeRequest::Explore(query.to_owned())) {
             self.explore_loading = true;
         }
+        self.request(BridgeRequest::Directory(query.to_owned()));
+    }
+
+    /// Общий каталог других инстансов, если пришёл.
+    pub(crate) fn directory(&self) -> Option<&Result<Vec<bs_api::DirectoryEntry>, String>> {
+        self.directory.as_ref()
     }
 
     /// Ошибка последнего REST-запроса.
@@ -2347,6 +2360,7 @@ impl Session {
                 self.explore_loading = false;
                 self.social_error = None;
             }
+            BridgeResponse::Directory(result) => self.directory = Some(result),
             BridgeResponse::Space(space) => {
                 let id = space.space.id.clone();
                 if let Some(cache) = self.cache.as_mut() {
@@ -3581,6 +3595,14 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
             Ok(page) => BridgeResponse::Explore(page),
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
+        // Каталог не настроен или хаб недоступен — это не ошибка экрана,
+        // а пустой раздел с пояснением.
+        BridgeRequest::Directory(query) => {
+            BridgeResponse::Directory(match client.directory(&query, 50, 0).await {
+                Ok(feed) => Ok(feed.spaces),
+                Err(err) => Err(err.to_string()),
+            })
+        }
         BridgeRequest::JoinSpace { id, by_request } => {
             if by_request {
                 match client.request_join_space(&id, None).await {

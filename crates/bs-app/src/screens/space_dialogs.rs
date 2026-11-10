@@ -259,15 +259,23 @@ fn show_join(ctx: &egui::Context, form: &mut JoinForm, bridge: &mut Bridge) -> b
                     }),
                 );
                 if (go.clicked() || enter) && !form.busy && !form.input.trim().is_empty() {
-                    match bs_api::parse_invite_input(&form.input).and_then(|(code, origin)| {
-                        join_target(bridge, origin.as_deref()).map(|index| (code, index))
-                    }) {
-                        Ok((code, index)) => {
-                            form.error = None;
-                            form.busy = true;
-                            bridge.focus_on(index);
-                            bridge.request(BridgeRequest::JoinByCode(code));
-                        }
+                    match bs_api::parse_invite_input(&form.input) {
+                        Ok((code, origin)) => match join_target(bridge, origin.as_deref()) {
+                            Ok(index) => {
+                                form.error = None;
+                                form.busy = true;
+                                bridge.focus_on(index);
+                                bridge.request(BridgeRequest::JoinByCode(code));
+                            }
+                            // Чужой инстанс ещё не подключён: подключаем и вступаем.
+                            Err(_) if origin.is_some() => {
+                                form.error = None;
+                                form.busy = true;
+                                bridge
+                                    .connect_and_join(origin.as_deref().unwrap_or_default(), &code);
+                            }
+                            Err(err) => form.error = Some(err),
+                        },
                         Err(err) => form.error = Some(err),
                     }
                 }

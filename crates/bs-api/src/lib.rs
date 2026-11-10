@@ -50,7 +50,9 @@ pub use assets::{AssetPath, GIF_HOSTS, STICKER_PREFIX, fetch_external, resolve_a
 pub use auth::AuthResponse;
 pub use bs_types::{LiveKitTokenRequest, LiveKitTokenResponse};
 pub use client::{ApiClient, DEFAULT_TIMEOUT, MAX_RESPONSE_BYTES, USER_AGENT};
-pub use community::{CreateSpaceRequest, ExplorePage, UpdateProfileRequest};
+pub use community::{
+    CreateSpaceRequest, DirectoryEntry, DirectoryFeed, ExplorePage, UpdateProfileRequest,
+};
 pub use compose::{GifItem, GifPage, MAX_UPLOAD_CHUNK, PersonalSticker, SendMessageBody};
 pub use error::ApiError;
 pub use federation::{

@@ -997,8 +997,8 @@ pub(crate) struct ChatScreen {
     desktop_input: crate::desktop::DesktopInput,
     /// Привязки, перехваченные глобально.
     global_keys: std::collections::BTreeSet<crate::prefs::Action>,
-    /// Нажата «Вступить» на приглашении: (инстанс, код).
-    pending_join: Option<(usize, String)>,
+    /// Нажата «Вступить» на приглашении.
+    pending_join: Option<super::invite_card::InviteJoin>,
     /// Окно «Пригласить людей».
     invite_dialog: Option<super::invite_dialog::InviteDialog>,
     /// Выбранный канал и его инстанс.
@@ -1374,8 +1374,8 @@ impl ChatScreen {
             }
             View::Explore => {
                 let mut create = false;
-                if let Some(id) = home::show_explore(ui, &mut self.home, bridge, &mut create) {
-                    nav = Some(Nav::Space((0, id)));
+                if let Some(target) = home::show_explore(ui, &mut self.home, bridge, &mut create) {
+                    nav = Some(Nav::Space(target));
                 }
                 if create {
                     nav = Some(Nav::CreateSpace);
@@ -1393,11 +1393,17 @@ impl ChatScreen {
                 self.show_header(ui, bridge);
                 self.show_composer(ui, bridge);
                 self.show_messages(ui, bridge);
-                if let Some((origin, code)) = self.pending_join.take() {
-                    let previous = bridge.focus_index();
-                    bridge.focus_on(origin);
-                    bridge.request(BridgeRequest::JoinByCode(code));
-                    bridge.focus_on(previous);
+                match self.pending_join.take() {
+                    Some(super::invite_card::InviteJoin::Slot(origin, code)) => {
+                        let previous = bridge.focus_index();
+                        bridge.focus_on(origin);
+                        bridge.request(BridgeRequest::JoinByCode(code));
+                        bridge.focus_on(previous);
+                    }
+                    Some(super::invite_card::InviteJoin::Connect(origin, code)) => {
+                        bridge.connect_and_join(&origin, &code);
+                    }
+                    None => {}
                 }
                 self.show_search(&ctx, bridge);
             }

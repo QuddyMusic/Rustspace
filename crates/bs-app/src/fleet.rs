@@ -157,6 +157,20 @@ pub(crate) struct HomeRow {
     pub(crate) live: bool,
 }
 
+/// Что сделать на инстансе, когда он подключится.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PendingJoin {
+    /// Вступить по коду приглашения.
+    Code(String),
+    /// Вступить в пространство (или подать заявку).
+    Space {
+        /// Id пространства.
+        id: String,
+        /// Заявкой, а не сразу.
+        by_request: bool,
+    },
+}
+
 /// Мост GUI ↔ tokio для всех инстансов.
 ///
 /// Через `Deref` все методы [`Session`] относятся к **активному** инстансу,
@@ -180,6 +194,8 @@ pub(crate) struct Bridge {
     registry_requested: bool,
     /// Инстансы, на которых просили удалить учётную запись.
     deleting: Vec<String>,
+    /// Вступления, ждущие подключения инстанса: (адрес, что сделать).
+    pending_joins: Vec<(String, PendingJoin)>,
 }
 
 impl Deref for Bridge {
@@ -248,6 +264,7 @@ impl Bridge {
             registry: Registry::default(),
             registry_requested: false,
             deleting: Vec::new(),
+            pending_joins: Vec::new(),
         }
     }
 
@@ -330,6 +347,96 @@ impl Bridge {
         self.deliver_deletions();
         self.flush_registry();
         self.collect_losses();
+        self.drive_pending_joins();
+    }
+
+    /// Вступает в пространство на инстансе `origin` по коду приглашения;
+    /// если инстанс ещё не подключён — подключает его федеративным входом
+    /// через домашний (как оригинал при переходе по чужому приглашению)
+    /// и вступает, когда подключение поднимется.
+    pub(crate) fn connect_and_join(&mut self, origin: &str, code: &str) {
+        self.connect_then(origin, PendingJoin::Code(code.to_owned()));
+    }
+
+    /// Вступает в пространство из общего каталога (сразу или заявкой),
+    /// подключив его инстанс, если нужно.
+    pub(crate) fn connect_and_join_space(
+        &mut self,
+        origin: &str,
+        space_id: &str,
+        by_request: bool,
+    ) {
+        self.connect_then(
+            origin,
+            PendingJoin::Space {
+                id: space_id.to_owned(),
+                by_request,
+            },
+        );
+    }
+
+    fn connect_then(&mut self, origin: &str, join: PendingJoin) {
+        let Some(base) = canonical_base(origin) else {
+            self.message = Some(tr("Некорректный адрес инстанса").to_owned());
+            return;
+        };
+        if let Some(index) = self.slot_index(&base)
+            && self.slots[index].session.is_live()
+        {
+            self.join_on(index, join);
+            return;
+        }
+        let connecting = self
+            .slot_index(&base)
+            .is_some_and(|index| !self.slots[index].session.is_idle());
+        if !connecting {
+            let before = self.slots.len();
+            self.add_remote(&base, None, None, true);
+            if self.slots.len() == before {
+                return;
+            }
+        }
+        self.pending_joins.retain(|(b, _)| *b != base);
+        self.pending_joins.push((base, join));
+        self.message = Some(tr("Подключаем инстанс, затем вступим в пространство…").to_owned());
+    }
+
+    fn slot_index(&self, base: &str) -> Option<usize> {
+        self.slots
+            .iter()
+            .position(|slot| slot.base.as_deref() == Some(base))
+    }
+
+    fn join_on(&mut self, index: usize, join: PendingJoin) {
+        let previous = self.focus;
+        self.focus = index;
+        self.request(match join {
+            PendingJoin::Code(code) => BridgeRequest::JoinByCode(code),
+            PendingJoin::Space { id, by_request } => BridgeRequest::JoinSpace { id, by_request },
+        });
+        self.focus = previous;
+    }
+
+    /// Вступления, чей инстанс поднялся (или не поднялся).
+    fn drive_pending_joins(&mut self) {
+        let pending = std::mem::take(&mut self.pending_joins);
+        for (base, join) in pending {
+            match self.slot_index(&base) {
+                Some(index) if self.slots[index].session.is_live() => self.join_on(index, join),
+                Some(index)
+                    if !self.slots[index].session.is_idle()
+                        || self.slots[index].awaiting_credential =>
+                {
+                    self.pending_joins.push((base, join));
+                }
+                _ => {
+                    self.message = Some(crate::tf!(
+                        "Не удалось подключиться к {base}: вступление отменено",
+                        base = base
+                    ));
+                }
+            }
+        }
     }
 
     /// Серверный реестр пришёл: собираем список и поднимаем подключения.
@@ -1285,6 +1392,19 @@ mod tests {
             .unwrap();
         let mut bridge = Bridge::new(runtime.handle().clone());
         bridge.connect_remote("   ", None);
+        assert!(bridge.take_message().unwrap().contains("адрес"));
+    }
+
+    #[test]
+    fn join_without_home_is_not_queued() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let mut bridge = Bridge::new(runtime.handle().clone());
+        bridge.connect_and_join("orbit.example", "abc123");
+        assert!(bridge.take_message().unwrap().contains("домашний"));
+        assert!(bridge.pending_joins.is_empty(), "без подключения ждать нечего");
+        bridge.connect_and_join_space("   ", "s1", false);
         assert!(bridge.take_message().unwrap().contains("адрес"));
     }
 

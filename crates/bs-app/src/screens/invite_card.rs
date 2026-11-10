@@ -21,7 +21,7 @@ fn origin_key(value: &str) -> Option<(String, String, u16)> {
 
 /// Инстанс сессии, которая обслуживает `origin` (`https://host[:port]`);
 /// пустой `origin` — инстанс, на котором пришло приглашение.
-fn slot_for_origin(bridge: &Bridge, home: usize, origin: &str) -> Option<usize> {
+pub(crate) fn slot_for_origin(bridge: &Bridge, home: usize, origin: &str) -> Option<usize> {
     if origin.trim().is_empty() {
         return Some(home);
     }
@@ -34,14 +34,22 @@ fn slot_for_origin(bridge: &Bridge, home: usize, origin: &str) -> Option<usize> 
     })
 }
 
-/// Карточка приглашения в пространство. Возвращает (инстанс, код), если
-/// нажали «Вступить».
+/// Что сделать по нажатию на карточке приглашения.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InviteJoin {
+    /// Инстанс подключён: вступить на нём по коду.
+    Slot(usize, String),
+    /// Инстанс не подключён: подключить (адрес) и вступить по коду.
+    Connect(String, String),
+}
+
+/// Карточка приглашения в пространство.
 pub(crate) fn show(
     ui: &mut egui::Ui,
     bridge: &Bridge,
     home: usize,
     invite: &bs_types::SpaceInvite,
-) -> Option<(usize, String)> {
+) -> Option<InviteJoin> {
     let slot = slot_for_origin(bridge, home, &invite.space_instance_origin);
     let joined = slot
         .and_then(|slot| bridge.cache_at(slot))
@@ -100,18 +108,27 @@ pub(crate) fn show(
                 }
                 (Some(slot), false) => {
                     if ui.add(theme::primary_button(tr("Вступить"))).clicked() {
-                        join = Some((slot, invite.invite_code.clone()));
+                        join = Some(InviteJoin::Slot(slot, invite.invite_code.clone()));
                     }
                 }
                 (None, false) => {
                     ui.label(
                         theme::muted(crate::tf!(
-                            "Пространство на {a0}: подключитесь к этому инстансу в «Подключениях», \
-                             чтобы вступить.",
+                            "Пространство на {a0}: инстанс подключится через ваш домашний аккаунт.",
                             a0 = invite.space_instance_origin
                         ))
                         .size(12.5),
                     );
+                    ui.add_space(4.0);
+                    if ui
+                        .add(theme::primary_button(tr("Подключиться и вступить")))
+                        .clicked()
+                    {
+                        join = Some(InviteJoin::Connect(
+                            invite.space_instance_origin.clone(),
+                            invite.invite_code.clone(),
+                        ));
+                    }
                 }
             }
         });

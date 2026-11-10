@@ -518,7 +518,6 @@
   "участника": "members",
   "{a0} · участников: {a1}": "{a0} · members: {a1}",
   "Вы уже в этом пространстве": "You're already in this space",
-  "Пространство на {a0}: подключитесь к этому инстансу в «Подключениях», чтобы вступить.": "Space on {a0}: connect to this instance in Connections to join.",
   "Пригласить в «{a0}»": "Invite to “{a0}”",
   "Ссылка-приглашение": "Invite link",
   "Получаем код…": "Getting the code…",
@@ -1044,5 +1043,12 @@
   "Работают вне окна": "Work outside the window",
   "Сочетания срабатывают, даже когда Backspace свёрнут или в трее.": "Shortcuts fire even when Backspace is minimized or in the tray.",
   "Сворачивать в трей": "Minimize to tray",
-  "Закрытие окна прячет Backspace в трей; выйти — через меню значка.": "Closing the window hides Backspace in the tray; quit from the icon menu."
+  "Закрытие окна прячет Backspace в трей; выйти — через меню значка.": "Closing the window hides Backspace in the tray; quit from the icon menu.",
+  "Подключаем инстанс, затем вступим в пространство…": "Connecting the instance, then joining the space…",
+  "Не удалось подключиться к {base}: вступление отменено": "Could not connect to {base}: join cancelled",
+  "Пространство на {a0}: инстанс подключится через ваш домашний аккаунт.": "Space on {a0}: the instance will be connected through your home account.",
+  "Подключиться и вступить": "Connect and join",
+  "Подключиться и подать заявку": "Connect and request to join",
+  "Другие инстансы": "Other instances",
+  "Сообщества с других серверов: вы войдёте туда своим домашним аккаунтом.": "Communities on other servers: you will sign in there with your home account."
 }
