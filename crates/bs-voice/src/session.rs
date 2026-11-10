@@ -2,8 +2,11 @@
 
 use std::sync::Arc;
 
-use livekit::options::TrackPublishOptions;
+use livekit::options::{AudioEncoding, TrackPublishOptions};
 use livekit::prelude::*;
+use livekit::webrtc::audio_frame::AudioFrame;
+use livekit::webrtc::audio_source::native::NativeAudioSource;
+use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, info};
 
@@ -17,6 +20,7 @@ use crate::mixer::SourceKind;
 use crate::signal::{DataMessage, watch_key};
 use crate::stage::{LocalCapture, VideoFeed, VideoStage};
 use crate::state::{ParticipantInfo, RoomSnapshot, RoomState, TrackKind, user_id_of};
+use crate::sysaudio::{self, SystemAudio};
 use crate::video::VideoPublishConfig;
 use crate::volume::{Volume, VolumeMap};
 
@@ -39,6 +43,20 @@ pub struct VoiceSession {
     mic_error: Arc<std::sync::Mutex<Option<String>>>,
     /// Видеопотоки звонка.
     stage: Arc<VideoStage>,
+    /// Системный звук демонстрации экрана.
+    screen_audio: Arc<tokio::sync::Mutex<Option<ScreenAudio>>>,
+    /// Чьи трансляции смотрим (identity ведущих).
+    watched: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// Подписываться ли на голос и камеры автоматически.
+    auto_subscribe: bool,
+}
+
+/// Идущая трансляция системного звука.
+#[derive(Debug)]
+struct ScreenAudio {
+    capture: SystemAudio,
+    publication: LocalTrackPublication,
+    forward: tokio::task::JoinHandle<()>,
 }
 
 impl VoiceSession {
@@ -56,7 +74,11 @@ impl VoiceSession {
         let identity = identity.into();
         let display_name = display_name.into();
 
-        let (room, mut room_events) = Room::connect(url, token, RoomOptions::default())
+        // Трансляции принимаем только у тех, кого смотрим (как оригинал):
+        // остальное подписываем сами в `apply_subscription`.
+        let mut options = RoomOptions::default();
+        options.auto_subscribe = false;
+        let (room, mut room_events) = Room::connect(url, token, options)
             .await
             .map_err(|e| VoiceError::Connect(e.to_string()))?;
 
@@ -91,12 +113,21 @@ impl VoiceSession {
             deafened: Arc::new(RwLock::new(config.start_deafened)),
             mic_error: Arc::new(std::sync::Mutex::new(None)),
             stage: Arc::new(VideoStage::default()),
+            screen_audio: Arc::new(tokio::sync::Mutex::new(None)),
+            watched: Arc::default(),
+            auto_subscribe: config.auto_subscribe,
         };
 
         if let Err(err) = session.audio.start_playback() {
             tracing::warn!(error = %err, "воспроизведение не открылось");
         }
         session.audio.set_deafened(config.start_deafened);
+
+        for participant in session.room.remote_participants().into_values() {
+            for publication in participant.track_publications().into_values() {
+                session.apply_subscription(&participant, &publication);
+            }
+        }
 
         let pump = session.clone();
         tokio::spawn(async move {
@@ -332,6 +363,7 @@ impl VoiceSession {
     /// # Errors
     /// Ошибка LiveKit при снятии публикации.
     pub async fn stop_screen_share(&self) -> VoiceResult<()> {
+        self.stop_screen_audio().await?;
         if self
             .stage
             .stop_local(&self.room, TrackKind::ScreenShare)
@@ -340,6 +372,96 @@ impl VoiceSession {
             self.send_data(&DataMessage::StreamStop).await;
         }
         Ok(())
+    }
+
+    /// Начинает транслировать системный звук вместе с экраном
+    /// (`ScreenshareAudio`, стерео 48 кГц, без обработки голоса).
+    ///
+    /// # Errors
+    /// Звуковой сервер недоступен или ошибка публикации LiveKit.
+    pub async fn start_screen_audio(&self) -> VoiceResult<()> {
+        self.stop_screen_audio().await?;
+        let (capture, mut frames) = tokio::task::spawn_blocking(SystemAudio::start)
+            .await
+            .map_err(|err| VoiceError::Device(err.to_string()))??;
+        let source = NativeAudioSource::new(
+            AudioSourceOptions {
+                echo_cancellation: false,
+                noise_suppression: false,
+                auto_gain_control: false,
+            },
+            sysaudio::RATE,
+            sysaudio::CHANNELS,
+            100,
+        );
+        let track = LocalAudioTrack::create_audio_track(
+            "screen_audio",
+            RtcAudioSource::Native(source.clone()),
+        );
+        let options = TrackPublishOptions {
+            source: TrackSource::ScreenshareAudio,
+            // musicHighQualityStereo оригинала.
+            audio_encoding: Some(AudioEncoding {
+                max_bitrate: 128_000,
+            }),
+            dtx: false,
+            red: false,
+            ..Default::default()
+        };
+        let publication = self
+            .room
+            .local_participant()
+            .publish_track(LocalTrack::Audio(track), options)
+            .await
+            .map_err(VoiceError::LiveKit)?;
+        let forward = tokio::spawn(async move {
+            while let Some(samples) = frames.recv().await {
+                let frame = AudioFrame {
+                    data: samples.into(),
+                    sample_rate: sysaudio::RATE,
+                    num_channels: sysaudio::CHANNELS,
+                    #[allow(clippy::cast_possible_truncation, reason = "480 сэмплов")]
+                    samples_per_channel: sysaudio::FRAME as u32,
+                };
+                if let Err(err) = source.capture_frame(&frame).await {
+                    debug!(error = %err.message, "кадр системного звука не принят");
+                }
+            }
+        });
+        *self.screen_audio.lock().await = Some(ScreenAudio {
+            capture,
+            publication,
+            forward,
+        });
+        info!("системный звук транслируется");
+        Ok(())
+    }
+
+    /// Прекращает трансляцию системного звука.
+    ///
+    /// # Errors
+    /// Ошибка LiveKit при снятии публикации.
+    pub async fn stop_screen_audio(&self) -> VoiceResult<()> {
+        let Some(audio) = self.screen_audio.lock().await.take() else {
+            return Ok(());
+        };
+        audio.forward.abort();
+        let sid = audio.publication.sid();
+        // Захват останавливается в своём потоке: не держим им рантайм.
+        tokio::task::spawn_blocking(move || drop(audio.capture))
+            .await
+            .map_err(|err| VoiceError::Device(err.to_string()))?;
+        self.room
+            .local_participant()
+            .unpublish_track(&sid)
+            .await
+            .map_err(VoiceError::LiveKit)?;
+        Ok(())
+    }
+
+    /// Идёт ли трансляция системного звука.
+    pub async fn is_screen_audio_on(&self) -> bool {
+        self.screen_audio.lock().await.is_some()
     }
 
     /// Идёт ли наша демонстрация экрана.
@@ -387,6 +509,27 @@ impl VoiceSession {
 
     /// Сообщает ведущему, что мы смотрим (или нет) его трансляцию.
     pub async fn set_watching(&self, sharer_identity: &str, watching: bool) {
+        {
+            let mut watched = self
+                .watched
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if watching {
+                watched.insert(sharer_identity.to_owned());
+            } else {
+                watched.remove(sharer_identity);
+            }
+        }
+        let sharer = self
+            .room
+            .remote_participants()
+            .into_values()
+            .find(|participant| participant.identity().as_str() == sharer_identity);
+        if let Some(sharer) = sharer {
+            for publication in sharer.track_publications().into_values() {
+                self.apply_subscription(&sharer, &publication);
+            }
+        }
         let message = DataMessage::watch(user_id_of(sharer_identity), sharer_identity, watching);
         self.send_data(&message).await;
     }
@@ -466,6 +609,19 @@ impl VoiceSession {
             }
             RoomEvent::ActiveSpeakersChanged { speakers } => {
                 self.on_active_speakers(&speakers).await;
+            }
+            RoomEvent::TrackPublished {
+                publication,
+                participant,
+            } => self.apply_subscription(&participant, &publication),
+            RoomEvent::TrackUnpublished {
+                publication,
+                participant,
+            } => {
+                if is_stream(publication.source()) {
+                    self.stage
+                        .detach(participant.identity().as_str(), TrackKind::ScreenShare);
+                }
             }
             RoomEvent::TrackSubscribed {
                 track,
@@ -564,6 +720,14 @@ impl VoiceSession {
             if let Some(source) = mix_source(kind) {
                 self.audio
                     .detach_remote(user_id_of(participant.identity().as_str()), source);
+            } else if kind == TrackKind::ScreenShare
+                && participant
+                    .track_publications()
+                    .contains_key(&publication.sid())
+            {
+                // Перестали смотреть — плитка остаётся, чтобы можно было вернуться.
+                self.stage
+                    .park_remote(participant.identity().as_str(), kind);
             } else {
                 self.stage.detach(participant.identity().as_str(), kind);
             }
@@ -631,6 +795,32 @@ impl VoiceSession {
         self.emit(VoiceEvent::ActiveSpeakers { identities });
     }
 
+    /// Подписка на трек: голос и камеры — всегда (если включено),
+    /// трансляции и их звук — только у тех, кого смотрим.
+    fn apply_subscription(
+        &self,
+        participant: &RemoteParticipant,
+        publication: &RemoteTrackPublication,
+    ) {
+        let identity = participant.identity().to_string();
+        let source = publication.source();
+        let wanted = if is_stream(source) {
+            if source == TrackSource::Screenshare {
+                self.stage
+                    .announce_remote(&identity, TrackKind::ScreenShare);
+            }
+            self.watched
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains(&identity)
+        } else {
+            self.auto_subscribe
+        };
+        if publication.is_subscribed() != wanted {
+            publication.set_subscribed(wanted);
+        }
+    }
+
     async fn on_connected(&self) {
         let room = {
             let mut snapshot = self.snapshot.write().await;
@@ -671,6 +861,14 @@ fn remote_info(participant: &RemoteParticipant) -> ParticipantInfo {
 #[must_use]
 pub fn cleanup_volume(volumes: &mut VolumeMap, identity: &str) -> Option<Volume> {
     volumes.forget(identity)
+}
+
+/// Трансляция или её звук: принимаются только у тех, кого смотрим.
+fn is_stream(source: TrackSource) -> bool {
+    matches!(
+        source,
+        TrackSource::Screenshare | TrackSource::ScreenshareAudio
+    )
 }
 
 #[cfg(test)]

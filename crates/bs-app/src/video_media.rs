@@ -222,7 +222,7 @@ mod real {
         fn run<F, Fut>(&self, media: &MediaEngine, apply: fn(&mut super::VideoStatus, bool), op: F)
         where
             F: FnOnce(bs_voice::VoiceSession) -> Fut + Send + 'static,
-            Fut: Future<Output = Result<bool, bs_voice::VoiceError>> + Send,
+            Fut: Future<Output = Result<(bool, Option<String>), bs_voice::VoiceError>> + Send,
         {
             let Some(session) = media.session() else {
                 lock(&self.status).error = Some(crate::i18n::tr("Нет звонка").to_owned());
@@ -235,9 +235,9 @@ mod real {
                 let mut status = lock(&status);
                 status.busy = false;
                 match result {
-                    Ok(on) => {
+                    Ok((on, warning)) => {
                         apply(&mut status, on);
-                        status.error = None;
+                        status.error = warning;
                     }
                     Err(err) => status.error = Some(err.to_string()),
                 }
@@ -261,6 +261,7 @@ mod real {
                 },
             };
             let (max_width, max_height) = settings.max_size;
+            let audio = settings.audio;
             let capture = CaptureConfig {
                 fps: settings.fps,
                 max_width,
@@ -285,7 +286,18 @@ mod real {
                 |s, on| s.screen_on = on,
                 move |session| async move {
                     session.start_screen_share(source, capture, publish).await?;
-                    Ok(true)
+                    // Без звука трансляция всё равно идёт: ошибку только показываем.
+                    let warning = if audio {
+                        session.start_screen_audio().await.err().map(|err| {
+                            crate::tf!(
+                                "Экран показывается, но системный звук недоступен: {err}",
+                                err = err
+                            )
+                        })
+                    } else {
+                        None
+                    };
+                    Ok((true, warning))
                 },
             );
         }
@@ -297,7 +309,7 @@ mod real {
                 |s, on| s.screen_on = on,
                 |session| async move {
                     session.stop_screen_share().await?;
-                    Ok(false)
+                    Ok((false, None))
                 },
             );
         }
@@ -312,7 +324,7 @@ mod real {
                     session
                         .start_camera(index, CameraConfig::default(), VideoPublishConfig::camera())
                         .await?;
-                    Ok(true)
+                    Ok((true, None))
                 },
             );
         }
@@ -324,7 +336,7 @@ mod real {
                 |s, on| s.camera_on = on,
                 |session| async move {
                     session.stop_camera().await?;
-                    Ok(false)
+                    Ok((false, None))
                 },
             );
         }

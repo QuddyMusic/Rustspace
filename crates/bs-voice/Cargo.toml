@@ -27,3 +27,7 @@ nokhwa = { version = "0.10", features = ["input-native"], optional = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pulseaudio = "0.3"
+futures = "0.3"

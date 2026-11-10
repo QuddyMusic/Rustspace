@@ -1098,5 +1098,6 @@
   "Свой": "Custom",
   " кбит/с": " kbps",
   "Транслировать звук системы": "Share system audio",
-  "Итоговый битрейт: {mbps} Мбит/с": "Resulting bitrate: {mbps} Mbps"
+  "Итоговый битрейт: {mbps} Мбит/с": "Resulting bitrate: {mbps} Mbps",
+  "Экран показывается, но системный звук недоступен: {err}": "The screen is being shared, but system audio is unavailable: {err}"
 }

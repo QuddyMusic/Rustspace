@@ -161,6 +161,20 @@ impl VideoStage {
         self.insert(identity, kind, false, Some(AbortOnDrop(task)));
     }
 
+    /// Трансляция опубликована, но мы её не принимаем (не смотрим):
+    /// плитка есть, кадров нет. Уже принимаемый поток не трогается.
+    pub(crate) fn announce_remote(&self, identity: &str, kind: TrackKind) {
+        if !lock(&self.slots).contains_key(&(identity.to_owned(), kind)) {
+            self.insert(identity, kind, false, None);
+        }
+    }
+
+    /// Перестали принимать поток, но он ещё опубликован: остаётся плитка
+    /// без кадров, зрители ведущего не трогаются.
+    pub(crate) fn park_remote(&self, identity: &str, kind: TrackKind) {
+        self.insert(identity, kind, false, None);
+    }
+
     /// Убирает видеопоток.
     pub(crate) fn detach(&self, identity: &str, kind: TrackKind) {
         lock(&self.slots).remove(&(identity.to_owned(), kind));

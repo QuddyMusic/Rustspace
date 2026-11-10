@@ -161,6 +161,8 @@ pub(crate) struct ShareSettings {
     pub(crate) mode: ShareMode,
     /// Кодек.
     pub(crate) codec: ShareCodec,
+    /// Транслировать системный звук.
+    pub(crate) audio: bool,
 }
 
 impl ShareQuality {
@@ -251,6 +253,7 @@ impl ShareQuality {
             bitrate: u64::from(kbps) * 1000,
             mode: config.mode,
             codec: config.codec,
+            audio: config.share_audio,
         }
     }
 

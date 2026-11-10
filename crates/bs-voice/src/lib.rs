@@ -30,6 +30,7 @@ pub mod session;
 pub mod signal;
 pub mod stage;
 pub mod state;
+pub mod sysaudio;
 pub mod vad;
 pub mod video;
 pub mod volume;
