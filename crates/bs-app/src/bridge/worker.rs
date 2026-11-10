@@ -992,6 +992,21 @@ pub(super) fn space_message(err: &bs_api::ApiError) -> String {
     crate::logic::describe_server_error(err.code(), &message)
 }
 
+/// Ограничения стриминга инстанса, если токен выдан (иначе звонка нет).
+async fn streaming_limits_if(
+    client: &bs_api::ApiClient,
+    wanted: bool,
+) -> Option<bs_api::StreamingLimits> {
+    if !wanted {
+        return None;
+    }
+    client
+        .streaming_limits()
+        .await
+        .map_err(|err| tracing::debug!(%err, "ограничения стриминга недоступны"))
+        .ok()
+}
+
 pub(super) async fn handle_request(
     client: &bs_api::ApiClient,
     request: BridgeRequest,
@@ -1032,9 +1047,11 @@ pub(super) async fn handle_request(
                 .livekit_token_dm(&dm_id)
                 .await
                 .map_err(|err| upload_message(&err));
+            let limits = streaming_limits_if(client, result.is_ok()).await;
             BridgeResponse::VoiceToken(VoiceTokenEvent {
                 channel_id: dm_id,
                 result,
+                limits,
             })
         }
         BridgeRequest::VoiceToken(channel_id) => {
@@ -1042,7 +1059,12 @@ pub(super) async fn handle_request(
                 .livekit_token_channel(&channel_id)
                 .await
                 .map_err(|err| upload_message(&err));
-            BridgeResponse::VoiceToken(VoiceTokenEvent { channel_id, result })
+            let limits = streaming_limits_if(client, result.is_ok()).await;
+            BridgeResponse::VoiceToken(VoiceTokenEvent {
+                channel_id,
+                result,
+                limits,
+            })
         }
         BridgeRequest::Stickers => BridgeResponse::Compose(ComposeEvent::Stickers(
             client.stickers().await.map_err(|err| upload_message(&err)),

@@ -50,7 +50,7 @@ pub use session::VoiceSession;
 pub use stage::VideoFeed;
 pub use state::{ParticipantInfo, RoomSnapshot, RoomState, TrackKind, user_id_of};
 pub use vad::VoiceDetector;
-pub use video::{VideoCodecChoice, VideoPublishConfig, VideoPublisher};
+pub use video::{ContentHint, VideoCodecChoice, VideoPublishConfig, VideoPublisher};
 pub use volume::{Volume, VolumeMap};
 
 /// Версия голосового слоя (для диагностики).

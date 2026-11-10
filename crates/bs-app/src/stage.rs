@@ -10,10 +10,12 @@ use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Vec2};
 
 use crate::fleet::Bridge;
 use crate::i18n::tr;
+use crate::share_quality::{self, ShareCodec, ShareMode, ShareQuality};
 use crate::theme;
-use crate::video_media::{Feed, ShareKind, ShareQuality, ShareSource, VideoControl};
+use crate::video_media::{Feed, ShareKind, ShareSource, VideoControl};
 use crate::voice::VoiceState;
 use crate::voice_media::AudioSource;
+use bs_api::StreamingLimits;
 
 /// Ключ плитки: identity и «это экран».
 type TileKey = (String, bool);
@@ -24,6 +26,8 @@ pub(crate) struct Picker {
     sources: Result<Vec<ShareSource>, String>,
     selected: Option<usize>,
     quality: ShareQuality,
+    /// Ограничения инстанса, на котором идёт звонок.
+    limits: StreamingLimits,
 }
 
 /// Состояние сцены между кадрами.
@@ -52,7 +56,7 @@ impl std::fmt::Debug for StageState {
 
 impl StageState {
     /// Открывает выбор источника.
-    pub(crate) fn open_picker(&mut self, quality: ShareQuality) {
+    pub(crate) fn open_picker(&mut self, quality: ShareQuality, limits: StreamingLimits) {
         let sources = VideoControl::screen_sources();
         // Единственный вариант (системный выбор под Wayland) — сразу отмечен.
         let selected = sources
@@ -64,6 +68,7 @@ impl StageState {
             sources,
             selected,
             quality,
+            limits,
         });
     }
 
@@ -433,31 +438,7 @@ pub(crate) fn show_picker(ctx: &egui::Context, voice: &mut VoiceState) {
                 }
             }
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(tr("Качество"));
-                egui::ComboBox::from_id_salt("share_height")
-                    .selected_text(format!("{}p", picker.quality.height))
-                    .show_ui(ui, |ui| {
-                        for height in ShareQuality::HEIGHTS {
-                            ui.selectable_value(
-                                &mut picker.quality.height,
-                                height,
-                                format!("{height}p"),
-                            );
-                        }
-                    });
-                egui::ComboBox::from_id_salt("share_fps")
-                    .selected_text(crate::tf!("{fps} к/с", fps = picker.quality.fps))
-                    .show_ui(ui, |ui| {
-                        for fps in ShareQuality::RATES {
-                            ui.selectable_value(
-                                &mut picker.quality.fps,
-                                fps,
-                                crate::tf!("{fps} к/с", fps = fps),
-                            );
-                        }
-                    });
-            });
+            quality_controls(ui, &mut picker.quality, &picker.limits);
             ui.add_space(8.0);
             let chosen = picker
                 .selected
@@ -475,13 +456,139 @@ pub(crate) fn show_picker(ctx: &egui::Context, voice: &mut VoiceState) {
         voice.prefs.share_quality = quality;
         let prefs = voice.prefs.clone();
         crate::prefs::update(|saved| saved.voice = prefs);
+        let settings = quality.settings(&voice.stream_limits());
         if let Some(media) = voice.media.as_ref() {
-            voice.video.start_screen(media, &source, quality);
+            voice.video.start_screen(media, &source, settings);
         }
         voice.stage.picker = None;
     } else if !open {
         voice.stage.picker = None;
     }
+}
+
+/// Ряд кнопок-переключателей; возвращает выбранное значение, если нажали.
+fn pills<T: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    values: &[T],
+    current: T,
+    label: impl Fn(T) -> String,
+) -> Option<T> {
+    let mut picked = None;
+    ui.horizontal_wrapped(|ui| {
+        for value in values {
+            if ui
+                .selectable_label(*value == current, label(*value))
+                .clicked()
+            {
+                picked = Some(*value);
+            }
+        }
+    });
+    picked
+}
+
+/// Подпись раздела в окне выбора.
+fn caption(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(text.to_uppercase())
+            .size(11.0)
+            .strong()
+            .color(theme::text_faint()),
+    );
+}
+
+/// Настройки качества (`StreamQualityControls` оригинала): показываются
+/// только варианты, разрешённые инстансом, а отмеченным — то, что
+/// трансляция реально получит.
+fn quality_controls(ui: &mut egui::Ui, quality: &mut ShareQuality, limits: &StreamingLimits) {
+    let effective = quality.effective(limits);
+    let mut heights = share_quality::allowed_heights(limits);
+    if heights.is_empty() {
+        heights = share_quality::RESOLUTIONS.to_vec();
+    }
+    caption(ui, tr("Разрешение"));
+    if let Some(height) = pills(ui, &heights, effective.height, ShareQuality::height_label) {
+        quality.height = height;
+    }
+    let mut rates = share_quality::allowed_rates(limits);
+    if rates.is_empty() {
+        rates = share_quality::FRAMERATES.to_vec();
+    }
+    caption(ui, tr("Частота кадров"));
+    if let Some(fps) = pills(ui, &rates, effective.fps, |fps| {
+        crate::tf!("{fps} к/с", fps = fps)
+    }) {
+        quality.fps = fps;
+    }
+    caption(ui, tr("Содержимое"));
+    if let Some(mode) = pills(
+        ui,
+        &[ShareMode::Gaming, ShareMode::Detail],
+        quality.mode,
+        |mode| match mode {
+            ShareMode::Gaming => tr("Плавность (игры, видео)").to_owned(),
+            ShareMode::Detail => tr("Чёткость (текст, код)").to_owned(),
+        },
+    ) {
+        quality.mode = mode;
+    }
+    caption(ui, tr("Кодек"));
+    if let Some(codec) = pills(
+        ui,
+        &[ShareCodec::Vp9, ShareCodec::H264],
+        quality.codec,
+        |codec| match codec {
+            ShareCodec::Vp9 => "VP9".to_owned(),
+            ShareCodec::H264 => "H.264".to_owned(),
+        },
+    ) {
+        quality.codec = codec;
+    }
+    caption(ui, tr("Битрейт"));
+    let auto_kbps = ShareQuality {
+        custom_bitrate_kbps: None,
+        ..*quality
+    }
+    .settings(limits)
+    .bitrate
+        / 1000;
+    if limits.allow_custom_bitrate {
+        let mut custom = effective.custom_bitrate_kbps.is_some();
+        ui.horizontal(|ui| {
+            if ui.radio_value(&mut custom, false, tr("Авто")).clicked() {
+                quality.custom_bitrate_kbps = None;
+            }
+            if ui.radio_value(&mut custom, true, tr("Свой")).clicked() {
+                quality.custom_bitrate_kbps = Some(u32::try_from(auto_kbps).unwrap_or(u32::MAX));
+            }
+        });
+        if let Some(mut kbps) = effective.custom_bitrate_kbps {
+            let low = limits.min_bitrate_kbps.max(100);
+            let high = limits.max_bitrate_kbps.max(low);
+            let step = f64::from(limits.bitrate_step_kbps.max(50));
+            if ui
+                .add(
+                    egui::Slider::new(&mut kbps, low..=high)
+                        .step_by(step)
+                        .suffix(tr(" кбит/с")),
+                )
+                .changed()
+            {
+                quality.custom_bitrate_kbps = Some(kbps);
+            }
+        }
+    }
+    let kbps = quality.settings(limits).bitrate / 1000;
+    ui.label(theme::muted(crate::tf!(
+        "Итоговый битрейт: {mbps} Мбит/с",
+        mbps = format!(
+            "{:.1}",
+            f64::from(u32::try_from(kbps).unwrap_or(u32::MAX)) / 1000.0
+        )
+    )));
+    ui.add_space(4.0);
+    ui.checkbox(&mut quality.share_audio, tr("Транслировать звук системы"));
 }
 
 #[cfg(test)]

@@ -63,6 +63,27 @@ pub struct VideoPublishConfig {
     pub max_framerate: f64,
     /// Включать simulcast (только для VP8/H264).
     pub simulcast: bool,
+    /// Что беречь, когда канала не хватает; `None` — выбор LiveKit по источнику.
+    pub content: Option<ContentHint>,
+}
+
+/// Чем жертвовать при нехватке канала (`contentHint` оригинала).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ContentHint {
+    /// Игры и видео: держим частоту кадров, разрешение может падать.
+    Motion,
+    /// Текст и код: держим разрешение, кадры могут пропускаться.
+    Detail,
+}
+
+impl ContentHint {
+    const fn degradation(self) -> livekit::options::DegradationPreference {
+        match self {
+            Self::Motion => livekit::options::DegradationPreference::MaintainFramerate,
+            Self::Detail => livekit::options::DegradationPreference::MaintainResolution,
+        }
+    }
 }
 
 impl Default for VideoPublishConfig {
@@ -72,6 +93,7 @@ impl Default for VideoPublishConfig {
             max_bitrate: 3_000_000,
             max_framerate: 30.0,
             simulcast: false,
+            content: None,
         }
     }
 }
@@ -85,6 +107,7 @@ impl VideoPublishConfig {
             max_bitrate: 4_000_000,
             max_framerate: 15.0,
             simulcast: false,
+            content: None,
         }
     }
 
@@ -96,6 +119,7 @@ impl VideoPublishConfig {
             max_bitrate: 1_500_000,
             max_framerate: 30.0,
             simulcast: true,
+            content: None,
         }
     }
 
@@ -108,9 +132,10 @@ impl VideoPublishConfig {
         if self.max_bitrate == 0 {
             return Err(VoiceError::Config("битрейт не может быть 0".into()));
         }
-        if !(1.0..=60.0).contains(&self.max_framerate) {
+        if !(1.0..=f64::from(crate::capture::MAX_FPS)).contains(&self.max_framerate) {
             return Err(VoiceError::Config(format!(
-                "fps должен быть в 1..=60, получено {}",
+                "fps должен быть в 1..={}, получено {}",
+                crate::capture::MAX_FPS,
                 self.max_framerate
             )));
         }
@@ -129,6 +154,7 @@ impl VideoPublishConfig {
             }),
             simulcast,
             source,
+            degradation_preference: self.content.map(ContentHint::degradation),
             ..Default::default()
         }
     }
@@ -257,7 +283,7 @@ mod tests {
 
     #[test]
     fn fps_out_of_range_is_rejected() {
-        for fps in [0.0, 0.5, 61.0, 120.0] {
+        for fps in [0.0, 0.5, 121.0, 240.0] {
             let cfg = VideoPublishConfig {
                 max_framerate: fps,
                 ..VideoPublishConfig::default()

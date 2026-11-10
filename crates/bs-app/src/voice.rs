@@ -80,6 +80,8 @@ pub(crate) struct VoiceState {
     pub(crate) stage: crate::stage::StageState,
     /// Камера и экран, о которых уже сообщили серверу.
     video_sent: (bool, bool),
+    /// Ограничения стриминга по инстансам (приходят с токеном LiveKit).
+    host_limits: std::collections::HashMap<usize, bs_api::StreamingLimits>,
 }
 
 /// Что сделать после кадра панели.
@@ -283,7 +285,10 @@ impl VoiceState {
             DockAction::ToggleCamera if status.camera_on => self.video.stop_camera(media),
             DockAction::ToggleCamera => self.video.start_camera(media, &self.prefs),
             DockAction::ToggleScreenShare if status.screen_on => self.video.stop_screen(media),
-            DockAction::ToggleScreenShare => self.stage.open_picker(self.prefs.share_quality),
+            DockAction::ToggleScreenShare => {
+                let limits = self.stream_limits();
+                self.stage.open_picker(self.prefs.share_quality, limits);
+            }
             _ => {}
         }
     }
@@ -450,6 +455,17 @@ impl VoiceState {
     }
 
     /// Разбирает ответы моста и следит, что сервер нас не отключил.
+    /// Ограничения стриминга инстанса, где идёт звонок (или стандартные,
+    /// пока они неизвестны).
+    pub(crate) fn stream_limits(&self) -> bs_api::StreamingLimits {
+        self.call
+            .as_ref()
+            .map(|call| call.origin)
+            .or_else(|| self.dm.as_ref().map(|dm| dm.origin))
+            .and_then(|origin| self.host_limits.get(&origin).cloned())
+            .unwrap_or_else(crate::share_quality::default_limits)
+    }
+
     pub(crate) fn poll(&mut self, bridge: &mut Bridge) {
         self.poll_calls(bridge);
         self.sync_video(bridge);
@@ -459,6 +475,9 @@ impl VoiceState {
         let mut dm_tokens: Vec<_> = Vec::new();
         for (origin, event) in bridge.take_voice_tokens() {
             dm_tokens.push((origin, event.channel_id.clone(), event.result.clone()));
+            if let Some(limits) = event.limits {
+                self.host_limits.insert(origin, limits);
+            }
             if let Some(call) = self.call.as_mut()
                 && call.origin == origin
                 && call.channel_id == event.channel_id

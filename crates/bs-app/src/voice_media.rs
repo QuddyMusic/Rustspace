@@ -95,7 +95,7 @@ pub(crate) struct VoicePrefs {
     /// Выбранная камера (номер); `None` — первая.
     pub(crate) camera: Option<u32>,
     /// Качество демонстрации экрана.
-    pub(crate) share_quality: crate::video_media::ShareQuality,
+    pub(crate) share_quality: crate::share_quality::ShareQuality,
 }
 
 impl Default for VoicePrefs {
@@ -115,7 +115,7 @@ impl Default for VoicePrefs {
             stream_attenuation: false,
             attenuation_strength: 50,
             camera: None,
-            share_quality: crate::video_media::ShareQuality::default(),
+            share_quality: crate::share_quality::ShareQuality::default(),
         }
     }
 }

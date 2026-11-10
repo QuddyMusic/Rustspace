@@ -39,6 +39,7 @@ mod prefs;
 mod registry;
 mod saved_session;
 mod screens;
+mod share_quality;
 mod social;
 mod sounds;
 mod stage;

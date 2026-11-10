@@ -106,9 +106,9 @@ impl CaptureConfig {
     ///
     /// fps вне 1..=60 или предел размера меньше 2.
     pub fn validate(&self) -> VoiceResult<()> {
-        if self.fps == 0 || self.fps > 60 {
+        if self.fps == 0 || self.fps > MAX_FPS {
             return Err(VoiceError::Config(format!(
-                "fps должен быть в 1..=60, получено {}",
+                "fps должен быть в 1..={MAX_FPS}, получено {}",
                 self.fps
             )));
         }
@@ -120,6 +120,9 @@ impl CaptureConfig {
         Ok(())
     }
 }
+
+/// Предельная частота захвата (как у оригинала: до 120 к/с).
+pub const MAX_FPS: u32 = 120;
 
 /// Работаем ли под Wayland (тогда выбор только через портал).
 ///
@@ -362,7 +365,7 @@ mod tests {
                 ..CaptureConfig::default()
             },
             CaptureConfig {
-                fps: 61,
+                fps: 121,
                 ..CaptureConfig::default()
             },
             CaptureConfig {

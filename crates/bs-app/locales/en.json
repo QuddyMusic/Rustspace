@@ -1085,5 +1085,18 @@
   "Сообщение длиннее {max} символов: сократите правку": "The message is longer than {max} characters: shorten the edit",
   "Выбрать экран или окно в системном окне": "Choose a screen or window in the system dialog",
   "Экран: {name}": "Screen: {name}",
-  "Окно: {name}": "Window: {name}"
+  "Окно: {name}": "Window: {name}",
+  "Как есть": "Native",
+  "Разрешение": "Resolution",
+  "Частота кадров": "Frame rate",
+  "Содержимое": "Content",
+  "Плавность (игры, видео)": "Smoothness (games, video)",
+  "Чёткость (текст, код)": "Clarity (text, code)",
+  "Кодек": "Codec",
+  "Битрейт": "Bitrate",
+  "Авто": "Auto",
+  "Свой": "Custom",
+  " кбит/с": " kbps",
+  "Транслировать звук системы": "Share system audio",
+  "Итоговый битрейт: {mbps} Мбит/с": "Resulting bitrate: {mbps} Mbps"
 }

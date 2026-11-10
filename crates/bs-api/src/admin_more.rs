@@ -25,6 +25,8 @@ pub struct StreamingLimits {
     pub max_framerate: u32,
     /// Разрешён ли свой битрейт.
     pub allow_custom_bitrate: bool,
+    /// Свои битрейты администратора для ячеек «высота_частота», кбит/с.
+    pub bitrate_matrix_overrides: Option<std::collections::BTreeMap<String, serde_json::Value>>,
 }
 
 /// Изменение ограничений: уходят только заданные поля.

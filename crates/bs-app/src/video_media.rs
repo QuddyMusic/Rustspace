@@ -108,67 +108,9 @@ pub(crate) struct VideoStatus {
     pub(crate) error: Option<String>,
 }
 
-/// Высота и частота кадров демонстрации (как `screenShareConfig` оригинала).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub(crate) struct ShareQuality {
-    /// Высота кадра: 720, 1080 или 1440.
-    pub(crate) height: u32,
-    /// Кадров в секунду: 15, 30 или 60.
-    pub(crate) fps: u32,
-}
-
-impl Default for ShareQuality {
-    fn default() -> Self {
-        Self {
-            height: 720,
-            fps: 30,
-        }
-    }
-}
-
-impl ShareQuality {
-    /// Допустимые высоты.
-    pub(crate) const HEIGHTS: [u32; 3] = [720, 1080, 1440];
-    /// Допустимые частоты.
-    pub(crate) const RATES: [u32; 3] = [15, 30, 60];
-
-    /// Приводит к допустимым значениям.
-    pub(crate) fn sanitize(&mut self) {
-        if !Self::HEIGHTS.contains(&self.height) {
-            self.height = 720;
-        }
-        if !Self::RATES.contains(&self.fps) {
-            self.fps = 30;
-        }
-    }
-
-    #[cfg_attr(
-        not(feature = "voice"),
-        allow(dead_code, reason = "нужно только с LiveKit")
-    )]
-    /// Предел кадра: высота из настройки, ширина — с запасом под
-    /// широкие мониторы (21:9 и шире); пропорции сохраняются при уменьшении.
-    #[must_use]
-    pub(crate) const fn max_size(self) -> (u32, u32) {
-        (self.height * 32 / 9, self.height)
-    }
-
-    #[cfg_attr(
-        not(feature = "voice"),
-        allow(dead_code, reason = "нужно только с LiveKit")
-    )]
-    /// Битрейт, бит/с: растёт с площадью кадра и частотой.
-    #[must_use]
-    pub(crate) fn bitrate(self) -> u64 {
-        let base: u64 = match self.height {
-            0..=720 => 2_500_000,
-            721..=1080 => 4_500_000,
-            _ => 7_000_000,
-        };
-        if self.fps >= 60 { base * 3 / 2 } else { base }
-    }
-}
+pub(crate) use crate::share_quality::ShareSettings;
+#[cfg(feature = "voice")]
+use crate::share_quality::{ShareCodec, ShareMode};
 
 fn lock(status: &Mutex<VideoStatus>) -> MutexGuard<'_, VideoStatus> {
     status.lock().unwrap_or_else(PoisonError::into_inner)
@@ -206,8 +148,8 @@ mod real {
     use bs_voice::capture::{CaptureConfig, CaptureTarget, ScreenSource, list_sources};
 
     use super::{
-        CameraDevice, Feed, FeedImage, MediaEngine, ShareKind, ShareQuality, ShareSource,
-        VideoControl, VoicePrefs, lock,
+        CameraDevice, Feed, FeedImage, MediaEngine, ShareCodec, ShareKind, ShareMode,
+        ShareSettings, ShareSource, VideoControl, VoicePrefs, lock,
     };
 
     impl VideoControl {
@@ -307,7 +249,7 @@ mod real {
             &self,
             media: &MediaEngine,
             source: &ShareSource,
-            quality: ShareQuality,
+            settings: ShareSettings,
         ) {
             let source = ScreenSource {
                 id: source.id,
@@ -318,17 +260,25 @@ mod real {
                     ShareKind::System => CaptureTarget::System,
                 },
             };
-            let (max_width, max_height) = quality.max_size();
+            let (max_width, max_height) = settings.max_size;
             let capture = CaptureConfig {
-                fps: quality.fps,
+                fps: settings.fps,
                 max_width,
                 max_height,
                 cursor: true,
             };
             let publish = VideoPublishConfig {
-                max_bitrate: quality.bitrate(),
-                max_framerate: f64::from(quality.fps),
-                ..VideoPublishConfig::screen_share()
+                codec: match settings.codec {
+                    ShareCodec::Vp9 => bs_voice::VideoCodecChoice::Vp9,
+                    ShareCodec::H264 => bs_voice::VideoCodecChoice::H264,
+                },
+                max_bitrate: settings.bitrate,
+                max_framerate: f64::from(settings.fps),
+                simulcast: false,
+                content: Some(match settings.mode {
+                    ShareMode::Gaming => bs_voice::ContentHint::Motion,
+                    ShareMode::Detail => bs_voice::ContentHint::Detail,
+                }),
             };
             self.run(
                 media,
@@ -395,7 +345,7 @@ mod real {
 #[cfg(not(feature = "voice"))]
 mod stub {
     use super::{
-        CameraDevice, Feed, MediaEngine, ShareQuality, ShareSource, VideoControl, VoicePrefs,
+        CameraDevice, Feed, MediaEngine, ShareSettings, ShareSource, VideoControl, VoicePrefs,
     };
     use crate::i18n::tr;
 
@@ -424,7 +374,7 @@ mod stub {
             &self,
             _media: &MediaEngine,
             _source: &ShareSource,
-            _quality: ShareQuality,
+            _settings: ShareSettings,
         ) {
         }
 
@@ -435,40 +385,5 @@ mod stub {
         pub(crate) fn stop_camera(&self, _media: &MediaEngine) {}
 
         pub(crate) fn set_watching(_media: &MediaEngine, _identity: &str, _watching: bool) {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ShareQuality;
-
-    #[test]
-    fn quality_limits_height_and_leaves_room_for_ultrawide() {
-        let quality = ShareQuality {
-            height: 1080,
-            fps: 60,
-        };
-        assert_eq!(quality.max_size(), (3840, 1080));
-    }
-
-    #[test]
-    fn quality_is_sanitized_to_known_steps() {
-        let mut quality = ShareQuality {
-            height: 999,
-            fps: 7,
-        };
-        quality.sanitize();
-        assert_eq!(quality, ShareQuality::default());
-    }
-
-    #[test]
-    fn bitrate_grows_with_size_and_rate() {
-        let base = ShareQuality::default().bitrate();
-        let full = ShareQuality {
-            height: 1080,
-            fps: 60,
-        }
-        .bitrate();
-        assert!(full > base);
     }
 }

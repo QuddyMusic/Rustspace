@@ -806,6 +806,8 @@ pub(crate) struct VoiceTokenEvent {
     pub(crate) channel_id: String,
     /// Токен и адрес сервера или текст ошибки.
     pub(crate) result: Result<bs_types::LiveKitTokenResponse, String>,
+    /// Ограничения стриминга этого инстанса (его SFU несёт трансляцию).
+    pub(crate) limits: Option<bs_api::StreamingLimits>,
 }
 
 /// Ответ на запрос профиля.
