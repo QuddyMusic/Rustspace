@@ -7,10 +7,11 @@ use livekit::prelude::*;
 use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, info};
 
-use crate::audio::{AudioEngine, map_track_kind};
+use crate::audio::{AudioEngine, map_track_kind, mix_source};
 use crate::config::VoiceConfig;
 use crate::error::{VoiceError, VoiceResult};
 use crate::events::VoiceEvent;
+use crate::mixer::SourceKind;
 use crate::state::{ParticipantInfo, RoomSnapshot, RoomState};
 use crate::volume::{Volume, VolumeMap};
 
@@ -84,6 +85,11 @@ impl VoiceSession {
             mic_error: Arc::new(std::sync::Mutex::new(None)),
         };
 
+        if let Err(err) = session.audio.start_playback() {
+            tracing::warn!(error = %err, "воспроизведение не открылось");
+        }
+        session.audio.set_deafened(config.start_deafened);
+
         let pump = session.clone();
         tokio::spawn(async move {
             while let Some(event) = room_events.recv().await {
@@ -140,7 +146,7 @@ impl VoiceSession {
             return Ok(());
         }
         self.audio.start()?;
-        let track = self.audio.create_mic_track("mic");
+        let track = self.audio.create_mic_track("mic")?;
         let options = TrackPublishOptions {
             source: TrackSource::Microphone,
             ..Default::default()
@@ -170,6 +176,7 @@ impl VoiceSession {
             .unpublish_track(&publication.sid())
             .await
             .map_err(VoiceError::LiveKit)?;
+        self.audio.release_mic_track();
         self.audio.stop()?;
         Ok(())
     }
@@ -204,6 +211,7 @@ impl VoiceSession {
     /// на все удалённые аудиотреки.
     pub async fn set_deafened(&self, deafened: bool) -> VoiceResult<()> {
         *self.deafened.write().await = deafened;
+        self.audio.set_deafened(deafened);
         for participant in self.room.remote_participants().into_values() {
             for publication in participant.track_publications().into_values() {
                 if publication.kind() == TrackKindLk::Audio {
@@ -223,22 +231,22 @@ impl VoiceSession {
         *self.deafened.read().await
     }
 
-    /// Устанавливает громкость участника.
+    /// Устанавливает громкость микрофона участника (0 — локально заглушён).
     pub async fn set_volume(&self, identity: &str, volume: Volume) -> VoiceResult<()> {
         self.volumes.write().await.set(identity, volume);
-        let deafened = *self.deafened.read().await;
-        if let Some(participant) = self
-            .room
-            .remote_participants()
-            .get(&ParticipantIdentity::from(identity))
-        {
-            for publication in participant.track_publications().into_values() {
-                if publication.kind() == TrackKindLk::Audio {
-                    publication.set_enabled(volume.is_audible() && !deafened);
-                }
-            }
-        }
+        self.audio.set_volume(identity, SourceKind::Voice, volume);
         Ok(())
+    }
+
+    /// Громкость звука трансляции участника.
+    pub fn set_stream_volume(&self, identity: &str, volume: Volume) {
+        self.audio.set_volume(identity, SourceKind::Screen, volume);
+    }
+
+    /// Звуковой движок сессии (общая громкость, приглушение и т. п.).
+    #[must_use]
+    pub fn audio(&self) -> &AudioEngine {
+        &self.audio
     }
 
     /// Громкость участника.
@@ -258,7 +266,9 @@ impl VoiceSession {
 
     /// Отключается от комнаты.
     pub async fn disconnect(&self) -> VoiceResult<()> {
+        self.audio.release_mic_track();
         self.audio.stop().ok();
+        self.audio.stop_playback();
         self.room.close().await.map_err(VoiceError::LiveKit)?;
         self.snapshot.write().await.state = RoomState::Disconnected;
         Ok(())
@@ -353,11 +363,11 @@ impl VoiceSession {
             sid: publication.sid().to_string(),
             kind,
         });
-        if matches!(kind, crate::state::TrackKind::Audio) {
-            let volume = self.volumes.read().await.get(&identity);
+        if let (Some(source), RemoteTrack::Audio(audio)) = (mix_source(kind), track) {
             let deafened = *self.deafened.read().await;
-            publication.set_enabled(volume.is_audible() && !deafened);
-            track.rtc_track();
+            publication.set_enabled(!deafened);
+            self.audio
+                .attach_remote(&identity, source, audio.rtc_track());
         }
     }
 
@@ -367,6 +377,10 @@ impl VoiceSession {
         participant: &RemoteParticipant,
     ) {
         if let Some(kind) = map_track_kind(publication.kind(), publication.source()) {
+            if let Some(source) = mix_source(kind) {
+                self.audio
+                    .detach_remote(participant.identity().as_str(), source);
+            }
             self.emit(VoiceEvent::TrackUnsubscribed {
                 identity: participant.identity().to_string(),
                 sid: publication.sid().to_string(),
@@ -409,11 +423,15 @@ impl VoiceSession {
         let identity = participant.identity().to_string();
         self.snapshot.write().await.remove(&identity);
         self.volumes.write().await.forget(&identity);
+        self.audio.detach_remote(&identity, SourceKind::Voice);
+        self.audio.detach_remote(&identity, SourceKind::Screen);
         self.emit(VoiceEvent::ParticipantLeft { identity });
     }
 
     async fn on_active_speakers(&self, speakers: &[Participant]) {
         let identities: Vec<String> = speakers.iter().map(|p| p.identity().to_string()).collect();
+        self.audio
+            .set_someone_speaking(identities.iter().any(|id| *id != self.identity));
         {
             let mut snapshot = self.snapshot.write().await;
             for info in snapshot.participants.values_mut() {

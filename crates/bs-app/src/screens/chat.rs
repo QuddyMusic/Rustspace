@@ -969,6 +969,8 @@ enum Nav {
     Invite { origin: usize, space_id: String },
     /// Действие панели голоса.
     Voice(crate::voice::DockAction),
+    /// Локальная громкость участника.
+    LocalAudio(crate::voice_media::LocalAudio),
     /// Модерация голоса.
     VoiceMod {
         origin: usize,
@@ -1252,6 +1254,7 @@ impl ChatScreen {
             }
             Nav::Voice(action) => self.voice.apply(action, bridge),
             Nav::VoiceMod { origin, op } => crate::voice::moderate(bridge, origin, op),
+            Nav::LocalAudio(audio) => self.voice.set_local_audio(bridge, &audio),
             Nav::SearchPeople(query) => {
                 self.active_space = None;
                 self.view = View::Friends;
@@ -1793,6 +1796,15 @@ impl ChatScreen {
                     .map(|c| (c.id.clone(), c.name.clone()))
                     .collect();
                 row.context_menu(|ui| {
+                    if let Some(audio) = crate::voice::local_audio_menu(
+                        ui,
+                        &self.voice.prefs,
+                        &occupant.id,
+                        crate::voice_media::AudioSource::Voice,
+                    ) {
+                        *nav = Some(Nav::LocalAudio(audio));
+                    }
+                    ui.separator();
                     if let Some(op) = crate::voice::moderation_menu(ui, &occupant.id, &others) {
                         *nav = Some(Nav::VoiceMod {
                             origin: space.origin,

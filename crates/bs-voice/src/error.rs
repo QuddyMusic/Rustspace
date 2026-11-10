@@ -12,6 +12,9 @@ pub enum VoiceError {
     #[error("не удалось подключиться к комнате: {0}")]
     Connect(String),
 
+    #[error("звуковое устройство: {0}")]
+    Device(String),
+
     #[error("микрофон не найден в системе")]
     NoMicrophone,
 

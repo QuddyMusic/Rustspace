@@ -945,6 +945,7 @@ fn voice_settings(
                 inputs,
                 &mut voice.prefs.input,
             );
+            changed |= volume_slider(ui, tr("Громкость микрофона"), &mut voice.prefs.input_volume);
             ui.add_space(8.0);
             changed |= device_picker(
                 ui,
@@ -953,6 +954,7 @@ fn voice_settings(
                 outputs,
                 &mut voice.prefs.output,
             );
+            changed |= volume_slider(ui, tr("Громкость звука"), &mut voice.prefs.output_volume);
             ui.add_space(8.0);
             if ui.button(tr("Обновить список устройств")).clicked() {
                 refresh = true;
@@ -987,6 +989,8 @@ fn voice_settings(
             changed |= before != *flag;
         }
     });
+    ui.add_space(10.0);
+    changed |= attenuation_card(ui, &mut voice.prefs);
     if changed {
         let prefs = voice.prefs.clone();
         voice.media(bridge).apply_prefs(&prefs);
@@ -996,6 +1000,40 @@ fn voice_settings(
     mic_test_card(ui, state, bridge, voice);
     ui.add_space(10.0);
     super::settings_app::sounds_card(ui);
+}
+
+/// Приглушение трансляций, пока кто-то говорит.
+fn attenuation_card(ui: &mut egui::Ui, prefs: &mut crate::voice_media::VoicePrefs) -> bool {
+    let mut changed = false;
+    card(ui, |ui| {
+        let before = prefs.stream_attenuation;
+        super::settings_extra::setting_row(
+            ui,
+            tr("Приглушать трансляции"),
+            tr("Пока кто-то говорит, звук демонстраций экрана становится тише."),
+            &mut prefs.stream_attenuation,
+        );
+        changed |= before != prefs.stream_attenuation;
+        if prefs.stream_attenuation {
+            ui.horizontal(|ui| {
+                ui.label(tr("Насколько"));
+                changed |= ui
+                    .add(egui::Slider::new(&mut prefs.attenuation_strength, 0..=100).suffix(" %"))
+                    .changed();
+            });
+        }
+    });
+    changed
+}
+
+/// Ползунок громкости 0–200 %.
+fn volume_slider(ui: &mut egui::Ui, title: &str, value: &mut u16) -> bool {
+    ui.horizontal(|ui| {
+        ui.label(title);
+        ui.add(egui::Slider::new(value, 0..=200).suffix(" %"))
+            .changed()
+    })
+    .inner
 }
 
 /// Сколько длится проверка микрофона.

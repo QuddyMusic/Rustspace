@@ -4,12 +4,13 @@
 //!
 //! - **доменный** ([`state`], [`events`], [`volume`], [`vad`], [`device`], [`mixer`]) —
 //!   чистые типы без зависимости от LiveKit, покрыты юнит-тестами;
-//! - **транспортный** ([`session`], [`audio`]) — тонкая обёртка над `livekit::Room`,
-//!   `PlatformAudio` и `libwebrtc`.
+//! - **транспортный** ([`session`], [`audio`]) — обёртка над `livekit::Room`
+//!   и собственный звуковой тракт на cpal.
 //!
-//! Громкость участников реализована на доменном уровне: libwebrtc не даёт
-//! API громкости на трек, поэтому 0 % — это отключение подписки, а
-//! промежуточные значения — собственный миксдаун ([`mixer`]).
+//! Звук идёт мимо системного playout LiveKit: микрофон — cpal → APM →
+//! усиление → `NativeAudioSource`, удалённые треки — `NativeAudioStream` →
+//! [`mixer`] → cpal. Так работают громкость микрофона, общая громкость и
+//! громкость каждого участника 0–200 %, как в Web Audio оригинала.
 
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
@@ -36,7 +37,7 @@ pub use convert::RgbaFrame;
 pub use device::{AudioDevice, DeviceKind, DeviceSelection};
 pub use error::{VoiceError, VoiceResult};
 pub use events::VoiceEvent;
-pub use mixer::Mixer;
+pub use mixer::{Mixer, SourceKind};
 pub use monitor::MicMonitor;
 pub use protocol::{
     CallIdentity, CallPhase, CallRecord, INCOMING_CALL_TIMEOUT, ProtocolAction, REBIND_GRACE,

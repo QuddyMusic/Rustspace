@@ -18,6 +18,7 @@ tokio-stream = "0.1"
 url = { workspace = true }
 tracing = { workspace = true }
 livekit = { version = "0.9.7", default-features = false, features = ["native", "rustls-tls-webpki-roots", "tokio", "glib-main-loop"] }
+cpal = "0.18"
 xcap = { version = "0.9", default-features = false }
 
 [dev-dependencies]

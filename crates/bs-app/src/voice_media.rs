@@ -4,7 +4,7 @@
 //! же интерфейсом, которая лишь сообщает, что звук недоступен. Присутствие в
 //! канале и флаги микрофона ведёт `voice.rs` через WebSocket независимо от этого.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// Состояние медиа-соединения.
 #[cfg_attr(
@@ -76,6 +76,22 @@ pub(crate) struct VoicePrefs {
     pub(crate) noise_suppression: bool,
     /// Автоматическая регулировка усиления.
     pub(crate) auto_gain_control: bool,
+    /// Громкость микрофона, 0–200 % (`inputVolume` оригинала).
+    pub(crate) input_volume: u16,
+    /// Общая громкость вывода, 0–200 % (`outputVolume`).
+    pub(crate) output_volume: u16,
+    /// Громкость участников по id, 0–200 % (`participantVolumes`).
+    pub(crate) participant_volumes: BTreeMap<String, u16>,
+    /// Участники, заглушённые у себя (`participantMutes`).
+    pub(crate) participant_mutes: BTreeSet<String>,
+    /// Громкость звука трансляций по id участника (`streamVolumes`).
+    pub(crate) stream_volumes: BTreeMap<String, u16>,
+    /// Трансляции, заглушённые у себя (`streamMutes`).
+    pub(crate) stream_mutes: BTreeSet<String>,
+    /// Приглушать звук трансляций, пока кто-то говорит.
+    pub(crate) stream_attenuation: bool,
+    /// Насколько приглушать, 0–100 %.
+    pub(crate) attenuation_strength: u8,
 }
 
 impl Default for VoicePrefs {
@@ -86,7 +102,112 @@ impl Default for VoicePrefs {
             echo_cancellation: true,
             noise_suppression: true,
             auto_gain_control: true,
+            input_volume: 100,
+            output_volume: 100,
+            participant_volumes: BTreeMap::new(),
+            participant_mutes: BTreeSet::new(),
+            stream_volumes: BTreeMap::new(),
+            stream_mutes: BTreeSet::new(),
+            stream_attenuation: false,
+            attenuation_strength: 50,
         }
+    }
+}
+
+/// Что слышно от участника: микрофон или звук трансляции.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AudioSource {
+    /// Микрофон.
+    Voice,
+    /// Звук демонстрации экрана.
+    #[cfg_attr(
+        not(feature = "voice"),
+        allow(dead_code, reason = "звук трансляций есть только с LiveKit")
+    )]
+    Stream,
+}
+
+/// Локальная громкость одного источника.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LocalAudio {
+    /// Id участника.
+    pub(crate) user_id: String,
+    /// Чей звук.
+    pub(crate) source: AudioSource,
+    /// Громкость, 0–200 %.
+    pub(crate) volume: u16,
+    /// Заглушён у себя.
+    pub(crate) muted: bool,
+}
+
+impl VoicePrefs {
+    /// Приводит значения к допустимым диапазонам.
+    pub(crate) fn sanitize(&mut self) {
+        self.input_volume = self.input_volume.min(200);
+        self.output_volume = self.output_volume.min(200);
+        self.attenuation_strength = self.attenuation_strength.min(100);
+        for volume in self
+            .participant_volumes
+            .values_mut()
+            .chain(self.stream_volumes.values_mut())
+        {
+            *volume = (*volume).min(200);
+        }
+    }
+
+    fn maps(&self, source: AudioSource) -> (&BTreeMap<String, u16>, &BTreeSet<String>) {
+        match source {
+            AudioSource::Voice => (&self.participant_volumes, &self.participant_mutes),
+            AudioSource::Stream => (&self.stream_volumes, &self.stream_mutes),
+        }
+    }
+
+    /// Текущие локальные настройки звука участника.
+    pub(crate) fn local_audio(&self, user_id: &str, source: AudioSource) -> LocalAudio {
+        let (volumes, mutes) = self.maps(source);
+        LocalAudio {
+            user_id: user_id.to_owned(),
+            source,
+            volume: volumes.get(user_id).copied().unwrap_or(100),
+            muted: mutes.contains(user_id),
+        }
+    }
+
+    /// Запоминает локальные настройки звука участника.
+    pub(crate) fn set_local_audio(&mut self, audio: &LocalAudio) {
+        let (volumes, mutes) = match audio.source {
+            AudioSource::Voice => (&mut self.participant_volumes, &mut self.participant_mutes),
+            AudioSource::Stream => (&mut self.stream_volumes, &mut self.stream_mutes),
+        };
+        if audio.volume == 100 {
+            volumes.remove(&audio.user_id);
+        } else {
+            volumes.insert(audio.user_id.clone(), audio.volume.min(200));
+        }
+        if audio.muted {
+            mutes.insert(audio.user_id.clone());
+        } else {
+            mutes.remove(&audio.user_id);
+        }
+    }
+
+    /// Итоговая громкость каждого участника, у которого она не 100 %.
+    #[cfg_attr(
+        not(feature = "voice"),
+        allow(dead_code, reason = "применяется только с LiveKit")
+    )]
+    pub(crate) fn effective_volumes(&self, source: AudioSource) -> Vec<(String, u16)> {
+        let (volumes, mutes) = self.maps(source);
+        volumes
+            .keys()
+            .chain(mutes.iter())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|id| {
+                let audio = self.local_audio(id, source);
+                (id.clone(), if audio.muted { 0 } else { audio.volume })
+            })
+            .collect()
     }
 }
 
@@ -179,14 +300,16 @@ mod real {
     use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
     use bs_voice::{
-        AudioEngine, AudioProcessingSettings, MicMonitor, VoiceConfig, VoiceEvent, VoiceSession,
-        device::DeviceKind as LkKind,
+        AudioEngine, AudioProcessingSettings, MicMonitor, SourceKind, VoiceConfig, VoiceEvent,
+        VoiceSession, Volume, device::DeviceKind as LkKind,
     };
     use tokio::runtime::Handle;
     use tokio::sync::broadcast::error::RecvError;
     use tokio::task::JoinHandle;
 
-    use super::{ConnectRequest, Device, DeviceKind, MediaStatus, Speaking, VoicePrefs};
+    use super::{
+        AudioSource, ConnectRequest, Device, DeviceKind, MediaStatus, Speaking, VoicePrefs,
+    };
 
     #[derive(Default)]
     struct Shared {
@@ -297,6 +420,21 @@ mod real {
             };
             if let Err(err) = audio.apply_processing(processing(prefs)) {
                 tracing::warn!("не удалось применить обработку звука: {err}");
+            }
+            audio.set_input_volume(Volume::new(prefs.input_volume));
+            audio.set_output_volume(Volume::new(prefs.output_volume));
+            audio.set_attenuation(
+                prefs
+                    .stream_attenuation
+                    .then_some(prefs.attenuation_strength),
+            );
+            for (source, kind) in [
+                (AudioSource::Voice, SourceKind::Voice),
+                (AudioSource::Stream, SourceKind::Screen),
+            ] {
+                for (id, volume) in prefs.effective_volumes(source) {
+                    audio.set_volume(&id, kind, Volume::new(volume));
+                }
             }
             if let Some(id) = &prefs.input
                 && let Err(err) = audio.set_input(id)

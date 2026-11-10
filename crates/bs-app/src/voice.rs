@@ -127,6 +127,18 @@ impl VoiceState {
             .get_or_insert_with(|| MediaEngine::new(bridge.runtime()))
     }
 
+    /// Меняет локальную громкость участника и сразу применяет её.
+    pub(crate) fn set_local_audio(
+        &mut self,
+        bridge: &Bridge,
+        audio: &crate::voice_media::LocalAudio,
+    ) {
+        self.prefs.set_local_audio(audio);
+        let prefs = self.prefs.clone();
+        self.media(bridge).apply_prefs(&prefs);
+        crate::prefs::update(|saved| saved.voice = prefs);
+    }
+
     /// Входит в голосовой канал; предыдущий звонок завершается.
     pub(crate) fn join(
         &mut self,
@@ -623,6 +635,24 @@ pub(crate) enum ModOp {
 }
 
 /// Меню модерации участника; сервер сам проверяет права.
+/// Локальная громкость участника в его контекстном меню.
+pub(crate) fn local_audio_menu(
+    ui: &mut egui::Ui,
+    prefs: &VoicePrefs,
+    user_id: &str,
+    source: crate::voice_media::AudioSource,
+) -> Option<crate::voice_media::LocalAudio> {
+    let mut audio = prefs.local_audio(user_id, source);
+    let before = audio.clone();
+    ui.label(match source {
+        crate::voice_media::AudioSource::Voice => tr("Громкость пользователя"),
+        crate::voice_media::AudioSource::Stream => tr("Громкость трансляции"),
+    });
+    ui.add(egui::Slider::new(&mut audio.volume, 0..=200).suffix(" %"));
+    ui.checkbox(&mut audio.muted, tr("Заглушить у себя"));
+    (audio != before).then_some(audio)
+}
+
 pub(crate) fn moderation_menu(
     ui: &mut egui::Ui,
     user_id: &str,
