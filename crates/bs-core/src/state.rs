@@ -40,7 +40,7 @@ impl TypingEntry {
 
 /// Полный кэш инстанса.
 ///
-/// Поля с `pub(crate)`-видимостью — для [`crate::apply`]; внешний код
+/// Поля с `pub(crate)`-видимостью — для [`mod@crate::apply`]; внешний код
 /// работает через read-аксессоры.
 #[derive(Debug)]
 #[must_use]

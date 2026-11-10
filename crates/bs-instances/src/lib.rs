@@ -4,7 +4,7 @@
 //! Ключевые типы:
 //! - [`InstanceHandle`] — подключение к одному инстансу: HTTP-клиент,
 //!   WebSocket-соединение и фоновая задача с backoff-переподключением.
-//! - [`InstanceRegistry`] — набор активных подключений по [`Origin`].
+//! - [`InstanceRegistry`] — набор активных подключений по [`Origin`](bs_types::Origin).
 //! - [`EventMultiplexer`] — объединённый поток событий всех инстансов
 //!   с пометкой origin-ом (аналог общего обработчика в `useWebSocket.ts`).
 //! - [`ReconnectPolicy`] — параметры экспоненциального backoff.

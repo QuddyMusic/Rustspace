@@ -1,7 +1,7 @@
 //! Эмодзи для выбора в композере: цветные картинки Twemoji.
 //!
 //! Графика Twemoji © Twitter, Inc. и участники проекта, CC-BY 4.0
-//! (https://creativecommons.org/licenses/by/4.0/); файлы взяты из крейта
+//! (<https://creativecommons.org/licenses/by/4.0/>); файлы взяты из крейта
 //! `twemoji-assets`.
 
 /// Один эмодзи: текст для вставки и картинка 72×72.

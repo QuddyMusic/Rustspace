@@ -30,6 +30,21 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # libwebrtc (голос) требует clang 21+, а keyring/звук/захват — системные
+      # заголовки. На macOS и Windows всё нужное уже есть в образе.
+      - name: Системные зависимости (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libdbus-1-dev libpipewire-0.3-dev libgbm-dev libxkbcommon-dev \
+            libwayland-dev libx11-dev libxrandr-dev libxcb1-dev libegl1-mesa-dev libglib2.0-dev \
+            libva-dev libdrm-dev libxext-dev libxfixes-dev libxdamage-dev libxcomposite-dev libxtst-dev
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh 21
+          echo "CC=clang-21" >> "$GITHUB_ENV"
+          echo "CXX=clang++-21" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=/usr/lib/llvm-21/lib" >> "$GITHUB_ENV"
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -46,6 +61,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Системные зависимости
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libdbus-1-dev libpipewire-0.3-dev libgbm-dev libxkbcommon-dev \
+            libwayland-dev libx11-dev libxrandr-dev libxcb1-dev libegl1-mesa-dev libglib2.0-dev
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh 21
+          echo "CC=clang-21" >> "$GITHUB_ENV"
+          echo "CXX=clang++-21" >> "$GITHUB_ENV"
       - run: cargo doc --workspace --no-deps --all-features
 
   audit:
@@ -56,3 +81,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install cargo-audit --locked
       - run: cargo audit
+
+  contract:
+    name: контракт с настоящим сервером Backspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: TheZwiss/backspace
+          path: backspace-upstream
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Зависимости сервера
+        working-directory: backspace-upstream
+        run: |
+          npm install -g pnpm@10
+          pnpm install --filter @backspace/server... --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo xtask contract
+        run: cargo xtask contract --server backspace-upstream
