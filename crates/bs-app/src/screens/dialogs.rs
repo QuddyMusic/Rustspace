@@ -292,6 +292,10 @@ pub(crate) struct SettingsState {
     appearance: super::appearance::AppearanceState,
     /// Страница «Горячие клавиши».
     hotkeys: super::settings_app::HotkeysState,
+    /// До какого момента (`ui.input().time`) идёт проверка микрофона.
+    mic_test_until: Option<f64>,
+    /// Почему проверка не запустилась.
+    mic_test_error: Option<String>,
     /// Состояние панели «Подключения».
     connections: super::connections::ConnectionsUi,
     /// Картинки профиля, пароль и админские разделы.
@@ -330,6 +334,8 @@ impl SettingsState {
             show_activity: user.show_activity.unwrap_or(true),
             appearance: super::appearance::AppearanceState::default(),
             hotkeys: super::settings_app::HotkeysState::default(),
+            mic_test_until: None,
+            mic_test_error: None,
             connections: super::connections::ConnectionsUi::default(),
             extra: super::settings_extra::ExtraUi::default(),
             admin_slots: Vec::new(),
@@ -973,7 +979,93 @@ fn voice_settings(
         crate::prefs::update(|saved| saved.voice = prefs);
     }
     ui.add_space(10.0);
+    mic_test_card(ui, state, bridge, voice);
+    ui.add_space(10.0);
     super::settings_app::sounds_card(ui);
+}
+
+/// Сколько длится проверка микрофона.
+const MIC_TEST_SECONDS: f64 = 15.0;
+
+/// «Проверка микрофона»: индикатор уровня сигнала без звонка.
+fn mic_test_card(
+    ui: &mut egui::Ui,
+    state: &mut SettingsState,
+    bridge: &Bridge,
+    voice: &mut crate::voice::VoiceState,
+) {
+    let now = ui.input(|i| i.time);
+    card(ui, |ui| {
+        widgets::section_label(ui, "Проверка микрофона");
+        ui.add_space(6.0);
+        let running = state.mic_test_until.is_some_and(|until| now < until);
+        if !running && state.mic_test_until.take().is_some() {
+            voice.media(bridge).stop_mic_test();
+        }
+        let in_call = voice.call.is_some() || voice.dm.is_some();
+        ui.horizontal(|ui| {
+            let label = if running {
+                "Остановить"
+            } else {
+                "Проверить микрофон"
+            };
+            if ui
+                .add_enabled(!in_call, egui::Button::new(label))
+                .on_disabled_hover_text("Во время звонка проверка недоступна")
+                .clicked()
+            {
+                if running {
+                    state.mic_test_until = None;
+                    voice.media(bridge).stop_mic_test();
+                } else {
+                    let prefs = voice.prefs.clone();
+                    match voice.media(bridge).start_mic_test(&prefs) {
+                        Ok(()) => {
+                            state.mic_test_until = Some(now + MIC_TEST_SECONDS);
+                            state.mic_test_error = None;
+                        }
+                        Err(err) => state.mic_test_error = Some(err),
+                    }
+                }
+            }
+            let level = voice.media(bridge).mic_level().unwrap_or(0.0);
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width().min(320.0), 10.0),
+                egui::Sense::hover(),
+            );
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(5), theme::bg_input());
+            let mut filled = rect;
+            filled.set_width(rect.width() * level);
+            let color = if level > 0.9 {
+                theme::rose()
+            } else if level > 0.6 {
+                theme::amber()
+            } else {
+                theme::green()
+            };
+            ui.painter()
+                .rect_filled(filled, CornerRadius::same(5), color);
+            if running {
+                ui.ctx().request_repaint();
+            }
+        });
+        ui.add_space(4.0);
+        let hint = state.mic_test_error.as_deref().map_or_else(
+            || {
+                theme::muted(
+                    "Скажите что-нибудь: полоса покажет уровень сигнала выбранного микрофона.",
+                )
+                .size(12.5)
+            },
+            |err| {
+                RichText::new(format!("Микрофон не открылся: {err}"))
+                    .size(12.5)
+                    .color(theme::rose())
+            },
+        );
+        ui.label(hint);
+    });
 }
 
 /// Выпадающий список устройств; `None` — системное по умолчанию.

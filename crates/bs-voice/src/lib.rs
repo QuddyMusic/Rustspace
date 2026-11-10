@@ -22,6 +22,7 @@ pub mod device;
 pub mod error;
 pub mod events;
 pub mod mixer;
+mod monitor;
 pub mod protocol;
 pub mod session;
 pub mod state;
@@ -36,6 +37,7 @@ pub use device::{AudioDevice, DeviceKind, DeviceSelection};
 pub use error::{VoiceError, VoiceResult};
 pub use events::VoiceEvent;
 pub use mixer::Mixer;
+pub use monitor::MicMonitor;
 pub use protocol::{
     CallIdentity, CallPhase, CallRecord, INCOMING_CALL_TIMEOUT, ProtocolAction, REBIND_GRACE,
     VoiceCoordinator,

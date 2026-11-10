@@ -166,6 +166,16 @@ mod stub {
         pub(crate) fn speaking(&self) -> Speaking {
             Speaking::new()
         }
+
+        pub(crate) fn start_mic_test(&mut self, _prefs: &VoicePrefs) -> Result<(), String> {
+            Err("сборка без голоса".to_owned())
+        }
+
+        pub(crate) fn stop_mic_test(&mut self) {}
+
+        pub(crate) fn mic_level(&self) -> Option<f32> {
+            None
+        }
     }
 }
 
@@ -174,7 +184,7 @@ mod real {
     use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
     use bs_voice::{
-        AudioEngine, AudioProcessingSettings, VoiceConfig, VoiceEvent, VoiceSession,
+        AudioEngine, AudioProcessingSettings, MicMonitor, VoiceConfig, VoiceEvent, VoiceSession,
         device::DeviceKind as LkKind,
     };
     use tokio::runtime::Handle;
@@ -210,6 +220,8 @@ mod real {
         shared: Arc<Mutex<Shared>>,
         task: Option<JoinHandle<()>>,
         audio: Option<AudioEngine>,
+        /// Идущая проверка микрофона в настройках.
+        mic_test: Option<MicMonitor>,
     }
 
     impl std::fmt::Debug for MediaEngine {
@@ -227,7 +239,27 @@ mod real {
                 shared: Arc::new(Mutex::new(Shared::default())),
                 task: None,
                 audio: None,
+                mic_test: None,
             }
+        }
+
+        /// Запускает проверку микрофона (уровень сигнала без звонка).
+        pub(crate) fn start_mic_test(&mut self, prefs: &VoicePrefs) -> Result<(), String> {
+            let audio = self.audio(prefs)?;
+            self.apply_prefs(prefs);
+            let monitor = MicMonitor::start(&audio, &self.handle).map_err(|err| err.to_string())?;
+            self.mic_test = Some(monitor);
+            Ok(())
+        }
+
+        /// Останавливает проверку микрофона.
+        pub(crate) fn stop_mic_test(&mut self) {
+            self.mic_test = None;
+        }
+
+        /// Уровень сигнала идущей проверки, 0.0–1.0.
+        pub(crate) fn mic_level(&self) -> Option<f32> {
+            self.mic_test.as_ref().map(MicMonitor::level)
         }
 
         #[allow(dead_code, reason = "для проверки возможностей сборки")]
@@ -285,6 +317,8 @@ mod real {
 
         pub(crate) fn connect(&mut self, request: ConnectRequest, prefs: &VoicePrefs) {
             self.disconnect();
+            // Проверка микрофона не должна остановить захват посреди звонка.
+            self.mic_test = None;
             let audio = match self.audio(prefs) {
                 Ok(audio) => audio,
                 Err(err) => {
