@@ -518,7 +518,11 @@ mod real {
                         Ok(VoiceEvent::ActiveSpeakers { identities }) => {
                             let mut shared = lock(&shared);
                             if shared.generation == generation {
-                                shared.speaking = identities.into_iter().collect();
+                                // identity — `userId:имя`; подсветка идёт по id.
+                                shared.speaking = identities
+                                    .iter()
+                                    .map(|id| bs_voice::user_id_of(id).to_owned())
+                                    .collect();
                             }
                         }
                         Ok(VoiceEvent::Disconnected { reason }) => {

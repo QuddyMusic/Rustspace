@@ -44,7 +44,7 @@ pub use protocol::{
     VoiceCoordinator,
 };
 pub use session::VoiceSession;
-pub use state::{ParticipantInfo, RoomSnapshot, RoomState, TrackKind};
+pub use state::{ParticipantInfo, RoomSnapshot, RoomState, TrackKind, user_id_of};
 pub use vad::VoiceDetector;
 pub use video::{
     ReceivedVideoFrame, RemoteVideoReceiver, ScreenShareSession, VideoCodecChoice,

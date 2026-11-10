@@ -12,7 +12,7 @@ use crate::config::VoiceConfig;
 use crate::error::{VoiceError, VoiceResult};
 use crate::events::VoiceEvent;
 use crate::mixer::SourceKind;
-use crate::state::{ParticipantInfo, RoomSnapshot, RoomState};
+use crate::state::{ParticipantInfo, RoomSnapshot, RoomState, user_id_of};
 use crate::volume::{Volume, VolumeMap};
 
 /// Ёмкость канала событий.
@@ -232,15 +232,19 @@ impl VoiceSession {
     }
 
     /// Устанавливает громкость микрофона участника (0 — локально заглушён).
+    ///
+    /// Принимает identity или id пользователя: громкость хранится по id.
     pub async fn set_volume(&self, identity: &str, volume: Volume) -> VoiceResult<()> {
         self.volumes.write().await.set(identity, volume);
-        self.audio.set_volume(identity, SourceKind::Voice, volume);
+        self.audio
+            .set_volume(user_id_of(identity), SourceKind::Voice, volume);
         Ok(())
     }
 
     /// Громкость звука трансляции участника.
     pub fn set_stream_volume(&self, identity: &str, volume: Volume) {
-        self.audio.set_volume(identity, SourceKind::Screen, volume);
+        self.audio
+            .set_volume(user_id_of(identity), SourceKind::Screen, volume);
     }
 
     /// Звуковой движок сессии (общая громкость, приглушение и т. п.).
@@ -367,7 +371,7 @@ impl VoiceSession {
             let deafened = *self.deafened.read().await;
             publication.set_enabled(!deafened);
             self.audio
-                .attach_remote(&identity, source, audio.rtc_track());
+                .attach_remote(user_id_of(&identity), source, audio.rtc_track());
         }
     }
 
@@ -379,7 +383,7 @@ impl VoiceSession {
         if let Some(kind) = map_track_kind(publication.kind(), publication.source()) {
             if let Some(source) = mix_source(kind) {
                 self.audio
-                    .detach_remote(participant.identity().as_str(), source);
+                    .detach_remote(user_id_of(participant.identity().as_str()), source);
             }
             self.emit(VoiceEvent::TrackUnsubscribed {
                 identity: participant.identity().to_string(),
@@ -423,15 +427,18 @@ impl VoiceSession {
         let identity = participant.identity().to_string();
         self.snapshot.write().await.remove(&identity);
         self.volumes.write().await.forget(&identity);
-        self.audio.detach_remote(&identity, SourceKind::Voice);
-        self.audio.detach_remote(&identity, SourceKind::Screen);
+        self.audio
+            .detach_remote(user_id_of(&identity), SourceKind::Voice);
+        self.audio
+            .detach_remote(user_id_of(&identity), SourceKind::Screen);
         self.emit(VoiceEvent::ParticipantLeft { identity });
     }
 
     async fn on_active_speakers(&self, speakers: &[Participant]) {
         let identities: Vec<String> = speakers.iter().map(|p| p.identity().to_string()).collect();
+        let me = self.room.local_participant().identity().to_string();
         self.audio
-            .set_someone_speaking(identities.iter().any(|id| *id != self.identity));
+            .set_someone_speaking(identities.iter().any(|id| *id != me));
         {
             let mut snapshot = self.snapshot.write().await;
             for info in snapshot.participants.values_mut() {

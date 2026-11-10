@@ -27,6 +27,16 @@ pub enum RoomState {
     Reconnecting,
 }
 
+/// Id пользователя из identity LiveKit.
+///
+/// Сервер Backspace выдаёт токены с identity `homeUserId:displayName`
+/// (`routes/livekit.ts`), поэтому всё, что клиент хранит по пользователю
+/// (громкость, подсветка говорящих), ключуется частью до первого `:`.
+#[must_use]
+pub fn user_id_of(identity: &str) -> &str {
+    identity.split_once(':').map_or(identity, |(id, _)| id)
+}
+
 impl RoomState {
     /// Можно ли принимать/отправлять медиа в этом состоянии.
     #[must_use]
@@ -132,5 +142,17 @@ impl RoomSnapshot {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.participants.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::user_id_of;
+
+    #[test]
+    fn identity_is_user_id_and_name() {
+        assert_eq!(user_id_of("u1:Alice"), "u1");
+        assert_eq!(user_id_of("u1:Al:ice"), "u1");
+        assert_eq!(user_id_of("bare"), "bare");
     }
 }
