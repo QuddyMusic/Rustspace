@@ -1099,5 +1099,9 @@
   " кбит/с": " kbps",
   "Транслировать звук системы": "Share system audio",
   "Итоговый битрейт: {mbps} Мбит/с": "Resulting bitrate: {mbps} Mbps",
-  "Экран показывается, но системный звук недоступен: {err}": "The screen is being shared, but system audio is unavailable: {err}"
+  "Экран показывается, но системный звук недоступен: {err}": "The screen is being shared, but system audio is unavailable: {err}",
+  "Ждём разрешения системы на глобальные сочетания…": "Waiting for the system to allow global shortcuts…",
+  "Портал глобальных сочетаний недоступен: {err}. Работают сочетания в окне.": "The global shortcuts portal is unavailable: {err}. Shortcuts work inside the window.",
+  "не назначено": "not assigned",
+  "Вне окна сочетания назначаются в настройках системы (Wayland):\n{list}": "Outside the window, shortcuts are assigned in the system settings (Wayland):\n{list}"
 }

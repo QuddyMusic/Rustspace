@@ -796,6 +796,7 @@ dependencies = [
  "two-face",
  "url",
  "wiremock",
+ "zbus 5.13.2",
  "zeroize",
 ]
 

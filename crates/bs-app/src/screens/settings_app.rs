@@ -68,6 +68,7 @@ pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
                 .size(12.5),
             );
         }
+        portal_note(ui);
         ui.add_space(10.0);
         let binds = crate::prefs::get().keybinds;
         for action in Action::ALL {
@@ -224,4 +225,35 @@ pub(crate) fn sounds_card(ui: &mut egui::Ui) {
     if sounds != before {
         crate::prefs::update(|prefs| prefs.sounds = sounds);
     }
+}
+
+/// Под Wayland сочетания вне окна назначает система: показываем, какие.
+fn portal_note(ui: &mut egui::Ui) {
+    use crate::desktop::PortalView;
+    let text = match crate::desktop::portal_state() {
+        PortalView::Off => return,
+        PortalView::Pending => tr("Ждём разрешения системы на глобальные сочетания…").to_owned(),
+        PortalView::Failed(err) => crate::tf!(
+            "Портал глобальных сочетаний недоступен: {err}. Работают сочетания в окне.",
+            err = err
+        ),
+        PortalView::Ready(map) => {
+            let list: Vec<String> = Action::ALL
+                .into_iter()
+                .map(|action| {
+                    let trigger = map
+                        .get(&action)
+                        .filter(|t| !t.is_empty())
+                        .map_or_else(|| tr("не назначено").to_owned(), Clone::clone);
+                    format!("{} — {trigger}", action.title())
+                })
+                .collect();
+            crate::tf!(
+                "Вне окна сочетания назначаются в настройках системы (Wayland):\n{list}",
+                list = list.join("\n")
+            )
+        }
+    };
+    ui.add_space(6.0);
+    ui.label(theme::muted(text).size(12.5));
 }

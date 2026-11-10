@@ -38,6 +38,8 @@ pub(crate) enum Command {
     Quit,
     /// Глобальная клавиша: действие и «нажата» (`false` — отпущена).
     Key(Action, bool),
+    /// То же от портала Wayland: сочетание назначила система.
+    PortalKey(Action, bool),
 }
 
 type Queue = Arc<Mutex<VecDeque<Command>>>;
@@ -53,7 +55,46 @@ pub(crate) fn tray_available() -> bool {
 
 /// Работает ли глобальный перехват клавиш.
 pub(crate) fn global_keys_available() -> bool {
-    KEYS_UP.load(std::sync::atomic::Ordering::Relaxed)
+    KEYS_UP.load(std::sync::atomic::Ordering::Relaxed) || portal_ready()
+}
+
+/// Состояние портала Wayland (`Off` вне Wayland и без перехвата в сборке).
+pub(crate) fn portal_state() -> PortalView {
+    #[cfg(all(feature = "global-hotkeys", target_os = "linux"))]
+    {
+        use crate::portal_keys::PortalState;
+        match crate::portal_keys::status() {
+            PortalState::Off => PortalView::Off,
+            PortalState::Pending => PortalView::Pending,
+            PortalState::Ready(map) => PortalView::Ready(map),
+            PortalState::Failed(err) => PortalView::Failed(err),
+        }
+    }
+    #[cfg(not(all(feature = "global-hotkeys", target_os = "linux")))]
+    {
+        PortalView::Off
+    }
+}
+
+fn portal_ready() -> bool {
+    matches!(portal_state(), PortalView::Ready(_))
+}
+
+/// Что показать о портале в настройках.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    not(all(feature = "global-hotkeys", target_os = "linux")),
+    allow(dead_code, reason = "портал есть только на Linux с перехватом клавиш")
+)]
+pub(crate) enum PortalView {
+    /// Портал не используется.
+    Off,
+    /// Ждём систему или пользователя.
+    Pending,
+    /// Сочетания по действиям (пустая строка — не назначено).
+    Ready(BTreeMap<Action, String>),
+    /// Портал отказал.
+    Failed(String),
 }
 
 fn lock(queue: &Queue) -> MutexGuard<'_, VecDeque<Command>> {
@@ -71,11 +112,17 @@ pub(crate) struct DesktopInput {
 
 /// Трей, окно и глобальные клавиши.
 #[derive(Default)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "независимые флаги: трей, окно спрятано, выход, глобальные клавиши"
+)]
 pub(crate) struct Desktop {
     queue: Queue,
     tray: bool,
     hidden: bool,
     quitting: bool,
+    /// Включены ли глобальные клавиши в настройках (на прошлом кадре).
+    global_enabled: bool,
     #[cfg(feature = "global-hotkeys")]
     keys: Option<global::Keys>,
     #[cfg(all(feature = "tray", not(target_os = "linux")))]
@@ -98,7 +145,19 @@ impl Desktop {
         let mut desktop = Self::default();
         #[cfg(feature = "tray")]
         desktop.start_tray(ctx);
-        #[cfg(feature = "global-hotkeys")]
+        #[cfg(all(feature = "global-hotkeys", target_os = "linux"))]
+        if crate::portal_keys::wanted() {
+            // Под Wayland перехват X11 видит только окна XWayland: нужен портал.
+            let queue = Arc::clone(&desktop.queue);
+            let wake = ctx.clone();
+            crate::portal_keys::start(Box::new(move |action, pressed| {
+                lock(&queue).push_back(Command::PortalKey(action, pressed));
+                wake.request_repaint();
+            }));
+        } else {
+            desktop.keys = global::Keys::new(&desktop.queue, ctx);
+        }
+        #[cfg(all(feature = "global-hotkeys", not(target_os = "linux")))]
         {
             desktop.keys = global::Keys::new(&desktop.queue, ctx);
         }
@@ -116,10 +175,10 @@ impl Desktop {
         not(feature = "global-hotkeys"),
         allow(clippy::unused_self, reason = "без перехватчика")
     )]
-    pub(crate) const fn has_global_keys(&self) -> bool {
+    pub(crate) fn has_global_keys(&self) -> bool {
         #[cfg(feature = "global-hotkeys")]
         {
-            self.keys.is_some()
+            self.keys.is_some() || portal_ready()
         }
         #[cfg(not(feature = "global-hotkeys"))]
         {
@@ -135,11 +194,17 @@ impl Desktop {
     }
 
     /// Привязки, перехваченные глобально (окно их не обрабатывает).
-    #[cfg_attr(
-        not(feature = "global-hotkeys"),
-        allow(clippy::unused_self, reason = "без перехватчика")
-    )]
     pub(crate) fn global_actions(&self) -> BTreeSet<Action> {
+        if !self.global_enabled {
+            return BTreeSet::new();
+        }
+        if let PortalView::Ready(map) = portal_state() {
+            return map
+                .into_iter()
+                .filter(|(_, trigger)| !trigger.is_empty())
+                .map(|(action, _)| action)
+                .collect();
+        }
         #[cfg(feature = "global-hotkeys")]
         if let Some(keys) = &self.keys {
             return keys.actions();
@@ -160,7 +225,8 @@ impl Desktop {
             let none = BTreeMap::new();
             keys.sync(if global_enabled { binds } else { &none });
         }
-        let _ = (binds, global_enabled);
+        let _ = binds;
+        self.global_enabled = global_enabled;
         let mut input = DesktopInput::default();
         let commands: Vec<Command> = lock(&self.queue).drain(..).collect();
         for command in commands {
@@ -174,6 +240,11 @@ impl Desktop {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 Command::Key(action, pressed) => input.keys.push((action, pressed)),
+                Command::PortalKey(action, pressed) => {
+                    if global_enabled {
+                        input.keys.push((action, pressed));
+                    }
+                }
             }
         }
         let close = ctx.input(|i| i.viewport().close_requested());

@@ -35,6 +35,8 @@ mod logic;
 mod markdown;
 mod media;
 mod notify;
+#[cfg(all(feature = "global-hotkeys", target_os = "linux"))]
+mod portal_keys;
 mod prefs;
 mod registry;
 mod saved_session;
