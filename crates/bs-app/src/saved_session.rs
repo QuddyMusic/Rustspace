@@ -1,8 +1,11 @@
 //! Сохранённая сессия домашнего инстанса: вход без пароля после перезапуска.
 //!
-//! В файле лежат адрес инстанса, флаг «разрешён http» и токен доступа. Токен —
-//! секрет: файл создаётся с правами `0600` (на Unix), пишется атомарно через
-//! временный файл, содержимое не попадает в логи.
+//! В файле лежат адрес инстанса и флаг «разрешён http». Токен доступа — секрет:
+//! он хранится в системном хранилище ключей (Secret Service на Linux, Keychain
+//! на macOS, Credential Manager в Windows), а в файле остаётся только пометка
+//! `tokenInKeyring`. Если хранилища нет (минимальная система без демона
+//! секретов), токен пишется в сам файл, как раньше: права `0600` (на Unix),
+//! атомарная запись через временный файл, содержимое не попадает в логи.
 
 use std::path::{Path, PathBuf};
 
@@ -51,7 +54,19 @@ pub(crate) fn load(path: &Path) -> Option<SavedSession> {
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let text = |key: &str| value.get(key).and_then(serde_json::Value::as_str);
     let base = text("base")?.trim();
-    let token = text("token")?;
+    let in_keyring = value
+        .get("tokenInKeyring")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let from_keyring;
+    let token = match text("token") {
+        Some(token) => token,
+        None if in_keyring => {
+            from_keyring = keystore::get(path)?;
+            from_keyring.as_str()
+        }
+        None => return None,
+    };
     if base.is_empty() || token.is_empty() {
         return None;
     }
@@ -82,14 +97,14 @@ pub(crate) fn save(
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
-    let json = zeroize::Zeroizing::new(
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "base": base,
-            "token": token,
-            "allowInsecure": transport == TransportPolicy::AllowInsecure,
-        }))
-        .map_err(std::io::Error::other)?,
-    );
+    let insecure = transport == TransportPolicy::AllowInsecure;
+    let body = if keystore::set(path, token) {
+        serde_json::json!({ "base": base, "tokenInKeyring": true, "allowInsecure": insecure })
+    } else {
+        serde_json::json!({ "base": base, "token": token, "allowInsecure": insecure })
+    };
+    let json =
+        zeroize::Zeroizing::new(serde_json::to_vec_pretty(&body).map_err(std::io::Error::other)?);
     let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
     let _ = std::fs::remove_file(&tmp);
     let write = || -> std::io::Result<()> {
@@ -115,6 +130,7 @@ pub(crate) fn save(
 
 /// Стирает сохранённую сессию (выход, отказ токена, удаление аккаунта).
 pub(crate) fn clear(path: &Path) {
+    keystore::delete(path);
     if let Err(err) = std::fs::remove_file(path)
         && err.kind() != std::io::ErrorKind::NotFound
     {
@@ -122,9 +138,81 @@ pub(crate) fn clear(path: &Path) {
     }
 }
 
+/// Системное хранилище ключей. В тестах отключено: они не должны трогать
+/// настоящий keyring пользователя, поэтому всегда идёт запасной путь — файл.
+mod keystore {
+    use std::path::Path;
+
+    const SERVICE: &str = "backspace-rs";
+
+    /// Запись привязана к файлу сессии: разные каталоги настроек (профили,
+    /// тесты) не затирают друг друга.
+    #[cfg(not(test))]
+    fn entry(path: &Path) -> Option<keyring::Entry> {
+        let account = format!("session:{}", path.display());
+        keyring::Entry::new(SERVICE, &account)
+            .map_err(|err| tracing::debug!(%err, "keyring недоступен"))
+            .ok()
+    }
+
+    /// Сохраняет токен; `false` — хранилища нет, нужен запасной путь.
+    #[cfg(not(test))]
+    pub(super) fn set(path: &Path, token: &str) -> bool {
+        entry(path).is_some_and(|entry| match entry.set_password(token) {
+            Ok(()) => true,
+            Err(err) => {
+                tracing::info!(%err, "keyring недоступен — токен сохранён в файл 0600");
+                false
+            }
+        })
+    }
+
+    #[cfg(not(test))]
+    pub(super) fn get(path: &Path) -> Option<zeroize::Zeroizing<String>> {
+        entry(path)?
+            .get_password()
+            .map(zeroize::Zeroizing::new)
+            .map_err(|err| tracing::warn!(%err, "токен в keyring не найден"))
+            .ok()
+    }
+
+    #[cfg(not(test))]
+    pub(super) fn delete(path: &Path) {
+        if let Some(entry) = entry(path) {
+            let _ = entry.delete_credential();
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) const fn set(_path: &Path, _token: &str) -> bool {
+        let _ = SERVICE;
+        false
+    }
+
+    #[cfg(test)]
+    pub(super) const fn get(_path: &Path) -> Option<zeroize::Zeroizing<String>> {
+        None
+    }
+
+    #[cfg(test)]
+    pub(super) const fn delete(_path: &Path) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyring_marker_without_keyring_is_no_session() {
+        let path = temp_path("kr");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            br#"{"base":"https://x.example","tokenInKeyring":true}"#,
+        )
+        .unwrap();
+        assert!(load(&path).is_none());
+    }
 
     fn temp_path(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("bs-saved-{name}-{}", std::process::id()));

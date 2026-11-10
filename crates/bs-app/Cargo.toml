@@ -40,6 +40,7 @@ tracing-subscriber = { workspace = true }
 url = { workspace = true }
 zeroize = { workspace = true }
 chrono = { workspace = true }
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 notify-rust = { version = "4", default-features = false, features = ["z"] }
 
 [dev-dependencies]
