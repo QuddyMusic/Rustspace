@@ -43,17 +43,29 @@ every WebSocket frame and REST response the client receives.
 - **Voice and video** (`--features voice`). Voice channels and DM calls over LiveKit; mute and
   deafen; input and output volume 0–200 %, per-user volume and local mute, stream volume and
   attenuation while someone speaks; echo cancellation, noise suppression and AGC; microphone
-  test; speaking indicators. Camera (`--features camera`) and screen sharing (monitor or
-  window, 720/1080/1440p, 15/30/60 fps) with a call stage above the chat; remote streams are
-  watched on demand like in the original, and the sharer sees who is watching.
+  test; speaking indicators. Camera (`--features camera`) and screen sharing with a call stage
+  above the chat: libwebrtc capture (the ScreenCast portal on Wayland), 540p–4K or native,
+  30–120 fps, VP9 or H.264, smoothness or clarity, all fitted to the instance's streaming
+  limits; system audio without Backspace's own sound (per-application capture over
+  PulseAudio/PipeWire on Linux, output loopback on Windows and macOS). Remote streams and
+  their audio are received only while you watch them, and the sharer sees who is watching.
 - **Desktop integration** (`--features desktop`). Tray icon with show/hide, mute, deafen and
   quit; closing the window hides it to the tray. Global hotkeys (including push-to-talk with
-  key release) on X11, Windows and macOS; inside the window the hotkeys always work.
-- **Look and feel.** Six built-in themes, custom accent, editing any colour, corner radius,
-  compact mode, JSON theme import/export, UI scale. Interface sounds from the original.
+  key release) on X11, Windows and macOS, and on Wayland through the XDG GlobalShortcuts
+  portal (shortcuts are assigned in the system settings); inside the window the hotkeys
+  always work.
+- **Look and feel.** Six built-in themes, custom accent, editing any colour, corner radius
+  (the whole window is made of rounded modules that follow it), compact mode, JSON theme
+  import/export, UI scale. Interface sounds from the original.
   System notifications by the original's rules (levels, mutes, DND, mentions).
 - **Languages.** Russian and English built in, switchable live; any other language can be
   added as a JSON catalog in `<config dir>/locales/<code>.json` (see *Settings → Language*).
+- **"Backspace" page** in the sidebar, like the original's project hub: what's new on your
+  home instance (with an "updated" dot), project links, bug reports, this server's version and
+  source.
+- **Client updates.** *Settings → About the client* checks the releases of the client's own
+  GitHub repository (`owner/repo`; a default can be baked in with `BS_UPDATE_REPO=owner/repo`
+  at build time) and offers the download for your system.
 - **Administration.** Profile, password change, account deletion; the instance admin panel
   (settings, users, storage, registration, federation peers, streaming limits, telemetry,
   updates).
@@ -71,9 +83,9 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-instances` | Connection to one instance: dispatcher, reconnect, password and token sign-in | 14 |
 | `bs-identity` | Login and registration, token storage, per-remote credentials, `UserKey` | 31 |
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
-| `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, data-channel signals | 75 |
+| `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, system audio, data-channel signals | 68 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 218 |
+| `bs-app` | The GUI and its entry point | 230 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
@@ -137,12 +149,14 @@ cargo run -p bs-tui -- --allow-insecure                # arguments after `--` go
 | `voice` | voice, screen sharing, call stage (includes `sounds`) | clang **21+**, `libclang`, `pkg-config`; Linux: PipeWire, X11/Wayland headers; `libwebrtc` is downloaded at build time |
 | `camera` | webcam via nokhwa (V4L2, Media Foundation, AVFoundation; includes `voice`) | — |
 | `tray` | tray icon and hide-to-tray | Linux: `libgtk-3-dev`, `libxdo-dev`, `libayatana-appindicator3-dev` |
-| `global-hotkeys` | hotkeys outside the window (not on pure Wayland) | Linux: X11 headers |
+| `global-hotkeys` | hotkeys outside the window (X11, Windows, macOS; Wayland through the GlobalShortcuts portal) | Linux: X11 headers |
 | `desktop` | `tray` + `global-hotkeys` | as above |
 
 Other runtime notes: the keyring needs `libdbus-1-dev` at build time and a Secret Service
 daemon at run time (otherwise the token goes to a `0600` file); file dialogs on Linux use
-`xdg-desktop-portal` or `zenity`. Audio uses the default ALSA host, which reaches PulseAudio
+`xdg-desktop-portal` or `zenity`; screen sharing on Wayland needs `xdg-desktop-portal` with a
+ScreenCast backend (GNOME, KDE or wlr) and PipeWire, system audio on Linux needs PulseAudio or
+`pipewire-pulse`. Audio uses the default ALSA host, which reaches PulseAudio
 or PipeWire through their ALSA plugins. `cargo run -p bs-voice --example audio_check` lists
 audio devices and shows the microphone level.
 
