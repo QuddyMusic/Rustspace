@@ -62,7 +62,10 @@ pub(crate) struct Feed {
 
 /// Вид источника демонстрации.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(not(feature = "voice"), allow(dead_code, reason = "источники есть только с LiveKit"))]
+#[cfg_attr(
+    not(feature = "voice"),
+    allow(dead_code, reason = "источники есть только с LiveKit")
+)]
 pub(crate) enum ShareKind {
     /// Монитор.
     Screen,

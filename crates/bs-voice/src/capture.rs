@@ -122,9 +122,15 @@ impl CaptureConfig {
 }
 
 /// Работаем ли под Wayland (тогда выбор только через портал).
+///
+/// Проверка та же, что у WebRTC: сеанс Wayland (`XDG_SESSION_TYPE`) и
+/// доступный композитор (`WAYLAND_DISPLAY`). Иначе захват через портал
+/// WebRTC не создаст, и приложение работает как под X11 (XWayland).
 #[must_use]
 pub fn is_wayland() -> bool {
-    cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some()
+    cfg!(target_os = "linux")
+        && std::env::var_os("WAYLAND_DISPLAY").is_some()
+        && std::env::var("XDG_SESSION_TYPE").is_ok_and(|kind| kind.eq_ignore_ascii_case("wayland"))
 }
 
 fn system_source() -> ScreenSource {
