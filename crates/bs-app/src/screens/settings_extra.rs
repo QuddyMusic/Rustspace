@@ -134,92 +134,19 @@ pub(crate) struct ExtraUi {
 
 impl ExtraUi {
     /// Разбирает ответы моста.
-    #[allow(clippy::too_many_lines, reason = "разбор всех админских событий")]
     pub(crate) fn poll(&mut self, bridge: &mut Bridge) {
         for event in bridge.take_admin_events() {
-            let admin = &mut self.admin;
-            let account = &mut self.account;
-            let Some(event) = admin.more.accept(event) else {
+            let Some(event) = self.admin.more.accept(event) else {
                 continue;
             };
-            let Some(event) = admin.invites.accept(event) else {
+            let Some(event) = self.admin.invites.accept(event) else {
                 continue;
             };
             match event {
-                AdminEvent::Settings(result) => match result {
-                    Ok(settings) => {
-                        admin.edit = Some(settings.clone());
-                        admin.settings = Some(settings);
-                        admin.gif_key.clear();
-                    }
-                    Err(message) => admin.settings_note = Some(fail(message)),
-                },
-                AdminEvent::SettingsSaved(result) => match result {
-                    Ok(settings) => {
-                        admin.edit = Some(settings.clone());
-                        admin.settings = Some(settings);
-                        admin.gif_key.clear();
-                        admin.settings_note = Some(ok(tr("Настройки сохранены")));
-                    }
-                    Err(message) => admin.settings_note = Some(fail(message)),
-                },
-                AdminEvent::Users(result) => match result {
-                    Ok(page) => {
-                        admin.users = Some(page);
-                        admin.users_note = None;
-                    }
-                    Err(message) => admin.users_note = Some(fail(message)),
-                },
-                AdminEvent::Storage(result) => match result {
-                    Ok(stats) => admin.storage = Some(stats),
-                    Err(message) => admin.storage_note = Some(fail(message)),
-                },
-                AdminEvent::Invites(_)
-                | AdminEvent::InviteDone(_)
-                | AdminEvent::Redemptions { .. }
-                | AdminEvent::Peers(_)
-                | AdminEvent::PeerDone(_)
-                | AdminEvent::Streaming(_)
-                | AdminEvent::Telemetry(_)
-                | AdminEvent::TelemetryPreview(_)
-                | AdminEvent::Updates(_) => {}
-                AdminEvent::Cleaned(result) => match result {
-                    Ok(done) => {
-                        admin.cleanup = Some(done);
-                        admin.storage_asked = false;
-                    }
-                    Err(message) => admin.storage_note = Some(fail(message)),
-                },
-                AdminEvent::Done { action, result } => match (action, result) {
-                    (AdminDone::Role | AdminDone::Delete, Ok(text)) => {
-                        admin.users_note = Some(ok(text));
-                        admin.users_asked = false;
-                        admin.confirm_delete = None;
-                    }
-                    (AdminDone::Role | AdminDone::Delete, Err(message)) => {
-                        admin.users_note = Some(fail(message));
-                    }
-                    (AdminDone::Reset, Ok(password)) => {
-                        let who = admin.reset_for.take().unwrap_or_default();
-                        admin.temp_password = Some((who, password));
-                    }
-                    (AdminDone::Reset, Err(message)) => admin.users_note = Some(fail(message)),
-                    (AdminDone::Password, Ok(_)) => {
-                        account.password_note =
-                            Some(ok(tr("Пароль изменён. Войдите в аккаунт заново.")));
-                        account.current.clear();
-                        account.new.clear();
-                        account.repeat.clear();
-                        account.logout = true;
-                    }
-                    (AdminDone::Password, Err(message)) => {
-                        account.password_note = Some(fail(message));
-                    }
-                    (AdminDone::Account, Ok(_)) => account.logout = true,
-                    (AdminDone::Account, Err(message)) => account.delete_note = Some(fail(message)),
-                    (AdminDone::Image, Ok(_)) => account.note = Some(ok(tr("Картинка обновлена"))),
-                    (AdminDone::Image, Err(message)) => account.note = Some(fail(message)),
-                },
+                AdminEvent::Done { action, result } => {
+                    self.apply_done(action, result);
+                }
+                other => self.admin.apply(other),
             }
         }
         if let Some(ReceiverBox(rx)) = &self.account.picking
@@ -237,6 +164,86 @@ impl ExtraUi {
                 }
                 Err(message) => self.account.note = Some(fail(message)),
             }
+        }
+    }
+
+    /// Итог действия: над пользователями (админ) или над своим аккаунтом.
+    fn apply_done(&mut self, action: AdminDone, result: Result<String, String>) {
+        let admin = &mut self.admin;
+        let account = &mut self.account;
+        match (action, result) {
+            (AdminDone::Role | AdminDone::Delete, Ok(text)) => {
+                admin.users_note = Some(ok(text));
+                admin.users_asked = false;
+                admin.confirm_delete = None;
+            }
+            (AdminDone::Role | AdminDone::Delete, Err(message)) => {
+                admin.users_note = Some(fail(message));
+            }
+            (AdminDone::Reset, Ok(password)) => {
+                let who = admin.reset_for.take().unwrap_or_default();
+                admin.temp_password = Some((who, password));
+            }
+            (AdminDone::Reset, Err(message)) => admin.users_note = Some(fail(message)),
+            (AdminDone::Password, Ok(_)) => {
+                account.password_note = Some(ok(tr("Пароль изменён. Войдите в аккаунт заново.")));
+                account.current.clear();
+                account.new.clear();
+                account.repeat.clear();
+                account.logout = true;
+            }
+            (AdminDone::Password, Err(message)) => {
+                account.password_note = Some(fail(message));
+            }
+            (AdminDone::Account, Ok(_)) => account.logout = true,
+            (AdminDone::Account, Err(message)) => account.delete_note = Some(fail(message)),
+            (AdminDone::Image, Ok(_)) => account.note = Some(ok(tr("Картинка обновлена"))),
+            (AdminDone::Image, Err(message)) => account.note = Some(fail(message)),
+        }
+    }
+}
+
+impl AdminUi {
+    /// Ответы об инстансе, пользователях и хранилище.
+    fn apply(&mut self, event: AdminEvent) {
+        match event {
+            AdminEvent::Settings(result) => match result {
+                Ok(settings) => {
+                    self.edit = Some(settings.clone());
+                    self.settings = Some(settings);
+                    self.gif_key.clear();
+                }
+                Err(message) => self.settings_note = Some(fail(message)),
+            },
+            AdminEvent::SettingsSaved(result) => match result {
+                Ok(settings) => {
+                    self.edit = Some(settings.clone());
+                    self.settings = Some(settings);
+                    self.gif_key.clear();
+                    self.settings_note = Some(ok(tr("Настройки сохранены")));
+                }
+                Err(message) => self.settings_note = Some(fail(message)),
+            },
+            AdminEvent::Users(result) => match result {
+                Ok(page) => {
+                    self.users = Some(page);
+                    self.users_note = None;
+                }
+                Err(message) => self.users_note = Some(fail(message)),
+            },
+            AdminEvent::Storage(result) => match result {
+                Ok(stats) => self.storage = Some(stats),
+                Err(message) => self.storage_note = Some(fail(message)),
+            },
+            AdminEvent::Cleaned(result) => match result {
+                Ok(done) => {
+                    self.cleanup = Some(done);
+                    self.storage_asked = false;
+                }
+                Err(message) => self.storage_note = Some(fail(message)),
+            },
+            // Разобраны раньше (приглашения, пиры, стриминг…) или выше.
+            _ => {}
         }
     }
 }
@@ -497,7 +504,6 @@ fn settings_patch(
 }
 
 /// «Инстанс»: общие настройки, регистрация, загрузки, GIF и федерация.
-#[allow(clippy::too_many_lines, reason = "форма настроек одним блоком")]
 pub(crate) fn instance_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bridge) {
     let admin = &mut extra.admin;
     page_title(ui, tr("Настройки инстанса"));
@@ -509,6 +515,37 @@ pub(crate) fn instance_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Br
         ui.label(theme::muted(tr("Загрузка…")));
         return;
     };
+    general_settings(ui, edit, &mut admin.gif_key, &saved);
+    registration_settings(ui, edit);
+    federation_settings(ui, edit);
+    let patch = settings_patch(&saved, edit, &admin.gif_key);
+    let changed = patch != InstanceSettingsPatch::default();
+    ui.add_space(14.0);
+    show_note(ui, admin.settings_note.as_ref());
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(changed, theme::primary_button(tr("Сохранить")))
+            .clicked()
+        {
+            bridge.request(BridgeRequest::Admin(AdminRequest::SaveSettings(patch)));
+        }
+        if ui
+            .add_enabled(changed, egui::Button::new(tr("Сбросить")))
+            .clicked()
+        {
+            admin.edit.clone_from(&admin.settings);
+            admin.gif_key.clear();
+        }
+    });
+}
+
+/// Общие настройки инстанса: название, каталог, лимит загрузки, ключ GIF.
+fn general_settings(
+    ui: &mut egui::Ui,
+    edit: &mut InstanceSettings,
+    gif_key: &mut String,
+    saved: &InstanceSettings,
+) {
     widgets::section_label(ui, tr("Общие"));
     ui.add_space(6.0);
     card(ui, |ui| {
@@ -531,7 +568,7 @@ pub(crate) fn instance_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Br
         widgets::field_label(ui, tr("Ключ Klipy для поиска GIF"));
         widgets::secret_field(
             ui,
-            &mut admin.gif_key,
+            gif_key,
             saved
                 .gif_api_key
                 .as_deref()
@@ -539,6 +576,10 @@ pub(crate) fn instance_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Br
             128,
         );
     });
+}
+
+/// Кто может зарегистрироваться.
+fn registration_settings(ui: &mut egui::Ui, edit: &mut InstanceSettings) {
     ui.add_space(14.0);
     widgets::section_label(ui, tr("Регистрация"));
     ui.add_space(6.0);
@@ -556,6 +597,10 @@ pub(crate) fn instance_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Br
             &mut edit.federated_registration_open,
         );
     });
+}
+
+/// Пересылка сообщений, ключи и пиринг.
+fn federation_settings(ui: &mut egui::Ui, edit: &mut InstanceSettings) {
     ui.add_space(14.0);
     widgets::section_label(ui, tr("Федерация"));
     ui.add_space(6.0);
@@ -587,32 +632,31 @@ pub(crate) fn instance_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Br
             &mut edit.auto_accept_peering,
         );
     });
-    let patch = settings_patch(&saved, edit, &admin.gif_key);
-    let changed = patch != InstanceSettingsPatch::default();
-    ui.add_space(14.0);
-    show_note(ui, admin.settings_note.as_ref());
-    ui.horizontal(|ui| {
-        if ui
-            .add_enabled(changed, theme::primary_button(tr("Сохранить")))
-            .clicked()
-        {
-            bridge.request(BridgeRequest::Admin(AdminRequest::SaveSettings(patch)));
-        }
-        if ui
-            .add_enabled(changed, egui::Button::new(tr("Сбросить")))
-            .clicked()
-        {
-            admin.edit.clone_from(&admin.settings);
-            admin.gif_key.clear();
-        }
-    });
 }
 
 /// «Пользователи»: поиск, роли, сброс пароля, удаление.
-#[allow(clippy::too_many_lines, reason = "список с действиями в одном месте")]
 pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bridge: &Bridge) {
     let admin = &mut extra.admin;
     page_title(ui, tr("Пользователи"));
+    users_filters(ui, admin, bridge);
+    ui.add_space(8.0);
+    show_note(ui, admin.users_note.as_ref());
+    temp_password(ui, admin);
+    let Some(page) = admin.users.clone() else {
+        ui.label(theme::muted(tr("Загрузка…")));
+        return;
+    };
+    ui.label(theme::muted(crate::tf!("Всего: {a0}", a0 = page.total)).size(12.5));
+    ui.add_space(4.0);
+    for user in &page.users {
+        user_card(ui, admin, user, user.id == me.id, bridge);
+        ui.add_space(6.0);
+    }
+    users_pager(ui, admin, &page);
+}
+
+/// Поиск, «показывать удалённых» и запрос страницы.
+fn users_filters(ui: &mut egui::Ui, admin: &mut AdminUi, bridge: &Bridge) {
     ui.horizontal(|ui| {
         widgets::search_box(ui, &mut admin.query, tr("Найти по имени"));
     });
@@ -637,8 +681,10 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
             show_deleted: admin.show_deleted,
         }));
     }
-    ui.add_space(8.0);
-    show_note(ui, admin.users_note.as_ref());
+}
+
+/// Временный пароль после сброса: показывается один раз.
+fn temp_password(ui: &mut egui::Ui, admin: &mut AdminUi) {
     if let Some((who, password)) = admin.temp_password.clone() {
         card(ui, |ui| {
             ui.label(crate::tf!(
@@ -658,89 +704,93 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
         });
         ui.add_space(8.0);
     }
-    let Some(page) = admin.users.clone() else {
-        ui.label(theme::muted(tr("Загрузка…")));
-        return;
-    };
-    ui.label(theme::muted(crate::tf!("Всего: {a0}", a0 = page.total)).size(12.5));
-    ui.add_space(4.0);
-    for user in &page.users {
-        let is_me = user.id == me.id;
-        card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    let name = user.display_name.as_deref().unwrap_or(&user.username);
-                    ui.label(RichText::new(name).family(theme::bold_family()).color(
-                        if user.is_deleted {
-                            theme::text_faint()
-                        } else {
-                            theme::text_bright()
-                        },
-                    ));
-                    let mut meta = format!("@{}", user.username);
-                    if let Some(host) = &user.home_instance {
-                        meta.push_str(" · ");
-                        meta.push_str(host);
-                    }
-                    if user.is_admin {
-                        meta.push_str(tr(" · администратор"));
-                    }
+}
+
+/// Карточка пользователя с действиями администратора.
+fn user_card(
+    ui: &mut egui::Ui,
+    admin: &mut AdminUi,
+    user: &bs_api::AdminUser,
+    is_me: bool,
+    bridge: &Bridge,
+) {
+    card(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                let name = user.display_name.as_deref().unwrap_or(&user.username);
+                ui.label(RichText::new(name).family(theme::bold_family()).color(
                     if user.is_deleted {
-                        meta.push_str(tr(" · удалён"));
-                    }
-                    ui.label(theme::muted(meta).size(12.5));
-                });
+                        theme::text_faint()
+                    } else {
+                        theme::text_bright()
+                    },
+                ));
+                let mut meta = format!("@{}", user.username);
+                if let Some(host) = &user.home_instance {
+                    meta.push_str(" · ");
+                    meta.push_str(host);
+                }
+                if user.is_admin {
+                    meta.push_str(tr(" · администратор"));
+                }
+                if user.is_deleted {
+                    meta.push_str(tr(" · удалён"));
+                }
+                ui.label(theme::muted(meta).size(12.5));
             });
-            if user.is_deleted || is_me {
-                return;
+        });
+        if user.is_deleted || is_me {
+            return;
+        }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let label = if user.is_admin {
+                tr("Снять админа")
+            } else {
+                tr("Сделать админом")
+            };
+            if ui.button(label).clicked() {
+                bridge.request(BridgeRequest::Admin(AdminRequest::SetRole {
+                    id: user.id.clone(),
+                    admin: !user.is_admin,
+                }));
             }
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let label = if user.is_admin {
-                    tr("Снять админа")
-                } else {
-                    tr("Сделать админом")
-                };
-                if ui.button(label).clicked() {
-                    bridge.request(BridgeRequest::Admin(AdminRequest::SetRole {
-                        id: user.id.clone(),
-                        admin: !user.is_admin,
-                    }));
-                }
-                if user.home_instance.is_none() && ui.button(tr("Сбросить пароль")).clicked()
-                {
-                    admin.reset_for = Some(user.username.clone());
-                    bridge.request(BridgeRequest::Admin(AdminRequest::ResetPassword(
-                        user.id.clone(),
-                    )));
-                }
-                if admin.confirm_delete.as_deref() == Some(user.id.as_str()) {
-                    if ui
-                        .add(egui::Button::new(
-                            RichText::new(tr("Точно удалить?")).color(theme::red()),
-                        ))
-                        .clicked()
-                    {
-                        bridge.request(BridgeRequest::Admin(AdminRequest::DeleteUser(
-                            user.id.clone(),
-                        )));
-                    }
-                    if ui.button(tr("Отмена")).clicked() {
-                        admin.confirm_delete = None;
-                    }
-                } else if ui
+            if user.home_instance.is_none() && ui.button(tr("Сбросить пароль")).clicked()
+            {
+                admin.reset_for = Some(user.username.clone());
+                bridge.request(BridgeRequest::Admin(AdminRequest::ResetPassword(
+                    user.id.clone(),
+                )));
+            }
+            if admin.confirm_delete.as_deref() == Some(user.id.as_str()) {
+                if ui
                     .add(egui::Button::new(
-                        RichText::new(tr("Удалить")).color(theme::rose()),
+                        RichText::new(tr("Точно удалить?")).color(theme::red()),
                     ))
                     .clicked()
                 {
-                    admin.confirm_delete = Some(user.id.clone());
+                    bridge.request(BridgeRequest::Admin(AdminRequest::DeleteUser(
+                        user.id.clone(),
+                    )));
                 }
-            });
+                if ui.button(tr("Отмена")).clicked() {
+                    admin.confirm_delete = None;
+                }
+            } else if ui
+                .add(egui::Button::new(
+                    RichText::new(tr("Удалить")).color(theme::rose()),
+                ))
+                .clicked()
+            {
+                admin.confirm_delete = Some(user.id.clone());
+            }
         });
-        ui.add_space(6.0);
-    }
+    });
+}
+
+/// Листание страниц списка.
+fn users_pager(ui: &mut egui::Ui, admin: &mut AdminUi, page: &AdminUserPage) {
     let pages = page.total.div_ceil(u64::from(page.page_size.max(1)));
     if pages > 1 {
         ui.horizontal(|ui| {
@@ -771,7 +821,6 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
 }
 
 /// «Хранилище»: сводка и очистка осиротевших файлов.
-#[allow(clippy::too_many_lines, reason = "сводка и очистка одним блоком")]
 pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bridge) {
     let admin = &mut extra.admin;
     page_title(ui, tr("Хранилище"));
@@ -783,7 +832,18 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
         ui.label(theme::muted(tr("Загрузка…")));
         return;
     };
-    let size = |bytes: u64| human_size(i64::try_from(bytes).unwrap_or(i64::MAX));
+    storage_summary(ui, &stats);
+    storage_cleanup(ui, admin, &stats, bridge);
+}
+
+/// Размер файлов по-человечески.
+fn file_size(bytes: u64) -> String {
+    human_size(i64::try_from(bytes).unwrap_or(i64::MAX))
+}
+
+/// Сводка: всего, используется, сироты, недогруженное и по типам.
+fn storage_summary(ui: &mut egui::Ui, stats: &StorageStats) {
+    let size = file_size;
     card(ui, |ui| {
         for (label, files, bytes) in [
             (tr("Всего"), stats.total_files, stats.total_size),
@@ -833,6 +893,11 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
             }
         });
     }
+}
+
+/// Итог очистки и кнопки «проверить» / «удалить сирот».
+fn storage_cleanup(ui: &mut egui::Ui, admin: &mut AdminUi, stats: &StorageStats, bridge: &Bridge) {
+    let size = file_size;
     ui.add_space(14.0);
     if let Some(done) = &admin.cleanup {
         let text = if done.dry_run {
