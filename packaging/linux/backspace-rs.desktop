@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Backspace RS
+GenericName=Чат и голосовая связь
+GenericName[en]=Chat and voice
+Comment=Нативный клиент Backspace на Rust
+Comment[en]=Native Rust client for Backspace
+Exec=backspace-rs
+Icon=backspace-rs
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=backspace;chat;voice;discord;
+StartupWMClass=backspace-rs

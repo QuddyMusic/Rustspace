@@ -96,9 +96,26 @@ cargo build --release -p bs-app --features voice           # с голосом (
 - для сборки без голоса отдельных пакетов обычно не нужно;
 - для звуков интерфейса (`--features sounds`, входит в `voice`) на Linux нужна `libasound2-dev`
   (Fedora: `alsa-lib-devel`);
-- для голоса (`--features voice`) при сборке скачивается `libwebrtc`, нужны `clang`/`libclang`,
-  `pkg-config`; на Linux — ещё заголовки PipeWire (захват звука и экрана) и средства разработки X11/Wayland;
+- для голоса (`--features voice`) при сборке скачивается `libwebrtc`, нужны **clang 21+**
+  (`CC`/`CXX` можно указать явно) и `libclang`, `pkg-config`; на Linux — ещё заголовки PipeWire
+  (захват звука и экрана) и средства разработки X11/Wayland;
+- для хранения токена в системном keyring на Linux нужна `libdbus-1-dev` (при сборке) и
+  демон Secret Service (gnome-keyring, KWallet) при работе; без него токен пишется в файл `0600`;
 - диалоги выбора файла на Linux используют `xdg-desktop-portal` или `zenity`.
+
+Настройки клиента (тема, масштаб, голос, звуки, уведомления, горячие клавиши) лежат рядом,
+в `prefs.json`; тему можно экспортировать и импортировать файлом в «Настройки → Внешний вид».
+
+### Упаковка
+
+```sh
+cargo install cargo-packager --locked
+cargo packager --release -p bs-app --formats deb,appimage   # Linux
+cargo packager --release -p bs-app --formats dmg            # macOS
+cargo packager --release -p bs-app --formats nsis           # Windows
+```
+
+Пакеты появятся в `target/packages`. Иконка и `.desktop` — в `packaging/linux`.
 
 ### Терминальный клиент
 
@@ -113,6 +130,14 @@ cargo run -p bs-tui -- --allow-insecure  # разрешить http вне loopba
 cargo test --workspace                   # тесты
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
+```
+
+Контрактные тесты против настоящего сервера Backspace (нужны Node.js 22+ и `pnpm install`
+в его checkout):
+
+```sh
+cargo xtask contract --server ../backspace          # поднять оригинал и проверить клиент
+cargo xtask contract --url http://127.0.0.1:3000    # против уже запущенного сервера
 ```
 
 Алиасы: `cargo fc` (fmt --check), `cargo c` (clippy), `cargo t` (тесты), `cargo f` (fmt).

@@ -56,11 +56,20 @@ fn main() -> eframe::Result {
         }
     };
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1100.0, 720.0])
+        .with_min_inner_size([720.0, 480.0])
+        .with_title("Backspace RS")
+        // Совпадает с StartupWMClass в .desktop: окно получает иконку панели.
+        .with_app_id("backspace-rs");
+    match eframe::icon_data::from_png_bytes(include_bytes!(
+        "../../../packaging/linux/backspace-rs.png"
+    )) {
+        Ok(icon) => viewport = viewport.with_icon(icon),
+        Err(err) => tracing::warn!(%err, "иконка окна не загружена"),
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1100.0, 720.0])
-            .with_min_inner_size([720.0, 480.0])
-            .with_title("Backspace RS"),
+        viewport,
         ..Default::default()
     };
 

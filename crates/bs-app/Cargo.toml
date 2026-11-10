@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description = "Нативный клиент Backspace на Rust (GUI)"
+homepage = "https://github.com/TheZwiss/backspace"
 
 [lints]
 workspace = true
@@ -11,6 +13,29 @@ workspace = true
 [[bin]]
 name = "backspace-rs"
 path = "src/main.rs"
+
+# Упаковка: `cargo packager --release -p bs-app --formats deb,appimage`
+# (Linux), `--formats dmg` (macOS), `--formats nsis` (Windows).
+[package.metadata.packager]
+product-name = "Backspace RS"
+authors = ["Backspace RS contributors"]
+identifier = "io.github.thezwiss.backspace-rs"
+category = "SocialNetworking"
+description = "Нативный клиент Backspace: чат, ЛС, пространства и голос"
+icons = ["../../packaging/linux/backspace-rs.png"]
+before-packaging-command = "cargo build --release -p bs-app --features voice"
+out-dir = "../../target/packages"
+binaries = [{ path = "backspace-rs", main = true }]
+
+[package.metadata.packager.deb]
+# libasound — звук, libdbus — хранилище ключей и уведомления, libxkbcommon/
+# libwayland/libGL — окно. libwebrtc вшита статически.
+depends = ["libasound2 | libasound2t64", "libdbus-1-3", "libxkbcommon0", "libwayland-client0", "libgl1"]
+section = "net"
+desktop-template = "../../packaging/linux/backspace-rs.desktop"
+
+[package.metadata.packager.appimage]
+bins = []
 
 [features]
 # Голос через LiveKit: нужна libwebrtc (скачивается при сборке `webrtc-sys`).
