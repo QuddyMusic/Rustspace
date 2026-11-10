@@ -39,6 +39,8 @@ pub(super) enum Nav {
     Friends,
     /// Обзор пространств.
     Explore,
+    /// Страница «Backspace».
+    Backspace,
     /// Открыть пространство.
     Space((usize, String)),
     /// Открыть канал или беседу.
@@ -128,6 +130,8 @@ pub(crate) struct ChatScreen {
     view: View,
     /// Состояние друзей и обзора.
     home: HomeState,
+    /// Страница «Backspace».
+    hub: super::hub::HubPage,
     /// Пространство, открытое в колонке каналов; `None` — главная.
     active_space: Option<(usize, String)>,
     /// Последний открытый канал в каждом пространстве.
@@ -293,7 +297,9 @@ impl ChatScreen {
     fn route_actions(&mut self, bridge: &mut Bridge, ctx: &egui::Context) {
         let wanted = match self.view {
             View::Channel => self.selected_channel.as_ref().map(|s| s.origin),
-            View::Friends | View::Explore => self.active_space.as_ref().map(|(o, _)| *o),
+            View::Friends | View::Explore | View::Backspace => {
+                self.active_space.as_ref().map(|(o, _)| *o)
+            }
         }
         .unwrap_or(0);
         bridge.focus_on(wanted);
@@ -320,6 +326,11 @@ impl ChatScreen {
                 self.active_space = None;
                 self.view = View::Explore;
                 bridge.load_explore(&self.home.explore_query);
+            }
+            Nav::Backspace => {
+                self.active_space = None;
+                self.view = View::Backspace;
+                self.hub = super::hub::HubPage::default();
             }
             Nav::Space((origin, id)) => {
                 if let Some(space) = items.iter().find(|s| s.origin == origin && s.id == id) {
@@ -450,6 +461,10 @@ impl ChatScreen {
                 home::show_active_now(ui, bridge);
                 main_module(ui, |ui| home::show_friends(ui, &mut self.home, bridge));
             }
+            View::Backspace => {
+                let hub = &mut self.hub;
+                main_module(ui, |ui| super::hub::show(ui, hub, bridge));
+            }
             View::Explore => {
                 let mut create = false;
                 let target = main_module(ui, |ui| {
@@ -561,6 +576,7 @@ impl ChatScreen {
             self.show_members = true;
         }
         self.home.ensure_loaded(bridge);
+        bridge.ensure_home_info();
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
         self.drive_voice(&ctx, bridge, now);

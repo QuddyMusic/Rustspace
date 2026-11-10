@@ -1032,6 +1032,18 @@ impl Bridge {
         self.slots.get(index)?.session.cache()
     }
 
+    /// Запрашивает сведения о домашнем инстансе, если их ещё нет.
+    pub(crate) fn ensure_home_info(&mut self) {
+        if let Some(home) = self.slots.first_mut() {
+            home.session.ensure_instance_info();
+        }
+    }
+
+    /// Сведения о домашнем инстансе, если пришли.
+    pub(crate) fn home_info(&self) -> Option<&Result<Box<bs_api::InstanceInfo>, String>> {
+        self.slots.first()?.session.instance_info()
+    }
+
     /// Адрес инстанса по номеру.
     pub(crate) fn base_at(&self, index: usize) -> Option<&str> {
         self.slots.get(index)?.base.as_deref()

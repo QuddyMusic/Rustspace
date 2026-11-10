@@ -183,6 +183,11 @@ pub(crate) struct Prefs {
     pub(crate) keybinds: std::collections::BTreeMap<Action, Keybind>,
     /// Язык интерфейса (код каталога: `ru`, `en`, …).
     pub(crate) language: String,
+    /// Обновления клиента.
+    pub(crate) updates: crate::updates::UpdatePrefs,
+    /// Какую версию домашнего инстанса видел пользователь на странице
+    /// «Backspace»: ключ — `id@адрес`.
+    pub(crate) hub_seen: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for Prefs {
@@ -195,6 +200,8 @@ impl Default for Prefs {
             desktop: DesktopPrefs::default(),
             keybinds: std::collections::BTreeMap::new(),
             language: "ru".to_owned(),
+            updates: crate::updates::UpdatePrefs::default(),
+            hub_seen: std::collections::BTreeMap::new(),
         }
     }
 }

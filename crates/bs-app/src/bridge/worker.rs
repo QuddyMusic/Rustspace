@@ -1252,6 +1252,13 @@ async fn spaces_request(
                 Err(err) => Err(err.to_string()),
             })
         }
+        BridgeRequest::InstanceInfo => BridgeResponse::InstanceInfo(
+            client
+                .instance_info()
+                .await
+                .map(Box::new)
+                .map_err(|err| err.to_string()),
+        ),
         BridgeRequest::JoinSpace { id, by_request } => {
             if by_request {
                 match client.request_join_space(&id, None).await {

@@ -221,6 +221,8 @@ pub(crate) enum BridgeRequest {
     Explore(String),
     /// Общий каталог пространств других инстансов (через свой инстанс).
     Directory(String),
+    /// Сведения об инстансе (`GET /api/instance/info`): версия, ссылки.
+    InstanceInfo,
     /// Вступить в пространство: сразу (публичное) или заявкой.
     JoinSpace {
         /// Идентификатор пространства.
@@ -878,6 +880,8 @@ pub(crate) enum BridgeResponse {
     Explore(bs_api::ExplorePage),
     /// Пришёл общий каталог (или почему его нет).
     Directory(Result<Vec<bs_api::DirectoryEntry>, String>),
+    /// Сведения об инстансе.
+    InstanceInfo(Result<Box<bs_api::InstanceInfo>, String>),
     /// Пространство создано или принято вступление.
     Space(Box<bs_types::SpaceWithChannelsAndMembers>),
     /// Профиль сохранён; пришла его новая версия.

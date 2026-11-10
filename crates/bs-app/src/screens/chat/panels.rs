@@ -17,6 +17,8 @@ pub(crate) enum View {
     Explore,
     /// Лента выбранного канала.
     Channel,
+    /// Страница «Backspace» (проектный хаб).
+    Backspace,
 }
 
 /// ПКМ по каналу: «Настройки уведомлений» и «Настройки канала».
@@ -345,6 +347,7 @@ impl ChatScreen {
                 }
 
                 let filter = self.sidebar_filter.trim().to_lowercase();
+                let hub_dot = crate::screens::hub::has_update(bridge);
                 egui::ScrollArea::vertical()
                     .id_salt("channel_list")
                     .auto_shrink([false, false])
@@ -355,7 +358,7 @@ impl ChatScreen {
                         }) {
                             self.channel_list(ui, space, &filter, nav);
                         } else {
-                            self.home_list(ui, dms, &filter, nav);
+                            self.home_list(ui, dms, &filter, hub_dot, nav);
                         }
                     });
             });
@@ -527,6 +530,7 @@ impl ChatScreen {
         ui: &mut egui::Ui,
         dms: &[SidebarDm],
         filter: &str,
+        hub_dot: bool,
         nav: &mut Option<Nav>,
     ) {
         if widgets::nav_row(ui, Icon::User, tr("Друзья"), self.view == View::Friends).clicked()
@@ -536,6 +540,16 @@ impl ChatScreen {
         if widgets::nav_row(ui, Icon::Compass, tr("Обзор"), self.view == View::Explore).clicked()
         {
             *nav = Some(Nav::Explore);
+        }
+        if widgets::brand_row(ui, "Backspace", self.view == View::Backspace, hub_dot)
+            .on_hover_text(if hub_dot {
+                tr("Backspace обновлён")
+            } else {
+                tr("О проекте Backspace")
+            })
+            .clicked()
+        {
+            *nav = Some(Nav::Backspace);
         }
         ui.add_space(12.0);
         ui.horizontal(|ui| {

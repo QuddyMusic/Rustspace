@@ -220,6 +220,8 @@ pub(crate) enum SettingsSection {
     Notifications,
     /// Язык интерфейса.
     Language,
+    /// Версия клиента и проверка его обновлений.
+    About,
     /// Приватность.
     Privacy,
     /// Соединение с инстансом.
@@ -251,6 +253,7 @@ impl SettingsSection {
             Self::Hotkeys => tr("Горячие клавиши"),
             Self::Notifications => tr("Уведомления"),
             Self::Language => tr("Язык"),
+            Self::About => tr("О клиенте"),
             Self::Privacy => tr("Приватность"),
             Self::Connections => tr("Подключения"),
             Self::Instance => tr("Инстанс"),
@@ -637,6 +640,7 @@ fn settings_nav(
                     SettingsSection::Hotkeys,
                     SettingsSection::Language,
                     SettingsSection::Connections,
+                    SettingsSection::About,
                 ],
                 &mut state.section,
             );
@@ -726,6 +730,7 @@ fn section_content(
         SettingsSection::Hotkeys => super::settings_app::hotkeys(ui, &mut state.hotkeys),
         SettingsSection::Notifications => super::settings_app::notifications(ui),
         SettingsSection::Language => super::settings_app::language(ui),
+        SettingsSection::About => super::settings_app::about(ui, bridge),
         SettingsSection::Privacy => privacy(ui, state, me, bridge),
         SettingsSection::Connections => connections(ui, state, bridge, action),
         SettingsSection::Instance if me.is_admin => {

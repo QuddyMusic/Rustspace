@@ -187,6 +187,47 @@ impl BackspaceApp {
     }
 }
 
+/// Полоса «Доступна новая версия клиента».
+fn update_strip(ui: &mut egui::Ui, prefs: &crate::updates::UpdatePrefs) {
+    let Some(release) = crate::updates::offer(prefs) else {
+        return;
+    };
+    egui::Panel::top("client_update")
+        .resizable(false)
+        .frame(
+            egui::Frame::new()
+                .fill(theme::accent())
+                .inner_margin(egui::Margin::symmetric(16, 6)),
+        )
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(crate::tf!(
+                        "Доступна новая версия Backspace RS: {version} (у вас {current})",
+                        version = release.version,
+                        current = crate::updates::CURRENT
+                    ))
+                    .color(theme::on_accent())
+                    .family(theme::bold_family()),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button(tr("Пропустить версию")).clicked() {
+                        let version = release.version.clone();
+                        crate::prefs::update(|prefs| prefs.updates.skipped = Some(version));
+                    }
+                    if ui.small_button(tr("Что нового")).clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(&release.page));
+                    }
+                    if let Some(download) = &release.download
+                        && ui.small_button(tr("Скачать")).clicked()
+                    {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(download));
+                    }
+                });
+            });
+        });
+}
+
 impl eframe::App for BackspaceApp {
     fn on_exit(&mut self) {
         crate::prefs::flush(true);
@@ -246,9 +287,14 @@ impl eframe::App for BackspaceApp {
             self.screen = Screen::Chat;
         }
 
+        crate::updates::tick(&self.bridge.runtime(), ui.ctx(), &prefs.updates);
         match self.screen {
-            Screen::Login => self.login.show(ui, &mut self.bridge),
+            Screen::Login => {
+                update_strip(ui, &prefs.updates);
+                self.login.show(ui, &mut self.bridge);
+            }
             Screen::Chat => {
+                update_strip(ui, &prefs.updates);
                 self.notice_strip(ui);
                 if self.chat.show(ui, &mut self.bridge) == ChatAction::Logout {
                     self.bridge.logout();

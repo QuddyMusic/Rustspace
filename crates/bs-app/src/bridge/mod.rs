@@ -130,6 +130,10 @@ pub(crate) struct Session {
     explore: Option<bs_api::ExplorePage>,
     /// Общий каталог других инстансов: пространства или причина, почему его нет.
     directory: Option<Result<Vec<bs_api::DirectoryEntry>, String>>,
+    /// Сведения об инстансе (для страницы «Backspace»).
+    instance_info: Option<Result<Box<bs_api::InstanceInfo>, String>>,
+    /// Запрос сведений об инстансе уже ушёл.
+    instance_info_asked: bool,
     /// Идёт ли запрос каталога.
     explore_loading: bool,
     /// Пространство, только что созданное или в которое вступили.

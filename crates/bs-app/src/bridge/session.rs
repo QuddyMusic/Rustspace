@@ -52,6 +52,8 @@ impl Session {
             images_ready: Vec::new(),
             explore: None,
             directory: None,
+            instance_info: None,
+            instance_info_asked: false,
             explore_loading: false,
             opened_space: None,
             info: None,
@@ -904,6 +906,18 @@ impl Session {
     /// Общий каталог других инстансов, если пришёл.
     pub(crate) fn directory(&self) -> Option<&Result<Vec<bs_api::DirectoryEntry>, String>> {
         self.directory.as_ref()
+    }
+
+    /// Запрашивает сведения об инстансе один раз за сессию.
+    pub(crate) fn ensure_instance_info(&mut self) {
+        if self.instance_info.is_none() && !self.instance_info_asked && self.is_live() {
+            self.instance_info_asked = self.request(BridgeRequest::InstanceInfo);
+        }
+    }
+
+    /// Сведения об инстансе, если уже пришли.
+    pub(crate) fn instance_info(&self) -> Option<&Result<Box<bs_api::InstanceInfo>, String>> {
+        self.instance_info.as_ref()
     }
 
     /// Ошибка последнего REST-запроса.

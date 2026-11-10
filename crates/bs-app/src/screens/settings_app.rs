@@ -152,6 +152,103 @@ pub(crate) fn language(ui: &mut egui::Ui) {
     }
 }
 
+/// «О клиенте»: версия и проверка обновлений по релизам репозитория клиента.
+pub(crate) fn about(ui: &mut egui::Ui, bridge: &crate::fleet::Bridge) {
+    use crate::updates::{self, UpdateState};
+    page_title(ui, tr("О клиенте"));
+    let mut prefs = crate::prefs::get().updates;
+    let before = prefs.clone();
+    card(ui, |ui| {
+        ui.label(
+            RichText::new(crate::tf!(
+                "Backspace RS {version}",
+                version = updates::CURRENT
+            ))
+            .size(16.0)
+            .color(theme::text_bright()),
+        );
+        ui.label(theme::muted(tr(
+            "Нативный клиент Backspace на Rust: egui, свой звук и видео через LiveKit.",
+        )));
+    });
+    ui.add_space(12.0);
+    card(ui, |ui| {
+        setting_row(
+            ui,
+            tr("Проверять обновления"),
+            tr("Раз в шесть часов клиент смотрит релизы своего репозитория на GitHub."),
+            &mut prefs.enabled,
+        );
+        setting_row(
+            ui,
+            tr("Предварительные версии"),
+            tr("Предлагать и бета-выпуски."),
+            &mut prefs.prereleases,
+        );
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(tr("Репозиторий клиента"));
+            ui.add(
+                egui::TextEdit::singleline(&mut prefs.repo)
+                    .hint_text("owner/repo")
+                    .desired_width(240.0),
+            );
+        });
+        let repo = prefs.repo.trim();
+        if !repo.is_empty() && !updates::valid_repo(repo) {
+            ui.label(
+                theme::muted(tr("Нужен вид owner/repo, например owner/backspace-rs"))
+                    .color(theme::rose()),
+            );
+        }
+        ui.add_space(8.0);
+        let state = updates::state();
+        let busy = state == UpdateState::Checking;
+        if ui
+            .add_enabled(!busy, egui::Button::new(tr("Проверить сейчас")))
+            .clicked()
+        {
+            updates::check_now(&bridge.runtime(), ui.ctx(), &prefs);
+        }
+        let text = match &state {
+            UpdateState::Idle => String::new(),
+            UpdateState::Checking => tr("Проверяем…").to_owned(),
+            UpdateState::UpToDate => tr("Установлена последняя версия").to_owned(),
+            UpdateState::Available(release) => {
+                crate::tf!("Доступна версия {version}", version = release.version)
+            }
+            UpdateState::Failed(err) => crate::tf!("Не удалось проверить: {err}", err = err),
+        };
+        if !text.is_empty() {
+            ui.add(egui::Label::new(theme::muted(text)).wrap());
+        }
+        if let UpdateState::Available(release) = updates::state() {
+            ui.add_space(6.0);
+            if !release.notes.is_empty() {
+                ui.label(theme::muted(release.notes.clone()).size(12.5));
+            }
+            ui.horizontal(|ui| {
+                ui.hyperlink_to(tr("Страница релиза"), &release.page);
+                if let Some(download) = &release.download {
+                    ui.hyperlink_to(tr("Скачать"), download);
+                }
+            });
+            if prefs.skipped.as_deref() == Some(release.version.as_str())
+                && ui
+                    .small_button(tr("Снова напоминать об этой версии"))
+                    .clicked()
+            {
+                prefs.skipped = None;
+            }
+        }
+    });
+    let trimmed = prefs.repo.trim().to_owned();
+    prefs.repo = trimmed;
+    if prefs != before {
+        crate::prefs::update(|saved| saved.updates = prefs);
+    }
+}
+
 /// «Уведомления»: системные всплывающие уведомления.
 pub(crate) fn notifications(ui: &mut egui::Ui) {
     page_title(ui, tr("Уведомления"));

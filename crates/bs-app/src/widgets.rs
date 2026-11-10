@@ -338,6 +338,51 @@ pub(crate) fn nav_row(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// Пункт главной со знаком Backspace и точкой «обновлено».
+pub(crate) fn brand_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    selected: bool,
+    dot: bool,
+) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 42.0), Sense::click());
+    let row = rect.shrink2(egui::vec2(8.0, 1.0));
+    if selected {
+        ui.painter()
+            .rect_filled(row, crate::theme::rounded(8), bg_active());
+    } else if response.hovered() {
+        ui.painter()
+            .rect_filled(row, crate::theme::rounded(8), bg_hover());
+    }
+    let color = if selected {
+        text_bright()
+    } else {
+        text_muted()
+    };
+    crate::brand::paint(
+        ui.painter(),
+        egui::pos2(row.left() + 22.0, row.center().y),
+        15.0,
+        color,
+    );
+    ui.painter().text(
+        egui::pos2(row.left() + 44.0, row.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(15.0),
+        color,
+    );
+    if dot {
+        ui.painter().circle_filled(
+            egui::pos2(row.right() - 14.0, row.center().y),
+            4.5,
+            crate::theme::accent(),
+        );
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 /// Компактная строка для панели «Сейчас онлайн».
 pub(crate) fn compact_person<'a>(
     ui: &mut egui::Ui,

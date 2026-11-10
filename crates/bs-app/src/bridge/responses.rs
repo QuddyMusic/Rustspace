@@ -176,6 +176,7 @@ impl Session {
             BridgeResponse::VoiceToken(event) => self.voice_in.push(event),
             BridgeResponse::SpaceAction(event) => self.apply_space_event(event),
             BridgeResponse::Directory(result) => self.directory = Some(result),
+            BridgeResponse::InstanceInfo(result) => self.instance_info = Some(result),
             BridgeResponse::Raw { tag, result } => self.raw_ready.push((tag, result)),
             BridgeResponse::Download { id, state } => self.downloads_ready.push((id, state)),
             BridgeResponse::Credential { origin, result } => self.issued.push((origin, result)),
