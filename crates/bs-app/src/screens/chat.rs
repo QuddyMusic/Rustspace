@@ -9,6 +9,7 @@ use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
 
 use crate::bridge::{BridgeRequest, ChannelKind, HistoryState};
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::logic::{
     author_name, connection_label, message_actions, outgoing_text, should_ack, should_load_older,
@@ -439,7 +440,7 @@ pub(crate) enum MemberSection {
 
 impl MemberRow {
     /// Секция, в которой участник показывается.
-    pub(crate) const fn section(&self) -> MemberSection {
+    pub(crate) fn section(&self) -> MemberSection {
         if self.owner {
             MemberSection::Owner
         } else if matches!(self.status, UserStatus::Offline) {
@@ -452,11 +453,11 @@ impl MemberRow {
 
 impl MemberSection {
     /// Заголовок секции без числа.
-    pub(crate) const fn title(self) -> &'static str {
+    pub(crate) fn title(self) -> &'static str {
         match self {
-            Self::Owner => "Владелец",
-            Self::Online => "В сети",
-            Self::Offline => "Не в сети",
+            Self::Owner => tr("Владелец"),
+            Self::Online => tr("В сети"),
+            Self::Offline => tr("Не в сети"),
         }
     }
 }
@@ -723,9 +724,9 @@ fn message_rows(
 fn typing_text(names: &[String]) -> Option<String> {
     match names {
         [] => None,
-        [one] => Some(format!("{one} печатает…")),
-        [a, b] => Some(format!("{a} и {b} печатают…")),
-        _ => Some("Несколько человек печатают…".to_owned()),
+        [one] => Some(crate::tf!("{one} печатает…", one = one)),
+        [a, b] => Some(crate::tf!("{a} и {b} печатают…", a = a, b = b)),
+        _ => Some(tr("Несколько человек печатают…").to_owned()),
     }
 }
 
@@ -754,7 +755,7 @@ fn channel_menu(
     nav: &mut Option<Nav>,
 ) {
     row.context_menu(|ui| {
-        if ui.button("Настройки уведомлений").clicked() {
+        if ui.button(tr("Настройки уведомлений")).clicked() {
             *nav = Some(Nav::Notifications {
                 origin: space.origin,
                 space_id: space.id.clone(),
@@ -762,7 +763,8 @@ fn channel_menu(
             });
             ui.close();
         }
-        if space.rights.manage_channels && ui.button("Настройки канала").clicked() {
+        if space.rights.manage_channels && ui.button(tr("Настройки канала")).clicked()
+        {
             *nav = Some(Nav::ChannelSettings {
                 origin: space.origin,
                 space_id: space.id.clone(),
@@ -792,7 +794,7 @@ fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) 
             if space.rights.invite
                 && ui
                     .add(widgets::flat_icon(Icon::Users, 20.0, theme::text_muted()))
-                    .on_hover_text("Пригласить людей")
+                    .on_hover_text(tr("Пригласить людей"))
                     .clicked()
             {
                 *nav = Some(Nav::Invite {
@@ -803,7 +805,7 @@ fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) 
             if space.rights.can_open_settings()
                 && ui
                     .add(widgets::flat_icon(Icon::Gear, 20.0, theme::text_muted()))
-                    .on_hover_text("Настройки пространства")
+                    .on_hover_text(tr("Настройки пространства"))
                     .clicked()
             {
                 *nav = Some(Nav::SpaceSettings {
@@ -823,8 +825,10 @@ fn create_buttons(
     nav: &mut Option<Nav>,
 ) {
     ui.add_space(12.0);
-    for (label, category) in [("Создать канал", false), ("Создать категорию", true)]
-    {
+    for (label, category) in [
+        (tr("Создать канал"), false),
+        (tr("Создать категорию"), true),
+    ] {
         if widgets::nav_row(ui, Icon::Plus, label, false).clicked() {
             *nav = Some(Nav::SpaceDialog(if category {
                 super::space_dialogs::SpaceDialog::category(space.origin, &space.id)
@@ -848,14 +852,14 @@ fn space_menu(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
         .iter()
         .filter_map(|g| Some((g.id.clone()?, g.name.clone()?)))
         .collect();
-    if space.rights.invite && ui.button("Пригласить людей").clicked() {
+    if space.rights.invite && ui.button(tr("Пригласить людей")).clicked() {
         *nav = Some(Nav::Invite {
             origin: space.origin,
             space_id: space.id.clone(),
         });
         ui.close();
     }
-    if ui.button("Настройки уведомлений").clicked() {
+    if ui.button(tr("Настройки уведомлений")).clicked() {
         *nav = Some(Nav::Notifications {
             origin: space.origin,
             space_id: space.id.clone(),
@@ -863,7 +867,7 @@ fn space_menu(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
         });
         ui.close();
     }
-    if space.rights.can_open_settings() && ui.button("Настройки пространства").clicked()
+    if space.rights.can_open_settings() && ui.button(tr("Настройки пространства")).clicked()
     {
         *nav = Some(Nav::SpaceSettings {
             origin: space.origin,
@@ -872,7 +876,7 @@ fn space_menu(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
         ui.close();
     }
     if space.rights.manage_channels {
-        if ui.button("Создать канал").clicked() {
+        if ui.button(tr("Создать канал")).clicked() {
             *nav = Some(Nav::SpaceDialog(SpaceDialog::channel(
                 space.origin,
                 &space.id,
@@ -881,7 +885,7 @@ fn space_menu(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
             )));
             ui.close();
         }
-        if ui.button("Создать категорию").clicked() {
+        if ui.button(tr("Создать категорию")).clicked() {
             *nav = Some(Nav::SpaceDialog(SpaceDialog::category(
                 space.origin,
                 &space.id,
@@ -894,7 +898,7 @@ fn space_menu(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
             ui.separator();
         }
         if ui
-            .button(RichText::new("Покинуть пространство").color(theme::rose()))
+            .button(RichText::new(tr("Покинуть пространство")).color(theme::rose()))
             .clicked()
         {
             *nav = Some(Nav::SpaceDialog(SpaceDialog::leave(
@@ -1491,7 +1495,7 @@ impl ChatScreen {
                         Ok(code) => {
                             let base = bridge.base_at(origin).unwrap_or_default();
                             ctx.copy_text(bs_api::invite_url(base, code));
-                            "Ссылка-приглашение скопирована".to_owned()
+                            tr("Ссылка-приглашение скопирована").to_owned()
                         }
                         Err(err) => err.clone(),
                     };
@@ -1509,9 +1513,9 @@ impl ChatScreen {
                     ..
                 } => {
                     let text = if matches!(event, SpaceEvent::Left { .. }) {
-                        "Вы покинули пространство"
+                        tr("Вы покинули пространство")
                     } else {
-                        "Пространство удалено"
+                        tr("Пространство удалено")
                     };
                     self.toast = Some((text.to_owned(), now + 3.0));
                     if self
@@ -1614,7 +1618,7 @@ impl ChatScreen {
                         ui.spacing_mut().item_spacing.y = 8.0;
                         let home = self.active_space.is_none() && self.view == View::Friends;
                         if theme::rail_home(ui, home, dm_unread)
-                            .on_hover_text("Главная")
+                            .on_hover_text(tr("Главная"))
                             .clicked()
                         {
                             *nav = Some(Nav::Friends);
@@ -1650,13 +1654,13 @@ impl ChatScreen {
                             }
                         }
                         if widgets::rail_action(ui, Icon::Plus, theme::mint(), false)
-                            .on_hover_text("Создать пространство")
+                            .on_hover_text(tr("Создать пространство"))
                             .clicked()
                         {
                             *nav = Some(Nav::CreateSpace);
                         }
                         if widgets::rail_action(ui, Icon::Join, theme::sky(), false)
-                            .on_hover_text("Присоединиться к пространству")
+                            .on_hover_text(tr("Присоединиться к пространству"))
                             .clicked()
                         {
                             *nav =
@@ -1668,7 +1672,7 @@ impl ChatScreen {
                             theme::sky(),
                             self.view == View::Explore,
                         )
-                        .on_hover_text("Обзор пространств")
+                        .on_hover_text(tr("Обзор пространств"))
                         .clicked()
                         {
                             *nav = Some(Nav::Explore);
@@ -1704,9 +1708,9 @@ impl ChatScreen {
                     )
                     .show(ui, |ui| {
                         let hint = if self.active_space.is_some() {
-                            "Найти канал"
+                            tr("Найти канал")
                         } else {
-                            "Найти или начать беседу"
+                            tr("Найти или начать беседу")
                         };
                         let response = widgets::search_box(ui, &mut self.sidebar_filter, hint);
                         let submitted =
@@ -1754,9 +1758,9 @@ impl ChatScreen {
             (c.origin, c.channel_id.as_str()) == (space.origin, channel.id.as_str())
         });
         let row = theme::voice_row(ui, &channel.name, active).on_hover_text(if active {
-            "Нажмите, чтобы отключиться"
+            tr("Нажмите, чтобы отключиться")
         } else {
-            "Нажмите, чтобы подключиться"
+            tr("Нажмите, чтобы подключиться")
         });
         if channel.muted {
             theme::muted_mark(ui, &row.rect);
@@ -1839,7 +1843,7 @@ impl ChatScreen {
                 }
                 if let Some(id) = group.id.as_ref().filter(|_| space.rights.manage_channels) {
                     header.label.context_menu(|ui| {
-                        if ui.button("Настройки категории").clicked() {
+                        if ui.button(tr("Настройки категории")).clicked() {
                             *nav = Some(Nav::ChannelSettings {
                                 origin: space.origin,
                                 space_id: space.id.clone(),
@@ -1892,28 +1896,30 @@ impl ChatScreen {
 
     /// Главная: «Друзья», «Обзор» и личные беседы.
     fn home_list(&self, ui: &mut egui::Ui, dms: &[SidebarDm], filter: &str, nav: &mut Option<Nav>) {
-        if widgets::nav_row(ui, Icon::User, "Друзья", self.view == View::Friends).clicked() {
+        if widgets::nav_row(ui, Icon::User, tr("Друзья"), self.view == View::Friends).clicked()
+        {
             *nav = Some(Nav::Friends);
         }
-        if widgets::nav_row(ui, Icon::Compass, "Обзор", self.view == View::Explore).clicked() {
+        if widgets::nav_row(ui, Icon::Compass, tr("Обзор"), self.view == View::Explore).clicked()
+        {
             *nav = Some(Nav::Explore);
         }
         ui.add_space(12.0);
         ui.horizontal(|ui| {
             ui.add_space(14.0);
-            widgets::section_label(ui, "Личные сообщения");
+            widgets::section_label(ui, tr("Личные сообщения"));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(10.0);
                 if ui
                     .add(widgets::flat_icon(Icon::Plus, 18.0, theme::text_muted()))
-                    .on_hover_text("Найти человека")
+                    .on_hover_text(tr("Найти человека"))
                     .clicked()
                 {
                     *nav = Some(Nav::SearchPeople(String::new()));
                 }
                 if ui
                     .add(widgets::flat_icon(Icon::Users, 18.0, theme::text_muted()))
-                    .on_hover_text("Создать группу")
+                    .on_hover_text(tr("Создать группу"))
                     .clicked()
                 {
                     *nav = Some(Nav::GroupCreate);
@@ -1960,9 +1966,9 @@ impl ChatScreen {
             ui.add_space(8.0);
             ui.vertical_centered(|ui| {
                 ui.label(theme::muted(if filter.is_empty() {
-                    "Бесед пока нет"
+                    tr("Бесед пока нет")
                 } else {
-                    "Нет совпадений — Enter, чтобы искать людей"
+                    tr("Нет совпадений — Enter, чтобы искать людей")
                 }));
             });
         }
@@ -2040,7 +2046,7 @@ impl ChatScreen {
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if widgets::icon_button(ui, Icon::Gear, 32.0)
-                                    .on_hover_text("Настройки")
+                                    .on_hover_text(tr("Настройки"))
                                     .clicked()
                                 {
                                     *nav = Some(Nav::Settings);
@@ -2052,9 +2058,9 @@ impl ChatScreen {
                                 };
                                 if widgets::icon_button(ui, phones, 30.0)
                                     .on_hover_text(if deafened {
-                                        "Включить звук"
+                                        tr("Включить звук")
                                     } else {
-                                        "Выключить звук"
+                                        tr("Выключить звук")
                                     })
                                     .clicked()
                                 {
@@ -2063,9 +2069,9 @@ impl ChatScreen {
                                 let mic = if muted { Icon::MicOff } else { Icon::Mic };
                                 if widgets::icon_button(ui, mic, 30.0)
                                     .on_hover_text(if muted {
-                                        "Включить микрофон"
+                                        tr("Включить микрофон")
                                     } else {
-                                        "Выключить микрофон"
+                                        tr("Выключить микрофон")
                                     })
                                     .clicked()
                                 {
@@ -2170,9 +2176,9 @@ impl ChatScreen {
             if ui
                 .add(widgets::flat_icon(Icon::Users, 22.0, color))
                 .on_hover_text(if self.show_members {
-                    "Скрыть участников"
+                    tr("Скрыть участников")
                 } else {
-                    "Показать участников"
+                    tr("Показать участников")
                 })
                 .clicked()
             {
@@ -2187,7 +2193,7 @@ impl ChatScreen {
             if dm.owner_id.is_some()
                 && ui
                     .add(widgets::flat_icon(Icon::Gear, 22.0, theme::text_faint()))
-                    .on_hover_text("Настройки группы")
+                    .on_hover_text(tr("Настройки группы"))
                     .clicked()
             {
                 self.group_dialog = Some(super::group_dm::GroupDialog::manage(selected.origin, dm));
@@ -2195,7 +2201,7 @@ impl ChatScreen {
             if self.voice.dm.is_none()
                 && ui
                     .add(widgets::flat_icon(Icon::Phone, 22.0, theme::text_faint()))
-                    .on_hover_text("Позвонить")
+                    .on_hover_text(tr("Позвонить"))
                     .clicked()
             {
                 self.pending_call = Some((
@@ -2212,7 +2218,7 @@ impl ChatScreen {
         };
         if ui
             .add(widgets::flat_icon(Icon::Search, 22.0, color))
-            .on_hover_text("Поиск по сообщениям")
+            .on_hover_text(tr("Поиск по сообщениям"))
             .clicked()
         {
             self.search.toggle();
@@ -2273,26 +2279,31 @@ impl ChatScreen {
 fn show_history_header(ui: &mut egui::Ui, history: &HistoryState) -> bool {
     if history.loading {
         ui.vertical_centered(|ui| {
-            ui.label(theme::muted("Загрузка истории…"));
+            ui.label(theme::muted(tr("Загрузка истории…")));
         });
     } else if let Some(error) = &history.error {
         ui.vertical_centered(|ui| {
             ui.label(
-                RichText::new(format!("Не удалось загрузить историю: {error}"))
-                    .color(theme::rose()),
+                RichText::new(crate::tf!(
+                    "Не удалось загрузить историю: {error}",
+                    error = error
+                ))
+                .color(theme::rose()),
             );
         });
-        return ui.button("Повторить").clicked();
+        return ui.button(tr("Повторить")).clicked();
     } else if history.exhausted {
         ui.vertical_centered(|ui| {
             ui.add_space(24.0);
             ui.label(
-                RichText::new("Это начало беседы")
+                RichText::new(tr("Это начало беседы"))
                     .size(18.0)
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
             );
-            ui.label(theme::muted("Здесь пока всё, что было написано раньше."));
+            ui.label(theme::muted(tr(
+                "Здесь пока всё, что было написано раньше.",
+            )));
             ui.add_space(16.0);
         });
     }
@@ -2304,15 +2315,15 @@ impl ChatScreen {
         let hint = match (&self.selected_channel, bridge.cache()) {
             (Some(selected), Some(cache)) => match selected.kind {
                 ChannelKind::Space => cache.channel(&selected.channel).map_or_else(
-                    || "Сообщение".to_owned(),
-                    |c| format!("Написать в #{}", c.name),
+                    || tr("Сообщение").to_owned(),
+                    |c| crate::tf!("Написать в #{a0}", a0 = c.name),
                 ),
                 ChannelKind::Dm => cache.dm_channel(&selected.channel).map_or_else(
-                    || "Сообщение".to_owned(),
-                    |dm| format!("Написать {}", dm_display_name(dm, &cache.me().id)),
+                    || tr("Сообщение").to_owned(),
+                    |dm| crate::tf!("Написать {a0}", a0 = dm_display_name(dm, &cache.me().id)),
                 ),
             },
-            _ => "Сообщение".to_owned(),
+            _ => tr("Сообщение").to_owned(),
         };
         let typing = self.selected_channel.as_ref().and_then(|selected| {
             let cache = bridge.cache()?;
@@ -2343,27 +2354,27 @@ impl ChatScreen {
                     ui.set_min_height(20.0);
                     if let Some(reply) = self.reply.clone().filter(|_| !self.is_editing()) {
                         ui.label(
-                            theme::muted(format!(
-                                "Ответ для {}: {}",
-                                reply.author,
-                                theme::truncate_chars(&reply.preview.replace('\n', " "), 60)
+                            theme::muted(crate::tf!(
+                                "Ответ для {a0}: {a1}",
+                                a0 = reply.author,
+                                a1 = theme::truncate_chars(&reply.preview.replace('\n', " "), 60)
                             ))
                             .size(12.5),
                         );
                         if ui
                             .small_button("✕")
-                            .on_hover_text("Отменить ответ")
+                            .on_hover_text(tr("Отменить ответ"))
                             .clicked()
                         {
                             self.reply = None;
                         }
                     } else if self.is_editing() {
                         ui.label(
-                            RichText::new("Правка сообщения")
+                            RichText::new(tr("Правка сообщения"))
                                 .color(theme::amber())
                                 .size(12.5),
                         );
-                        if ui.small_button("Отмена (Esc)").clicked() {
+                        if ui.small_button(tr("Отмена (Esc)")).clicked() {
                             self.cancel_edit();
                         }
                     } else if let Some(text) = &typing {
@@ -2470,9 +2481,9 @@ impl ChatScreen {
             .show(ui, |ui| {
                 let Some(selected) = self.selected_channel.clone() else {
                     ui.centered_and_justified(|ui| {
-                        ui.label(theme::muted(
+                        ui.label(theme::muted(tr(
                             "Выберите канал или беседу слева — или найдите друзей",
-                        ));
+                        )));
                     });
                     return;
                 };
@@ -2656,8 +2667,8 @@ impl ChatScreen {
                         .inner_margin(Margin::symmetric(14, 7))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.label(theme::muted("Вы смотрите старые сообщения"));
-                                if ui.button("К последним").clicked() {
+                                ui.label(theme::muted(tr("Вы смотрите старые сообщения")));
+                                if ui.button(tr("К последним")).clicked() {
                                     self.jump_to = None;
                                     bridge.return_to_present(&selected.channel);
                                 }
@@ -2674,7 +2685,7 @@ impl ChatScreen {
         };
         let mut open = true;
         let mut chosen = None;
-        egui::Window::new("Реакция")
+        egui::Window::new(tr("Реакция"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -2707,9 +2718,12 @@ impl ChatScreen {
                 ui.add_space(70.0);
                 ui.vertical(|ui| {
                     ui.label(
-                        RichText::new(format!("{} приглашает в пространство", row.author))
-                            .size(12.5)
-                            .color(theme::text_muted()),
+                        RichText::new(crate::tf!(
+                            "{a0} приглашает в пространство",
+                            a0 = row.author
+                        ))
+                        .size(12.5)
+                        .color(theme::text_muted()),
                     );
                     if let Some(join) =
                         super::invite_card::show(ui, bridge, selected.origin, invite)
@@ -2722,8 +2736,8 @@ impl ChatScreen {
             return;
         }
         let text = event.map_or_else(
-            || bs_types::GENERIC_SYSTEM_TEXT.to_owned(),
-            |event| event.text(&row.author, true),
+            || tr("Системное сообщение").to_owned(),
+            |event| crate::social::system_text(event, &row.author, true),
         );
         let glyph = event
             .and_then(bs_types::DmSystemEvent::glyph)
@@ -2920,13 +2934,13 @@ impl ChatScreen {
         let mut save_request: Option<crate::download::Click> = None;
         response.context_menu(|ui| {
             if let Some(value) = &image {
-                if ui.button("Копировать картинку").clicked() {
+                if ui.button(tr("Копировать картинку")).clicked() {
                     if let Some(hub) = crate::images::ImageHub::of(ui.ctx()) {
                         hub.request_raw(value, crate::images::RawPurpose::Copy);
                     }
                     ui.close();
                 }
-                if ui.button("Сохранить как…").clicked() {
+                if ui.button(tr("Сохранить как…")).clicked() {
                     let name = row
                         .attachments
                         .iter()
@@ -2941,55 +2955,55 @@ impl ChatScreen {
                 if gif_url.is_some()
                     && ui
                         .button(if gif_favorite {
-                            "Убрать из избранных GIF"
+                            tr("Убрать из избранных GIF")
                         } else {
-                            "В избранные GIF"
+                            tr("В избранные GIF")
                         })
                         .clicked()
                 {
                     favorite_request = true;
                     ui.close();
                 }
-                if can_collect && ui.button("Сохранить в мои стикеры").clicked()
+                if can_collect && ui.button(tr("Сохранить в мои стикеры")).clicked()
                 {
                     if let Some(hub) = crate::images::ImageHub::of(ui.ctx()) {
                         hub.request_raw(
                             value,
-                            crate::images::RawPurpose::Sticker("Стикер".to_owned()),
+                            crate::images::RawPurpose::Sticker(tr("Стикер").to_owned()),
                         );
                     }
                     ui.close();
                 }
                 ui.separator();
             }
-            if ui.button("Ответить").clicked() {
+            if ui.button(tr("Ответить")).clicked() {
                 reply_request = true;
                 ui.close();
             }
-            if ui.button("Добавить реакцию…").clicked() {
+            if ui.button(tr("Добавить реакцию…")).clicked() {
                 open_picker = true;
                 ui.close();
             }
             if !row.body.is_empty()
                 && media::sticker_of(&row.body).is_none()
                 && media::gif_of(&row.body).is_none()
-                && ui.button("Копировать текст").clicked()
+                && ui.button(tr("Копировать текст")).clicked()
             {
                 ui.ctx().copy_text(row.body.clone());
                 ui.close();
             }
-            if ui.button("Отметить непрочитанным").clicked() {
+            if ui.button(tr("Отметить непрочитанным")).clicked() {
                 bridge.send(bs_types::ClientEvent::MarkUnread {
                     channel_id: selected.channel.clone(),
                     message_id: message_id.clone(),
                 });
                 ui.close();
             }
-            if manage && ui.button("Изменить").clicked() {
+            if manage && ui.button(tr("Изменить")).clicked() {
                 *edit_request = Some((message_id.clone(), row.body.clone()));
                 ui.close();
             }
-            if manage && ui.button("Удалить").clicked() {
+            if manage && ui.button(tr("Удалить")).clicked() {
                 bridge.delete_message(selected.kind, message_id.clone());
                 ui.close();
             }

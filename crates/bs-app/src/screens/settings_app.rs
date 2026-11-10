@@ -7,6 +7,7 @@ use egui::{Align, Layout, RichText};
 
 use super::dialogs::{card, page_title};
 use super::settings_extra::setting_row;
+use crate::i18n::tr;
 use crate::prefs::Action;
 use crate::theme;
 
@@ -21,7 +22,7 @@ pub(crate) struct HotkeysState {
 
 /// «Горячие клавиши».
 pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
-    page_title(ui, "Горячие клавиши");
+    page_title(ui, tr("Горячие клавиши"));
     if let Some(action) = state.recording
         && let Some(captured) = crate::hotkeys::capture(ui.ctx())
     {
@@ -34,10 +35,10 @@ pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
                 .find(|(other, existing)| **other != action && **existing == bind)
                 .map(|(other, _)| *other);
             if let Some(other) = taken {
-                state.conflict = Some(format!(
-                    "{} уже назначено на «{}»",
-                    bind.label(),
-                    other.title()
+                state.conflict = Some(crate::tf!(
+                    "{a0} уже назначено на «{a1}»",
+                    a0 = bind.label(),
+                    a1 = other.title()
                 ));
             } else {
                 crate::prefs::update(|prefs| {
@@ -48,10 +49,10 @@ pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
     }
     card(ui, |ui| {
         ui.label(
-            theme::muted(
+            theme::muted(tr(
                 "Сочетания работают, пока окно Backspace в фокусе. В поле ввода срабатывают \
                  только сочетания с Ctrl или Alt.",
-            )
+            ))
             .size(12.5),
         );
         ui.add_space(10.0);
@@ -61,7 +62,7 @@ pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
                 ui.label(RichText::new(action.title()).color(theme::text_bright()));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let bound = binds.get(&action).copied();
-                    if bound.is_some() && ui.small_button("✕").on_hover_text("Убрать").clicked()
+                    if bound.is_some() && ui.small_button("✕").on_hover_text(tr("Убрать")).clicked()
                     {
                         crate::prefs::update(|prefs| {
                             prefs.keybinds.remove(&action);
@@ -69,10 +70,10 @@ pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
                     }
                     let recording = state.recording == Some(action);
                     let label = if recording {
-                        "Нажмите сочетание… (Esc — отмена)".to_owned()
+                        tr("Нажмите сочетание… (Esc — отмена)").to_owned()
                     } else {
                         bound.map_or_else(
-                            || "Не назначено".to_owned(),
+                            || tr("Не назначено").to_owned(),
                             super::super::prefs::Keybind::label,
                         )
                     };
@@ -97,37 +98,79 @@ pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
     });
 }
 
+/// «Язык»: язык интерфейса и подсказка, как добавить свой перевод.
+pub(crate) fn language(ui: &mut egui::Ui) {
+    page_title(ui, tr("Язык"));
+    let current = crate::i18n::current();
+    let mut chosen = None;
+    card(ui, |ui| {
+        for language in crate::i18n::available() {
+            let selected = language.code == current;
+            if ui
+                .add(
+                    egui::Button::new(&language.name)
+                        .selected(selected)
+                        .min_size(egui::vec2(220.0, 30.0)),
+                )
+                .clicked()
+                && !selected
+            {
+                chosen = Some(language.code);
+            }
+            ui.add_space(4.0);
+        }
+        ui.add_space(6.0);
+        let dir = crate::saved_session::config_dir()
+            .map(|dir| dir.join("locales").display().to_string())
+            .unwrap_or_default();
+        ui.label(
+            theme::muted(crate::tf!(
+                "Свой перевод: положите <код>.json в {dir}. Ключи — русские строки интерфейса, \
+                 значения — перевод; поле \"@language\" — название языка.",
+                dir = dir
+            ))
+            .size(12.5),
+        );
+    });
+    if let Some(code) = chosen {
+        crate::i18n::set_language(&code);
+        crate::prefs::update(|prefs| prefs.language = code);
+    }
+}
+
 /// «Уведомления»: системные всплывающие уведомления.
 pub(crate) fn notifications(ui: &mut egui::Ui) {
-    page_title(ui, "Уведомления");
+    page_title(ui, tr("Уведомления"));
     let mut desktop = crate::prefs::get().desktop;
     let before = desktop.clone();
     card(ui, |ui| {
         setting_row(
             ui,
-            "Системные уведомления",
-            "Всплывающее окно о новом сообщении по тем же правилам, что и звук: \
+            tr("Системные уведомления"),
+            tr(
+                "Всплывающее окно о новом сообщении по тем же правилам, что и звук: \
              ЛС, упоминания и уровень уведомлений канала.",
+            ),
             &mut desktop.notifications,
         );
         ui.add_enabled_ui(desktop.notifications, |ui| {
             setting_row(
                 ui,
-                "Показывать текст сообщения",
-                "Без этого в уведомлении только автор и канал.",
+                tr("Показывать текст сообщения"),
+                tr("Без этого в уведомлении только автор и канал."),
                 &mut desktop.previews,
             );
             setting_row(
                 ui,
-                "Только когда окно не в фокусе",
-                "Не беспокоить, пока вы и так смотрите на Backspace.",
+                tr("Только когда окно не в фокусе"),
+                tr("Не беспокоить, пока вы и так смотрите на Backspace."),
                 &mut desktop.only_unfocused,
             );
         });
-        if ui.button("Проверить уведомление").clicked() {
+        if ui.button(tr("Проверить уведомление")).clicked() {
             crate::notify::show(crate::notify::Toast {
                 title: "Backspace".to_owned(),
-                body: "Так будут выглядеть уведомления о сообщениях.".to_owned(),
+                body: tr("Так будут выглядеть уведомления о сообщениях.").to_owned(),
             });
         }
     });
@@ -141,18 +184,18 @@ pub(crate) fn sounds_card(ui: &mut egui::Ui) {
     let mut sounds = crate::prefs::get().sounds;
     let before = sounds.clone();
     card(ui, |ui| {
-        crate::widgets::section_label(ui, "Звуки интерфейса");
+        crate::widgets::section_label(ui, tr("Звуки интерфейса"));
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label("Громкость");
+            ui.label(tr("Громкость"));
             ui.spacing_mut().slider_width = 240.0;
             ui.add(egui::Slider::new(&mut sounds.volume, 0..=200).suffix(" %"));
         });
         ui.add_space(8.0);
         setting_row(
             ui,
-            "Звук на каждое сообщение",
-            "Играть звук на все сообщения в каналах, а не только на ЛС и упоминания.",
+            tr("Звук на каждое сообщение"),
+            tr("Играть звук на все сообщения в каналах, а не только на ЛС и упоминания."),
             &mut sounds.message_all_channels,
         );
     });

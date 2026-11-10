@@ -9,6 +9,7 @@ use egui::RichText;
 use super::settings_extra::{Note, fail, number_row, setting_row, show_note};
 use crate::bridge::{AdminEvent, AdminRequest, BridgeRequest, PeerOp};
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::screens::dialogs::{card, page_title};
 use crate::theme;
 use crate::widgets;
@@ -162,53 +163,53 @@ fn combo(ui: &mut egui::Ui, id: &str, value: &mut u32, options: &[u32], suffix: 
 /// «Стриминг»: пределы качества демонстрации экрана и камеры.
 #[allow(clippy::too_many_lines, reason = "форма настроек одним блоком")]
 pub(crate) fn streaming_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridge) {
-    page_title(ui, "Стриминг");
+    page_title(ui, tr("Стриминг"));
     if !more.streaming_asked {
         more.streaming_asked = request(bridge, AdminRequest::LoadStreaming);
     }
     let (Some(saved), Some(edit)) = (more.streaming.clone(), more.edit.as_mut()) else {
         show_note(ui, more.streaming_note.as_ref());
-        ui.label(theme::muted("Загрузка…"));
+        ui.label(theme::muted(tr("Загрузка…")));
         return;
     };
     card(ui, |ui| {
         number_row(
             ui,
-            "Максимальный битрейт, кбит/с",
-            "Выше этого значения поток не поднимается.",
+            tr("Максимальный битрейт, кбит/с"),
+            tr("Выше этого значения поток не поднимается."),
             &mut edit.max_bitrate_kbps,
             (500, 1_000_000),
         );
         number_row(
             ui,
-            "Минимальный битрейт, кбит/с",
-            "Ниже этого значения поток не опускается.",
+            tr("Минимальный битрейт, кбит/с"),
+            tr("Ниже этого значения поток не опускается."),
             &mut edit.min_bitrate_kbps,
             (100, 1_000_000),
         );
         number_row(
             ui,
-            "Шаг битрейта, кбит/с",
-            "Шаг ползунка качества.",
+            tr("Шаг битрейта, кбит/с"),
+            tr("Шаг ползунка качества."),
             &mut edit.bitrate_step_kbps,
             (50, 5_000),
         );
         setting_row(
             ui,
-            "Свой битрейт",
-            "Разрешить пользователям задавать битрейт вручную.",
+            tr("Свой битрейт"),
+            tr("Разрешить пользователям задавать битрейт вручную."),
             &mut edit.allow_custom_bitrate,
         );
         ui.horizontal(|ui| {
-            ui.label("Предельное разрешение");
+            ui.label(tr("Предельное разрешение"));
             combo(ui, "max_res", &mut edit.max_resolution, &RESOLUTIONS, "p");
             ui.add_space(16.0);
-            ui.label("Предельная частота кадров");
+            ui.label(tr("Предельная частота кадров"));
             combo(ui, "max_fps", &mut edit.max_framerate, &FRAMERATES, " fps");
         });
     });
     ui.add_space(10.0);
-    widgets::section_label(ui, "Допустимые разрешения");
+    widgets::section_label(ui, tr("Допустимые разрешения"));
     card(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             for res in RESOLUTIONS {
@@ -218,13 +219,13 @@ pub(crate) fn streaming_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bri
                 }
             }
             let mut native = has_resolution(&edit.allowed_resolutions, None);
-            if ui.checkbox(&mut native, "Исходное").changed() {
+            if ui.checkbox(&mut native, tr("Исходное")).changed() {
                 toggle_resolution(&mut edit.allowed_resolutions, None, native);
             }
         });
     });
     ui.add_space(10.0);
-    widgets::section_label(ui, "Допустимая частота кадров");
+    widgets::section_label(ui, tr("Допустимая частота кадров"));
     card(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             for fps in FRAMERATES {
@@ -245,13 +246,13 @@ pub(crate) fn streaming_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bri
     show_note(ui, more.streaming_note.as_ref());
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(changed, theme::primary_button("Сохранить"))
+            .add_enabled(changed, theme::primary_button(tr("Сохранить")))
             .clicked()
         {
             request(bridge, AdminRequest::SaveStreaming(patch));
         }
         if ui
-            .add_enabled(changed, egui::Button::new("Сбросить"))
+            .add_enabled(changed, egui::Button::new(tr("Сбросить")))
             .clicked()
         {
             more.edit.clone_from(&more.streaming);
@@ -261,30 +262,30 @@ pub(crate) fn streaming_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bri
 
 /// «Телеметрия»: согласие и предпросмотр отправляемого.
 pub(crate) fn telemetry_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridge) {
-    page_title(ui, "Телеметрия");
+    page_title(ui, tr("Телеметрия"));
     if !more.telemetry_asked {
         more.telemetry_asked = request(bridge, AdminRequest::LoadTelemetry);
     }
     show_note(ui, more.telemetry_note.as_ref());
     let Some(status) = more.telemetry.clone() else {
-        ui.label(theme::muted("Загрузка…"));
+        ui.label(theme::muted(tr("Загрузка…")));
         return;
     };
     card(ui, |ui| {
-        ui.label(
+        ui.label(tr(
             "Раз в сутки инстанс может отправлять разработчикам обезличенную сводку: \
              версию и обобщённые счётчики. Никаких сообщений и имён.",
-        );
+        ));
         ui.add_space(8.0);
         let mut on = status.enabled == Some(true);
         let before = on;
         setting_row(
             ui,
-            "Отправлять телеметрию",
+            tr("Отправлять телеметрию"),
             match status.enabled {
-                None => "Выбор ещё не сделан.",
-                Some(true) => "Включено.",
-                Some(false) => "Выключено.",
+                None => tr("Выбор ещё не сделан."),
+                Some(true) => tr("Включено."),
+                Some(false) => tr("Выключено."),
             },
             &mut on,
         );
@@ -293,14 +294,16 @@ pub(crate) fn telemetry_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bri
         }
         if let Some(id) = &status.id {
             let masked: String = id.chars().take(8).collect();
-            ui.label(theme::muted(format!("Идентификатор: {masked}…")).size(12.5));
+            ui.label(
+                theme::muted(crate::tf!("Идентификатор: {masked}…", masked = masked)).size(12.5),
+            );
         }
         if let Some(day) = &status.last_day {
-            ui.label(theme::muted(format!("Последняя отправка: {day}")).size(12.5));
+            ui.label(theme::muted(crate::tf!("Последняя отправка: {day}", day = day)).size(12.5));
         }
     });
     ui.add_space(10.0);
-    if ui.button("Показать, что будет отправлено").clicked() {
+    if ui.button(tr("Показать, что будет отправлено")).clicked() {
         request(bridge, AdminRequest::LoadTelemetryPreview);
     }
     if let Some(preview) = &more.preview {
@@ -317,27 +320,29 @@ pub(crate) fn telemetry_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bri
 
 fn state_label(status: &UpdateStatus) -> String {
     match status.state.as_str() {
-        "up-to-date" => "Установлена последняя версия".to_owned(),
-        "update-available" => "Доступно обновление".to_owned(),
+        "up-to-date" => tr("Установлена последняя версия").to_owned(),
+        "update-available" => tr("Доступно обновление").to_owned(),
         _ => match status.reason.as_deref() {
-            Some("disabled") => "Проверка обновлений отключена на сервере".to_owned(),
-            Some("unreachable") => "Не удалось связаться с сервером релизов".to_owned(),
-            Some("rate-limited") => "Сервер релизов ограничил запросы, попробуйте позже".to_owned(),
-            Some("unparseable") => "Не удалось разобрать ответ сервера релизов".to_owned(),
-            _ => "Состояние неизвестно".to_owned(),
+            Some("disabled") => tr("Проверка обновлений отключена на сервере").to_owned(),
+            Some("unreachable") => tr("Не удалось связаться с сервером релизов").to_owned(),
+            Some("rate-limited") => {
+                tr("Сервер релизов ограничил запросы, попробуйте позже").to_owned()
+            }
+            Some("unparseable") => tr("Не удалось разобрать ответ сервера релизов").to_owned(),
+            _ => tr("Состояние неизвестно").to_owned(),
         },
     }
 }
 
 /// «Обновления»: версия, последний релиз и способ установки.
 pub(crate) fn updates_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridge) {
-    page_title(ui, "Обновления");
+    page_title(ui, tr("Обновления"));
     if !more.updates_asked {
         more.updates_asked = request(bridge, AdminRequest::LoadUpdates(false));
     }
     show_note(ui, more.updates_note.as_ref());
     let Some(status) = more.updates.clone() else {
-        ui.label(theme::muted("Загрузка…"));
+        ui.label(theme::muted(tr("Загрузка…")));
         return;
     };
     card(ui, |ui| {
@@ -347,14 +352,21 @@ pub(crate) fn updates_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridg
             .as_deref()
             .map(|c| format!(" ({c})"))
             .unwrap_or_default();
-        ui.label(format!("Установлено: {}{commit}", status.current.version));
+        ui.label(crate::tf!(
+            "Установлено: {a0}{commit}",
+            a0 = status.current.version,
+            commit = commit
+        ));
         if let Some(latest) = &status.latest {
-            ui.label(format!("Последний релиз: {}", latest.version));
+            ui.label(crate::tf!("Последний релиз: {a0}", a0 = latest.version));
             if !latest.published_at.is_empty() {
-                ui.label(theme::muted(format!("Опубликован: {}", latest.published_at)).size(12.5));
+                ui.label(
+                    theme::muted(crate::tf!("Опубликован: {a0}", a0 = latest.published_at))
+                        .size(12.5),
+                );
             }
             if !latest.url.is_empty() {
-                ui.hyperlink_to("Страница релиза", &latest.url);
+                ui.hyperlink_to(tr("Страница релиза"), &latest.url);
             }
         }
         ui.add_space(6.0);
@@ -362,23 +374,24 @@ pub(crate) fn updates_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridg
     });
     ui.add_space(10.0);
     if ui
-        .add_enabled(status.check_enabled, egui::Button::new("Проверить снова"))
+        .add_enabled(
+            status.check_enabled,
+            egui::Button::new(tr("Проверить снова")),
+        )
         .clicked()
     {
         request(bridge, AdminRequest::LoadUpdates(true));
     }
     ui.add_space(10.0);
     card(ui, |ui| {
-        ui.label(RichText::new("Как обновить вручную").color(theme::text_bright()));
+        ui.label(RichText::new(tr("Как обновить вручную")).color(theme::text_bright()));
         let hint = match status.channel.as_str() {
-            "prebuilt" => "Установка из готового образа: на сервере выполните ./update.sh.",
+            "prebuilt" => tr("Установка из готового образа: на сервере выполните ./update.sh."),
             "source" => {
-                "Установка из исходников: на сервере выполните git pull и затем ./update.sh."
+                tr("Установка из исходников: на сервере выполните git pull и затем ./update.sh.")
             }
-            _ => {
-                "Способ установки неизвестен. Готовый образ: ./update.sh. \
-                 Из исходников: git pull, затем ./update.sh."
-            }
+            _ => tr("Способ установки неизвестен. Готовый образ: ./update.sh. \
+                 Из исходников: git pull, затем ./update.sh."),
         };
         ui.label(theme::muted(hint).size(12.5));
     });
@@ -386,26 +399,26 @@ pub(crate) fn updates_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridg
 
 fn status_text(peer: &Peer) -> (&'static str, egui::Color32) {
     match peer.status.as_str() {
-        "active" => ("Активен", theme::green()),
-        "pending" => ("Ожидает ответа", theme::amber()),
-        "awaiting_approval" => ("Ждёт одобрения", theme::amber()),
-        "unreachable" => ("Недоступен", theme::rose()),
-        "needs_attention" => ("Требует внимания", theme::rose()),
-        "rejected" => ("Отклонён", theme::rose()),
-        "revoked" => ("Отозван", theme::text_faint()),
-        _ => ("Неизвестно", theme::text_faint()),
+        "active" => (tr("Активен"), theme::green()),
+        "pending" => (tr("Ожидает ответа"), theme::amber()),
+        "awaiting_approval" => (tr("Ждёт одобрения"), theme::amber()),
+        "unreachable" => (tr("Недоступен"), theme::rose()),
+        "needs_attention" => (tr("Требует внимания"), theme::rose()),
+        "rejected" => (tr("Отклонён"), theme::rose()),
+        "revoked" => (tr("Отозван"), theme::text_faint()),
+        _ => (tr("Неизвестно"), theme::text_faint()),
     }
 }
 
 fn confirm_text(op: &PeerOp) -> &'static str {
     match op {
-        PeerOp::Rotate(_) => {
-            "Сменить общий секрет с этим инстансом? Старый секрет будет действовать ещё некоторое время."
-        }
-        PeerOp::Revoke(_) => "Отозвать пира? Федерация с этим инстансом прекратится.",
-        PeerOp::Reset(_) => "Сбросить пира? Связь будет установлена заново.",
-        PeerOp::Delete(_) => "Удалить пира навсегда? Запись исчезнет безвозвратно.",
-        _ => "Подтвердите действие.",
+        PeerOp::Rotate(_) => tr(
+            "Сменить общий секрет с этим инстансом? Старый секрет будет действовать ещё некоторое время.",
+        ),
+        PeerOp::Revoke(_) => tr("Отозвать пира? Федерация с этим инстансом прекратится."),
+        PeerOp::Reset(_) => tr("Сбросить пира? Связь будет установлена заново."),
+        PeerOp::Delete(_) => tr("Удалить пира навсегда? Запись исчезнет безвозвратно."),
+        _ => tr("Подтвердите действие."),
     }
 }
 
@@ -424,24 +437,25 @@ fn peer_card(ui: &mut egui::Ui, more: &mut MoreUi, peer: &Peer, bridge: &Bridge)
         ui.label(theme::muted(&peer.origin).size(12.5));
         if let Some(seen) = peer.last_seen_at {
             ui.label(
-                theme::muted(format!(
-                    "Был на связи: {}",
-                    theme::stamp(seen, chrono::Utc::now().timestamp_millis())
+                theme::muted(crate::tf!(
+                    "Был на связи: {a0}",
+                    a0 = theme::stamp(seen, chrono::Utc::now().timestamp_millis())
                 ))
                 .size(12.5),
             );
         }
         if peer.consecutive_failures > 0 || peer.consecutive_auth_failures > 0 {
             ui.label(
-                theme::muted(format!(
-                    "Подряд неудач: связь — {}, аутентификация — {}",
-                    peer.consecutive_failures, peer.consecutive_auth_failures
+                theme::muted(crate::tf!(
+                    "Подряд неудач: связь — {a0}, аутентификация — {a1}",
+                    a0 = peer.consecutive_failures,
+                    a1 = peer.consecutive_auth_failures
                 ))
                 .size(12.5),
             );
         }
         if let Some(reason) = &peer.status_reason {
-            ui.label(theme::muted(format!("Причина: {reason}")).size(12.5));
+            ui.label(theme::muted(crate::tf!("Причина: {reason}", reason = reason)).size(12.5));
         }
         ui.add_space(6.0);
         if more.confirm.as_ref().is_some_and(|op| match op {
@@ -454,11 +468,11 @@ fn peer_card(ui: &mut egui::Ui, more: &mut MoreUi, peer: &Peer, bridge: &Bridge)
             if let Some(op) = op {
                 ui.label(RichText::new(confirm_text(&op)).color(theme::amber()));
                 ui.horizontal(|ui| {
-                    if ui.button("Подтвердить").clicked() {
+                    if ui.button(tr("Подтвердить")).clicked() {
                         request(bridge, AdminRequest::Peer(op));
                         more.confirm = None;
                     }
-                    if ui.button("Отмена").clicked() {
+                    if ui.button(tr("Отмена")).clicked() {
                         more.confirm = None;
                     }
                 });
@@ -467,44 +481,44 @@ fn peer_card(ui: &mut egui::Ui, more: &mut MoreUi, peer: &Peer, bridge: &Bridge)
         }
         ui.horizontal_wrapped(|ui| {
             if revoked {
-                if ui.button("Подключить снова").clicked() {
+                if ui.button(tr("Подключить снова")).clicked() {
                     request(
                         bridge,
                         AdminRequest::Peer(PeerOp::Initiate(peer.origin.clone())),
                     );
                 }
-                if ui.button("Удалить навсегда").clicked() {
+                if ui.button(tr("Удалить навсегда")).clicked() {
                     more.confirm = Some(PeerOp::Delete(peer.id.clone()));
                 }
                 return;
             }
             if matches!(peer.status.as_str(), "unreachable" | "needs_attention")
-                && ui.button("Перепроверить").clicked()
+                && ui.button(tr("Перепроверить")).clicked()
             {
                 request(bridge, AdminRequest::Peer(PeerOp::Recheck(peer.id.clone())));
             }
             if peer.status == "active"
                 && !peer.rotation_in_progress
-                && ui.button("Сменить секрет").clicked()
+                && ui.button(tr("Сменить секрет")).clicked()
             {
                 more.confirm = Some(PeerOp::Rotate(peer.id.clone()));
             }
-            if ui.button("Сбросить").clicked() {
+            if ui.button(tr("Сбросить")).clicked() {
                 more.confirm = Some(PeerOp::Reset(peer.id.clone()));
             }
-            if ui.button("Отозвать").clicked() {
+            if ui.button(tr("Отозвать")).clicked() {
                 more.confirm = Some(PeerOp::Revoke(peer.id.clone()));
             }
         });
         if !revoked {
             ui.horizontal(|ui| {
-                ui.label(theme::muted("Ротация секрета каждые, дней").size(12.5));
+                ui.label(theme::muted(tr("Ротация секрета каждые, дней")).size(12.5));
                 let days = more
                     .intervals
                     .entry(peer.id.clone())
                     .or_insert(peer.auto_rotate_interval_days);
                 ui.add(egui::DragValue::new(days).range(1..=365));
-                if *days != peer.auto_rotate_interval_days && ui.button("Применить").clicked()
+                if *days != peer.auto_rotate_interval_days && ui.button(tr("Применить")).clicked()
                 {
                     request(
                         bridge,
@@ -525,38 +539,38 @@ pub(crate) fn federation_panel(
     bridge: &Bridge,
 ) {
     let admin = &mut extra.admin;
-    page_title(ui, "Федерация");
+    page_title(ui, tr("Федерация"));
     if !admin.more.peers_asked {
         admin.more.peers_asked = request(bridge, AdminRequest::LoadPeers);
     }
     // Глобальные параметры живут в общих настройках инстанса.
     super::settings_extra::ensure_settings(admin, bridge);
     if let Some(edit) = admin.edit_mut() {
-        widgets::section_label(ui, "Глобальные параметры");
+        widgets::section_label(ui, tr("Глобальные параметры"));
         card(ui, |ui| {
             setting_row(
                 ui,
-                "Автоматически принимать пиринг",
-                "Запросы от других инстансов принимаются без ручного одобрения.",
+                tr("Автоматически принимать пиринг"),
+                tr("Запросы от других инстансов принимаются без ручного одобрения."),
                 &mut edit.auto_accept_peering,
             );
             setting_row(
                 ui,
-                "Ретрансляция сообщений",
-                "Хранить сообщения для недоступных пиров и доставить позже.",
+                tr("Ретрансляция сообщений"),
+                tr("Хранить сообщения для недоступных пиров и доставить позже."),
                 &mut edit.federation_relay_enabled,
             );
             number_row(
                 ui,
-                "Хранение ретрансляции, дней",
-                "Сколько дней ждать недоступного пира.",
+                tr("Хранение ретрансляции, дней"),
+                tr("Сколько дней ждать недоступного пира."),
                 &mut edit.federation_relay_ttl_days,
                 (1, 365),
             );
             number_row(
                 ui,
-                "Ротация секрета по умолчанию, дней",
-                "Для новых пиров.",
+                tr("Ротация секрета по умолчанию, дней"),
+                tr("Для новых пиров."),
                 &mut edit.default_auto_rotate_interval_days,
                 (1, 365),
             );
@@ -565,13 +579,13 @@ pub(crate) fn federation_panel(
         let changed = patch != InstanceSettingsPatch::default();
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(changed, theme::primary_button("Сохранить"))
+                .add_enabled(changed, theme::primary_button(tr("Сохранить")))
                 .clicked()
             {
                 bridge.request(BridgeRequest::Admin(AdminRequest::SaveSettings(patch)));
             }
             if ui
-                .add_enabled(changed, egui::Button::new("Сбросить"))
+                .add_enabled(changed, egui::Button::new(tr("Сбросить")))
                 .clicked()
             {
                 admin.reset_edit();
@@ -580,7 +594,7 @@ pub(crate) fn federation_panel(
         ui.add_space(12.0);
     }
     let more = &mut admin.more;
-    widgets::section_label(ui, "Подключить инстанс");
+    widgets::section_label(ui, tr("Подключить инстанс"));
     card(ui, |ui| {
         ui.horizontal(|ui| {
             widgets::text_field(ui, &mut more.initiate, "https://example.org", 200);
@@ -588,7 +602,7 @@ pub(crate) fn federation_panel(
             if ui
                 .add_enabled(
                     !origin.is_empty(),
-                    theme::primary_button("Запросить пиринг"),
+                    theme::primary_button(tr("Запросить пиринг")),
                 )
                 .clicked()
             {
@@ -600,13 +614,13 @@ pub(crate) fn federation_panel(
     ui.add_space(8.0);
     show_note(ui, more.peers_note.as_ref());
     if !more.approvals.is_empty() {
-        widgets::section_label(ui, "Запросы на одобрение");
+        widgets::section_label(ui, tr("Запросы на одобрение"));
         for req in more.approvals.clone() {
             card(ui, |ui| {
                 let dir = if req.direction == "inbound" {
-                    "Входящий запрос"
+                    tr("Входящий запрос")
                 } else {
-                    "Исходящий запрос"
+                    tr("Исходящий запрос")
                 };
                 ui.label(
                     RichText::new(req.instance_name.as_deref().unwrap_or(&req.origin))
@@ -614,13 +628,13 @@ pub(crate) fn federation_panel(
                 );
                 ui.label(theme::muted(format!("{dir} · {}", req.origin)).size(12.5));
                 ui.horizontal(|ui| {
-                    if ui.button("Одобрить").clicked() {
+                    if ui.button(tr("Одобрить")).clicked() {
                         request(
                             bridge,
                             AdminRequest::Peer(PeerOp::Answer(req.id.clone(), true)),
                         );
                     }
-                    if ui.button("Отклонить").clicked() {
+                    if ui.button(tr("Отклонить")).clicked() {
                         request(
                             bridge,
                             AdminRequest::Peer(PeerOp::Answer(req.id.clone(), false)),
@@ -632,12 +646,12 @@ pub(crate) fn federation_panel(
         }
     }
     let Some(peers) = more.peers.clone() else {
-        ui.label(theme::muted("Загрузка…"));
+        ui.label(theme::muted(tr("Загрузка…")));
         return;
     };
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut more.show_revoked, false, "Активные");
-        ui.selectable_value(&mut more.show_revoked, true, "Отозванные");
+        ui.selectable_value(&mut more.show_revoked, false, tr("Активные"));
+        ui.selectable_value(&mut more.show_revoked, true, tr("Отозванные"));
     });
     ui.add_space(6.0);
     let mut shown: Vec<&Peer> = peers
@@ -649,9 +663,9 @@ pub(crate) fn federation_panel(
         theme::empty_state(
             ui,
             if more.show_revoked {
-                "Отозванных пиров нет"
+                tr("Отозванных пиров нет")
             } else {
-                "Пока нет ни одного пира"
+                tr("Пока нет ни одного пира")
             },
         );
     }

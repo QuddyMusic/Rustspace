@@ -122,6 +122,7 @@ pub(crate) type Speaking = HashSet<String>;
 #[cfg(not(feature = "voice"))]
 mod stub {
     use super::{ConnectRequest, Device, DeviceKind, MediaStatus, Speaking, VoicePrefs};
+    use crate::i18n::tr;
 
     /// Заглушка: звука нет.
     #[derive(Debug, Default)]
@@ -162,7 +163,7 @@ mod stub {
         }
 
         pub(crate) fn start_mic_test(&mut self, _prefs: &VoicePrefs) -> Result<(), String> {
-            Err("сборка без голоса".to_owned())
+            Err(tr("сборка без голоса").to_owned())
         }
 
         pub(crate) fn stop_mic_test(&mut self) {}

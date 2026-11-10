@@ -8,6 +8,7 @@ use egui::{Color32, CornerRadius, RichText, Sense, Stroke};
 
 use super::dialogs::{card, page_title};
 use super::settings_extra::setting_row;
+use crate::i18n::tr;
 use crate::theme::{self, Appearance, Palette, Preset};
 use crate::widgets;
 
@@ -28,37 +29,37 @@ pub(crate) struct AppearanceState {
 
 /// Рисует страницу.
 pub(crate) fn page(ui: &mut egui::Ui, state: &mut AppearanceState) {
-    page_title(ui, "Внешний вид");
+    page_title(ui, tr("Внешний вид"));
     let mut appearance = crate::prefs::get().appearance;
     let before = appearance.clone();
 
     scale_card(ui, state);
     ui.add_space(10.0);
     card(ui, |ui| {
-        widgets::section_label(ui, "Тема");
+        widgets::section_label(ui, tr("Тема"));
         ui.add_space(6.0);
         presets(ui, &mut appearance);
     });
     ui.add_space(10.0);
     card(ui, |ui| {
-        widgets::section_label(ui, "Акцентный цвет");
+        widgets::section_label(ui, tr("Акцентный цвет"));
         ui.add_space(6.0);
         accent_row(ui, &mut appearance);
     });
     ui.add_space(10.0);
     card(ui, |ui| {
-        widgets::section_label(ui, "Форма и плотность");
+        widgets::section_label(ui, tr("Форма и плотность"));
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label("Скругление углов");
+            ui.label(tr("Скругление углов"));
             ui.spacing_mut().slider_width = 200.0;
             ui.add(egui::Slider::new(&mut appearance.radius, 0..=16).suffix(" px"));
         });
         ui.add_space(8.0);
         setting_row(
             ui,
-            "Компактная лента",
-            "Меньше отступов между сообщениями — больше сообщений на экране.",
+            tr("Компактная лента"),
+            tr("Меньше отступов между сообщениями — больше сообщений на экране."),
             &mut appearance.compact,
         );
     });
@@ -75,7 +76,7 @@ pub(crate) fn page(ui: &mut egui::Ui, state: &mut AppearanceState) {
 
 fn scale_card(ui: &mut egui::Ui, state: &mut AppearanceState) {
     card(ui, |ui| {
-        widgets::section_label(ui, "Масштаб интерфейса");
+        widgets::section_label(ui, tr("Масштаб интерфейса"));
         ui.add_space(6.0);
         ui.spacing_mut().slider_width = 280.0;
         let scale = state.scale.get_or_insert_with(|| ui.ctx().zoom_factor());
@@ -90,7 +91,7 @@ fn scale_card(ui: &mut egui::Ui, state: &mut AppearanceState) {
             crate::prefs::update(|prefs| prefs.scale = value);
         }
         ui.add_space(6.0);
-        ui.label(theme::muted("Применяется после того, как вы отпустите ползунок.").size(12.5));
+        ui.label(theme::muted(tr("Применяется после того, как вы отпустите ползунок.")).size(12.5));
     });
 }
 
@@ -109,9 +110,9 @@ fn presets(ui: &mut egui::Ui, appearance: &mut Appearance) {
     if appearance.custom.is_some() {
         ui.add_space(6.0);
         ui.label(
-            theme::muted(format!(
-                "Сейчас своя тема на основе «{}».",
-                appearance.preset.title()
+            theme::muted(crate::tf!(
+                "Сейчас своя тема на основе «{a0}».",
+                a0 = appearance.preset.title()
             ))
             .size(12.5),
         );
@@ -200,7 +201,7 @@ fn accent_row(ui: &mut egui::Ui, appearance: &mut Appearance) {
             }
         }
         ui.add_space(8.0);
-        ui.label(theme::muted("Свой:"));
+        ui.label(theme::muted(tr("Свой:")));
         egui::color_picker::color_edit_button_srgba(
             ui,
             &mut palette.accent,
@@ -225,13 +226,13 @@ fn readable_on(color: Color32) -> Color32 {
 }
 
 fn custom_colors(ui: &mut egui::Ui, appearance: &mut Appearance) {
-    egui::CollapsingHeader::new(RichText::new("Свои цвета").family(theme::bold_family()))
+    egui::CollapsingHeader::new(RichText::new(tr("Свои цвета")).family(theme::bold_family()))
         .id_salt("appearance_custom_colors")
         .show(ui, |ui| {
             ui.label(
-                theme::muted(
+                theme::muted(tr(
                     "Любой цвет темы можно поменять. Правка создаёт свою тему на основе выбранной.",
-                )
+                ))
                 .size(12.5),
             );
             ui.add_space(6.0);
@@ -255,7 +256,7 @@ fn custom_colors(ui: &mut egui::Ui, appearance: &mut Appearance) {
             ui.add_space(4.0);
             ui.checkbox(
                 &mut palette.dark,
-                "Тёмная основа (стили полос прокрутки, полей)",
+                tr("Тёмная основа (стили полос прокрутки, полей)"),
             );
             if palette != before {
                 appearance.custom = Some(palette);
@@ -264,7 +265,7 @@ fn custom_colors(ui: &mut egui::Ui, appearance: &mut Appearance) {
             if ui
                 .add_enabled(
                     appearance.custom.is_some(),
-                    egui::Button::new("Сбросить к теме"),
+                    egui::Button::new(tr("Сбросить к теме")),
                 )
                 .clicked()
             {
@@ -274,19 +275,24 @@ fn custom_colors(ui: &mut egui::Ui, appearance: &mut Appearance) {
 }
 
 fn import_export(ui: &mut egui::Ui, state: &mut AppearanceState, appearance: &mut Appearance) {
-    widgets::section_label(ui, "Файл темы");
+    widgets::section_label(ui, tr("Файл темы"));
     ui.add_space(4.0);
-    ui.label(theme::muted("Тема сохраняется в JSON: им можно поделиться с друзьями.").size(12.5));
+    ui.label(
+        theme::muted(tr(
+            "Тема сохраняется в JSON: им можно поделиться с друзьями.",
+        ))
+        .size(12.5),
+    );
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        if ui.button("Экспортировать…").clicked() {
+        if ui.button(tr("Экспортировать…")).clicked() {
             state.notice = Some(export(&appearance.palette()));
         }
-        if ui.button("Импортировать…").clicked() {
+        if ui.button(tr("Импортировать…")).clicked() {
             state.notice = match import() {
                 Some(Ok(palette)) => {
                     appearance.custom = Some(palette);
-                    Some((true, "Тема загружена".to_owned()))
+                    Some((true, tr("Тема загружена").to_owned()))
                 }
                 Some(Err(err)) => Some((false, err)),
                 None => None,
@@ -303,7 +309,7 @@ fn import_export(ui: &mut egui::Ui, state: &mut AppearanceState, appearance: &mu
 fn export(palette: &Palette) -> (bool, String) {
     let Some(path) = rfd::FileDialog::new()
         .set_file_name("backspace-theme.json")
-        .add_filter("Тема Backspace", &["json"])
+        .add_filter(tr("Тема Backspace"), &["json"])
         .save_file()
     else {
         return (true, String::new());
@@ -312,15 +318,15 @@ fn export(palette: &Palette) -> (bool, String) {
         .map_err(std::io::Error::other)
         .and_then(|json| std::fs::write(&path, json));
     match result {
-        Ok(()) => (true, format!("Сохранено: {}", path.display())),
-        Err(err) => (false, format!("Не удалось сохранить: {err}")),
+        Ok(()) => (true, crate::tf!("Сохранено: {a0}", a0 = path.display())),
+        Err(err) => (false, crate::tf!("Не удалось сохранить: {err}", err = err)),
     }
 }
 
 /// `None` — пользователь закрыл диалог.
 fn import() -> Option<Result<Palette, String>> {
     let path = rfd::FileDialog::new()
-        .add_filter("Тема Backspace", &["json"])
+        .add_filter(tr("Тема Backspace"), &["json"])
         .pick_file()?;
     Some(parse_theme(
         &std::fs::read(&path).map_err(|err| err.to_string()).ok()?,
@@ -331,9 +337,10 @@ fn import() -> Option<Result<Palette, String>> {
 pub(crate) fn parse_theme(bytes: &[u8]) -> Result<Palette, String> {
     const LIMIT: usize = 64 * 1024;
     if bytes.len() > LIMIT {
-        return Err("Файл темы слишком большой".to_owned());
+        return Err(tr("Файл темы слишком большой").to_owned());
     }
-    serde_json::from_slice::<Palette>(bytes).map_err(|err| format!("Файл темы не подходит: {err}"))
+    serde_json::from_slice::<Palette>(bytes)
+        .map_err(|err| crate::tf!("Файл темы не подходит: {err}", err = err))
 }
 
 #[cfg(test)]

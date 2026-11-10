@@ -6,6 +6,7 @@ use egui::{Color32, CornerRadius, RichText, Sense, Vec2};
 
 use crate::bridge::BridgeRequest;
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::{social, theme};
 
 /// Ширина окна.
@@ -125,7 +126,7 @@ fn body(ui: &mut egui::Ui, state: &ProfileState) {
         if let Some(error) = &state.error {
             ui.colored_label(theme::red(), error);
         } else {
-            ui.label(theme::muted("Загрузка…"));
+            ui.label(theme::muted(tr("Загрузка…")));
         }
         return;
     };
@@ -145,22 +146,22 @@ fn body(ui: &mut egui::Ui, state: &ProfileState) {
         ui.label(RichText::new(custom).color(theme::text()));
     }
     if let Some(home) = user.home_instance.as_deref() {
-        ui.label(theme::muted(format!("Домашний инстанс: {home}")).size(12.5));
+        ui.label(theme::muted(crate::tf!("Домашний инстанс: {home}", home = home)).size(12.5));
     }
     if let Some(bio) = user.bio.as_deref().filter(|b| !b.trim().is_empty()) {
         ui.add_space(10.0);
-        ui.label(theme::section_title("О СЕБЕ"));
+        ui.label(theme::section_title(tr("О СЕБЕ")));
         ui.label(RichText::new(bio).color(theme::text()));
     }
     ui.add_space(10.0);
-    ui.label(theme::section_title("НА ПЛАТФОРМЕ С"));
+    ui.label(theme::section_title(tr("НА ПЛАТФОРМЕ С")));
     ui.label(RichText::new(date(user.created_at)).color(theme::text()));
     if let Some(mutuals) = &state.mutuals {
         if !mutuals.mutual_friends.is_empty() {
             ui.add_space(10.0);
-            ui.label(theme::section_title(&format!(
-                "ОБЩИЕ ДРУЗЬЯ — {}",
-                mutuals.mutual_friends.len()
+            ui.label(theme::section_title(&crate::tf!(
+                "ОБЩИЕ ДРУЗЬЯ — {a0}",
+                a0 = mutuals.mutual_friends.len()
             )));
             for friend in &mutuals.mutual_friends {
                 ui.horizontal(|ui| {
@@ -177,9 +178,9 @@ fn body(ui: &mut egui::Ui, state: &ProfileState) {
         }
         if !mutuals.mutual_spaces.is_empty() {
             ui.add_space(10.0);
-            ui.label(theme::section_title(&format!(
-                "ОБЩИЕ ПРОСТРАНСТВА — {}",
-                mutuals.mutual_spaces.len()
+            ui.label(theme::section_title(&crate::tf!(
+                "ОБЩИЕ ПРОСТРАНСТВА — {a0}",
+                a0 = mutuals.mutual_spaces.len()
             )));
             for space in &mutuals.mutual_spaces {
                 ui.horizontal(|ui| {
@@ -228,19 +229,19 @@ pub(crate) fn show(
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
                         if state.user_id != me {
-                            if ui.button("Написать").clicked() {
+                            if ui.button(tr("Написать")).clicked() {
                                 bridge.request(BridgeRequest::OpenDm(state.user_id.clone()));
                                 action = ProfileAction::Close;
                             }
                             if let Some(user) = &state.user
-                                && ui.button("Добавить в друзья").clicked()
+                                && ui.button(tr("Добавить в друзья")).clicked()
                             {
                                 bridge.request(BridgeRequest::SendFriendRequest(
                                     user.username.clone(),
                                 ));
                             }
                         }
-                        if ui.button("Закрыть").clicked() {
+                        if ui.button(tr("Закрыть")).clicked() {
                             action = ProfileAction::Close;
                         }
                     });

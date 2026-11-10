@@ -4,6 +4,7 @@
 //! отрисовщики (аватар-заглушка, круглая кнопка, плашка статуса). Чистые
 //! функции (цвет по имени, инициалы, время) покрыты тестами.
 
+use crate::i18n::tr;
 use bs_types::UserStatus;
 use egui::{Align, Color32, CornerRadius, FontId, Layout, Margin, Sense, Stroke, TextStyle};
 
@@ -269,30 +270,30 @@ impl Palette {
     /// Цвета для редактора темы: подпись и ссылка на поле.
     pub(crate) fn fields_mut(&mut self) -> [(&'static str, &mut Color32); 24] {
         [
-            ("Фон рейла пространств", &mut self.bg_rail),
-            ("Боковые панели", &mut self.bg_sidebar),
-            ("Лента сообщений", &mut self.bg_chat),
-            ("Поля ввода", &mut self.bg_input),
-            ("Окна и меню", &mut self.bg_bubble),
-            ("Наведение", &mut self.bg_hover),
-            ("Выбранный элемент", &mut self.bg_active),
-            ("Наведение на кнопку", &mut self.widget_hover),
-            ("Границы", &mut self.border),
-            ("Текст", &mut self.text),
-            ("Приглушённый текст", &mut self.text_muted),
-            ("Подсказки", &mut self.text_faint),
-            ("Заголовки и имена", &mut self.text_bright),
-            ("Названия каналов", &mut self.channel_text),
-            ("Акцент", &mut self.accent),
-            ("Текст на акценте", &mut self.on_accent),
-            ("Позитивное действие", &mut self.mint),
-            ("Подложка позитивного", &mut self.mint_bg),
-            ("Непрочитанное, ошибки", &mut self.rose),
-            ("Предупреждения", &mut self.amber),
-            ("В сети", &mut self.green),
-            ("Ссылки", &mut self.sky),
-            ("Опасные действия", &mut self.red),
-            ("Не в сети", &mut self.gray),
+            (tr("Фон рейла пространств"), &mut self.bg_rail),
+            (tr("Боковые панели"), &mut self.bg_sidebar),
+            (tr("Лента сообщений"), &mut self.bg_chat),
+            (tr("Поля ввода"), &mut self.bg_input),
+            (tr("Окна и меню"), &mut self.bg_bubble),
+            (tr("Наведение"), &mut self.bg_hover),
+            (tr("Выбранный элемент"), &mut self.bg_active),
+            (tr("Наведение на кнопку"), &mut self.widget_hover),
+            (tr("Границы"), &mut self.border),
+            (tr("Текст"), &mut self.text),
+            (tr("Приглушённый текст"), &mut self.text_muted),
+            (tr("Подсказки"), &mut self.text_faint),
+            (tr("Заголовки и имена"), &mut self.text_bright),
+            (tr("Названия каналов"), &mut self.channel_text),
+            (tr("Акцент"), &mut self.accent),
+            (tr("Текст на акценте"), &mut self.on_accent),
+            (tr("Позитивное действие"), &mut self.mint),
+            (tr("Подложка позитивного"), &mut self.mint_bg),
+            (tr("Непрочитанное, ошибки"), &mut self.rose),
+            (tr("Предупреждения"), &mut self.amber),
+            (tr("В сети"), &mut self.green),
+            (tr("Ссылки"), &mut self.sky),
+            (tr("Опасные действия"), &mut self.red),
+            (tr("Не в сети"), &mut self.gray),
         ]
     }
 }
@@ -327,14 +328,14 @@ impl Preset {
     ];
 
     /// Название для интерфейса.
-    pub(crate) const fn title(self) -> &'static str {
+    pub(crate) fn title(self) -> &'static str {
         match self {
             Self::Aether => "Aether Drift",
-            Self::Midnight => "Полночь",
+            Self::Midnight => tr("Полночь"),
             Self::Nord => "Nord",
-            Self::Dusk => "Сумерки",
-            Self::Daylight => "Дневная",
-            Self::Contrast => "Высокий контраст",
+            Self::Dusk => tr("Сумерки"),
+            Self::Daylight => tr("Дневная"),
+            Self::Contrast => tr("Высокий контраст"),
         }
     }
 
@@ -487,8 +488,9 @@ mod hex {
 
     pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Color32, D::Error> {
         let text = String::deserialize(de)?;
-        super::parse_hex(&text)
-            .ok_or_else(|| serde::de::Error::custom(format!("ожидался цвет #rrggbb: {text}")))
+        super::parse_hex(&text).ok_or_else(|| {
+            serde::de::Error::custom(crate::tf!("ожидался цвет #rrggbb: {text}", text = text))
+        })
     }
 }
 
@@ -1194,7 +1196,7 @@ pub(crate) fn category_header(ui: &mut egui::Ui, name: &str, add: bool) -> Categ
                             16.0,
                             text_faint(),
                         ))
-                        .on_hover_text("Создать канал"),
+                        .on_hover_text(tr("Создать канал")),
                     );
                 });
             }
@@ -1297,8 +1299,8 @@ pub(crate) fn stamp(ms: i64, now_ms: i64) -> String {
     };
     let days = (now.date_naive() - at.date_naive()).num_days();
     match days {
-        0 => format!("Сегодня в {}", at.format("%H:%M")),
-        1 => format!("Вчера в {}", at.format("%H:%M")),
+        0 => crate::tf!("Сегодня в {a0}", a0 = at.format("%H:%M")),
+        1 => crate::tf!("Вчера в {a0}", a0 = at.format("%H:%M")),
         _ => at.format("%d.%m.%Y %H:%M").to_string(),
     }
 }
@@ -1315,7 +1317,7 @@ pub(crate) fn short_stamp(ms: i64, now_ms: i64) -> String {
     };
     match (now.date_naive() - at.date_naive()).num_days() {
         0 => at.format("%H:%M").to_string(),
-        1 => "вчера".to_owned(),
+        1 => tr("вчера").to_owned(),
         _ => at.format("%d.%m.%y").to_string(),
     }
 }

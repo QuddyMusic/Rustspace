@@ -6,6 +6,7 @@ use tokio::runtime::Handle;
 
 use crate::bridge::ChannelKind;
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::images::ImageHub;
 use crate::logic::{connection_label, next_screen, should_wake};
 use crate::screens::chat::{ChatAction, ChatScreen, SelectedChannel};
@@ -41,6 +42,7 @@ impl BackspaceApp {
     /// Загружает сохранённые настройки и сразу применяет оформление и масштаб.
     pub(crate) fn new(ctx: &egui::Context, runtime: Handle) -> Self {
         let prefs = crate::prefs::load(crate::prefs::default_path());
+        crate::i18n::set_language(&prefs.language);
         crate::theme::apply(ctx, &prefs.appearance);
         ctx.set_zoom_factor(prefs.scale);
         let mut bridge = Bridge::new(runtime);
@@ -79,10 +81,14 @@ impl BackspaceApp {
             .collect();
         let saved = done.len() - failed.len();
         let text = match (saved, failed.first()) {
-            (0, Some(first)) => format!("Не удалось скачать {first}"),
-            (1, None) => format!("Файл сохранён: {}", done[0].0),
-            (n, None) => format!("Сохранено файлов: {n}"),
-            (n, Some(first)) => format!("Сохранено файлов: {n}; не удалось: {first}"),
+            (0, Some(first)) => crate::tf!("Не удалось скачать {first}", first = first),
+            (1, None) => crate::tf!("Файл сохранён: {a0}", a0 = done[0].0),
+            (n, None) => crate::tf!("Сохранено файлов: {n}", n = n),
+            (n, Some(first)) => crate::tf!(
+                "Сохранено файлов: {n}; не удалось: {first}",
+                n = n,
+                first = first
+            ),
         };
         self.bridge.set_info(text);
     }
@@ -93,7 +99,8 @@ impl BackspaceApp {
             let bytes = match result {
                 Ok(bytes) => bytes,
                 Err(err) => {
-                    self.bridge.set_info(format!("Не удалось скачать: {err}"));
+                    self.bridge
+                        .set_info(crate::tf!("Не удалось скачать: {err}", err = err));
                     continue;
                 }
             };
@@ -110,10 +117,10 @@ impl BackspaceApp {
                         });
                     if let Some(image) = image {
                         ctx.copy_image(image);
-                        self.bridge.set_info("Картинка скопирована".to_owned());
+                        self.bridge.set_info(tr("Картинка скопирована").to_owned());
                     } else {
                         self.bridge
-                            .set_info("Не удалось прочитать картинку".to_owned());
+                            .set_info(tr("Не удалось прочитать картинку").to_owned());
                     }
                 }
                 crate::images::RawPurpose::Sticker(name) => {
@@ -122,7 +129,7 @@ impl BackspaceApp {
                             name,
                             bytes: bytes.into(),
                         });
-                    self.bridge.set_info("Стикер сохраняется…".to_owned());
+                    self.bridge.set_info(tr("Стикер сохраняется…").to_owned());
                 }
             }
         }
@@ -152,7 +159,10 @@ impl BackspaceApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let text = notice.unwrap_or_else(|| {
-                        format!("Соединение: {}", connection_label(self.bridge.connection()))
+                        crate::tf!(
+                            "Соединение: {a0}",
+                            a0 = connection_label(self.bridge.connection())
+                        )
                     });
                     ui.label(
                         egui::RichText::new(text)
@@ -161,7 +171,7 @@ impl BackspaceApp {
                     );
                     if self.bridge.notice().is_some() {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("Скрыть").clicked() {
+                            if ui.small_button(tr("Скрыть")).clicked() {
                                 dismiss = true;
                             }
                         });

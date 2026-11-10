@@ -4,6 +4,7 @@ use bs_types::TransportPolicy;
 use zeroize::Zeroize as _;
 
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::theme;
 
 /// Форма логина и её состояние.
@@ -86,12 +87,12 @@ impl LoginScreen {
     fn card(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) {
         ui.vertical_centered(|ui| {
             ui.label(
-                egui::RichText::new("С возвращением!")
+                egui::RichText::new(tr("С возвращением!"))
                     .size(24.0)
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
             );
-            ui.label(theme::muted("Войдите в свой инстанс Backspace"));
+            ui.label(theme::muted(tr("Войдите в свой инстанс Backspace")));
         });
         ui.add_space(18.0);
 
@@ -101,7 +102,7 @@ impl LoginScreen {
 
         ui.add_enabled_ui(!busy, |ui| {
             let width = ui.available_width();
-            ui.label(theme::section_title("Адрес инстанса"));
+            ui.label(theme::section_title(tr("Адрес инстанса")));
             let base = ui.add(
                 egui::TextEdit::singleline(&mut self.base)
                     .hint_text("example.com")
@@ -109,14 +110,14 @@ impl LoginScreen {
                     .margin(egui::vec2(10.0, 8.0)),
             );
             ui.add_space(8.0);
-            ui.label(theme::section_title("Логин"));
+            ui.label(theme::section_title(tr("Логин")));
             let username = ui.add(
                 egui::TextEdit::singleline(&mut self.username)
                     .desired_width(width)
                     .margin(egui::vec2(10.0, 8.0)),
             );
             ui.add_space(8.0);
-            ui.label(theme::section_title("Пароль"));
+            ui.label(theme::section_title(tr("Пароль")));
             let password = ui.add(
                 egui::TextEdit::singleline(&mut self.password)
                     .password(true)
@@ -137,19 +138,19 @@ impl LoginScreen {
             !busy,
             egui::Checkbox::new(
                 &mut self.allow_insecure,
-                "Разрешить незащищённое соединение (http)",
+                tr("Разрешить незащищённое соединение (http)"),
             ),
         )
-        .on_hover_text(
+        .on_hover_text(tr(
             "Пароль и токен пойдут открытым текстом. Включайте только для инстанса \
              в своей локальной сети. localhost разрешён и без этой галочки.",
-        );
+        ));
         ui.add_space(14.0);
 
         let label = if busy {
-            "Подключение…"
+            tr("Подключение…")
         } else {
-            "Войти"
+            tr("Войти")
         };
         let button = ui.add_enabled(
             !busy,
@@ -182,7 +183,8 @@ impl LoginScreen {
         }
         ui.add_space(10.0);
         ui.vertical_centered(|ui| {
-            if ui.link("Нет аккаунта? Зарегистрироваться").clicked() {
+            if ui.link(tr("Нет аккаунта? Зарегистрироваться")).clicked()
+            {
                 self.registering = true;
             }
         });

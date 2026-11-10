@@ -4,6 +4,7 @@
 use egui::{CornerRadius, Margin, RichText};
 
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::theme;
 
 /// Сравнимый ключ адреса: схема, хост, порт (с портом по умолчанию).
@@ -75,9 +76,10 @@ pub(crate) fn show(
                             .color(theme::text_bright()),
                     );
                     ui.label(
-                        theme::muted(format!(
-                            "{} · участников: {}",
-                            snapshot.instance_name, snapshot.member_count
+                        theme::muted(crate::tf!(
+                            "{a0} · участников: {a1}",
+                            a0 = snapshot.instance_name,
+                            a1 = snapshot.member_count
                         ))
                         .size(12.5),
                     );
@@ -94,19 +96,19 @@ pub(crate) fn show(
             ui.add_space(8.0);
             match (slot, joined) {
                 (_, true) => {
-                    ui.label(RichText::new("Вы уже в этом пространстве").color(theme::mint()));
+                    ui.label(RichText::new(tr("Вы уже в этом пространстве")).color(theme::mint()));
                 }
                 (Some(slot), false) => {
-                    if ui.add(theme::primary_button("Вступить")).clicked() {
+                    if ui.add(theme::primary_button(tr("Вступить"))).clicked() {
                         join = Some((slot, invite.invite_code.clone()));
                     }
                 }
                 (None, false) => {
                     ui.label(
-                        theme::muted(format!(
-                            "Пространство на {}: подключитесь к этому инстансу в «Подключениях», \
+                        theme::muted(crate::tf!(
+                            "Пространство на {a0}: подключитесь к этому инстансу в «Подключениях», \
                              чтобы вступить.",
-                            invite.space_instance_origin
+                            a0 = invite.space_instance_origin
                         ))
                         .size(12.5),
                     );

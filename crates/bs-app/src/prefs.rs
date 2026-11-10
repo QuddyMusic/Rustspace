@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::tr;
 use crate::theme::Appearance;
 use crate::voice_media::VoicePrefs;
 
@@ -96,14 +97,14 @@ impl Action {
     ];
 
     /// Подпись в настройках.
-    pub(crate) const fn title(self) -> &'static str {
+    pub(crate) fn title(self) -> &'static str {
         match self {
-            Self::ToggleMute => "Вкл/выкл микрофон",
-            Self::ToggleDeafen => "Вкл/выкл звук",
-            Self::PushToTalk => "Рация (говорить, пока зажато)",
-            Self::ToggleCamera => "Вкл/выкл камеру",
-            Self::ToggleScreenShare => "Показ экрана",
-            Self::Disconnect => "Выйти из голосового канала",
+            Self::ToggleMute => tr("Вкл/выкл микрофон"),
+            Self::ToggleDeafen => tr("Вкл/выкл звук"),
+            Self::PushToTalk => tr("Рация (говорить, пока зажато)"),
+            Self::ToggleCamera => tr("Вкл/выкл камеру"),
+            Self::ToggleScreenShare => tr("Показ экрана"),
+            Self::Disconnect => tr("Выйти из голосового канала"),
         }
     }
 }
@@ -154,17 +155,6 @@ impl Keybind {
     }
 }
 
-/// Язык интерфейса.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum Language {
-    /// Русский.
-    #[default]
-    Ru,
-    /// English.
-    En,
-}
-
 /// Все сохраняемые настройки.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -181,8 +171,8 @@ pub(crate) struct Prefs {
     pub(crate) desktop: DesktopPrefs,
     /// Горячие клавиши (работают, пока окно в фокусе).
     pub(crate) keybinds: std::collections::BTreeMap<Action, Keybind>,
-    /// Язык интерфейса.
-    pub(crate) language: Language,
+    /// Язык интерфейса (код каталога: `ru`, `en`, …).
+    pub(crate) language: String,
 }
 
 impl Default for Prefs {
@@ -194,7 +184,7 @@ impl Default for Prefs {
             sounds: SoundPrefs::default(),
             desktop: DesktopPrefs::default(),
             keybinds: std::collections::BTreeMap::new(),
-            language: Language::default(),
+            language: "ru".to_owned(),
         }
     }
 }

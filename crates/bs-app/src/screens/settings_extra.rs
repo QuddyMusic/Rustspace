@@ -10,6 +10,7 @@ use egui::{Align, Layout, RichText};
 
 use crate::bridge::{AdminDone, AdminEvent, AdminRequest, BridgeRequest, ImageKind, Secret};
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::media::human_size;
 use crate::screens::dialogs::{card, page_title};
 use crate::theme;
@@ -158,7 +159,7 @@ impl ExtraUi {
                         admin.edit = Some(settings.clone());
                         admin.settings = Some(settings);
                         admin.gif_key.clear();
-                        admin.settings_note = Some(ok("Настройки сохранены"));
+                        admin.settings_note = Some(ok(tr("Настройки сохранены")));
                     }
                     Err(message) => admin.settings_note = Some(fail(message)),
                 },
@@ -205,7 +206,7 @@ impl ExtraUi {
                     (AdminDone::Reset, Err(message)) => admin.users_note = Some(fail(message)),
                     (AdminDone::Password, Ok(_)) => {
                         account.password_note =
-                            Some(ok("Пароль изменён. Войдите в аккаунт заново."));
+                            Some(ok(tr("Пароль изменён. Войдите в аккаунт заново.")));
                         account.current.clear();
                         account.new.clear();
                         account.repeat.clear();
@@ -216,7 +217,7 @@ impl ExtraUi {
                     }
                     (AdminDone::Account, Ok(_)) => account.logout = true,
                     (AdminDone::Account, Err(message)) => account.delete_note = Some(fail(message)),
-                    (AdminDone::Image, Ok(_)) => account.note = Some(ok("Картинка обновлена")),
+                    (AdminDone::Image, Ok(_)) => account.note = Some(ok(tr("Картинка обновлена"))),
                     (AdminDone::Image, Err(message)) => account.note = Some(fail(message)),
                 },
             }
@@ -232,7 +233,7 @@ impl ExtraUi {
                         name,
                         bytes: Arc::new(bytes),
                     });
-                    self.account.note = Some(ok("Загружаю…"));
+                    self.account.note = Some(ok(tr("Загружаю…")));
                 }
                 Err(message) => self.account.note = Some(fail(message)),
             }
@@ -264,7 +265,7 @@ impl AccountUi {
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let chosen = rfd::FileDialog::new()
-                .add_filter("Изображения", &["png", "jpg", "jpeg", "gif", "webp"])
+                .add_filter(tr("Изображения"), &["png", "jpg", "jpeg", "gif", "webp"])
                 .pick_file();
             if let Some(path) = chosen {
                 let name = path
@@ -272,7 +273,7 @@ impl AccountUi {
                     .map_or_else(|| "image".to_owned(), |n| n.to_string_lossy().into_owned());
                 let bytes = match std::fs::metadata(&path) {
                     Ok(meta) if meta.len() > MAX_IMAGE_BYTES => {
-                        Err("Картинка больше 16 МБ".to_owned())
+                        Err(tr("Картинка больше 16 МБ").to_owned())
                     }
                     Ok(_) => std::fs::read(&path).map_err(|e| e.to_string()),
                     Err(e) => Err(e.to_string()),
@@ -288,23 +289,29 @@ impl AccountUi {
 /// Аватар и баннер: загрузка и удаление.
 pub(crate) fn images_card(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bridge: &Bridge) {
     let managed = me.home_instance.is_some() && me.detached_home_instance.is_none();
-    widgets::section_label(ui, "Аватар и баннер");
+    widgets::section_label(ui, tr("Аватар и баннер"));
     ui.add_space(6.0);
     if managed {
         ui.label(
-            theme::muted("Картинки профиля ведёт ваш домашний инстанс: меняйте их там.").size(13.0),
+            theme::muted(tr(
+                "Картинки профиля ведёт ваш домашний инстанс: меняйте их там.",
+            ))
+            .size(13.0),
         );
         return;
     }
     let ctx = ui.ctx().clone();
     for (kind, title, has) in [
-        (ImageKind::Avatar, "Аватар", me.avatar.is_some()),
-        (ImageKind::Banner, "Баннер", me.banner.is_some()),
+        (ImageKind::Avatar, tr("Аватар"), me.avatar.is_some()),
+        (ImageKind::Banner, tr("Баннер"), me.banner.is_some()),
     ] {
         ui.horizontal(|ui| {
             ui.label(RichText::new(title).color(theme::text_bright()));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.add_enabled(has, egui::Button::new("Убрать")).clicked() {
+                if ui
+                    .add_enabled(has, egui::Button::new(tr("Убрать")))
+                    .clicked()
+                {
                     bridge.request(BridgeRequest::SetImage {
                         kind,
                         name: String::new(),
@@ -313,7 +320,7 @@ pub(crate) fn images_card(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
                 }
                 let busy = extra.account.picking.is_some();
                 if ui
-                    .add_enabled(!busy, theme::primary_button("Загрузить…"))
+                    .add_enabled(!busy, theme::primary_button(tr("Загрузить…")))
                     .clicked()
                 {
                     extra.account.pick(&ctx, kind);
@@ -329,25 +336,25 @@ pub(crate) fn images_card(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
 pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bridge: &Bridge) {
     let state = &mut extra.account;
     let federated = me.home_instance.is_some() && me.detached_home_instance.is_none();
-    page_title_small(ui, "Пароль");
+    page_title_small(ui, tr("Пароль"));
     card(ui, |ui| {
         if federated {
-            ui.label(theme::muted("Пароль этого аккаунта задаёт домашний инстанс.").size(13.0));
+            ui.label(theme::muted(tr("Пароль этого аккаунта задаёт домашний инстанс.")).size(13.0));
             return;
         }
-        widgets::field_label(ui, "Текущий пароль");
-        widgets::secret_field(ui, &mut state.current, "Текущий пароль", 128);
-        widgets::field_label(ui, "Новый пароль");
-        widgets::secret_field(ui, &mut state.new, "Не короче 8 символов", 128);
-        widgets::field_label(ui, "Повторите новый пароль");
-        widgets::secret_field(ui, &mut state.repeat, "Ещё раз", 128);
+        widgets::field_label(ui, tr("Текущий пароль"));
+        widgets::secret_field(ui, &mut state.current, tr("Текущий пароль"), 128);
+        widgets::field_label(ui, tr("Новый пароль"));
+        widgets::secret_field(ui, &mut state.new, tr("Не короче 8 символов"), 128);
+        widgets::field_label(ui, tr("Повторите новый пароль"));
+        widgets::secret_field(ui, &mut state.repeat, tr("Ещё раз"), 128);
         ui.add_space(8.0);
         let problem = if state.new.chars().count() < PASSWORD_MIN {
-            Some("Новый пароль короче 8 символов")
+            Some(tr("Новый пароль короче 8 символов"))
         } else if state.new != state.repeat {
-            Some("Пароли не совпадают")
+            Some(tr("Пароли не совпадают"))
         } else if state.current.is_empty() {
-            Some("Введите текущий пароль")
+            Some(tr("Введите текущий пароль"))
         } else {
             None
         };
@@ -358,7 +365,10 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
         }
         show_note(ui, state.password_note.as_ref());
         if ui
-            .add_enabled(problem.is_none(), theme::primary_button("Сменить пароль"))
+            .add_enabled(
+                problem.is_none(),
+                theme::primary_button(tr("Сменить пароль")),
+            )
             .clicked()
         {
             bridge.request(BridgeRequest::Admin(AdminRequest::ChangePassword {
@@ -368,14 +378,14 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
         }
     });
     ui.add_space(14.0);
-    page_title_small(ui, "Опасная зона");
+    page_title_small(ui, tr("Опасная зона"));
     card(ui, |ui| {
         if !state.delete_open {
-            ui.label(theme::muted("Удаление аккаунта нельзя отменить.").size(13.0));
+            ui.label(theme::muted(tr("Удаление аккаунта нельзя отменить.")).size(13.0));
             ui.add_space(6.0);
             if ui
                 .add(egui::Button::new(
-                    RichText::new("Удалить аккаунт").color(theme::red()),
+                    RichText::new(tr("Удалить аккаунт")).color(theme::red()),
                 ))
                 .clicked()
             {
@@ -384,13 +394,13 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
             return;
         }
         ui.label(
-            RichText::new("Чтобы удалить аккаунт, введите свой логин и пароль.")
+            RichText::new(tr("Чтобы удалить аккаунт, введите свой логин и пароль."))
                 .color(theme::rose()),
         );
-        widgets::field_label(ui, &format!("Логин ({})", me.username));
+        widgets::field_label(ui, &crate::tf!("Логин ({a0})", a0 = me.username));
         widgets::text_field(ui, &mut state.delete_username, &me.username, 64);
-        widgets::field_label(ui, "Пароль");
-        widgets::secret_field(ui, &mut state.delete_password, "Пароль", 128);
+        widgets::field_label(ui, tr("Пароль"));
+        widgets::secret_field(ui, &mut state.delete_password, tr("Пароль"), 128);
         ui.add_space(8.0);
         show_note(ui, state.delete_note.as_ref());
         ui.horizontal(|ui| {
@@ -398,7 +408,7 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
             if ui
                 .add_enabled(
                     ready,
-                    egui::Button::new(RichText::new("Удалить навсегда").color(theme::red())),
+                    egui::Button::new(RichText::new(tr("Удалить навсегда")).color(theme::red())),
                 )
                 .clicked()
             {
@@ -407,7 +417,7 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
                     username: state.delete_username.clone(),
                 }));
             }
-            if ui.button("Отмена").clicked() {
+            if ui.button(tr("Отмена")).clicked() {
                 state.delete_open = false;
                 state.delete_password.clear();
                 state.delete_username.clear();
@@ -490,87 +500,90 @@ fn settings_patch(
 #[allow(clippy::too_many_lines, reason = "форма настроек одним блоком")]
 pub(crate) fn instance_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bridge) {
     let admin = &mut extra.admin;
-    page_title(ui, "Настройки инстанса");
+    page_title(ui, tr("Настройки инстанса"));
     if !admin.settings_asked {
         admin.settings_asked = bridge.request(BridgeRequest::Admin(AdminRequest::LoadSettings));
     }
     let (Some(saved), Some(edit)) = (admin.settings.clone(), admin.edit.as_mut()) else {
         show_note(ui, admin.settings_note.as_ref());
-        ui.label(theme::muted("Загрузка…"));
+        ui.label(theme::muted(tr("Загрузка…")));
         return;
     };
-    widgets::section_label(ui, "Общие");
+    widgets::section_label(ui, tr("Общие"));
     ui.add_space(6.0);
     card(ui, |ui| {
-        widgets::field_label(ui, "Название инстанса");
+        widgets::field_label(ui, tr("Название инстанса"));
         widgets::text_field(ui, &mut edit.instance_name, "Backspace", 32);
         ui.add_space(10.0);
         setting_row(
             ui,
-            "Каталог пространств",
-            "Публичные пространства видны в «Обзоре».",
+            tr("Каталог пространств"),
+            tr("Публичные пространства видны в «Обзоре»."),
             &mut edit.discovery_enabled,
         );
         number_row(
             ui,
-            "Лимит загрузки, МБ",
-            "Самый большой файл, который можно прикрепить.",
+            tr("Лимит загрузки, МБ"),
+            tr("Самый большой файл, который можно прикрепить."),
             &mut edit.max_upload_size_mb,
             (1, 10_240),
         );
-        widgets::field_label(ui, "Ключ Klipy для поиска GIF");
+        widgets::field_label(ui, tr("Ключ Klipy для поиска GIF"));
         widgets::secret_field(
             ui,
             &mut admin.gif_key,
-            saved.gif_api_key.as_deref().unwrap_or("Не задан"),
+            saved
+                .gif_api_key
+                .as_deref()
+                .unwrap_or_else(|| tr("Не задан")),
             128,
         );
     });
     ui.add_space(14.0);
-    widgets::section_label(ui, "Регистрация");
+    widgets::section_label(ui, tr("Регистрация"));
     ui.add_space(6.0);
     card(ui, |ui| {
         setting_row(
             ui,
-            "Регистрация открыта",
-            "Новые люди могут создать аккаунт на этом инстансе.",
+            tr("Регистрация открыта"),
+            tr("Новые люди могут создать аккаунт на этом инстансе."),
             &mut edit.registration_open,
         );
         setting_row(
             ui,
-            "Федеративная регистрация",
-            "Аккаунты с других инстансов могут заводить здесь профиль.",
+            tr("Федеративная регистрация"),
+            tr("Аккаунты с других инстансов могут заводить здесь профиль."),
             &mut edit.federated_registration_open,
         );
     });
     ui.add_space(14.0);
-    widgets::section_label(ui, "Федерация");
+    widgets::section_label(ui, tr("Федерация"));
     ui.add_space(6.0);
     card(ui, |ui| {
         setting_row(
             ui,
-            "Пересылка сообщений",
-            "Личные сообщения доставляются другим инстансам.",
+            tr("Пересылка сообщений"),
+            tr("Личные сообщения доставляются другим инстансам."),
             &mut edit.federation_relay_enabled,
         );
         number_row(
             ui,
-            "Хранить очередь, дней",
-            "Сколько недоставленное ждёт получателя.",
+            tr("Хранить очередь, дней"),
+            tr("Сколько недоставленное ждёт получателя."),
             &mut edit.federation_relay_ttl_days,
             (1, 365),
         );
         number_row(
             ui,
-            "Смена ключей, дней",
-            "Как часто ключи пиринга обновляются сами.",
+            tr("Смена ключей, дней"),
+            tr("Как часто ключи пиринга обновляются сами."),
             &mut edit.default_auto_rotate_interval_days,
             (1, 365),
         );
         setting_row(
             ui,
-            "Принимать пиринг автоматически",
-            "Без ручного подтверждения заявок от других инстансов.",
+            tr("Принимать пиринг автоматически"),
+            tr("Без ручного подтверждения заявок от других инстансов."),
             &mut edit.auto_accept_peering,
         );
     });
@@ -580,13 +593,13 @@ pub(crate) fn instance_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Br
     show_note(ui, admin.settings_note.as_ref());
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(changed, theme::primary_button("Сохранить"))
+            .add_enabled(changed, theme::primary_button(tr("Сохранить")))
             .clicked()
         {
             bridge.request(BridgeRequest::Admin(AdminRequest::SaveSettings(patch)));
         }
         if ui
-            .add_enabled(changed, egui::Button::new("Сбросить"))
+            .add_enabled(changed, egui::Button::new(tr("Сбросить")))
             .clicked()
         {
             admin.edit.clone_from(&admin.settings);
@@ -599,9 +612,9 @@ pub(crate) fn instance_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Br
 #[allow(clippy::too_many_lines, reason = "список с действиями в одном месте")]
 pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bridge: &Bridge) {
     let admin = &mut extra.admin;
-    page_title(ui, "Пользователи");
+    page_title(ui, tr("Пользователи"));
     ui.horizontal(|ui| {
-        widgets::search_box(ui, &mut admin.query, "Найти по имени");
+        widgets::search_box(ui, &mut admin.query, tr("Найти по имени"));
     });
     if admin.query != admin.asked_query {
         admin.asked_query.clone_from(&admin.query);
@@ -612,7 +625,7 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
         if widgets::toggle(ui, &mut admin.show_deleted) {
             admin.users_asked = false;
         }
-        ui.label(theme::muted("Показывать удалённых"));
+        ui.label(theme::muted(tr("Показывать удалённых")));
     });
     if admin.page == 0 {
         admin.page = 1;
@@ -628,14 +641,17 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
     show_note(ui, admin.users_note.as_ref());
     if let Some((who, password)) = admin.temp_password.clone() {
         card(ui, |ui| {
-            ui.label(format!("Временный пароль для @{who} (покажется один раз):"));
+            ui.label(crate::tf!(
+                "Временный пароль для @{who} (покажется один раз):",
+                who = who
+            ));
             ui.label(
                 RichText::new(&password)
                     .monospace()
                     .size(16.0)
                     .color(theme::mint()),
             );
-            if ui.button("Скопировать и скрыть").clicked() {
+            if ui.button(tr("Скопировать и скрыть")).clicked() {
                 ui.ctx().copy_text(password);
                 admin.temp_password = None;
             }
@@ -643,10 +659,10 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
         ui.add_space(8.0);
     }
     let Some(page) = admin.users.clone() else {
-        ui.label(theme::muted("Загрузка…"));
+        ui.label(theme::muted(tr("Загрузка…")));
         return;
     };
-    ui.label(theme::muted(format!("Всего: {}", page.total)).size(12.5));
+    ui.label(theme::muted(crate::tf!("Всего: {a0}", a0 = page.total)).size(12.5));
     ui.add_space(4.0);
     for user in &page.users {
         let is_me = user.id == me.id;
@@ -668,10 +684,10 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
                         meta.push_str(host);
                     }
                     if user.is_admin {
-                        meta.push_str(" · администратор");
+                        meta.push_str(tr(" · администратор"));
                     }
                     if user.is_deleted {
-                        meta.push_str(" · удалён");
+                        meta.push_str(tr(" · удалён"));
                     }
                     ui.label(theme::muted(meta).size(12.5));
                 });
@@ -682,9 +698,9 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let label = if user.is_admin {
-                    "Снять админа"
+                    tr("Снять админа")
                 } else {
-                    "Сделать админом"
+                    tr("Сделать админом")
                 };
                 if ui.button(label).clicked() {
                     bridge.request(BridgeRequest::Admin(AdminRequest::SetRole {
@@ -692,7 +708,7 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
                         admin: !user.is_admin,
                     }));
                 }
-                if user.home_instance.is_none() && ui.button("Сбросить пароль").clicked()
+                if user.home_instance.is_none() && ui.button(tr("Сбросить пароль")).clicked()
                 {
                     admin.reset_for = Some(user.username.clone());
                     bridge.request(BridgeRequest::Admin(AdminRequest::ResetPassword(
@@ -702,7 +718,7 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
                 if admin.confirm_delete.as_deref() == Some(user.id.as_str()) {
                     if ui
                         .add(egui::Button::new(
-                            RichText::new("Точно удалить?").color(theme::red()),
+                            RichText::new(tr("Точно удалить?")).color(theme::red()),
                         ))
                         .clicked()
                     {
@@ -710,12 +726,12 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
                             user.id.clone(),
                         )));
                     }
-                    if ui.button("Отмена").clicked() {
+                    if ui.button(tr("Отмена")).clicked() {
                         admin.confirm_delete = None;
                     }
                 } else if ui
                     .add(egui::Button::new(
-                        RichText::new("Удалить").color(theme::rose()),
+                        RichText::new(tr("Удалить")).color(theme::rose()),
                     ))
                     .clicked()
                 {
@@ -729,15 +745,22 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
     if pages > 1 {
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(admin.page > 1, egui::Button::new("Назад"))
+                .add_enabled(admin.page > 1, egui::Button::new(tr("Назад")))
                 .clicked()
             {
                 admin.page -= 1;
                 admin.users_asked = false;
             }
-            ui.label(theme::muted(format!("{} из {pages}", admin.page)));
+            ui.label(theme::muted(crate::tf!(
+                "{a0} из {pages}",
+                a0 = admin.page,
+                pages = pages
+            )));
             if ui
-                .add_enabled(u64::from(admin.page) < pages, egui::Button::new("Вперёд"))
+                .add_enabled(
+                    u64::from(admin.page) < pages,
+                    egui::Button::new(tr("Вперёд")),
+                )
                 .clicked()
             {
                 admin.page += 1;
@@ -751,27 +774,27 @@ pub(crate) fn users_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
 #[allow(clippy::too_many_lines, reason = "сводка и очистка одним блоком")]
 pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bridge) {
     let admin = &mut extra.admin;
-    page_title(ui, "Хранилище");
+    page_title(ui, tr("Хранилище"));
     if !admin.storage_asked {
         admin.storage_asked = bridge.request(BridgeRequest::Admin(AdminRequest::LoadStorage));
     }
     show_note(ui, admin.storage_note.as_ref());
     let Some(stats) = admin.storage.clone() else {
-        ui.label(theme::muted("Загрузка…"));
+        ui.label(theme::muted(tr("Загрузка…")));
         return;
     };
     let size = |bytes: u64| human_size(i64::try_from(bytes).unwrap_or(i64::MAX));
     card(ui, |ui| {
         for (label, files, bytes) in [
-            ("Всего", stats.total_files, stats.total_size),
+            (tr("Всего"), stats.total_files, stats.total_size),
             (
-                "Используется",
+                tr("Используется"),
                 stats.referenced_files,
                 stats.referenced_size,
             ),
-            ("Осиротевшие", stats.orphaned_files, stats.orphaned_size),
+            (tr("Осиротевшие"), stats.orphaned_files, stats.orphaned_size),
             (
-                "Недогруженные загрузки",
+                tr("Недогруженные загрузки"),
                 stats.stale_tus_sessions,
                 stats.stale_tus_size,
             ),
@@ -779,23 +802,27 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
             ui.horizontal(|ui| {
                 ui.label(RichText::new(label).color(theme::text_bright()));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(theme::muted(format!("{files} файлов · {}", size(bytes))));
+                    ui.label(theme::muted(crate::tf!(
+                        "{files} файлов · {a0}",
+                        files = files,
+                        a0 = size(bytes)
+                    )));
                 });
             });
         }
     });
     if !stats.breakdown.is_empty() {
         ui.add_space(10.0);
-        widgets::section_label(ui, "По типам");
+        widgets::section_label(ui, tr("По типам"));
         ui.add_space(6.0);
         card(ui, |ui| {
             for row in &stats.breakdown {
                 let name = match row.kind.as_str() {
-                    "image" => "Изображения",
-                    "video" => "Видео",
-                    "audio" => "Аудио",
-                    "document" => "Документы",
-                    _ => "Прочее",
+                    "image" => tr("Изображения"),
+                    "video" => tr("Видео"),
+                    "audio" => tr("Аудио"),
+                    "document" => tr("Документы"),
+                    _ => tr("Прочее"),
                 };
                 ui.horizontal(|ui| {
                     ui.label(name);
@@ -809,16 +836,16 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
     ui.add_space(14.0);
     if let Some(done) = &admin.cleanup {
         let text = if done.dry_run {
-            format!(
-                "Можно удалить {} файлов ({})",
-                done.deleted_files,
-                size(done.freed_bytes)
+            crate::tf!(
+                "Можно удалить {a0} файлов ({a1})",
+                a0 = done.deleted_files,
+                a1 = size(done.freed_bytes)
             )
         } else {
-            format!(
-                "Удалено {} файлов, освобождено {}",
-                done.deleted_files,
-                size(done.freed_bytes)
+            crate::tf!(
+                "Удалено {a0} файлов, освобождено {a1}",
+                a0 = done.deleted_files,
+                a1 = size(done.freed_bytes)
             )
         };
         ui.label(RichText::new(text).color(theme::green()));
@@ -828,7 +855,7 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
         ui.add_space(6.0);
     }
     ui.horizontal(|ui| {
-        if ui.button("Проверить без удаления").clicked() {
+        if ui.button(tr("Проверить без удаления")).clicked() {
             bridge.request(BridgeRequest::Admin(AdminRequest::Cleanup {
                 dry_run: true,
             }));
@@ -836,7 +863,7 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
         if admin.confirm_cleanup {
             if ui
                 .add(egui::Button::new(
-                    RichText::new("Удалить сирот").color(theme::red()),
+                    RichText::new(tr("Удалить сирот")).color(theme::red()),
                 ))
                 .clicked()
             {
@@ -845,13 +872,13 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
                 }));
                 admin.confirm_cleanup = false;
             }
-            if ui.button("Отмена").clicked() {
+            if ui.button(tr("Отмена")).clicked() {
                 admin.confirm_cleanup = false;
             }
         } else if ui
             .add_enabled(
                 stats.orphaned_files > 0,
-                egui::Button::new("Очистить сирот…"),
+                egui::Button::new(tr("Очистить сирот…")),
             )
             .clicked()
         {

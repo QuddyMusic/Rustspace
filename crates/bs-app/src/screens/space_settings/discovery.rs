@@ -10,6 +10,7 @@ use egui::{CornerRadius, Margin, RichText, Vec2};
 use super::{DESCRIPTION_MAX, Rights, SpaceSettings, heading, status_lines};
 use crate::bridge::SpaceOp;
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::{images, theme, widgets};
 
 const MAX_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
@@ -33,14 +34,16 @@ fn pick(ctx: &egui::Context, banner: bool) -> Picking {
     let ctx = ctx.clone();
     std::thread::spawn(move || {
         let chosen = rfd::FileDialog::new()
-            .add_filter("Изображения", &["png", "jpg", "jpeg", "gif", "webp"])
+            .add_filter(tr("Изображения"), &["png", "jpg", "jpeg", "gif", "webp"])
             .pick_file();
         if let Some(path) = chosen {
             let name = path
                 .file_name()
                 .map_or_else(|| "image".to_owned(), |n| n.to_string_lossy().into_owned());
             let bytes = match std::fs::metadata(&path) {
-                Ok(meta) if meta.len() > MAX_IMAGE_BYTES => Err("Картинка больше 16 МБ".to_owned()),
+                Ok(meta) if meta.len() > MAX_IMAGE_BYTES => {
+                    Err(tr("Картинка больше 16 МБ").to_owned())
+                }
                 Ok(_) => std::fs::read(&path).map_err(|e| e.to_string()),
                 Err(e) => Err(e.to_string()),
             };
@@ -73,7 +76,7 @@ pub(super) fn appearance(
     rights: Rights,
     bridge: &Bridge,
 ) {
-    widgets::section_label(ui, "Оформление пространства");
+    widgets::section_label(ui, tr("Оформление пространства"));
     ui.add_space(6.0);
     let base = bridge.base_at(state.origin).unwrap_or_default();
     image_row(ui, state, rights, base, false);
@@ -91,16 +94,16 @@ fn image_row(
 ) {
     let (label, upload, remove, size) = if banner {
         (
-            "Баннер пространства",
-            "Загрузить баннер (16:9)",
-            "Удалить баннер",
+            tr("Баннер пространства"),
+            tr("Загрузить баннер (16:9)"),
+            tr("Удалить баннер"),
             Vec2::new(160.0, 90.0),
         )
     } else {
         (
-            "Значок пространства",
-            "Загрузить значок",
-            "Удалить значок",
+            tr("Значок пространства"),
+            tr("Загрузить значок"),
+            tr("Удалить значок"),
             Vec2::splat(64.0),
         )
     };
@@ -136,7 +139,7 @@ fn image_row(
             ui.add_enabled_ui(rights.manage_space, |ui| {
                 let busy = state.picking.is_some() || state.uploading == Some(banner);
                 let text = if state.uploading == Some(banner) {
-                    "Загрузка…"
+                    tr("Загрузка…")
                 } else {
                     upload
                 };
@@ -169,9 +172,9 @@ pub(super) fn save_bar(
     ui.horizontal(|ui| {
         let valid = !state.fields.name.trim().is_empty() && state.uploading.is_none();
         let label = if state.busy {
-            "Сохранение…"
+            tr("Сохранение…")
         } else {
-            "Сохранить"
+            tr("Сохранить")
         };
         if ui
             .add_enabled(valid && !state.busy, theme::primary_button(label))
@@ -180,7 +183,7 @@ pub(super) fn save_bar(
             let op = SpaceOp::Update(state.update_patch());
             state.request(bridge, op);
         }
-        if ui.button("Сбросить").clicked() {
+        if ui.button(tr("Сбросить")).clicked() {
             state.fields = state.saved.clone();
         }
     });
@@ -193,31 +196,31 @@ pub(super) fn show(
     rights: Rights,
     bridge: &mut Bridge,
 ) {
-    heading(ui, "Обнаружение");
+    heading(ui, tr("Обнаружение"));
     ui.add_enabled_ui(rights.manage_space, |ui| {
-        widgets::field_label(ui, "Видимость");
+        widgets::field_label(ui, tr("Видимость"));
         ui.label(
-            RichText::new(
+            RichText::new(tr(
                 "Управляйте тем, кто может находить это пространство и присоединяться к нему.",
-            )
+            ))
             .color(theme::text_muted()),
         );
         ui.add_space(4.0);
         for (value, title, hint) in [
             (
                 SpaceVisibility::Private,
-                "Закрытое",
-                "Присоединиться могут только те, у кого есть ссылка для приглашения",
+                tr("Закрытое"),
+                tr("Присоединиться могут только те, у кого есть ссылка для приглашения"),
             ),
             (
                 SpaceVisibility::Request,
-                "По запросу",
-                "Видно в разделе «Обзор»; можно запросить вступление",
+                tr("По запросу"),
+                tr("Видно в разделе «Обзор»; можно запросить вступление"),
             ),
             (
                 SpaceVisibility::Public,
-                "Открытое",
-                "Видно в разделе «Обзор»; присоединиться может любой",
+                tr("Открытое"),
+                tr("Видно в разделе «Обзор»; присоединиться может любой"),
             ),
         ] {
             if widgets::radio_card(ui, title, hint, state.fields.visibility == value).clicked() {
@@ -227,15 +230,15 @@ pub(super) fn show(
         ui.add_space(10.0);
         directory(ui, state);
         ui.add_space(10.0);
-        widgets::field_label(ui, "Описание");
+        widgets::field_label(ui, tr("Описание"));
         ui.label(
-            RichText::new("Краткое описание, отображаемое на странице «Обзор».")
+            RichText::new(tr("Краткое описание, отображаемое на странице «Обзор»."))
                 .color(theme::text_muted()),
         );
         widgets::text_area(
             ui,
             &mut state.fields.description,
-            "Краткое описание для страницы «Обзор»…",
+            tr("Краткое описание для страницы «Обзор»…"),
             DESCRIPTION_MAX,
             3,
         );
@@ -248,7 +251,7 @@ pub(super) fn show(
 }
 
 fn directory(ui: &mut egui::Ui, state: &mut SpaceSettings) {
-    widgets::section_label(ui, "Внешний каталог Backspace");
+    widgets::section_label(ui, tr("Внешний каталог Backspace"));
     ui.add_space(4.0);
     egui::Frame::new()
         .fill(theme::bg_rail())
@@ -260,12 +263,12 @@ fn directory(ui: &mut egui::Ui, state: &mut SpaceSettings) {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.label(
-                        RichText::new("Добавить во внешний каталог Backspace")
+                        RichText::new(tr("Добавить во внешний каталог Backspace"))
                             .color(theme::text_bright()),
                     );
                     ui.label(
                         RichText::new(
-                            "Показывать это пространство во внешнем пространстве на каждом сервере Backspace.",
+                            tr("Показывать это пространство во внешнем пространстве на каждом сервере Backspace."),
                         )
                         .size(12.0)
                         .color(theme::text_muted()),
@@ -277,7 +280,7 @@ fn directory(ui: &mut egui::Ui, state: &mut SpaceSettings) {
             });
             if locked {
                 ui.label(
-                    RichText::new("Сначала сделайте пространство открытым или доступным по запросу.")
+                    RichText::new(tr("Сначала сделайте пространство открытым или доступным по запросу."))
                         .size(12.0)
                         .color(theme::text_muted()),
                 );
@@ -285,7 +288,7 @@ fn directory(ui: &mut egui::Ui, state: &mut SpaceSettings) {
             ui.add_space(4.0);
             ui.label(
                 RichText::new(
-                    "После добавления становятся общедоступными: название, описание, значок, баннер и число участников пространства, а также адрес этого сервера. Те, кто просматривает внешний каталог, загружают значок и баннер с этого сервера.",
+                    tr("После добавления становятся общедоступными: название, описание, значок, баннер и число участников пространства, а также адрес этого сервера. Те, кто просматривает внешний каталог, загружают значок и баннер с этого сервера."),
                 )
                 .size(12.0)
                 .color(theme::text_muted()),
@@ -295,21 +298,23 @@ fn directory(ui: &mut egui::Ui, state: &mut SpaceSettings) {
 
 fn join_requests(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge) {
     ui.add_space(18.0);
-    widgets::section_label(ui, "Ожидающие запросы на вступление");
+    widgets::section_label(ui, tr("Ожидающие запросы на вступление"));
     ui.add_space(6.0);
     let Some(list) = state.requests.clone() else {
-        ui.label(RichText::new("Загрузка…").color(theme::text_muted()));
+        ui.label(RichText::new(tr("Загрузка…")).color(theme::text_muted()));
         return;
     };
     if list.is_empty() {
-        ui.label(RichText::new("Нет ожидающих запросов на вступление").color(theme::text_muted()));
+        ui.label(
+            RichText::new(tr("Нет ожидающих запросов на вступление")).color(theme::text_muted()),
+        );
         return;
     }
     for request in &list {
         let name = request
             .user
             .as_ref()
-            .map_or_else(|| "Неизвестно".to_owned(), super::display_name);
+            .map_or_else(|| tr("Неизвестно").to_owned(), super::display_name);
         egui::Frame::new()
             .fill(theme::bg_rail())
             .corner_radius(CornerRadius::same(10))
@@ -327,14 +332,14 @@ fn join_requests(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Brid
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .add_enabled(!state.busy, egui::Button::new("Отклонить"))
+                            .add_enabled(!state.busy, egui::Button::new(tr("Отклонить")))
                             .clicked()
                         {
                             state
                                 .request(bridge, SpaceOp::DecideRequest(request.id.clone(), false));
                         }
                         if ui
-                            .add_enabled(!state.busy, egui::Button::new("Принять"))
+                            .add_enabled(!state.busy, egui::Button::new(tr("Принять")))
                             .clicked()
                         {
                             state.request(bridge, SpaceOp::DecideRequest(request.id.clone(), true));

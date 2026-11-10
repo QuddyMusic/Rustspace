@@ -9,6 +9,7 @@ use egui::{Align, Layout, Margin, RichText};
 
 use crate::bridge::BridgeRequest;
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::theme;
 use crate::voice_media::{ConnectRequest, MediaEngine, MediaStatus, Speaking, VoicePrefs};
@@ -350,7 +351,7 @@ impl VoiceState {
                 self.follow_move(bridge, &id, &name);
             } else {
                 self.leave_quietly();
-                self.notice = Some("Вы отключены от голосового канала".to_owned());
+                self.notice = Some(tr("Вы отключены от голосового канала").to_owned());
                 return;
             }
         }
@@ -376,7 +377,7 @@ impl VoiceState {
         bridge.focus_on(origin);
         bridge.request(BridgeRequest::VoiceToken(channel_id.to_owned()));
         bridge.focus_on(previous);
-        self.notice = Some(format!("Вас переместили в «{name}»"));
+        self.notice = Some(crate::tf!("Вас переместили в «{name}»", name = name));
     }
 
     /// Применяет принудительные заглушки от модератора.
@@ -516,7 +517,7 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                         });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if widgets::icon_button(ui, Icon::HangUp, 30.0)
-                                .on_hover_text("Отключиться")
+                                .on_hover_text(tr("Отключиться"))
                                 .clicked()
                             {
                                 action = DockAction::Leave;
@@ -540,13 +541,13 @@ impl VoiceState {
     fn dock_info(&self) -> Option<DockInfo> {
         if let Some(dm) = &self.dm {
             let status = match (dm.phase, &dm.token, &self.status) {
-                (crate::dmcall::DmPhase::Ringing, _, _) => ("Вызываем…", theme::amber()),
-                (_, Some(Err(_)), _) => ("Нет токена LiveKit", theme::rose()),
-                (_, _, MediaStatus::Failed(_)) => ("Нет звукового соединения", theme::rose()),
-                (_, _, MediaStatus::ListenOnly(_)) => ("Звонок: нет микрофона", theme::amber()),
-                (_, _, MediaStatus::Live) => ("Звонок идёт", theme::green()),
-                (_, _, MediaStatus::Unavailable) => ("Сборка без голоса", theme::text_muted()),
-                _ => ("Подключение…", theme::amber()),
+                (crate::dmcall::DmPhase::Ringing, _, _) => (tr("Вызываем…"), theme::amber()),
+                (_, Some(Err(_)), _) => (tr("Нет токена LiveKit"), theme::rose()),
+                (_, _, MediaStatus::Failed(_)) => (tr("Нет звукового соединения"), theme::rose()),
+                (_, _, MediaStatus::ListenOnly(_)) => (tr("Звонок: нет микрофона"), theme::amber()),
+                (_, _, MediaStatus::Live) => (tr("Звонок идёт"), theme::green()),
+                (_, _, MediaStatus::Unavailable) => (tr("Сборка без голоса"), theme::text_muted()),
+                _ => (tr("Подключение…"), theme::amber()),
             };
             return Some(DockInfo {
                 status,
@@ -568,14 +569,14 @@ impl VoiceState {
 
 fn status_line(call: &VoiceCall, media: &MediaStatus) -> (&'static str, egui::Color32) {
     match (&call.token, media, call.confirmed) {
-        _ if call.forced_deafen => ("Звук отключён модератором", theme::amber()),
-        _ if call.forced_mute => ("Вас заглушил модератор", theme::amber()),
-        (Some(Err(_)), _, _) => ("Нет токена LiveKit", theme::rose()),
-        (_, MediaStatus::Failed(_), _) => ("Нет звукового соединения", theme::rose()),
-        (_, MediaStatus::ListenOnly(_), _) => ("Нет микрофона", theme::amber()),
-        (_, MediaStatus::Live, _) => ("Голос подключён", theme::green()),
-        (_, MediaStatus::Unavailable, true) => ("Сборка без голоса", theme::text_muted()),
-        _ => ("Подключение…", theme::amber()),
+        _ if call.forced_deafen => (tr("Звук отключён модератором"), theme::amber()),
+        _ if call.forced_mute => (tr("Вас заглушил модератор"), theme::amber()),
+        (Some(Err(_)), _, _) => (tr("Нет токена LiveKit"), theme::rose()),
+        (_, MediaStatus::Failed(_), _) => (tr("Нет звукового соединения"), theme::rose()),
+        (_, MediaStatus::ListenOnly(_), _) => (tr("Нет микрофона"), theme::amber()),
+        (_, MediaStatus::Live, _) => (tr("Голос подключён"), theme::green()),
+        (_, MediaStatus::Unavailable, true) => (tr("Сборка без голоса"), theme::text_muted()),
+        _ => (tr("Подключение…"), theme::amber()),
     }
 }
 
@@ -585,19 +586,24 @@ fn status_detail(
     media: &MediaStatus,
 ) -> Option<String> {
     match (token, media) {
-        (Some(Err(err)), _) => Some(format!(
-            "Сервер не выдал токен LiveKit: {err}. Проверьте, что на инстансе настроен LiveKit."
+        (Some(Err(err)), _) => Some(crate::tf!(
+            "Сервер не выдал токен LiveKit: {err}. Проверьте, что на инстансе настроен LiveKit.",
+            err = err
         )),
-        (_, MediaStatus::Failed(err)) => Some(format!("Не удалось подключиться к LiveKit: {err}")),
-        (_, MediaStatus::ListenOnly(err)) => Some(format!(
+        (_, MediaStatus::Failed(err)) => Some(crate::tf!(
+            "Не удалось подключиться к LiveKit: {err}",
+            err = err
+        )),
+        (_, MediaStatus::ListenOnly(err)) => Some(crate::tf!(
             "Вы слышите других, но вас не слышат: микрофон не открылся ({err}). \
              Проверьте, что микрофон подключён и не занят другой программой, \
-             и выберите его в настройках голоса."
+             и выберите его в настройках голоса.",
+            err = err
         )),
         (_, MediaStatus::Unavailable) => Some(
-            "Приложение собрано без голосового движка. Запустите: \
-             cargo run -p bs-app --features voice"
-                .to_owned(),
+            tr("Приложение собрано без голосового движка. Запустите: \
+             cargo run -p bs-app --features voice")
+            .to_owned(),
         ),
         _ => None,
     }
@@ -624,7 +630,7 @@ pub(crate) fn moderation_menu(
 ) -> Option<ModOp> {
     let uid = user_id.to_owned();
     let mut op = ui
-        .button("Заглушить микрофон (сервер)")
+        .button(tr("Заглушить микрофон (сервер)"))
         .clicked()
         .then(|| ModOp::Mute(uid.clone(), true));
     let mut pick = |clicked: bool, value: ModOp| {
@@ -633,19 +639,19 @@ pub(crate) fn moderation_menu(
         }
     };
     pick(
-        ui.button("Снять заглушку микрофона").clicked(),
+        ui.button(tr("Снять заглушку микрофона")).clicked(),
         ModOp::Mute(uid.clone(), false),
     );
     pick(
-        ui.button("Отключить звук (сервер)").clicked(),
+        ui.button(tr("Отключить звук (сервер)")).clicked(),
         ModOp::Deafen(uid.clone(), true),
     );
     pick(
-        ui.button("Вернуть звук").clicked(),
+        ui.button(tr("Вернуть звук")).clicked(),
         ModOp::Deafen(uid.clone(), false),
     );
     if !other_channels.is_empty() {
-        ui.menu_button("Переместить в…", |ui| {
+        ui.menu_button(tr("Переместить в…"), |ui| {
             for (id, name) in other_channels {
                 pick(
                     ui.button(name).clicked(),
@@ -655,7 +661,7 @@ pub(crate) fn moderation_menu(
         });
     }
     pick(
-        ui.button("Отключить от канала").clicked(),
+        ui.button(tr("Отключить от канала")).clicked(),
         ModOp::Disconnect(uid),
     );
     op

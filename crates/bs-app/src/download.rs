@@ -4,6 +4,7 @@
 //! результат приходит по каналу, а сами файлы качает мост (см.
 //! `BridgeRequest::Download`).
 
+use crate::i18n::tr;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
@@ -42,7 +43,7 @@ pub(crate) fn safe_name(raw: &str) -> String {
         .collect();
     let cleaned = cleaned.trim().trim_matches('.').trim().to_owned();
     if cleaned.is_empty() {
-        "файл".to_owned()
+        tr("файл").to_owned()
     } else {
         cleaned
     }

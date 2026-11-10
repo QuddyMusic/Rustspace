@@ -25,6 +25,7 @@ use bs_types::TransportPolicy;
 use tokio::runtime::Handle;
 
 use crate::bridge::{BridgeRequest, FailureKind, IssuedCredential, Secret, Session};
+use crate::i18n::tr;
 use crate::registry::{self, Registry, now_ms};
 
 /// Сколько чужих инстансов можно подключить: домашний сервер сам присылает
@@ -358,7 +359,8 @@ impl Bridge {
             Ok(server) => self.registry.load(Some(server), &known, now_ms()),
             Err(message) => {
                 tracing::warn!(%message, "реестр подключений не прочитан");
-                self.message = Some("Не удалось прочитать список подключений с сервера".to_owned());
+                self.message =
+                    Some(tr("Не удалось прочитать список подключений с сервера").to_owned());
                 self.registry.load(None, &known, now_ms());
             }
         }
@@ -428,12 +430,14 @@ impl Bridge {
             match result {
                 Ok(status) => {
                     self.message = match status.as_str() {
-                        "rejected" => Some(format!("Пиринг с {name} отклонён")),
-                        "pending" | "awaiting_approval" => {
-                            Some(format!("Пиринг с {name} ожидает подтверждения"))
-                        }
-                        "admin_required" => Some(format!(
-                            "Администратор вашего инстанса должен одобрить связь с {name}"
+                        "rejected" => Some(crate::tf!("Пиринг с {name} отклонён", name = name)),
+                        "pending" | "awaiting_approval" => Some(crate::tf!(
+                            "Пиринг с {name} ожидает подтверждения",
+                            name = name
+                        )),
+                        "admin_required" => Some(crate::tf!(
+                            "Администратор вашего инстанса должен одобрить связь с {name}",
+                            name = name
                         )),
                         _ => self.message.take(),
                     };
@@ -469,7 +473,7 @@ impl Bridge {
                         slot.restart = None;
                         slot.manual = None;
                         self.message = Some(
-                            "Вход выполнен, но перевести аккаунт на выданный пароль не удалось"
+                            tr("Вход выполнен, но перевести аккаунт на выданный пароль не удалось")
                                 .to_owned(),
                         );
                     }
@@ -577,23 +581,26 @@ impl Bridge {
                                 host_label(&origin),
                                 delete_error(result.error.as_deref())
                             )),
-                            None => problems.push(format!(
-                                "{}: сервер не ответил по этому инстансу",
-                                host_label(&origin)
+                            None => problems.push(crate::tf!(
+                                "{a0}: сервер не ответил по этому инстансу",
+                                a0 = host_label(&origin)
                             )),
                         }
                     }
                     self.message = Some(if problems.is_empty() {
                         match removed {
-                            0 | 1 => "Учётная запись удалена".to_owned(),
-                            n => format!("Учётная запись удалена на {n} инстансах"),
+                            0 | 1 => tr("Учётная запись удалена").to_owned(),
+                            n => crate::tf!("Учётная запись удалена на {n} инстансах", n = n),
                         }
                     } else {
                         problems.join("\n")
                     });
                 }
                 Err(message) => {
-                    self.message = Some(format!("Не удалось удалить учётную запись: {message}"));
+                    self.message = Some(crate::tf!(
+                        "Не удалось удалить учётную запись: {message}",
+                        message = message
+                    ));
                 }
             }
         }
@@ -727,7 +734,7 @@ impl Bridge {
     /// проверяется домом, на чужой инстанс не уходит.
     pub(crate) fn connect_remote(&mut self, raw_base: &str, password: Option<&str>) {
         let Some(base) = canonical_base(raw_base) else {
-            self.message = Some("Некорректный адрес инстанса".to_owned());
+            self.message = Some(tr("Некорректный адрес инстанса").to_owned());
             return;
         };
         self.add_remote(&base, password, None, true);
@@ -741,7 +748,7 @@ impl Bridge {
         register: bool,
     ) {
         if !self.slots[0].session.is_live() {
-            self.message = Some("Сначала войдите в домашний инстанс".to_owned());
+            self.message = Some(tr("Сначала войдите в домашний инстанс").to_owned());
             return;
         }
         if let Ok(url) = url::Url::parse(base)
@@ -751,7 +758,7 @@ impl Bridge {
             return;
         }
         if self.slots[0].base.as_deref() == Some(base) {
-            self.message = Some("Это ваш домашний инстанс: он уже подключён".to_owned());
+            self.message = Some(tr("Это ваш домашний инстанс: он уже подключён").to_owned());
             return;
         }
         if let Some(existing) = self
@@ -762,15 +769,16 @@ impl Bridge {
         {
             let slot = &self.slots[existing + 1];
             if !slot.session.is_idle() || slot.awaiting_credential {
-                self.message = Some("Этот инстанс уже подключён".to_owned());
+                self.message = Some(tr("Этот инстанс уже подключён").to_owned());
                 return;
             }
             self.slots.remove(existing + 1);
             self.focus = 0;
         }
         if self.slots.len() > MAX_REMOTES {
-            self.message = Some(format!(
-                "Можно подключить не больше {MAX_REMOTES} инстансов"
+            self.message = Some(crate::tf!(
+                "Можно подключить не больше {MAX_REMOTES} инстансов",
+                MAX_REMOTES = MAX_REMOTES
             ));
             return;
         }
@@ -816,7 +824,7 @@ impl Bridge {
         };
         let username = username.trim();
         if username.is_empty() || password.is_empty() {
-            self.message = Some("Введите имя и пароль на этом инстансе".to_owned());
+            self.message = Some(tr("Введите имя и пароль на этом инстансе").to_owned());
             return;
         }
         self.add_remote(&base, None, Some(username.to_owned()), false);
@@ -1226,10 +1234,10 @@ impl Bridge {
 fn delete_error(code: Option<&str>) -> String {
     match code {
         Some("owns_spaces" | "user_owns_spaces") => {
-            "сначала передайте владение пространствами".to_owned()
+            tr("сначала передайте владение пространствами").to_owned()
         }
         Some(other) if !other.is_empty() => other.to_owned(),
-        _ => "не удалось".to_owned(),
+        _ => tr("не удалось").to_owned(),
     }
 }
 

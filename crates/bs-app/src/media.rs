@@ -5,6 +5,7 @@ use bs_types::Attachment;
 use egui::{Align2, Color32, CornerRadius, FontId, Rect, Sense, Vec2};
 
 use crate::download::{Click, Target};
+use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::images::{Download, ImageHub, ImageState, paint_cover};
 use crate::theme;
@@ -101,11 +102,11 @@ pub(crate) fn human_size(bytes: i64) -> String {
     #[allow(clippy::cast_precision_loss, reason = "размер нужен лишь для подписи")]
     let b = bytes.max(0) as f64;
     if b < KIB {
-        format!("{bytes} Б")
+        crate::tf!("{bytes} Б", bytes = bytes)
     } else if b < KIB * KIB {
-        format!("{:.0} КБ", b / KIB)
+        crate::tf!("{a0} КБ", a0 = format!("{:.0}", b / KIB))
     } else {
-        format!("{:.1} МБ", b / (KIB * KIB))
+        crate::tf!("{a0} МБ", a0 = format!("{:.1}", b / (KIB * KIB)))
     }
 }
 
@@ -195,10 +196,12 @@ fn download_badge(
     if hover {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         let tip = match state {
-            Some(Download::Running { .. }) => "Скачивается…".to_owned(),
-            Some(Download::Done) => "Сохранено. Нажмите, чтобы скачать ещё раз".to_owned(),
-            Some(Download::Failed(why)) => format!("Не удалось: {why}. Нажмите, чтобы повторить"),
-            None => "Скачать".to_owned(),
+            Some(Download::Running { .. }) => tr("Скачивается…").to_owned(),
+            Some(Download::Done) => tr("Сохранено. Нажмите, чтобы скачать ещё раз").to_owned(),
+            Some(Download::Failed(why)) => {
+                crate::tf!("Не удалось: {why}. Нажмите, чтобы повторить", why = why)
+            }
+            None => tr("Скачать").to_owned(),
         };
         egui::Tooltip::always_open(
             ui.ctx().clone(),
@@ -232,14 +235,18 @@ pub(crate) fn show_download_all(
         .count();
     let total: i64 = attachments.iter().map(|a| a.size).sum();
     let label = if running > 0 {
-        format!("Скачивается… ({running} из {})", attachments.len())
+        crate::tf!(
+            "Скачивается… ({running} из {a0})",
+            running = running,
+            a0 = attachments.len()
+        )
     } else if done == attachments.len() {
-        format!("Все файлы сохранены ({})", attachments.len())
+        crate::tf!("Все файлы сохранены ({a0})", a0 = attachments.len())
     } else {
-        format!(
-            "Скачать все ({} · {})",
-            attachments.len(),
-            human_size(total)
+        crate::tf!(
+            "Скачать все ({a0} · {a1})",
+            a0 = attachments.len(),
+            a1 = human_size(total)
         )
     };
     let (rect, _) = ui.allocate_exact_size(Vec2::new(250.0, 30.0), Sense::hover());
@@ -326,10 +333,10 @@ pub(crate) fn show_attachment(
             paint_cover(ui.painter(), rect, &image, radius, true, Color32::WHITE);
         }
         ImageState::Failed(reason) => {
-            placeholder(ui, rect, "Не удалось показать картинку");
+            placeholder(ui, rect, tr("Не удалось показать картинку"));
             failure = Some(reason);
         }
-        ImageState::Loading => placeholder(ui, rect, "Загрузка…"),
+        ImageState::Loading => placeholder(ui, rect, tr("Загрузка…")),
         ImageState::Absent => placeholder(ui, rect, &att.name),
     }
     let response = response.on_hover_text(failure.unwrap_or_else(|| att.name.clone()));
@@ -379,8 +386,8 @@ pub(crate) fn show_sticker(ui: &mut egui::Ui, value: &str) -> Option<Hit> {
                 Color32::WHITE,
             );
         }
-        ImageState::Loading => placeholder(ui, rect, "Стикер…"),
-        _ => placeholder(ui, rect, "Стикер недоступен"),
+        ImageState::Loading => placeholder(ui, rect, tr("Стикер…")),
+        _ => placeholder(ui, rect, tr("Стикер недоступен")),
     }
     if ready && response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -410,7 +417,7 @@ pub(crate) fn show_gif(ui: &mut egui::Ui, url: &str) -> Option<Hit> {
             );
         }
         ImageState::Loading => placeholder(ui, rect, "GIF…"),
-        _ => placeholder(ui, rect, "GIF недоступен"),
+        _ => placeholder(ui, rect, tr("GIF недоступен")),
     }
     if ready && response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -488,7 +495,7 @@ pub(crate) fn viewer(ctx: &egui::Context, value: &str) -> bool {
                     ui.painter().text(
                         rect.center(),
                         Align2::CENTER_CENTER,
-                        "Загрузка…",
+                        tr("Загрузка…"),
                         FontId::proportional(16.0),
                         theme::text_muted(),
                     );
@@ -497,7 +504,7 @@ pub(crate) fn viewer(ctx: &egui::Context, value: &str) -> bool {
                     ui.painter().text(
                         rect.center(),
                         Align2::CENTER_CENTER,
-                        "Не удалось показать картинку",
+                        tr("Не удалось показать картинку"),
                         FontId::proportional(16.0),
                         theme::text_muted(),
                     );
@@ -525,7 +532,7 @@ pub(crate) fn viewer(ctx: &egui::Context, value: &str) -> bool {
                 close = true;
             }
             backdrop.context_menu(|ui| {
-                if ui.button("Копировать картинку").clicked() {
+                if ui.button(tr("Копировать картинку")).clicked() {
                     if let Some(hub) = ImageHub::of(ctx) {
                         hub.request_raw(value, crate::images::RawPurpose::Copy);
                     }

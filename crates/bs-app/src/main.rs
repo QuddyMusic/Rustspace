@@ -8,6 +8,9 @@
 // Бинарь: `pub` не нужен (unreachable_pub), а `pub(crate)` внутри приватных
 // модулей clippy считает избыточным. Оставляем `pub(crate)` — он честнее.
 #![allow(clippy::redundant_pub_crate)]
+// Шаблоны перевода `tf!("… {name} …")` подставляются во время работы
+// (см. `i18n`), а не `format!`: подстановки в них — не ошибка.
+#![allow(clippy::literal_string_with_formatting_args)]
 // В тестах паника — законный способ упасть быстро и с понятным текстом.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
@@ -23,6 +26,7 @@ mod fake_instance;
 mod fleet;
 mod gif_favorites;
 mod hotkeys;
+mod i18n;
 mod icons;
 mod images;
 mod logic;

@@ -10,6 +10,7 @@ use egui::{CornerRadius, Margin, RichText};
 
 use crate::bridge::{BridgeRequest, GroupEvent, GroupOp};
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::social::user_display_name;
 use crate::{theme, widgets};
 
@@ -173,7 +174,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut GroupDialog, bridge: &mut Br
                 ui.label(RichText::new(err).color(theme::rose()));
             }
             ui.add_space(10.0);
-            if ui.button("Закрыть").clicked() {
+            if ui.button(tr("Закрыть")).clicked() {
                 keep_open = false;
             }
         });
@@ -191,11 +192,11 @@ fn title(ui: &mut egui::Ui, text: &str) {
 }
 
 fn create(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge) {
-    title(ui, "Создать группу");
+    title(ui, tr("Создать группу"));
     ui.label(
-        RichText::new(format!(
-            "Выберите от 2 до {} друзей. Вы добавитесь в группу автоматически.",
-            GROUP_MAX_MEMBERS - 1
+        RichText::new(crate::tf!(
+            "Выберите от 2 до {a0} друзей. Вы добавитесь в группу автоматически.",
+            a0 = GROUP_MAX_MEMBERS - 1
         ))
         .color(theme::text_muted()),
     );
@@ -205,7 +206,7 @@ fn create(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge) {
         return;
     };
     let search = &mut state.search;
-    widgets::text_field(ui, search, "Поиск друзей…", 64);
+    widgets::text_field(ui, search, tr("Поиск друзей…"), 64);
     ui.add_space(4.0);
     let needle = search.trim().to_lowercase();
     egui::ScrollArea::vertical()
@@ -232,7 +233,7 @@ fn create(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge) {
                 });
             }
             if friends.is_empty() {
-                ui.label(RichText::new("Сначала добавьте друзей").color(theme::text_muted()));
+                ui.label(RichText::new(tr("Сначала добавьте друзей")).color(theme::text_muted()));
             }
         });
     ui.add_space(8.0);
@@ -243,9 +244,9 @@ fn create(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge) {
         .map(member)
         .collect();
     let label = if state.busy {
-        "Создание…".to_owned()
+        tr("Создание…").to_owned()
     } else {
-        format!("Создать группу ({count})")
+        crate::tf!("Создать группу ({count})", count = count)
     };
     if ui
         .add_enabled(
@@ -264,14 +265,18 @@ fn manage(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &
         .map(|c| c.me().id.clone())
         .unwrap_or_default();
     let owner = dm.owner_id.as_deref() == Some(me.as_str());
-    title(ui, "Настройки группы");
+    title(ui, tr("Настройки группы"));
     icon_row(ui, state, bridge, dm, owner);
     ui.add_space(8.0);
     name_row(ui, state, bridge, dm, owner);
     ui.add_space(10.0);
     widgets::section_label(
         ui,
-        &format!("Участники — {} из {GROUP_MAX_MEMBERS}", dm.members.len()),
+        &crate::tf!(
+            "Участники — {a0} из {GROUP_MAX_MEMBERS}",
+            a0 = dm.members.len(),
+            GROUP_MAX_MEMBERS = GROUP_MAX_MEMBERS
+        ),
     );
     ui.add_space(4.0);
     egui::ScrollArea::vertical()
@@ -309,7 +314,7 @@ fn icon_row(
                 |base| crate::images::absolute(base, value),
             )
         });
-        let name = dm.name.clone().unwrap_or_else(|| "Группа".to_owned());
+        let name = dm.name.clone().unwrap_or_else(|| tr("Группа").to_owned());
         theme::avatar(
             ui,
             theme::Face {
@@ -323,19 +328,19 @@ fn icon_row(
         );
         ui.add_space(8.0);
         ui.vertical(|ui| {
-            widgets::field_label(ui, "Иконка группы");
+            widgets::field_label(ui, tr("Иконка группы"));
             ui.add_enabled_ui(owner && !state.busy, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.add(theme::primary_button("Загрузить…")).clicked() {
+                    if ui.add(theme::primary_button(tr("Загрузить…"))).clicked() {
                         op = pick_icon()
                             .map(|picked| picked.map(|bytes| GroupOp::Icon(Some(bytes))));
                     }
-                    if dm.icon.is_some() && ui.button("Убрать").clicked() {
+                    if dm.icon.is_some() && ui.button(tr("Убрать")).clicked() {
                         op = Some(Ok(GroupOp::Icon(None)));
                     }
                 });
             });
-            ui.label(theme::muted("Квадрат по центру картинки, до 8 МБ.").size(12.0));
+            ui.label(theme::muted(tr("Квадрат по центру картинки, до 8 МБ.")).size(12.0));
         });
     });
     match op {
@@ -348,13 +353,16 @@ fn icon_row(
 /// Диалог выбора картинки; `None` — пользователь передумал.
 fn pick_icon() -> Option<Result<Vec<u8>, String>> {
     let path = rfd::FileDialog::new()
-        .add_filter("Картинки", &["png", "jpg", "jpeg", "gif", "webp"])
+        .add_filter(tr("Картинки"), &["png", "jpg", "jpeg", "gif", "webp"])
         .pick_file()?;
     let size = std::fs::metadata(&path).map_or(0, |m| m.len());
     if size > ICON_MAX_BYTES {
-        return Some(Err("Файл больше 8 МБ".to_owned()));
+        return Some(Err(tr("Файл больше 8 МБ").to_owned()));
     }
-    Some(std::fs::read(&path).map_err(|err| format!("Не удалось прочитать файл: {err}")))
+    Some(
+        std::fs::read(&path)
+            .map_err(|err| crate::tf!("Не удалось прочитать файл: {err}", err = err)),
+    )
 }
 
 fn name_row(
@@ -368,9 +376,9 @@ fn name_row(
     let busy = state.busy;
     let mut send = None;
     if let Mode::Manage { name, .. } = &mut state.mode {
-        widgets::field_label(ui, "Название группы");
+        widgets::field_label(ui, tr("Название группы"));
         ui.add_enabled_ui(owner, |ui| {
-            widgets::text_field(ui, name, "Название группы", GROUP_NAME_MAX);
+            widgets::text_field(ui, name, tr("Название группы"), GROUP_NAME_MAX);
         });
         ui.label(
             RichText::new(format!("{}/{GROUP_NAME_MAX}", name.chars().count()))
@@ -381,12 +389,12 @@ fn name_row(
         if owner && trimmed != saved.trim() {
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(!busy, theme::primary_button("Сохранить"))
+                    .add_enabled(!busy, theme::primary_button(tr("Сохранить")))
                     .clicked()
                 {
                     send = Some((!trimmed.is_empty()).then_some(trimmed));
                 }
-                if ui.button("Отменить изменения").clicked() {
+                if ui.button(tr("Отменить изменения")).clicked() {
                     name.clone_from(&saved);
                 }
             });
@@ -417,17 +425,17 @@ fn member_row(
         ui.label(RichText::new(&name).color(theme::text_bright()));
         if is_owner {
             ui.label(
-                RichText::new("· Владелец группы")
+                RichText::new(tr("· Владелец группы"))
                     .size(12.0)
                     .color(theme::text_muted()),
             );
         }
         if owner && user.id != me {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("Удалить").clicked() {
+                if ui.small_button(tr("Удалить")).clicked() {
                     set_confirm(state, Some(Confirm::Kick(user.id.clone())));
                 }
-                if ui.small_button("Передать права").clicked() {
+                if ui.small_button(tr("Передать права")).clicked() {
                     set_confirm(state, Some(Confirm::Transfer(user.id.clone())));
                 }
             });
@@ -435,10 +443,11 @@ fn member_row(
     });
     let asked = |c: &Confirm| confirm.as_ref() == Some(c);
     if asked(&Confirm::Kick(user.id.clone())) {
-        let text = format!(
-            "Удалить {name} из этой группы? Этот участник больше не увидит новые сообщения."
+        let text = crate::tf!(
+            "Удалить {name} из этой группы? Этот участник больше не увидит новые сообщения.",
+            name = name
         );
-        match confirm_box(ui, &text, "Удалить из группы", state.busy) {
+        match confirm_box(ui, &text, tr("Удалить из группы"), state.busy) {
             Some(true) => {
                 state.send(bridge, dm.id.clone(), GroupOp::Remove(user.id.clone()));
             }
@@ -446,8 +455,11 @@ fn member_row(
             None => {}
         }
     } else if asked(&Confirm::Transfer(user.id.clone())) {
-        let text = format!("Передать права владельца {name}? Вы лишитесь прав владельца.");
-        match confirm_box(ui, &text, "Передать", state.busy) {
+        let text = crate::tf!(
+            "Передать права владельца {name}? Вы лишитесь прав владельца.",
+            name = name
+        );
+        match confirm_box(ui, &text, tr("Передать"), state.busy) {
             Some(true) => {
                 state.send(bridge, dm.id.clone(), GroupOp::Transfer(user.id.clone()));
             }
@@ -470,7 +482,7 @@ fn confirm_box(ui: &mut egui::Ui, text: &str, button: &str, busy: bool) -> Optio
                 if ui.add_enabled(!busy, egui::Button::new(button)).clicked() {
                     pressed = Some(true);
                 }
-                if ui.button("Отмена").clicked() {
+                if ui.button(tr("Отмена")).clicked() {
                     pressed = Some(false);
                 }
             });
@@ -486,19 +498,19 @@ fn set_confirm(state: &mut GroupDialog, value: Option<Confirm>) {
 
 fn add_member(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &DmChannel) {
     if dm.members.len() >= GROUP_MAX_MEMBERS {
-        ui.label(RichText::new("Группа заполнена").color(theme::text_muted()));
+        ui.label(RichText::new(tr("Группа заполнена")).color(theme::text_muted()));
         return;
     }
     let adding = matches!(&state.mode, Mode::Manage { adding: true, .. });
     if !adding {
-        if ui.button("Добавить участника").clicked()
+        if ui.button(tr("Добавить участника")).clicked()
             && let Mode::Manage { adding, .. } = &mut state.mode
         {
             *adding = true;
         }
         return;
     }
-    widgets::text_field(ui, &mut state.search, "Поиск друзей…", 64);
+    widgets::text_field(ui, &mut state.search, tr("Поиск друзей…"), 64);
     let needle = state.search.trim().to_lowercase();
     let candidates: Vec<Friend> = bridge
         .friends()
@@ -511,7 +523,7 @@ fn add_member(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, d
         .max_height(140.0)
         .show(ui, |ui| {
             if candidates.is_empty() {
-                ui.label(RichText::new("Нет подходящих друзей").color(theme::text_muted()));
+                ui.label(RichText::new(tr("Нет подходящих друзей")).color(theme::text_muted()));
             }
             for friend in &candidates {
                 ui.horizontal(|ui| {
@@ -520,7 +532,7 @@ fn add_member(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, d
                     ui.label(&name);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .add_enabled(!state.busy, egui::Button::new("Добавить"))
+                            .add_enabled(!state.busy, egui::Button::new(tr("Добавить")))
                             .clicked()
                         {
                             state.send(bridge, dm.id.clone(), GroupOp::Add(friend.id.clone()));
@@ -542,7 +554,7 @@ fn leave(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &D
     if !asked {
         if ui
             .add(egui::Button::new(
-                RichText::new("Покинуть группу").color(theme::rose()),
+                RichText::new(tr("Покинуть группу")).color(theme::rose()),
             ))
             .clicked()
         {
@@ -554,14 +566,15 @@ fn leave(ui: &mut egui::Ui, state: &mut GroupDialog, bridge: &mut Bridge, dm: &D
         .name
         .clone()
         .filter(|n| !n.trim().is_empty())
-        .unwrap_or_else(|| "группа".to_owned());
-    let text = format!(
-        "Покинуть «{name}»? Вы перестанете получать сообщения из этой беседы. Остальные участники увидят системное сообщение."
+        .unwrap_or_else(|| tr("группа").to_owned());
+    let text = crate::tf!(
+        "Покинуть «{name}»? Вы перестанете получать сообщения из этой беседы. Остальные участники увидят системное сообщение.",
+        name = name
     );
     let label = if state.busy {
-        "Выход…"
+        tr("Выход…")
     } else {
-        "Покинуть группу"
+        tr("Покинуть группу")
     };
     match confirm_box(ui, &text, label, state.busy) {
         Some(true) => {

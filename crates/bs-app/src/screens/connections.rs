@@ -12,6 +12,7 @@ use chrono::{Datelike, TimeZone};
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke};
 
 use crate::fleet::{Bridge, ConnectionRow, RowState};
+use crate::i18n::tr;
 use crate::registry::{now_ms, reason};
 use crate::theme;
 use crate::widgets;
@@ -125,10 +126,10 @@ pub(crate) enum ConnAction {
 pub(crate) fn show(ui: &mut egui::Ui, state: &mut ConnectionsUi, bridge: &Bridge) -> ConnAction {
     let mut action = ConnAction::None;
     ui.label(
-        theme::muted(
+        theme::muted(tr(
             "Свяжите учётные записи на разных серверах Backspace. Пространства и \
              личные сообщения всех подключённых серверов показываются в одном окне.",
-        )
+        ))
         .size(13.0),
     );
     ui.add_space(12.0);
@@ -150,10 +151,13 @@ pub(crate) fn show(ui: &mut egui::Ui, state: &mut ConnectionsUi, bridge: &Bridge
     }
     if rows.is_empty() {
         ui.label(
-            theme::muted("Другие серверы не подключены. Добавьте сервер, чтобы начать.").size(13.0),
+            theme::muted(tr(
+                "Другие серверы не подключены. Добавьте сервер, чтобы начать.",
+            ))
+            .size(13.0),
         );
     } else if shown.is_empty() {
-        ui.label(theme::muted("Нет серверов, подходящих под фильтр.").size(13.0));
+        ui.label(theme::muted(tr("Нет серверов, подходящих под фильтр.")).size(13.0));
     }
     let now = now_ms();
     for row in shown {
@@ -218,16 +222,23 @@ fn home_card(ui: &mut egui::Ui, home: &crate::fleet::HomeRow) {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.label(
-                        RichText::new("Домашний сервер")
+                        RichText::new(tr("Домашний сервер"))
                             .family(theme::bold_family())
                             .size(15.0)
                             .color(theme::text_bright()),
                     );
                     let host = bs_identity::identity::host_of(&home.base);
-                    ui.label(theme::muted(format!("{host} как {}", home.username)).size(12.0));
+                    ui.label(
+                        theme::muted(crate::tf!(
+                            "{host} как {a0}",
+                            host = host,
+                            a0 = home.username
+                        ))
+                        .size(12.0),
+                    );
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(theme::muted("Локальный").size(12.5));
+                    ui.label(theme::muted(tr("Локальный")).size(12.5));
                 });
             });
         });
@@ -237,10 +248,10 @@ fn filter_bar(ui: &mut egui::Ui, state: &mut ConnectionsUi, counts: &Counts) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for (filter, title, count) in [
-            (Filter::All, "Все", counts.all),
-            (Filter::Connected, "Подключённые", counts.connected),
-            (Filter::Disconnected, "Отключённые", counts.disconnected),
-            (Filter::Issues, "С проблемами", counts.issues),
+            (Filter::All, tr("Все"), counts.all),
+            (Filter::Connected, tr("Подключённые"), counts.connected),
+            (Filter::Disconnected, tr("Отключённые"), counts.disconnected),
+            (Filter::Issues, tr("С проблемами"), counts.issues),
         ] {
             if widgets::pill_tab(ui, &format!("{title}  {count}"), state.filter == filter).clicked()
             {
@@ -249,14 +260,14 @@ fn filter_bar(ui: &mut egui::Ui, state: &mut ConnectionsUi, counts: &Counts) {
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             egui::ComboBox::from_id_salt("connections_sort")
-                .selected_text("Сортировка")
+                .selected_text(tr("Сортировка"))
                 .width(96.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut state.sort, Sort::DateAdded, "Дата добавления");
+                    ui.selectable_value(&mut state.sort, Sort::DateAdded, tr("Дата добавления"));
                     ui.selectable_value(
                         &mut state.sort,
                         Sort::LastConnected,
-                        "Последнее подключение",
+                        tr("Последнее подключение"),
                     );
                 });
         });
@@ -271,11 +282,11 @@ fn dot(ui: &mut egui::Ui, color: Color32) {
 /// Цвет и подпись значка статуса.
 fn badge(state: RowState) -> (Color32, &'static str) {
     match state {
-        RowState::Connected => (theme::green(), "Подключено"),
-        RowState::Connecting => (theme::amber(), "Подключается…"),
-        RowState::Disconnected => (theme::gray(), "Отключено"),
-        RowState::Unreachable => (theme::amber(), "Недоступен"),
-        RowState::AuthExpired => (theme::red(), "Нужен вход"),
+        RowState::Connected => (theme::green(), tr("Подключено")),
+        RowState::Connecting => (theme::amber(), tr("Подключается…")),
+        RowState::Disconnected => (theme::gray(), tr("Отключено")),
+        RowState::Unreachable => (theme::amber(), tr("Недоступен")),
+        RowState::AuthExpired => (theme::red(), tr("Нужен вход")),
     }
 }
 
@@ -342,14 +353,14 @@ fn row_card(
                                 .size(12.0)
                                 .color(theme::rose()),
                         )
-                        .on_hover_text("Каналов и бесед с непрочитанным");
+                        .on_hover_text(tr("Каналов и бесед с непрочитанным"));
                     }
                 });
                 let host = bs_identity::identity::host_of(&row.origin);
                 let who = if row.username.is_empty() {
                     host
                 } else {
-                    format!("{host} как {}", row.username)
+                    crate::tf!("{host} как {a0}", host = host, a0 = row.username)
                 };
                 ui.label(theme::muted(who).size(12.0));
                 ui.label(theme::muted(meta_line(row, now)).size(11.5));
@@ -413,21 +424,24 @@ fn chevron(ui: &mut egui::Ui, open: bool) {
 }
 
 fn meta_line(row: &ConnectionRow, now: i64) -> String {
-    let mut parts = vec![format!("Добавлен {}", date(row.added_at))];
+    let mut parts = vec![crate::tf!("Добавлен {a0}", a0 = date(row.added_at))];
     match row.state {
         RowState::Connected => {
             if let Some(at) = row.last_connected_at {
-                parts.push(format!("Подключён {}", relative(at, now)));
+                parts.push(crate::tf!("Подключён {a0}", a0 = relative(at, now)));
             }
         }
         RowState::Disconnected => {
             if let Some(at) = row.disconnected_at {
-                parts.push(format!("Отключён {}", relative(at, now)));
+                parts.push(crate::tf!("Отключён {a0}", a0 = relative(at, now)));
             }
         }
         _ => {
             if let Some(at) = row.last_connected_at {
-                parts.push(format!("Последнее подключение {}", relative(at, now)));
+                parts.push(crate::tf!(
+                    "Последнее подключение {a0}",
+                    a0 = relative(at, now)
+                ));
             }
         }
     }
@@ -442,20 +456,20 @@ fn details(ui: &mut egui::Ui, row: &ConnectionRow) {
         } else {
             theme::truncate_chars(&row.remote_user_id, 12)
         };
-        detail_cell(ui, width, "ID УДАЛЁННОГО ПОЛЬЗОВАТЕЛЯ", &id);
-        detail_cell(ui, width, "ДОБАВЛЕН", &date(row.added_at));
+        detail_cell(ui, width, tr("ID УДАЛЁННОГО ПОЛЬЗОВАТЕЛЯ"), &id);
+        detail_cell(ui, width, tr("ДОБАВЛЕН"), &date(row.added_at));
         if matches!(row.state, RowState::Disconnected) {
             detail_cell(
                 ui,
                 width,
-                "ОТКЛЮЧЁН",
+                tr("ОТКЛЮЧЁН"),
                 &row.disconnected_at.map_or_else(|| "—".to_owned(), date),
             );
         } else {
             detail_cell(
                 ui,
                 width,
-                "ПОСЛЕДНЕЕ ПОДКЛЮЧЕНИЕ",
+                tr("ПОСЛЕДНЕЕ ПОДКЛЮЧЕНИЕ"),
                 &row.last_connected_at.map_or_else(|| "—".to_owned(), date),
             );
         }
@@ -499,25 +513,27 @@ fn detail_cell(ui: &mut egui::Ui, width: f32, caption: &str, value: &str) {
 /// Слова для кода причины из реестра.
 fn describe_reason(stored: &str) -> String {
     match stored {
-        reason::UNREACHABLE => "Этот сервер был недоступен.".to_owned(),
+        reason::UNREACHABLE => tr("Этот сервер был недоступен.").to_owned(),
         reason::SESSION_EXPIRED => {
-            "Сохранённая сессия истекла. Войдите заново, чтобы переподключиться.".to_owned()
+            tr("Сохранённая сессия истекла. Войдите заново, чтобы переподключиться.").to_owned()
         }
-        reason::REAUTHENTICATE => "Войдите заново, чтобы подключиться.".to_owned(),
-        reason::AUTHENTICATE_HOME => "Войдите, чтобы подключиться к домашнему серверу.".to_owned(),
+        reason::REAUTHENTICATE => tr("Войдите заново, чтобы подключиться.").to_owned(),
+        reason::AUTHENTICATE_HOME => {
+            tr("Войдите, чтобы подключиться к домашнему серверу.").to_owned()
+        }
         other => other.to_owned(),
     }
 }
 
 fn peering_label(status: &str) -> &'static str {
     match status {
-        "active" => "Пиринг установлен",
-        "pending" | "awaiting_approval" => "Пиринг ожидает подтверждения",
-        "admin_required" => "Нужно одобрение администратора",
-        "rejected" => "Пиринг отклонён",
-        "unreachable" => "Инстанс не отвечает на пиринг",
-        "revoked" => "Пиринг отозван",
-        _ => "Пиринг: статус неизвестен",
+        "active" => tr("Пиринг установлен"),
+        "pending" | "awaiting_approval" => tr("Пиринг ожидает подтверждения"),
+        "admin_required" => tr("Нужно одобрение администратора"),
+        "rejected" => tr("Пиринг отклонён"),
+        "unreachable" => tr("Инстанс не отвечает на пиринг"),
+        "revoked" => tr("Пиринг отозван"),
+        _ => tr("Пиринг: статус неизвестен"),
     }
 }
 
@@ -539,20 +555,26 @@ fn actions(
         match row.state {
             RowState::Connected => {
                 if ui
-                    .add(small_button("Отключиться", theme::text_muted()))
+                    .add(small_button(tr("Отключиться"), theme::text_muted()))
                     .clicked()
                 {
                     *action = ConnAction::Disconnect(origin.clone());
                 }
-                ui.add_enabled(false, small_button("Удалить учётную запись", theme::rose()))
-                    .on_disabled_hover_text("Сначала отключитесь, чтобы удалить учётную запись");
+                ui.add_enabled(
+                    false,
+                    small_button(tr("Удалить учётную запись"), theme::rose()),
+                )
+                .on_disabled_hover_text(tr("Сначала отключитесь, чтобы удалить учётную запись"));
             }
             RowState::Connecting => {
-                ui.add_enabled(false, small_button("Подключается…", theme::text_muted()));
+                ui.add_enabled(
+                    false,
+                    small_button(tr("Подключается…"), theme::text_muted()),
+                );
             }
             RowState::Disconnected => {
                 if ui
-                    .add(small_button("Переподключиться", theme::accent()))
+                    .add(small_button(tr("Переподключиться"), theme::accent()))
                     .clicked()
                 {
                     *action = ConnAction::Reconnect(origin.clone());
@@ -563,7 +585,7 @@ fn actions(
             RowState::Unreachable | RowState::AuthExpired => {
                 if matches!(row.state, RowState::Unreachable)
                     && ui
-                        .add(small_button("Переподключиться", theme::accent()))
+                        .add(small_button(tr("Переподключиться"), theme::accent()))
                         .clicked()
                 {
                     *action = ConnAction::Reconnect(origin.clone());
@@ -572,7 +594,10 @@ fn actions(
                     reauth_button(ui, state, &origin);
                 }
                 if ui
-                    .add(small_button("Удалить принудительно", theme::text_muted()))
+                    .add(small_button(
+                        tr("Удалить принудительно"),
+                        theme::text_muted(),
+                    ))
                     .clicked()
                 {
                     state.dialog = Some(Dialog::ForceRemove {
@@ -587,7 +612,7 @@ fn actions(
 
 fn reauth_button(ui: &mut egui::Ui, state: &mut ConnectionsUi, origin: &str) {
     if ui
-        .add(small_button("Войти заново", theme::amber()))
+        .add(small_button(tr("Войти заново"), theme::amber()))
         .clicked()
     {
         state.dialog = Some(Dialog::Reauth {
@@ -599,7 +624,7 @@ fn reauth_button(ui: &mut egui::Ui, state: &mut ConnectionsUi, origin: &str) {
 
 fn delete_button(ui: &mut egui::Ui, state: &mut ConnectionsUi, origin: &str) {
     if ui
-        .add(small_button("Удалить учётную запись", theme::rose()))
+        .add(small_button(tr("Удалить учётную запись"), theme::rose()))
         .clicked()
     {
         state.dialog = Some(Dialog::Delete {
@@ -637,13 +662,13 @@ fn dialog(
             ui.set_width(ui.available_width());
             match current {
                 Dialog::Reauth { origin, password } => {
-                    widgets::field_label(ui, "Пароль учётной записи на домашнем сервере");
-                    let field = widgets::secret_field(ui, password, "пароль", 200);
+                    widgets::field_label(ui, tr("Пароль учётной записи на домашнем сервере"));
+                    let field = widgets::secret_field(ui, password, tr("пароль"), 200);
                     ui.label(
-                        theme::muted(
+                        theme::muted(tr(
                             "Пароль проверяет ваш домашний сервер и никогда не отправляется \
                              на этот сервер: для него создаются отдельные учётные данные.",
-                        )
+                        ))
                         .size(11.5),
                     );
                     ui.add_space(6.0);
@@ -651,7 +676,7 @@ fn dialog(
                     let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.horizontal(|ui| {
                         if ui
-                            .add_enabled(ready, theme::primary_button("Войти"))
+                            .add_enabled(ready, theme::primary_button(tr("Войти")))
                             .clicked()
                             || (ready && enter)
                         {
@@ -661,7 +686,7 @@ fn dialog(
                             };
                             close = true;
                         }
-                        if ui.button("Отмена").clicked() {
+                        if ui.button(tr("Отмена")).clicked() {
                             close = true;
                         }
                     });
@@ -672,23 +697,23 @@ fn dialog(
                     password,
                 } => {
                     ui.label(
-                        theme::muted(
+                        theme::muted(tr(
                             "Сервер не принимает учётные данные, выданные вашим домашним \
                              сервером. Войдите с паролем, который вы задали на том сервере: \
                              после входа аккаунт будет переведён на выданные данные.",
-                        )
+                        ))
                         .size(12.0),
                     );
                     ui.add_space(6.0);
-                    widgets::field_label(ui, "Ваше имя на этом сервере");
-                    widgets::text_field(ui, username, "имя пользователя", 100);
-                    widgets::field_label(ui, "Пароль для этого сервера");
-                    widgets::secret_field(ui, password, "пароль на удалённом сервере", 200);
+                    widgets::field_label(ui, tr("Ваше имя на этом сервере"));
+                    widgets::text_field(ui, username, tr("имя пользователя"), 100);
+                    widgets::field_label(ui, tr("Пароль для этого сервера"));
+                    widgets::secret_field(ui, password, tr("пароль на удалённом сервере"), 200);
                     ui.add_space(6.0);
                     let ready = !username.trim().is_empty() && !password.is_empty();
                     ui.horizontal(|ui| {
                         if ui
-                            .add_enabled(ready, theme::primary_button("Войти и подключиться"))
+                            .add_enabled(ready, theme::primary_button(tr("Войти и подключиться")))
                             .clicked()
                         {
                             *action = ConnAction::OwnLogin {
@@ -698,35 +723,35 @@ fn dialog(
                             };
                             close = true;
                         }
-                        if ui.button("Отмена").clicked() {
+                        if ui.button(tr("Отмена")).clicked() {
                             close = true;
                         }
                     });
                 }
                 Dialog::ForceRemove { origin } => {
                     ui.label(
-                        RichText::new("Принудительно удалить запись")
+                        RichText::new(tr("Принудительно удалить запись"))
                             .family(theme::bold_family())
                             .color(theme::text_bright()),
                     );
                     ui.label(
-                        theme::muted(
+                        theme::muted(tr(
                             "Запись о сервере будет удалена из списка. Удалённый сервер не \
                              получит уведомления. Используйте это только если сервер \
                              недоступен навсегда.",
-                        )
+                        ))
                         .size(12.0),
                     );
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         if ui
-                            .add(small_button("Удалить принудительно", theme::rose()))
+                            .add(small_button(tr("Удалить принудительно"), theme::rose()))
                             .clicked()
                         {
                             *action = ConnAction::ForceRemove(origin.clone());
                             close = true;
                         }
-                        if ui.button("Отмена").clicked() {
+                        if ui.button(tr("Отмена")).clicked() {
                             close = true;
                         }
                     });
@@ -746,14 +771,14 @@ fn dialog(
 fn own_login_hint(ui: &mut egui::Ui, state: &mut ConnectionsUi, row: &ConnectionRow) {
     ui.add_space(4.0);
     ui.label(
-        theme::muted(
+        theme::muted(tr(
             "На этом сервере уже есть ваша учётная запись, но он не принял выданные \
              домашним сервером данные.",
-        )
+        ))
         .size(12.0),
     );
     if ui
-        .add(small_button("Войти своим паролем", theme::amber()))
+        .add(small_button(tr("Войти своим паролем"), theme::amber()))
         .clicked()
     {
         state.dialog = Some(Dialog::OwnLogin {
@@ -778,15 +803,15 @@ fn delete_form(
     close: &mut bool,
 ) {
     ui.label(
-        RichText::new("Удаление учётной записи")
+        RichText::new(tr("Удаление учётной записи"))
             .family(theme::bold_family())
             .color(theme::text_bright()),
     );
     ui.label(
-        theme::muted(format!(
-            "Удалить вашу федеративную учётную запись на сервере {}. Выберите, что \
+        theme::muted(crate::tf!(
+            "Удалить вашу федеративную учётную запись на сервере {a0}. Выберите, что \
              делать с вашими данными.",
-            bs_identity::identity::host_of(origin)
+            a0 = bs_identity::identity::host_of(origin)
         ))
         .size(12.0),
     );
@@ -794,20 +819,24 @@ fn delete_form(
     for (value, title, text) in [
         (
             IdentityDeleteMode::Leave,
-            "Тихо уйти",
-            "Отключиться от сервера. Ваша учётная запись и все данные останутся.",
+            tr("Тихо уйти"),
+            tr("Отключиться от сервера. Ваша учётная запись и все данные останутся."),
         ),
         (
             IdentityDeleteMode::Soft,
-            "Удалить пользователя",
-            "Удалить учётную запись, но сохранить сообщения. Вы будете отображаться \
+            tr("Удалить пользователя"),
+            tr(
+                "Удалить учётную запись, но сохранить сообщения. Вы будете отображаться \
              как «Удалённый пользователь».",
+            ),
         ),
         (
             IdentityDeleteMode::Full,
-            "Удалить всё",
-            "Удалить учётную запись и все ваши сообщения, личные сообщения, реакции и \
+            tr("Удалить всё"),
+            tr(
+                "Удалить учётную запись и все ваши сообщения, личные сообщения, реакции и \
              файлы. Ничего не останется.",
+            ),
         ),
     ] {
         if widgets::radio_card(ui, title, text, *mode == value).clicked() {
@@ -815,13 +844,13 @@ fn delete_form(
         }
         ui.add_space(4.0);
     }
-    ui.checkbox(everywhere, "Применить ко всем подключённым серверам");
+    ui.checkbox(everywhere, tr("Применить ко всем подключённым серверам"));
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         let label = if *mode == IdentityDeleteMode::Leave {
-            "Отключиться"
+            tr("Отключиться")
         } else {
-            "Удалить учётную запись"
+            tr("Удалить учётную запись")
         };
         if ui.add(small_button(label, theme::rose())).clicked() {
             *action = ConnAction::Delete {
@@ -834,7 +863,7 @@ fn delete_form(
             };
             *close = true;
         }
-        if ui.button("Отмена").clicked() {
+        if ui.button(tr("Отмена")).clicked() {
             *close = true;
         }
     });
@@ -861,7 +890,7 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            "+ Добавить сервер",
+            tr("+ Добавить сервер"),
             egui::FontId::proportional(14.0),
             if hovered {
                 theme::text_bright()
@@ -885,23 +914,23 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(
-                RichText::new("Добавить удалённый сервер")
+                RichText::new(tr("Добавить удалённый сервер"))
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
             );
             ui.add_space(6.0);
-            widgets::field_label(ui, "Адрес сервера");
+            widgets::field_label(ui, tr("Адрес сервера"));
             widgets::text_field(ui, &mut state.address, "https://instance.example.com", 200);
-            widgets::field_label(ui, "Пароль учётной записи на домашнем сервере");
+            widgets::field_label(ui, tr("Пароль учётной записи на домашнем сервере"));
             let field =
-                widgets::secret_field(ui, &mut state.password, "тот же, что при входе", 200);
+                widgets::secret_field(ui, &mut state.password, tr("тот же, что при входе"), 200);
             ui.add_space(4.0);
             ui.label(
-                theme::muted(
+                theme::muted(tr(
                     "Пароль проверяет ваш домашний сервер и никогда не отправляется на \
                      подключаемый сервер: для него создаются отдельные уникальные \
                      учётные данные.",
-                )
+                ))
                 .size(12.0),
             );
             ui.add_space(8.0);
@@ -909,7 +938,7 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
             let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(ready, theme::primary_button("Подключиться"))
+                    .add_enabled(ready, theme::primary_button(tr("Подключиться")))
                     .clicked()
                     || (ready && enter)
                 {
@@ -919,7 +948,7 @@ fn add_form(ui: &mut egui::Ui, state: &mut ConnectionsUi, action: &mut ConnActio
                     };
                     state.add_open = false;
                 }
-                if ui.button("Отмена").clicked() {
+                if ui.button(tr("Отмена")).clicked() {
                     state.add_open = false;
                     state.password.clear();
                 }
@@ -946,7 +975,14 @@ const MONTHS: [&str; 12] = [
 fn date(ms: i64) -> String {
     chrono::Local.timestamp_millis_opt(ms).single().map_or_else(
         || "—".to_owned(),
-        |d| format!("{} {} {}", d.day(), MONTHS[d.month0() as usize], d.year()),
+        |d| {
+            format!(
+                "{} {} {}",
+                d.day(),
+                tr(MONTHS[d.month0() as usize]),
+                d.year()
+            )
+        },
     )
 }
 
@@ -955,15 +991,15 @@ fn relative(ms: i64, now: i64) -> String {
     let secs = ((now - ms) / 1000).max(0);
     let (minutes, hours, days) = (secs / 60, secs / 3600, secs / 86_400);
     if secs < 60 {
-        "только что".to_owned()
+        tr("только что").to_owned()
     } else if minutes < 60 {
-        format!("{minutes} мин назад")
+        crate::tf!("{minutes} мин назад", minutes = minutes)
     } else if hours < 24 {
-        format!("{hours} ч назад")
+        crate::tf!("{hours} ч назад", hours = hours)
     } else if days == 1 {
-        "вчера".to_owned()
+        tr("вчера").to_owned()
     } else {
-        format!("{days} дн. назад")
+        crate::tf!("{days} дн. назад", days = days)
     }
 }
 

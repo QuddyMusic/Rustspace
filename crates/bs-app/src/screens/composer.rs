@@ -24,6 +24,7 @@ use egui::{
 use crate::bridge::{BridgeRequest, ComposeEvent};
 use crate::emoji_data::{CATEGORIES, Entry};
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::images;
 use crate::media::human_size;
@@ -200,12 +201,15 @@ fn read_paths(paths: Vec<PathBuf>) -> Vec<Picked> {
     paths
         .into_iter()
         .map(|path| {
-            let name = path
-                .file_name()
-                .map_or_else(|| "файл".to_owned(), |n| n.to_string_lossy().into_owned());
+            let name = path.file_name().map_or_else(
+                || tr("файл").to_owned(),
+                |n| n.to_string_lossy().into_owned(),
+            );
             let bytes = match std::fs::metadata(&path) {
-                Ok(meta) if meta.len() == 0 => Err("Файл пустой".to_owned()),
-                Ok(meta) if meta.len() > MAX_FILE_BYTES => Err("Файл слишком большой".to_owned()),
+                Ok(meta) if meta.len() == 0 => Err(tr("Файл пустой").to_owned()),
+                Ok(meta) if meta.len() > MAX_FILE_BYTES => {
+                    Err(tr("Файл слишком большой").to_owned())
+                }
                 Ok(_) => std::fs::read(&path).map_err(|err| err.to_string()),
                 Err(err) => Err(err.to_string()),
             };
@@ -367,7 +371,7 @@ impl Composer {
                     bytes: Arc::new(bytes),
                 }) && let Some(item) = self.staged.last_mut()
                 {
-                    item.state = StagedState::Failed("Нет соединения".to_owned());
+                    item.state = StagedState::Failed(tr("Нет соединения").to_owned());
                 }
             }
         }
@@ -386,12 +390,12 @@ impl Composer {
                 PickMode::Files => dialog.pick_files(),
                 PickMode::Images => dialog
                     .add_filter(
-                        "Изображения",
+                        tr("Изображения"),
                         &["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"],
                     )
                     .pick_files(),
                 PickMode::Sticker => dialog
-                    .add_filter("Изображения", &["png", "jpg", "jpeg", "gif", "webp"])
+                    .add_filter(tr("Изображения"), &["png", "jpg", "jpeg", "gif", "webp"])
                     .pick_file()
                     .map(|p| vec![p]),
             };
@@ -487,13 +491,13 @@ impl Composer {
         size: Option<[u32; 2]>,
     ) -> String {
         let Some(key) = favorite_key(bridge, self.origin) else {
-            return "Не удалось определить аккаунт для избранного".to_owned();
+            return tr("Не удалось определить аккаунт для избранного").to_owned();
         };
         self.favorites.select(&key);
         match self.favorites.toggle_url(url, size) {
-            Ok(true) => "GIF добавлен в избранное".to_owned(),
-            Ok(false) => "GIF убран из избранного".to_owned(),
-            Err(err) => format!("Избранное не сохранилось на диск: {err}"),
+            Ok(true) => tr("GIF добавлен в избранное").to_owned(),
+            Ok(false) => tr("GIF убран из избранного").to_owned(),
+            Err(err) => crate::tf!("Избранное не сохранилось на диск: {err}", err = err),
         }
     }
 
@@ -556,13 +560,13 @@ impl Composer {
                 if let Some(note) = self.note.clone() {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&note).color(theme::rose()).size(12.5));
-                        if ui.small_button("Скрыть").clicked() {
+                        if ui.small_button(tr("Скрыть")).clicked() {
                             self.note = None;
                         }
                     });
                 }
                 if dragging {
-                    ui.label(theme::muted("Отпустите, чтобы прикрепить файлы"));
+                    ui.label(theme::muted(tr("Отпустите, чтобы прикрепить файлы")));
                 }
                 ui.horizontal(|ui| {
                     if !editing {
@@ -570,7 +574,8 @@ impl Composer {
                             enabled,
                             widgets::flat_icon(Icon::Plus, 22.0, theme::text_muted()),
                         );
-                        if response.on_hover_text("Добавить вложение").clicked() {
+                        if response.on_hover_text(tr("Добавить вложение")).clicked()
+                        {
                             self.open = if self.open == Open::Plus {
                                 Open::None
                             } else {
@@ -622,7 +627,7 @@ impl Composer {
                                 Icon::Send,
                                 Color32::WHITE,
                             );
-                            if response.on_hover_text("Отправить").clicked() {
+                            if response.on_hover_text(tr("Отправить")).clicked() {
                                 outgoing = Some(Outgoing {
                                     content: draft.trim().to_owned(),
                                     attachments: ready_ids.clone(),
@@ -635,7 +640,7 @@ impl Composer {
                             widgets::flat_icon(Icon::Smile, 22.0, theme::text_muted()),
                         );
                         emoji_rect = Some(smile.rect);
-                        if smile.on_hover_text("Эмодзи").clicked() {
+                        if smile.on_hover_text(tr("Эмодзи")).clicked() {
                             self.toggle_picker(Picker::Emoji);
                         }
                         if !editing {
@@ -643,7 +648,7 @@ impl Composer {
                                 enabled,
                                 widgets::flat_icon(Icon::Sticker, 22.0, theme::text_muted()),
                             );
-                            if sticker.on_hover_text("Стикеры").clicked() {
+                            if sticker.on_hover_text(tr("Стикеры")).clicked() {
                                 self.toggle_picker(Picker::Sticker);
                             }
                             let gif = ui.add_enabled(enabled, gif_button());
@@ -762,7 +767,7 @@ impl Composer {
                                             12.0,
                                             theme::text_faint(),
                                         ))
-                                        .on_hover_text("Убрать")
+                                        .on_hover_text(tr("Убрать"))
                                         .clicked()
                                     {
                                         remove = Some(item.id);
@@ -793,8 +798,8 @@ impl Composer {
                     .show(ui, |ui| {
                         ui.set_width(220.0);
                         for (icon, label, mode) in [
-                            (Icon::File, "Загрузить файл", PickMode::Files),
-                            (Icon::Image, "Загрузить изображение", PickMode::Images),
+                            (Icon::File, tr("Загрузить файл"), PickMode::Files),
+                            (Icon::Image, tr("Загрузить изображение"), PickMode::Images),
                         ] {
                             if menu_row(ui, icon, label).clicked() {
                                 chosen = Some(mode);
@@ -855,7 +860,7 @@ impl Composer {
                         ui.set_min_size(PICKER_SIZE);
                         ui.set_max_size(PICKER_SIZE);
                         ui.horizontal(|ui| {
-                            if widgets::pill_tab(ui, "Эмодзи", tab == Picker::Emoji).clicked()
+                            if widgets::pill_tab(ui, tr("Эмодзи"), tab == Picker::Emoji).clicked()
                             {
                                 next_tab = Picker::Emoji;
                             }
@@ -863,7 +868,7 @@ impl Composer {
                                 if widgets::pill_tab(ui, "GIF", tab == Picker::Gif).clicked() {
                                     next_tab = Picker::Gif;
                                 }
-                                if widgets::pill_tab(ui, "Стикеры", tab == Picker::Sticker)
+                                if widgets::pill_tab(ui, tr("Стикеры"), tab == Picker::Sticker)
                                     .clicked()
                                 {
                                     next_tab = Picker::Sticker;
@@ -918,10 +923,10 @@ impl Composer {
             self.favorites.select(&key);
         }
         ui.horizontal(|ui| {
-            if widgets::pill_tab(ui, "Поиск", !self.gifs.favorites_only).clicked() {
+            if widgets::pill_tab(ui, tr("Поиск"), !self.gifs.favorites_only).clicked() {
                 self.gifs.favorites_only = false;
             }
-            if widgets::pill_tab(ui, "Избранное", self.gifs.favorites_only).clicked() {
+            if widgets::pill_tab(ui, tr("Избранное"), self.gifs.favorites_only).clicked() {
                 self.gifs.favorites_only = true;
             }
         });
@@ -936,16 +941,21 @@ impl Composer {
         match gate {
             None => {
                 if let Some(error) = &self.gifs.enabled_error {
-                    theme::empty_state(ui, &format!("Не удалось проверить GIF: {error}"));
+                    theme::empty_state(
+                        ui,
+                        &crate::tf!("Не удалось проверить GIF: {error}", error = error),
+                    );
                 } else {
-                    theme::empty_state(ui, "Загрузка…");
+                    theme::empty_state(ui, tr("Загрузка…"));
                 }
                 return None;
             }
             Some(false) => {
                 theme::empty_state(
                     ui,
-                    "Поиск GIF не включён на этом инстансе: администратору нужно указать ключ Klipy в настройках инстанса (вкладка «Инстанс»).",
+                    tr(
+                        "Поиск GIF не включён на этом инстансе: администратору нужно указать ключ Klipy в настройках инстанса (вкладка «Инстанс»).",
+                    ),
                 );
                 return None;
             }
@@ -953,7 +963,7 @@ impl Composer {
         }
         if !favorites_only {
             let before = self.gifs.query.clone();
-            widgets::search_box(ui, &mut self.gifs.query, "Поиск GIF в Klipy");
+            widgets::search_box(ui, &mut self.gifs.query, tr("Поиск GIF в Klipy"));
             if self.gifs.query != before {
                 self.gifs.typed_at = now;
             }
@@ -1052,7 +1062,7 @@ impl Composer {
                         );
                     }
                     let hint = match (&failure, painted) {
-                        (Some(message), false) => format!("{}\nНе загрузилось: {message}", item.title),
+                        (Some(message), false) => crate::tf!("{a0}\nНе загрузилось: {message}", a0 = item.title, message = message),
                         _ => item.title.clone(),
                     };
                     let star = Rect::from_min_size(
@@ -1078,9 +1088,9 @@ impl Composer {
                         paint_star(ui.painter(), star.center(), 8.0, starred);
                         if button
                             .on_hover_text(if starred {
-                                "Убрать из избранного"
+                                tr("Убрать из избранного")
                             } else {
-                                "В избранное"
+                                tr("В избранное")
                             })
                             .clicked()
                         {
@@ -1092,15 +1102,15 @@ impl Composer {
                     if list.is_empty() {
                         theme::empty_state(
                             ui,
-                            "Здесь пока пусто. Наведите на GIF в поиске и нажмите звёздочку — он появится тут.",
+                            tr("Здесь пока пусто. Наведите на GIF в поиске и нажмите звёздочку — он появится тут."),
                         );
                     }
                 } else if self.gifs.loading {
-                    ui.label(theme::muted("Загрузка…"));
+                    ui.label(theme::muted(tr("Загрузка…")));
                 } else if self.gifs.items.is_empty() && self.gifs.asked.is_some() {
                     theme::empty_state(
                         ui,
-                        "Ничего не нашлось. Если пусто даже без запроса — проверьте ключ Klipy в настройках инстанса.",
+                        tr("Ничего не нашлось. Если пусто даже без запроса — проверьте ключ Klipy в настройках инстанса."),
                     );
                 }
             });
@@ -1113,7 +1123,7 @@ impl Composer {
                 .favorites
                 .toggle(&item)
                 .err()
-                .map(|err| format!("Избранное не сохранилось на диск: {err}"));
+                .map(|err| crate::tf!("Избранное не сохранилось на диск: {err}", err = err));
         }
         if want_more
             && !favorites_only
@@ -1141,9 +1151,9 @@ impl Composer {
         let mut delete = None;
         let mut add = false;
         ui.horizontal(|ui| {
-            ui.label(theme::section_title("Мои стикеры"));
+            ui.label(theme::section_title(tr("Мои стикеры")));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add(theme::primary_button("Добавить")).clicked() {
+                if ui.add(theme::primary_button(tr("Добавить"))).clicked() {
                     add = true;
                 }
             });
@@ -1153,11 +1163,11 @@ impl Composer {
         }
         ui.add_space(4.0);
         match &self.stickers.items {
-            None => theme::empty_state(ui, "Загрузка…"),
+            None => theme::empty_state(ui, tr("Загрузка…")),
             Some(items) if items.is_empty() => {
                 theme::empty_state(
                     ui,
-                    "Стикеров пока нет. Добавьте картинку — она станет стикером.",
+                    tr("Стикеров пока нет. Добавьте картинку — она станет стикером."),
                 );
             }
             Some(items) => {
@@ -1193,7 +1203,7 @@ impl Composer {
                                         chosen = Some(sticker.token.clone());
                                     }
                                     response.context_menu(|ui| {
-                                        if ui.button("Удалить стикер").clicked() {
+                                        if ui.button(tr("Удалить стикер")).clicked() {
                                             delete = Some(sticker.id.clone());
                                             ui.close();
                                         }

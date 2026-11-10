@@ -6,6 +6,7 @@
 use bs_instances::ConnectionState;
 
 use crate::app::Screen;
+use crate::i18n::tr;
 
 /// Отображаемое имя автора сообщения: `display_name`, иначе `username`.
 ///
@@ -48,12 +49,12 @@ pub(crate) const fn next_screen(current: Screen, ready: bool, session_lost: bool
 /// номер попытки.
 pub(crate) fn connection_label(state: &ConnectionState) -> String {
     match state {
-        ConnectionState::Connecting => "подключение…".to_owned(),
-        ConnectionState::Connected => "на связи".to_owned(),
+        ConnectionState::Connecting => tr("подключение…").to_owned(),
+        ConnectionState::Connected => tr("на связи").to_owned(),
         ConnectionState::Reconnecting { attempt } => {
-            format!("переподключение (попытка {attempt})…")
+            crate::tf!("переподключение (попытка {attempt})…", attempt = attempt)
         }
-        ConnectionState::Stopped => "соединение остановлено".to_owned(),
+        ConnectionState::Stopped => tr("соединение остановлено").to_owned(),
     }
 }
 
@@ -105,78 +106,84 @@ pub(crate) const fn should_wake(busy: bool, has_cache: bool) -> bool {
 /// приходит с чужого инстанса и не должен ломать интерфейс.
 pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String {
     let known = match code {
-        Some("rate_limited") => "Слишком часто: подождите несколько секунд",
-        Some("content_too_long") => "Сообщение слишком длинное",
-        Some("content_required") => "Нельзя отправить пустое сообщение",
-        Some("group_dm_too_few_members") => "В группе должно быть не менее двух других участников",
-        Some("group_dm_too_many_members") => "В группе может быть не более 10 участников",
-        Some("group_dm_includes_self") => "Вы добавляетесь в группу автоматически",
-        Some("dm_not_found") => "Беседа не найдена",
-        Some("dm_not_group") => "Это возможно только в групповой беседе",
-        Some("dm_owner_only") => "Это может сделать только владелец группы",
-        Some("group_dm_name_length") => "Название группы: от 1 до 50 символов",
+        Some("rate_limited") => tr("Слишком часто: подождите несколько секунд"),
+        Some("content_too_long") => tr("Сообщение слишком длинное"),
+        Some("content_required") => tr("Нельзя отправить пустое сообщение"),
+        Some("group_dm_too_few_members") => {
+            tr("В группе должно быть не менее двух других участников")
+        }
+        Some("group_dm_too_many_members") => tr("В группе может быть не более 10 участников"),
+        Some("group_dm_includes_self") => tr("Вы добавляетесь в группу автоматически"),
+        Some("dm_not_found") => tr("Беседа не найдена"),
+        Some("dm_not_group") => tr("Это возможно только в групповой беседе"),
+        Some("dm_owner_only") => tr("Это может сделать только владелец группы"),
+        Some("group_dm_name_length") => tr("Название группы: от 1 до 50 символов"),
         Some("owner_cannot_kick_self") => {
-            "Владелец не может удалить сам себя. Вместо этого покиньте группу"
+            tr("Владелец не может удалить сам себя. Вместо этого покиньте группу")
         }
-        Some("target_not_dm_member") => "Этот пользователь не участник беседы",
-        Some("new_owner_required") => "Выберите, кто станет новым владельцем",
-        Some("already_owner") => "Этот пользователь уже владелец группы",
-        Some("not_dm_member") => "Вы не участник этого личного канала",
-        Some("recipient_deleted") => "Собеседник удалён: переписка доступна только для чтения",
-        Some("missing_permission") => "Недостаточно прав",
-        Some("not_message_author") => "Править и удалять можно только свои сообщения",
-        Some("system_message_immutable") => "Системное сообщение изменить нельзя",
-        Some("reply_target_invalid") => "На это сообщение нельзя ответить",
-        Some("attachment_invalid" | "attachment_not_owned") => "Вложение недоступно",
-        Some("user_banned") => "Вы заблокированы в этом пространстве",
-        Some("already_member") => "Вы уже участник этого пространства",
+        Some("target_not_dm_member") => tr("Этот пользователь не участник беседы"),
+        Some("new_owner_required") => tr("Выберите, кто станет новым владельцем"),
+        Some("already_owner") => tr("Этот пользователь уже владелец группы"),
+        Some("not_dm_member") => tr("Вы не участник этого личного канала"),
+        Some("recipient_deleted") => tr("Собеседник удалён: переписка доступна только для чтения"),
+        Some("missing_permission") => tr("Недостаточно прав"),
+        Some("not_message_author") => tr("Править и удалять можно только свои сообщения"),
+        Some("system_message_immutable") => tr("Системное сообщение изменить нельзя"),
+        Some("reply_target_invalid") => tr("На это сообщение нельзя ответить"),
+        Some("attachment_invalid" | "attachment_not_owned") => tr("Вложение недоступно"),
+        Some("user_banned") => tr("Вы заблокированы в этом пространстве"),
+        Some("already_member") => tr("Вы уже участник этого пространства"),
         Some("join_request_required") => {
-            "Это пространство принимает по заявке: найдите его в «Обзоре»"
+            tr("Это пространство принимает по заявке: найдите его в «Обзоре»")
         }
-        Some("join_request_pending") => "Заявка на вступление уже отправлена",
-        Some("invite_not_found" | "invalid_invite") => "Приглашение не найдено или устарело",
-        Some("role_name_taken") => "Роль с таким названием уже существует.",
+        Some("join_request_pending") => tr("Заявка на вступление уже отправлена"),
+        Some("invite_not_found" | "invalid_invite") => tr("Приглашение не найдено или устарело"),
+        Some("role_name_taken") => tr("Роль с таким названием уже существует."),
         Some("role_hierarchy") => {
-            "Это можно делать только с участниками и ролями ниже вашей самой высокой роли."
+            tr("Это можно делать только с участниками и ролями ниже вашей самой высокой роли.")
         }
         Some("role_permissions_conflict") => {
-            "Кто-то другой изменил права этой роли. Проверьте их и сохраните ещё раз."
+            tr("Кто-то другой изменил права этой роли. Проверьте их и сохраните ещё раз.")
         }
-        Some("permissions_invalid") => "Недопустимое значение прав.",
-        Some("role_name_required") => "Укажите название роли.",
-        Some("cannot_change_own_roles") => "Вы не можете менять собственные роли.",
+        Some("permissions_invalid") => tr("Недопустимое значение прав."),
+        Some("role_name_required") => tr("Укажите название роли."),
+        Some("cannot_change_own_roles") => tr("Вы не можете менять собственные роли."),
         Some("everyone_role_not_assignable") => {
-            "Роль @everyone действует для всех, её нельзя назначить."
+            tr("Роль @everyone действует для всех, её нельзя назначить.")
         }
-        Some("everyone_role_not_deletable") => "Роль @everyone нельзя удалить.",
-        Some("role_not_in_space") => "Эта роль не принадлежит этому пространству.",
-        Some("member_not_found") => "Участник не найден.",
-        Some("space_owner_only") => "Это может сделать только владелец пространства.",
-        Some("cannot_grant_unowned_permissions") => "Нельзя выдать права, которых нет у вас самих.",
+        Some("everyone_role_not_deletable") => tr("Роль @everyone нельзя удалить."),
+        Some("role_not_in_space") => tr("Эта роль не принадлежит этому пространству."),
+        Some("member_not_found") => tr("Участник не найден."),
+        Some("space_owner_only") => tr("Это может сделать только владелец пространства."),
+        Some("cannot_grant_unowned_permissions") => {
+            tr("Нельзя выдать права, которых нет у вас самих.")
+        }
         Some("cannot_deny_unowned_permissions") => {
-            "Нельзя запретить права, которых нет у вас самих."
+            tr("Нельзя запретить права, которых нет у вас самих.")
         }
         Some("cannot_change_unowned_permissions") => {
-            "Изменять можно только те права, которые есть у вас самих."
+            tr("Изменять можно только те права, которые есть у вас самих.")
         }
         Some("overrides_conflict") => {
-            "Кто-то другой изменил эти права. Проверьте их и сохраните ещё раз."
+            tr("Кто-то другой изменил эти права. Проверьте их и сохраните ещё раз.")
         }
-        Some("override_bits_invalid") => "Значения прав указаны неверно.",
+        Some("override_bits_invalid") => tr("Значения прав указаны неверно."),
         Some("override_target_invalid") => {
-            "Переопределение прав применяется к роли или к участнику."
+            tr("Переопределение прав применяется к роли или к участнику.")
         }
-        Some("override_target_required") => "Выберите роль или участника для переопределения.",
-        Some("channel_not_found") => "Этот канал не найден.",
-        Some("category_not_found") => "Эта категория не найдена.",
-        Some("category_not_in_space") => "Эта категория не относится к данному пространству.",
-        Some("channel_name_required") => "Укажите название канала.",
-        Some("category_name_required") => "Укажите название категории.",
-        Some("channel_name_length") => "Название канала должно содержать от 1 до 100 символов.",
-        Some("category_name_length") => "Название категории должно содержать от 1 до 100 символов.",
-        Some("channel_topic_length") => "Тема канала не может быть длиннее 1024 символов.",
-        Some("no_fields_to_update") => "Нечего сохранять.",
-        Some("owner_cannot_leave") => "Владелец не может покинуть пространство",
+        Some("override_target_required") => tr("Выберите роль или участника для переопределения."),
+        Some("channel_not_found") => tr("Этот канал не найден."),
+        Some("category_not_found") => tr("Эта категория не найдена."),
+        Some("category_not_in_space") => tr("Эта категория не относится к данному пространству."),
+        Some("channel_name_required") => tr("Укажите название канала."),
+        Some("category_name_required") => tr("Укажите название категории."),
+        Some("channel_name_length") => tr("Название канала должно содержать от 1 до 100 символов."),
+        Some("category_name_length") => {
+            tr("Название категории должно содержать от 1 до 100 символов.")
+        }
+        Some("channel_topic_length") => tr("Тема канала не может быть длиннее 1024 символов."),
+        Some("no_fields_to_update") => tr("Нечего сохранять."),
+        Some("owner_cannot_leave") => tr("Владелец не может покинуть пространство"),
         _ => "",
     };
     if !known.is_empty() {
@@ -188,7 +195,7 @@ pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String
         .take(200)
         .collect();
     if cleaned.trim().is_empty() {
-        "Сервер отклонил действие".to_owned()
+        tr("Сервер отклонил действие").to_owned()
     } else {
         cleaned
     }
@@ -197,22 +204,22 @@ pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String
 /// Текст отказа регистрации нового аккаунта.
 pub(crate) fn register_error_text(err: &bs_api::ApiError) -> String {
     if err.is_rate_limited() {
-        return "Слишком много попыток регистрации: подождите пару минут".to_owned();
+        return tr("Слишком много попыток регистрации: подождите пару минут").to_owned();
     }
     let known = match err.code() {
-        Some("username_taken") => "Это имя уже занято",
-        Some("username_length_invalid") => "Имя: от 3 до 32 символов",
+        Some("username_taken") => tr("Это имя уже занято"),
+        Some("username_length_invalid") => tr("Имя: от 3 до 32 символов"),
         Some("username_characters_invalid") => {
-            "В имени допустимы только латинские буквы, цифры и подчёркивание"
+            tr("В имени допустимы только латинские буквы, цифры и подчёркивание")
         }
-        Some("username_required") => "Укажите имя пользователя",
-        Some("password_required") => "Укажите пароль",
-        Some("password_too_short") => "Пароль слишком короткий: минимум 8 символов",
-        Some("registration_closed") => "Регистрация на этом инстансе закрыта",
+        Some("username_required") => tr("Укажите имя пользователя"),
+        Some("password_required") => tr("Укажите пароль"),
+        Some("password_too_short") => tr("Пароль слишком короткий: минимум 8 символов"),
+        Some("registration_closed") => tr("Регистрация на этом инстансе закрыта"),
         Some("invite_required") => {
-            "Регистрация только по приглашению: вставьте ссылку или код приглашения"
+            tr("Регистрация только по приглашению: вставьте ссылку или код приглашения")
         }
-        Some("invite_invalid") => "Приглашение недействительно, истекло или уже использовано",
+        Some("invite_invalid") => tr("Приглашение недействительно, истекло или уже использовано"),
         _ => "",
     };
     if !known.is_empty() {
@@ -246,11 +253,11 @@ pub(crate) fn username_problem(name: &str) -> Option<&'static str> {
     let name = name.trim();
     let len = name.chars().count();
     if len == 0 {
-        Some("Укажите имя пользователя")
+        Some(tr("Укажите имя пользователя"))
     } else if !(3..=32).contains(&len) {
-        Some("Имя: от 3 до 32 символов")
+        Some(tr("Имя: от 3 до 32 символов"))
     } else if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        Some("Только латинские буквы, цифры и подчёркивание")
+        Some(tr("Только латинские буквы, цифры и подчёркивание"))
     } else {
         None
     }

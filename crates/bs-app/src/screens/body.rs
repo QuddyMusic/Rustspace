@@ -2,6 +2,7 @@
 
 use egui::{CornerRadius, Margin, RichText, Sense, Stroke, Vec2};
 
+use crate::i18n::tr;
 use crate::markdown::{Block, Kind, Span};
 use crate::theme;
 
@@ -106,7 +107,7 @@ fn show_span(ui: &mut egui::Ui, salt: &str, index: usize, span: &Span) {
                 );
                 if response
                     .interact(Sense::click())
-                    .on_hover_text("Показать спойлер")
+                    .on_hover_text(tr("Показать спойлер"))
                     .clicked()
                 {
                     ui.data_mut(|d| d.insert_temp(id, true));
@@ -161,7 +162,7 @@ fn show_spans(ui: &mut egui::Ui, salt: &str, spans: &[Span], tail: Option<&str>)
 
 /// Показывает разобранный текст сообщения.
 pub(crate) fn show_text(ui: &mut egui::Ui, salt: &str, blocks: &[Block], edited: bool) {
-    let mut tail = edited.then_some(" (изменено)");
+    let mut tail = edited.then_some(tr(" (изменено)"));
     let count = blocks.len();
     for (index, block) in blocks.iter().enumerate() {
         let is_last = index + 1 == count;
@@ -293,7 +294,7 @@ pub(crate) fn show_reactions(
             );
             if hovered {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                response.show_tooltip_text("Добавить реакцию");
+                response.show_tooltip_text(tr("Добавить реакцию"));
             }
             targets.push((rect, ReactionClick::OpenPicker));
         }

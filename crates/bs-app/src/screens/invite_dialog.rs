@@ -8,6 +8,7 @@ use egui::{CornerRadius, Margin, RichText};
 
 use crate::bridge::BridgeRequest;
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::social::user_display_name;
 use crate::{theme, widgets};
 
@@ -87,7 +88,7 @@ impl InviteDialog {
 /// Рисует окно; `false` — закрыть.
 pub(crate) fn show(ctx: &egui::Context, state: &mut InviteDialog, bridge: &mut Bridge) -> bool {
     let mut open = true;
-    egui::Window::new(format!("Пригласить в «{}»", state.space_name))
+    egui::Window::new(crate::tf!("Пригласить в «{a0}»", a0 = state.space_name))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -103,13 +104,13 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut InviteDialog, bridge: &mut B
 }
 
 fn link_row(ui: &mut egui::Ui, state: &mut InviteDialog, bridge: &Bridge) {
-    widgets::section_label(ui, "Ссылка-приглашение");
+    widgets::section_label(ui, tr("Ссылка-приглашение"));
     ui.add_space(4.0);
     match &state.code {
         None => {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(theme::muted("Получаем код…"));
+                ui.label(theme::muted(tr("Получаем код…")));
             });
         }
         Some(Err(err)) => {
@@ -127,9 +128,9 @@ fn link_row(ui: &mut egui::Ui, state: &mut InviteDialog, bridge: &Bridge) {
                         ui.add(egui::Label::new(RichText::new(&url).monospace()).truncate());
                     });
                 let label = if state.copied {
-                    "Скопировано"
+                    tr("Скопировано")
                 } else {
-                    "Копировать"
+                    tr("Копировать")
                 };
                 if ui.add(theme::primary_button(label)).clicked() {
                     ui.ctx().copy_text(url.clone());
@@ -141,16 +142,16 @@ fn link_row(ui: &mut egui::Ui, state: &mut InviteDialog, bridge: &Bridge) {
 }
 
 fn friends(ui: &mut egui::Ui, state: &mut InviteDialog, bridge: &mut Bridge) {
-    widgets::section_label(ui, "Друзья");
+    widgets::section_label(ui, tr("Друзья"));
     ui.add_space(4.0);
     let friends: Vec<Friend> = bridge.friends().to_vec();
     if friends.is_empty() {
-        ui.label(theme::muted(
+        ui.label(theme::muted(tr(
             "Добавьте друзей, чтобы приглашать их в личных сообщениях.",
-        ));
+        )));
         return;
     }
-    widgets::text_field(ui, &mut state.filter, "Найти друга", 64);
+    widgets::text_field(ui, &mut state.filter, tr("Найти друга"), 64);
     ui.add_space(6.0);
     let filter = state.filter.trim().to_lowercase();
     let code = state.code.as_ref().and_then(|c| c.as_ref().ok()).cloned();
@@ -189,17 +190,17 @@ fn friends(ui: &mut egui::Ui, state: &mut InviteDialog, bridge: &mut Bridge) {
                                 ui.spinner();
                             }
                             Some(Sent::Done) => {
-                                ui.label(RichText::new("Отправлено").color(theme::mint()));
+                                ui.label(RichText::new(tr("Отправлено")).color(theme::mint()));
                             }
                             status => {
                                 if let Some(Sent::Failed(err)) = status {
-                                    ui.label(RichText::new("Ошибка").color(theme::rose()))
+                                    ui.label(RichText::new(tr("Ошибка")).color(theme::rose()))
                                         .on_hover_text(err);
                                 }
                                 if ui
                                     .add_enabled(
                                         code.is_some(),
-                                        theme::positive_button("Пригласить"),
+                                        theme::positive_button(tr("Пригласить")),
                                     )
                                     .clicked()
                                 {

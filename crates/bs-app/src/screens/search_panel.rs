@@ -9,6 +9,7 @@ use egui::{Align2, Color32, FontId, Margin, RichText, Sense, text::LayoutJob};
 
 use crate::bridge::{ChannelKind, SearchHit};
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::theme;
 use crate::widgets;
@@ -41,12 +42,12 @@ pub(crate) enum Has {
 impl Has {
     const ALL: [Self; 4] = [Self::Any, Self::File, Self::Image, Self::Link];
 
-    const fn label(self) -> &'static str {
+    fn label(self) -> &'static str {
         match self {
-            Self::Any => "Любые",
-            Self::File => "Файл",
-            Self::Image => "Картинка",
-            Self::Link => "Ссылка",
+            Self::Any => tr("Любые"),
+            Self::File => tr("Файл"),
+            Self::Image => tr("Картинка"),
+            Self::Link => tr("Ссылка"),
         }
     }
 
@@ -93,9 +94,9 @@ fn valid_date(raw: &str) -> bool {
 /// Склоняет «результат».
 pub(crate) fn plural_results(count: usize) -> String {
     let word = match (count % 10, count % 100) {
-        (1, n) if n != 11 => "результат",
-        (2..=4, n) if !(12..=14).contains(&n) => "результата",
-        _ => "результатов",
+        (1, n) if n != 11 => tr("результат"),
+        (2..=4, n) if !(12..=14).contains(&n) => tr("результата"),
+        _ => tr("результатов"),
     };
     format!("{count} {word}")
 }
@@ -215,7 +216,7 @@ impl SearchPanel {
     /// Собирает запрос из полей. `Ok(None)` — поля пусты.
     fn query(&self) -> Result<Option<bs_api::MessageSearchQuery>, String> {
         if !valid_date(&self.before) || !valid_date(&self.after) {
-            return Err("Дата в виде ГГГГ-ММ-ДД, например 2026-05-31".to_owned());
+            return Err(tr("Дата в виде ГГГГ-ММ-ДД, например 2026-05-31").to_owned());
         }
         let clean = |s: &str| {
             let t = s.trim();
@@ -316,7 +317,7 @@ impl SearchPanel {
         ui.horizontal(|ui| {
             let edit = ui.add(
                 egui::TextEdit::singleline(&mut self.text)
-                    .hint_text("Поиск по сообщениям")
+                    .hint_text(tr("Поиск по сообщениям"))
                     .desired_width(WIDTH - 40.0)
                     .margin(egui::vec2(10.0, 7.0)),
             );
@@ -326,7 +327,7 @@ impl SearchPanel {
             changed |= edit.changed();
             if ui
                 .add(widgets::flat_icon(Icon::Close, 16.0, theme::text_faint()))
-                .on_hover_text("Закрыть")
+                .on_hover_text(tr("Закрыть"))
                 .clicked()
             {
                 close = true;
@@ -334,15 +335,15 @@ impl SearchPanel {
         });
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label(theme::muted("От").size(12.0));
+            ui.label(theme::muted(tr("От")).size(12.0));
             changed |= ui
                 .add(
                     egui::TextEdit::singleline(&mut self.from)
-                        .hint_text("имя пользователя")
+                        .hint_text(tr("имя пользователя"))
                         .desired_width(120.0),
                 )
                 .changed();
-            ui.label(theme::muted("Есть").size(12.0));
+            ui.label(theme::muted(tr("Есть")).size(12.0));
             egui::ComboBox::from_id_salt("search_has")
                 .selected_text(self.has.label())
                 .width(90.0)
@@ -356,19 +357,19 @@ impl SearchPanel {
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label(theme::muted("После").size(12.0));
+            ui.label(theme::muted(tr("После")).size(12.0));
             changed |= ui
                 .add(
                     egui::TextEdit::singleline(&mut self.after)
-                        .hint_text("ГГГГ-ММ-ДД")
+                        .hint_text(tr("ГГГГ-ММ-ДД"))
                         .desired_width(100.0),
                 )
                 .changed();
-            ui.label(theme::muted("До").size(12.0));
+            ui.label(theme::muted(tr("До")).size(12.0));
             changed |= ui
                 .add(
                     egui::TextEdit::singleline(&mut self.before)
-                        .hint_text("ГГГГ-ММ-ДД")
+                        .hint_text(tr("ГГГГ-ММ-ДД"))
                         .desired_width(100.0),
                 )
                 .changed();
@@ -438,14 +439,14 @@ impl SearchPanel {
         } else if state.loading && state.hits.is_empty() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(theme::muted("Ищу…"));
+                ui.label(theme::muted(tr("Ищу…")));
             });
         } else if state.hits.is_empty() {
             let text =
                 if searching && self.edited_at.is_none() && self.query().ok().flatten().is_some() {
-                    "Ничего не найдено"
+                    tr("Ничего не найдено")
                 } else {
-                    "Введите текст или задайте фильтры"
+                    tr("Введите текст или задайте фильтры")
                 };
             ui.label(theme::muted(text).size(12.5));
         }
@@ -481,9 +482,9 @@ impl SearchPanel {
                 if remaining > 0 {
                     ui.add_space(4.0);
                     let label = if loading {
-                        "Загрузка…".to_owned()
+                        tr("Загрузка…").to_owned()
                     } else {
-                        format!("Показать ещё (осталось {remaining})")
+                        crate::tf!("Показать ещё (осталось {remaining})", remaining = remaining)
                     };
                     if ui.add_enabled(!loading, egui::Button::new(label)).clicked() {
                         more = true;
@@ -517,12 +518,15 @@ fn hit_row(ui: &mut egui::Ui, hit: &SearchHit, needle: &str, now_ms: i64) -> boo
                     });
                     let text = preview(&hit.content, needle, PREVIEW_CHARS);
                     if text.is_empty() {
-                        ui.label(theme::muted("Вложение").size(13.0));
+                        ui.label(theme::muted(tr("Вложение")).size(13.0));
                     } else {
                         ui.add(egui::Label::new(highlighted(&text, needle)).wrap());
                     }
                     if hit.attachments > 0 {
-                        ui.label(theme::muted(format!("Вложений: {}", hit.attachments)).size(11.5));
+                        ui.label(
+                            theme::muted(crate::tf!("Вложений: {a0}", a0 = hit.attachments))
+                                .size(11.5),
+                        );
                     }
                 });
             });

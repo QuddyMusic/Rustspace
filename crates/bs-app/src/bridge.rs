@@ -36,6 +36,7 @@ use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc as tokio_mpsc};
 use zeroize::Zeroizing;
 
+use crate::i18n::tr;
 use crate::logic::describe_server_error;
 
 /// Сколько сообщений просим у сервера за один запрос истории.
@@ -142,9 +143,9 @@ const DOWNLOAD_STEP: u64 = 128 * 1024;
 /// Текст ошибки скачивания для пользователя.
 fn download_message(err: &bs_api::ApiError) -> String {
     match err {
-        bs_api::ApiError::Io(io) => format!("не удалось записать файл ({io})"),
+        bs_api::ApiError::Io(io) => crate::tf!("не удалось записать файл ({io})", io = io),
         other if other.status().is_some_and(|s| s.as_u16() == 404) => {
-            "файл больше не доступен на сервере".to_owned()
+            tr("файл больше не доступен на сервере").to_owned()
         }
         other => other.to_string(),
     }

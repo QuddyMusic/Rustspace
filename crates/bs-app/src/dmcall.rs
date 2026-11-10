@@ -5,6 +5,7 @@ use egui::{Align2, RichText};
 
 use crate::bridge::{BridgeRequest, CallEvent};
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::theme;
 use crate::voice::{DockAction, VoiceState, after_deafen_toggle, after_mute_toggle};
 use crate::voice_media::{ConnectRequest, MediaStatus};
@@ -198,7 +199,7 @@ impl VoiceState {
                 origin,
                 dm_channel_id.as_ref(),
                 federated_call_id.as_ref(),
-                "Звонок отклонён",
+                tr("Звонок отклонён"),
             ),
             CallEvent::Ended {
                 dm_channel_id,
@@ -207,7 +208,7 @@ impl VoiceState {
                 origin,
                 dm_channel_id.as_ref(),
                 federated_call_id.as_ref(),
-                "Звонок завершён",
+                tr("Звонок завершён"),
             ),
             CallEvent::Undeliverable {
                 dm_channel_id,
@@ -219,7 +220,7 @@ impl VoiceState {
                         origin,
                         dm_channel_id.as_ref(),
                         Some(&federated_call_id),
-                        "Не удалось дозвониться",
+                        tr("Не удалось дозвониться"),
                     );
                 }
             }
@@ -244,7 +245,7 @@ impl VoiceState {
             )
         {
             self.incoming = None;
-            self.notice = Some("Пропущенный звонок".to_owned());
+            self.notice = Some(tr("Пропущенный звонок").to_owned());
             return;
         }
         if let Some(call) = self.dm.as_ref()
@@ -402,7 +403,7 @@ pub(crate) fn show_incoming(ctx: &egui::Context, state: &VoiceState) -> Option<I
         .show(ctx, |ui| {
             ui.set_min_width(260.0);
             ui.vertical_centered(|ui| {
-                ui.label(theme::muted("Входящий звонок").size(12.5));
+                ui.label(theme::muted(tr("Входящий звонок")).size(12.5));
                 ui.label(
                     RichText::new(&call.caller)
                         .size(18.0)
@@ -410,10 +411,10 @@ pub(crate) fn show_incoming(ctx: &egui::Context, state: &VoiceState) -> Option<I
                 );
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if ui.add(theme::primary_button("Принять")).clicked() {
+                    if ui.add(theme::primary_button(tr("Принять"))).clicked() {
                         answer = Some(IncomingAnswer::Accept);
                     }
-                    if ui.button("Отклонить").clicked() {
+                    if ui.button(tr("Отклонить")).clicked() {
                         answer = Some(IncomingAnswer::Reject);
                     }
                 });

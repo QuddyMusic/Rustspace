@@ -14,6 +14,7 @@ use bs_types::{Origin, TransportPolicy};
 use zeroize::Zeroize as _;
 
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::logic::{invite_token_from_input, username_problem};
 use crate::theme;
 
@@ -126,7 +127,7 @@ impl Drop for RegisterForm {
 
 /// Клиент для коротких проверок без входа.
 fn probe_client(base: &str, transport: TransportPolicy) -> Result<ApiClient, String> {
-    let base = crate::bridge::normalize_base(base).ok_or_else(|| "нет адреса".to_owned())?;
+    let base = crate::bridge::normalize_base(base).ok_or_else(|| tr("нет адреса").to_owned())?;
     ApiClient::with_policy(Origin::Home, base, transport).map_err(|err| err.to_string())
 }
 
@@ -152,12 +153,12 @@ impl RegisterForm {
 
         ui.vertical_centered(|ui| {
             ui.label(
-                egui::RichText::new("Создать аккаунт")
+                egui::RichText::new(tr("Создать аккаунт"))
                     .size(24.0)
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
             );
-            ui.label(theme::muted("Новый аккаунт на инстансе Backspace"));
+            ui.label(theme::muted(tr("Новый аккаунт на инстансе Backspace")));
         });
         ui.add_space(14.0);
 
@@ -165,29 +166,35 @@ impl RegisterForm {
         let mut back = false;
         ui.add_enabled_ui(!busy, |ui| {
             let width = ui.available_width();
-            ui.label(theme::section_title("Адрес инстанса"));
+            ui.label(theme::section_title(tr("Адрес инстанса")));
             ui.add(field(base, width).hint_text("example.com"));
             self.instance_status(ui);
             ui.add_space(6.0);
 
-            ui.label(theme::section_title("Имя пользователя"));
-            ui.add(field(&mut self.username, width).hint_text("латиница, цифры, _"));
+            ui.label(theme::section_title(tr("Имя пользователя")));
+            ui.add(field(&mut self.username, width).hint_text(tr("латиница, цифры, _")));
             self.username_status(ui);
             ui.add_space(6.0);
 
-            ui.label(theme::section_title("Отображаемое имя (необязательно)"));
+            ui.label(theme::section_title(tr("Отображаемое имя (необязательно)")));
             ui.add(field(&mut self.display_name, width));
             ui.add_space(6.0);
 
-            ui.label(theme::section_title("Пароль"));
+            ui.label(theme::section_title(tr("Пароль")));
             ui.add(field(&mut self.password, width).password(true));
-            ui.label(theme::muted(format!("Не меньше {PASSWORD_MIN} символов")).size(12.0));
+            ui.label(
+                theme::muted(crate::tf!(
+                    "Не меньше {PASSWORD_MIN} символов",
+                    PASSWORD_MIN = PASSWORD_MIN
+                ))
+                .size(12.0),
+            );
             ui.add_space(4.0);
-            ui.label(theme::section_title("Повторите пароль"));
+            ui.label(theme::section_title(tr("Повторите пароль")));
             ui.add(field(&mut self.confirm, width).password(true));
             if !self.confirm.is_empty() && self.confirm != self.password {
                 ui.label(
-                    egui::RichText::new("Пароли не совпадают")
+                    egui::RichText::new(tr("Пароли не совпадают"))
                         .size(12.0)
                         .color(theme::rose()),
                 );
@@ -195,27 +202,30 @@ impl RegisterForm {
             ui.add_space(6.0);
 
             if self.needs_invite() || !self.invite.is_empty() {
-                ui.label(theme::section_title("Приглашение"));
-                ui.add(field(&mut self.invite, width).hint_text("ссылка или код"));
+                ui.label(theme::section_title(tr("Приглашение")));
+                ui.add(field(&mut self.invite, width).hint_text(tr("ссылка или код")));
                 self.invite_status(ui);
                 ui.add_space(6.0);
             }
 
-            ui.label(theme::section_title("Цвет аватара"));
+            ui.label(theme::section_title(tr("Цвет аватара")));
             self.color_picker(ui);
         });
 
         ui.add_space(8.0);
         ui.add_enabled(
             !busy,
-            egui::Checkbox::new(allow_insecure, "Разрешить незащищённое соединение (http)"),
+            egui::Checkbox::new(
+                allow_insecure,
+                tr("Разрешить незащищённое соединение (http)"),
+            ),
         );
         ui.add_space(12.0);
 
         let label = if busy {
-            "Создание…"
+            tr("Создание…")
         } else {
-            "Создать аккаунт"
+            tr("Создать аккаунт")
         };
         let submit = ui
             .add_enabled(
@@ -230,20 +240,23 @@ impl RegisterForm {
             ui.add_space(6.0);
             ui.vertical_centered(egui::Ui::spinner);
         }
-        if let Some(problem) = &self.problem {
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new(problem).color(theme::rose()));
-        } else if let Some(err) = bridge.last_error() {
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new(err).color(theme::rose()));
-        }
+        self.show_problem(ui, bridge);
         ui.add_space(10.0);
         ui.vertical_centered(|ui| {
-            if ui.link("Уже есть аккаунт? Войти").clicked() {
+            if ui.link(tr("Уже есть аккаунт? Войти")).clicked() {
                 back = true;
             }
         });
         back
+    }
+
+    /// Ошибка формы или отказ сервера под кнопкой.
+    fn show_problem(&self, ui: &mut egui::Ui, bridge: &Bridge) {
+        let text = self.problem.as_deref().or_else(|| bridge.last_error());
+        if let Some(text) = text {
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(text).color(theme::rose()));
+        }
     }
 
     /// Запускает и принимает фоновые проверки.
@@ -293,15 +306,20 @@ impl RegisterForm {
 
     fn instance_status(&self, ui: &mut egui::Ui) {
         let (text, color) = match &self.info.result {
-            None if self.info.pending() => ("Проверяем инстанс…".to_owned(), theme::text_faint()),
+            None if self.info.pending() => {
+                (tr("Проверяем инстанс…").to_owned(), theme::text_faint())
+            }
             None => return,
-            Some(Err(err)) => (format!("Инстанс не отвечает: {err}"), theme::rose()),
+            Some(Err(err)) => (
+                crate::tf!("Инстанс не отвечает: {err}", err = err),
+                theme::rose(),
+            ),
             Some(Ok(info)) if info.registration_open => (
-                format!("{} · регистрация открыта", info.name),
+                crate::tf!("{a0} · регистрация открыта", a0 = info.name),
                 theme::mint(),
             ),
             Some(Ok(info)) => (
-                format!("{} · регистрация только по приглашению", info.name),
+                crate::tf!("{a0} · регистрация только по приглашению", a0 = info.name),
                 theme::amber(),
             ),
         };
@@ -323,19 +341,22 @@ impl RegisterForm {
     /// Ответ сервера о занятости имени.
     fn name_verdict(&self) -> (String, egui::Color32) {
         match &self.name_check.result {
-            None => ("Проверяем…".to_owned(), theme::text_faint()),
-            Some(Ok(UsernameCheck::Available)) => ("Имя свободно".to_owned(), theme::mint()),
-            Some(Ok(UsernameCheck::Taken)) => ("Имя уже занято".to_owned(), theme::rose()),
+            None => (tr("Проверяем…").to_owned(), theme::text_faint()),
+            Some(Ok(UsernameCheck::Available)) => (tr("Имя свободно").to_owned(), theme::mint()),
+            Some(Ok(UsernameCheck::Taken)) => (tr("Имя уже занято").to_owned(), theme::rose()),
             Some(Ok(UsernameCheck::Invalid { code })) => (
-                crate::logic::describe_server_error(Some(code), "Имя не подходит"),
+                crate::logic::describe_server_error(Some(code), tr("Имя не подходит")),
                 theme::rose(),
             ),
             // Закрытая регистрация не мешает имени: по приглашению можно.
             Some(Ok(UsernameCheck::RegistrationClosed)) => (
-                "Проверка недоступна: нужна ссылка-приглашение".to_owned(),
+                tr("Проверка недоступна: нужна ссылка-приглашение").to_owned(),
                 theme::text_faint(),
             ),
-            Some(Err(_)) => ("Не удалось проверить имя".to_owned(), theme::text_faint()),
+            Some(Err(_)) => (
+                tr("Не удалось проверить имя").to_owned(),
+                theme::text_faint(),
+            ),
         }
     }
 
@@ -344,20 +365,25 @@ impl RegisterForm {
             return;
         }
         let (text, color) = match &self.invite_check.result {
-            None => ("Проверяем приглашение…".to_owned(), theme::text_faint()),
+            None => (tr("Проверяем приглашение…").to_owned(), theme::text_faint()),
             Some(Ok(InviteCheck::Valid { name })) if name.is_empty() => {
-                ("Приглашение действует".to_owned(), theme::mint())
+                (tr("Приглашение действует").to_owned(), theme::mint())
             }
-            Some(Ok(InviteCheck::Valid { name })) => {
-                (format!("Приглашение «{name}» действует"), theme::mint())
+            Some(Ok(InviteCheck::Valid { name })) => (
+                crate::tf!("Приглашение «{name}» действует", name = name),
+                theme::mint(),
+            ),
+            Some(Ok(InviteCheck::Expired)) => {
+                (tr("Срок приглашения истёк").to_owned(), theme::rose())
             }
-            Some(Ok(InviteCheck::Expired)) => ("Срок приглашения истёк".to_owned(), theme::rose()),
             Some(Ok(InviteCheck::Exhausted)) => {
-                ("Приглашение уже использовано".to_owned(), theme::rose())
+                (tr("Приглашение уже использовано").to_owned(), theme::rose())
             }
-            Some(Ok(InviteCheck::Invalid)) => ("Приглашение не найдено".to_owned(), theme::rose()),
+            Some(Ok(InviteCheck::Invalid)) => {
+                (tr("Приглашение не найдено").to_owned(), theme::rose())
+            }
             Some(Err(_)) => (
-                "Не удалось проверить приглашение".to_owned(),
+                tr("Не удалось проверить приглашение").to_owned(),
                 theme::text_faint(),
             ),
         };
@@ -404,7 +430,7 @@ impl RegisterForm {
             return;
         }
         if self.password != self.confirm {
-            self.problem = Some("Пароли не совпадают".to_owned());
+            self.problem = Some(tr("Пароли не совпадают").to_owned());
             return;
         }
         let display = self.display_name.trim();

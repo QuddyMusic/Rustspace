@@ -14,6 +14,7 @@ use egui::{Color32, CornerRadius, Margin, RichText};
 use super::{Rights, SpaceSettings, heading, status_lines};
 use crate::bridge::SpaceOp;
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::{theme, widgets};
 
 const NAME_MAX: usize = 100;
@@ -183,23 +184,25 @@ fn list(
     bridge: &mut Bridge,
     roles: &[Role],
 ) {
-    heading(ui, "Роли");
+    heading(ui, tr("Роли"));
     ui.label(
-        RichText::new("Роли определяют, какие права есть у участников.").color(theme::text_muted()),
+        RichText::new(tr("Роли определяют, какие права есть у участников."))
+            .color(theme::text_muted()),
     );
     ui.label(
-        RichText::new("Роли выше в списке стоят выше ролей под ними.").color(theme::text_muted()),
+        RichText::new(tr("Роли выше в списке стоят выше ролей под ними."))
+            .color(theme::text_muted()),
     );
     ui.add_space(8.0);
     if rights.manage_roles
         && ui
-            .add_enabled(!state.busy, theme::primary_button("Создать роль"))
+            .add_enabled(!state.busy, theme::primary_button(tr("Создать роль")))
             .clicked()
     {
         let known = roles.iter().map(|role| role.id.clone()).collect();
         state.roles.expect_new(known);
         let op = SpaceOp::CreateRole(NewRole {
-            name: "новая роль".to_owned(),
+            name: tr("новая роль").to_owned(),
             color: DEFAULT_COLOR.to_owned(),
             permissions: None,
         });
@@ -207,7 +210,7 @@ fn list(
     }
     status_lines(ui, state);
     ui.add_space(8.0);
-    widgets::section_label(ui, &format!("Роли ({})", roles.len()));
+    widgets::section_label(ui, &crate::tf!("Роли ({a0})", a0 = roles.len()));
     ui.add_space(6.0);
     for index in 0..roles.len() {
         role_row(ui, state, rights, bridge, roles, index);
@@ -258,9 +261,9 @@ fn role_row(
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .button(if editable {
-                            "Изменить"
+                            tr("Изменить")
                         } else {
-                            "Просмотр"
+                            tr("Просмотр")
                         })
                         .clicked()
                     {
@@ -274,7 +277,7 @@ fn role_row(
                         .filter(|next| next.is_everyone != Some(true));
                     if ui
                         .add_enabled(below.is_some() && !state.busy, egui::Button::new("▼"))
-                        .on_hover_text(format!("Переместить «{}» ниже", role.name))
+                        .on_hover_text(crate::tf!("Переместить «{a0}» ниже", a0 = role.name))
                         .clicked()
                         && let Some(anchor) = below
                     {
@@ -286,7 +289,7 @@ fn role_row(
                         .filter(|prev| can_manage_role_at(rights.top, prev.position, rights.perms));
                     if ui
                         .add_enabled(above.is_some() && !state.busy, egui::Button::new("▲"))
-                        .on_hover_text(format!("Переместить «{}» выше", role.name))
+                        .on_hover_text(crate::tf!("Переместить «{a0}» выше", a0 = role.name))
                         .clicked()
                         && let Some(anchor) = above
                     {
@@ -339,7 +342,7 @@ fn editor(
     let everyone = role.is_everyone == Some(true);
     let editable =
         rights.manage_roles && can_manage_role_at(rights.top, role.position, rights.perms);
-    if ui.button("← Вернуться к ролям").clicked() {
+    if ui.button(tr("← Вернуться к ролям")).clicked() {
         state.roles.closed();
         return;
     }
@@ -348,7 +351,7 @@ fn editor(
     if !editable && rights.manage_roles {
         ui.label(
             RichText::new(
-                "Эта роль находится на уровне вашей самой высокой роли или выше. Её можно просматривать, но не изменять.",
+                tr("Эта роль находится на уровне вашей самой высокой роли или выше. Её можно просматривать, но не изменять."),
             )
             .color(theme::text_muted()),
         );
@@ -359,10 +362,10 @@ fn editor(
     };
     ui.add_enabled_ui(editable, |ui| {
         if !everyone {
-            widgets::section_label(ui, "Внешний вид");
-            widgets::field_label(ui, "Название роли");
-            widgets::text_field(ui, &mut draft.name, "Название роли", NAME_MAX);
-            widgets::field_label(ui, "Цвет роли");
+            widgets::section_label(ui, tr("Внешний вид"));
+            widgets::field_label(ui, tr("Название роли"));
+            widgets::text_field(ui, &mut draft.name, tr("Название роли"), NAME_MAX);
+            widgets::field_label(ui, tr("Цвет роли"));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 for preset in PRESETS {
@@ -392,14 +395,14 @@ fn editor(
 fn permission_grid(ui: &mut egui::Ui, perms: &mut Permissions, rights: Rights, editable: bool) {
     if editable && !rights.perms.contains(Permissions::all()) {
         ui.label(
-            RichText::new("Переключать можно только те права, которые есть у вас самих. Остальные заблокированы.")
+            RichText::new(tr("Переключать можно только те права, которые есть у вас самих. Остальные заблокированы."))
                 .color(theme::text_muted()),
         );
         ui.add_space(4.0);
     }
     for (title, list) in GROUPS {
         ui.add_space(6.0);
-        widgets::section_label(ui, title);
+        widgets::section_label(ui, tr(title));
         for (bit, label) in list {
             let held = rights.perms.contains(*bit);
             let mut on = perms.contains(*bit);
@@ -413,7 +416,7 @@ fn permission_grid(ui: &mut egui::Ui, perms: &mut Permissions, rights: Rights, e
                     } else {
                         theme::text_muted()
                     };
-                    ui.label(RichText::new(*label).color(color));
+                    ui.label(RichText::new(tr(label)).color(color));
                     changed
                 })
                 .inner;
@@ -422,6 +425,22 @@ fn permission_grid(ui: &mut egui::Ui, perms: &mut Permissions, rights: Rights, e
             }
         }
     }
+}
+
+/// Только изменённые поля черновика роли.
+fn role_update(draft: &Draft, everyone: bool) -> RoleUpdate {
+    let mut update = RoleUpdate::default();
+    if !everyone && draft.name.trim() != draft.base_name {
+        update.name = Some(draft.name.trim().to_owned());
+    }
+    if !everyone && draft.color != draft.base_color {
+        update.color = Some(draft.color.clone());
+    }
+    if draft.perms != draft.base_perms {
+        update.permissions = Some(permissions_to_string(draft.perms));
+        update.permissions_version = Some(draft.version.clone());
+    }
+    update
 }
 
 #[allow(clippy::too_many_arguments, reason = "кнопки редактора роли")]
@@ -451,34 +470,26 @@ fn buttons(
             });
         let invalid = (!everyone && (name.is_empty() || !valid_hex(&draft.color))) || duplicate;
         if name.is_empty() && !everyone {
-            ui.label(RichText::new("Название роли не может быть пустым").color(theme::rose()));
+            ui.label(RichText::new(tr("Название роли не может быть пустым")).color(theme::rose()));
         } else if duplicate {
-            ui.label(RichText::new("Роль с таким названием уже существует").color(theme::rose()));
+            ui.label(
+                RichText::new(tr("Роль с таким названием уже существует")).color(theme::rose()),
+            );
         }
         ui.horizontal(|ui| {
             let label = if state.busy {
-                "Сохранение…"
+                tr("Сохранение…")
             } else {
-                "Сохранить"
+                tr("Сохранить")
             };
             if ui
                 .add_enabled(!invalid && !state.busy, theme::primary_button(label))
                 .clicked()
             {
-                let mut update = RoleUpdate::default();
-                if !everyone && draft.name.trim() != draft.base_name {
-                    update.name = Some(draft.name.trim().to_owned());
-                }
-                if !everyone && draft.color != draft.base_color {
-                    update.color = Some(draft.color.clone());
-                }
-                if draft.perms != draft.base_perms {
-                    update.permissions = Some(permissions_to_string(draft.perms));
-                    update.permissions_version = Some(draft.version.clone());
-                }
+                let update = role_update(draft, everyone);
                 state.request(bridge, SpaceOp::UpdateRole(role.id.clone(), update));
             }
-            if ui.button("Отменить изменения").clicked() {
+            if ui.button(tr("Отменить изменения")).clicked() {
                 state.roles.draft = Some(load_draft(role));
             }
         });
@@ -491,14 +502,14 @@ fn buttons(
     ui.horizontal(|ui| {
         let copy = ui.add_enabled(
             foreign.is_empty() && !state.busy,
-            egui::Button::new("Копировать роль"),
+            egui::Button::new(tr("Копировать роль")),
         );
         let copy = if foreign.is_empty() {
             copy
         } else {
-            copy.on_disabled_hover_text(
+            copy.on_disabled_hover_text(tr(
                 "У этой роли есть права, которых нет у вас, поэтому её нельзя скопировать.",
-            )
+            ))
         };
         if copy.clicked() {
             let known = bridge
@@ -508,7 +519,7 @@ fn buttons(
                 .unwrap_or_default();
             state.roles.expect_new(known);
             let op = SpaceOp::CreateRole(NewRole {
-                name: format!("Копия {}", role.name),
+                name: crate::tf!("Копия {a0}", a0 = role.name),
                 color: role.color.clone(),
                 permissions: Some(permissions_to_string(bits_of(role))),
             });
@@ -516,9 +527,9 @@ fn buttons(
             state.roles.closed();
         }
         let label = if state.roles.delete_armed {
-            "Подтвердить?"
+            tr("Подтвердить?")
         } else {
-            "Удалить роль"
+            tr("Удалить роль")
         };
         let delete = ui.add_enabled(
             foreign.is_empty() && !state.busy,

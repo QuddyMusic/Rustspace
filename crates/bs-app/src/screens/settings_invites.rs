@@ -6,6 +6,7 @@ use egui::RichText;
 use super::settings_extra::{Note, fail, ok, setting_row, show_note};
 use crate::bridge::{AdminEvent, AdminRequest, BridgeRequest, InviteOp};
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::screens::dialogs::{card, page_title};
 use crate::theme;
 use crate::widgets;
@@ -78,26 +79,32 @@ fn now_ms() -> i64 {
 
 fn status_text(invite: &Invite) -> (&'static str, egui::Color32) {
     match invite.status.as_str() {
-        "active" => ("Действует", theme::green()),
-        "expired" => ("Истекла", theme::amber()),
-        "exhausted" => ("Использована", theme::amber()),
-        "revoked" => ("Отозвана", theme::rose()),
+        "active" => (tr("Действует"), theme::green()),
+        "expired" => (tr("Истекла"), theme::amber()),
+        "exhausted" => (tr("Использована"), theme::amber()),
+        "revoked" => (tr("Отозвана"), theme::rose()),
         _ => ("—", theme::text_faint()),
     }
 }
 
 fn uses_text(invite: &Invite) -> String {
     invite.max_uses.map_or_else(
-        || format!("Использований: {}", invite.used_count),
-        |max| format!("Использований: {} из {max}", invite.used_count),
+        || crate::tf!("Использований: {a0}", a0 = invite.used_count),
+        |max| {
+            crate::tf!(
+                "Использований: {a0} из {max}",
+                a0 = invite.used_count,
+                max = max
+            )
+        },
     )
 }
 
 fn expiry_text(invite: &Invite) -> String {
     match invite.expires_at {
-        None => "Бессрочно".to_owned(),
-        Some(at) if at <= now_ms() => format!("Истекла {}", theme::stamp(at, now_ms())),
-        Some(at) => format!("Действует до {}", theme::stamp(at, now_ms())),
+        None => tr("Бессрочно").to_owned(),
+        Some(at) if at <= now_ms() => crate::tf!("Истекла {a0}", a0 = theme::stamp(at, now_ms())),
+        Some(at) => crate::tf!("Действует до {a0}", a0 = theme::stamp(at, now_ms())),
     }
 }
 
@@ -120,33 +127,33 @@ fn show_form(ui: &mut egui::Ui, ui_state: &mut InvitesUi, bridge: &Bridge) {
         return;
     };
     let title = match (&form.id, form.reinstate) {
-        (None, _) => "Новая ссылка",
-        (Some(_), true) => "Восстановить ссылку",
-        (Some(_), false) => "Изменить ссылку",
+        (None, _) => tr("Новая ссылка"),
+        (Some(_), true) => tr("Восстановить ссылку"),
+        (Some(_), false) => tr("Изменить ссылку"),
     };
     let mut submit = false;
     let mut cancel = false;
     card(ui, |ui| {
         ui.label(RichText::new(title).color(theme::text_bright()));
         if !form.reinstate {
-            widgets::field_label(ui, "Название");
-            widgets::text_field(ui, &mut form.name, "Например, «для друзей»", 64);
+            widgets::field_label(ui, tr("Название"));
+            widgets::text_field(ui, &mut form.name, tr("Например, «для друзей»"), 64);
         }
         ui.horizontal(|ui| {
-            ui.label("Макс. использований (0 — без предела)");
+            ui.label(tr("Макс. использований (0 — без предела)"));
             ui.add(egui::DragValue::new(&mut form.max_uses).range(0..=100_000));
         });
         ui.horizontal(|ui| {
-            ui.label("Срок действия");
+            ui.label(tr("Срок действия"));
             if form.id.is_some() {
-                ui.checkbox(&mut form.keep_expiry, "не менять");
+                ui.checkbox(&mut form.keep_expiry, tr("не менять"));
             }
             ui.add_enabled_ui(!form.keep_expiry, |ui| {
                 egui::ComboBox::from_id_salt("invite_expiry")
-                    .selected_text(EXPIRIES[form.expiry.min(EXPIRIES.len() - 1)].0)
+                    .selected_text(tr(EXPIRIES[form.expiry.min(EXPIRIES.len() - 1)].0))
                     .show_ui(ui, |ui| {
                         for (i, (label, _)) in EXPIRIES.iter().enumerate() {
-                            ui.selectable_value(&mut form.expiry, i, *label);
+                            ui.selectable_value(&mut form.expiry, i, tr(label));
                         }
                     });
             });
@@ -154,12 +161,12 @@ fn show_form(ui: &mut egui::Ui, ui_state: &mut InvitesUi, bridge: &Bridge) {
         let valid = form.reinstate || !form.name.trim().is_empty();
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(valid, theme::primary_button("Сохранить"))
+                .add_enabled(valid, theme::primary_button(tr("Сохранить")))
                 .clicked()
             {
                 submit = true;
             }
-            if ui.button("Отмена").clicked() {
+            if ui.button(tr("Отмена")).clicked() {
                 cancel = true;
             }
         });
@@ -194,16 +201,16 @@ fn invite_card(ui: &mut egui::Ui, state: &mut InvitesUi, invite: &Invite, bridge
         ui.label(theme::muted(uses_text(invite)).size(12.5));
         ui.label(theme::muted(expiry_text(invite)).size(12.5));
         if let Some(by) = &invite.created_by_username {
-            ui.label(theme::muted(format!("Создал: {by}")).size(12.5));
+            ui.label(theme::muted(crate::tf!("Создал: {by}", by = by)).size(12.5));
         }
         ui.horizontal_wrapped(|ui| {
-            if invite.status == "active" && ui.button("Копировать ссылку").clicked()
+            if invite.status == "active" && ui.button(tr("Копировать ссылку")).clicked()
             {
                 ui.ctx().copy_text(invite.url.clone());
-                state.note = Some(ok("Ссылка скопирована"));
+                state.note = Some(ok(tr("Ссылка скопирована")));
             }
             if invite.status == "active" {
-                if ui.button("Изменить").clicked() {
+                if ui.button(tr("Изменить")).clicked() {
                     state.form = Some(Form {
                         id: Some(invite.id.clone()),
                         name: invite.name.clone(),
@@ -212,13 +219,13 @@ fn invite_card(ui: &mut egui::Ui, state: &mut InvitesUi, invite: &Invite, bridge
                         ..Form::default()
                     });
                 }
-                if ui.button("Отозвать").clicked() {
+                if ui.button(tr("Отозвать")).clicked() {
                     send(
                         bridge,
                         AdminRequest::Invite(InviteOp::Revoke(invite.id.clone())),
                     );
                 }
-            } else if ui.button("Восстановить").clicked() {
+            } else if ui.button(tr("Восстановить")).clicked() {
                 state.form = Some(Form {
                     id: Some(invite.id.clone()),
                     reinstate: true,
@@ -227,23 +234,23 @@ fn invite_card(ui: &mut egui::Ui, state: &mut InvitesUi, invite: &Invite, bridge
                     ..Form::default()
                 });
             }
-            if ui.button("Кто использовал").clicked() {
+            if ui.button(tr("Кто использовал")).clicked() {
                 send(
                     bridge,
                     AdminRequest::Invite(InviteOp::Redemptions(invite.id.clone())),
                 );
             }
             if state.confirm_delete.as_deref() == Some(invite.id.as_str()) {
-                if ui.button("Точно удалить").clicked() {
+                if ui.button(tr("Точно удалить")).clicked() {
                     send(
                         bridge,
                         AdminRequest::Invite(InviteOp::Delete(invite.id.clone())),
                     );
                 }
-                if ui.button("Отмена").clicked() {
+                if ui.button(tr("Отмена")).clicked() {
                     state.confirm_delete = None;
                 }
-            } else if ui.button("Удалить").clicked() {
+            } else if ui.button(tr("Удалить")).clicked() {
                 state.confirm_delete = Some(invite.id.clone());
             }
         });
@@ -255,12 +262,12 @@ fn invite_card(ui: &mut egui::Ui, state: &mut InvitesUi, invite: &Invite, bridge
                     ui.label(RichText::new(message).color(theme::rose()).size(12.5));
                 }
                 Ok(list) if list.is_empty() => {
-                    ui.label(theme::muted("Пока никто не воспользовался").size(12.5));
+                    ui.label(theme::muted(tr("Пока никто не воспользовался")).size(12.5));
                 }
                 Ok(list) => {
                     for r in list {
                         let name = if r.is_deleted {
-                            format!("{} (удалён)", r.registrant_username)
+                            crate::tf!("{a0} (удалён)", a0 = r.registrant_username)
                         } else {
                             r.current_username
                                 .clone()
@@ -288,20 +295,20 @@ pub(crate) fn registration_panel(
     bridge: &Bridge,
 ) {
     let admin = &mut extra.admin;
-    page_title(ui, "Регистрация");
+    page_title(ui, tr("Регистрация"));
     super::settings_extra::ensure_settings(admin, bridge);
     if let Some(edit) = admin.edit_mut() {
         card(ui, |ui| {
             setting_row(
                 ui,
-                "Открытая регистрация",
-                "Любой может создать аккаунт без инвайта.",
+                tr("Открытая регистрация"),
+                tr("Любой может создать аккаунт без инвайта."),
                 &mut edit.registration_open,
             );
             setting_row(
                 ui,
-                "Регистрация федеративных аккаунтов",
-                "Пользователи других инстансов могут создавать здесь аккаунты.",
+                tr("Регистрация федеративных аккаунтов"),
+                tr("Пользователи других инстансов могут создавать здесь аккаунты."),
                 &mut edit.federated_registration_open,
             );
         });
@@ -309,13 +316,13 @@ pub(crate) fn registration_panel(
         let changed = patch != bs_api::InstanceSettingsPatch::default();
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(changed, theme::primary_button("Сохранить"))
+                .add_enabled(changed, theme::primary_button(tr("Сохранить")))
                 .clicked()
             {
                 send(bridge, AdminRequest::SaveSettings(patch));
             }
             if ui
-                .add_enabled(changed, egui::Button::new("Сбросить"))
+                .add_enabled(changed, egui::Button::new(tr("Сбросить")))
                 .clicked()
             {
                 admin.reset_edit();
@@ -324,17 +331,17 @@ pub(crate) fn registration_panel(
         ui.add_space(12.0);
     }
     let state = &mut admin.invites;
-    widgets::section_label(ui, "Инвайт-ссылки");
+    widgets::section_label(ui, tr("Инвайт-ссылки"));
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         let before = state.archived;
-        ui.selectable_value(&mut state.archived, false, "Активные");
-        ui.selectable_value(&mut state.archived, true, "Архив");
+        ui.selectable_value(&mut state.archived, false, tr("Активные"));
+        ui.selectable_value(&mut state.archived, true, tr("Архив"));
         if state.archived != before {
             state.list = None;
             state.asked = None;
         }
-        if ui.button("Создать ссылку").clicked() {
+        if ui.button(tr("Создать ссылку")).clicked() {
             state.form = Some(Form::default());
         }
     });
@@ -348,16 +355,16 @@ pub(crate) fn registration_panel(
     show_note(ui, state.note.as_ref());
     show_form(ui, state, bridge);
     let Some(list) = state.list.clone() else {
-        ui.label(theme::muted("Загрузка…"));
+        ui.label(theme::muted(tr("Загрузка…")));
         return;
     };
     if list.is_empty() {
         theme::empty_state(
             ui,
             if state.archived {
-                "Архив пуст"
+                tr("Архив пуст")
             } else {
-                "Активных ссылок нет"
+                tr("Активных ссылок нет")
             },
         );
     }

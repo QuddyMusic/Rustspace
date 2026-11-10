@@ -9,6 +9,7 @@
 use bs_core::Cache;
 
 use crate::bridge::NewMessage;
+use crate::i18n::tr;
 
 /// Длина текста в уведомлении.
 const PREVIEW_CHARS: usize = 140;
@@ -36,7 +37,7 @@ pub(crate) fn toast(cache: &Cache, message: &NewMessage, previews: bool) -> Toas
     let body = if previews {
         preview(&message.content)
     } else {
-        "Новое сообщение".to_owned()
+        tr("Новое сообщение").to_owned()
     };
     Toast { title, body }
 }
@@ -92,7 +93,7 @@ fn author_name(cache: &Cache, user_id: &str) -> String {
 fn preview(content: &str) -> String {
     let flat: String = content.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.is_empty() {
-        return "Вложение".to_owned();
+        return tr("Вложение").to_owned();
     }
     crate::theme::truncate_chars(&flat, PREVIEW_CHARS)
 }

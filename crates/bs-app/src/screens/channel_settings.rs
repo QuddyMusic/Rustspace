@@ -11,6 +11,7 @@ use egui::{CornerRadius, Margin, RichText};
 use super::space_settings::{PERMISSION_GROUPS, Rights, rights_for};
 use crate::bridge::{BridgeRequest, SpaceEvent, SpaceOp};
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::{theme, widgets};
 
 const NAME_MAX: usize = 100;
@@ -154,7 +155,7 @@ impl ChannelSettings {
                     (SpaceOp::UpdateChannel(..) | SpaceOp::RenameCategory(..), Ok(())) => {
                         self.saved_name.clone_from(&self.name);
                         self.saved_topic.clone_from(&self.topic);
-                        self.notice = Some("Настройки сохранены".to_owned());
+                        self.notice = Some(tr("Настройки сохранены").to_owned());
                     }
                     (SpaceOp::PutOverride(..) | SpaceOp::DeleteOverride(..), Ok(())) => {
                         self.overrides = None;
@@ -162,7 +163,7 @@ impl ChannelSettings {
                         self.draft = None;
                     }
                     (_, Err(err)) => {
-                        if err.starts_with("Кто-то другой") {
+                        if err.starts_with(tr("Кто-то другой")) {
                             self.overrides = None;
                             self.overrides_requested = false;
                             self.draft = None;
@@ -238,9 +239,9 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut ChannelSettings, bridge: &mu
 
 fn title(state: &ChannelSettings) -> &'static str {
     if state.is_channel() {
-        "Настройки канала"
+        tr("Настройки канала")
     } else {
-        "Настройки категории"
+        tr("Настройки категории")
     }
 }
 
@@ -267,9 +268,9 @@ fn nav(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, keep_open
             );
         });
         ui.add_space(8.0);
-        let mut tabs = vec![(Tab::Overview, "Основное", crate::icons::Icon::Gear)];
+        let mut tabs = vec![(Tab::Overview, tr("Основное"), crate::icons::Icon::Gear)];
         if rights.manage_roles {
-            tabs.push((Tab::Access, "Права доступа", crate::icons::Icon::Users));
+            tabs.push((Tab::Access, tr("Права доступа"), crate::icons::Icon::Users));
         }
         for (tab, label, icon) in tabs {
             if widgets::nav_row(ui, icon, label, state.tab == tab).clicked() {
@@ -281,7 +282,7 @@ fn nav(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, keep_open
         ui.add_space(ui.available_height() - 36.0);
         ui.horizontal(|ui| {
             ui.add_space(14.0);
-            if ui.button("Закрыть").clicked() {
+            if ui.button(tr("Закрыть")).clicked() {
                 *keep_open = false;
             }
         });
@@ -310,24 +311,24 @@ fn status_lines(ui: &mut egui::Ui, state: &ChannelSettings) {
 }
 
 fn overview(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) {
-    heading(ui, "Основное");
+    heading(ui, tr("Основное"));
     let channel = state.is_channel();
     widgets::field_label(
         ui,
         if channel {
-            "Название канала"
+            tr("Название канала")
         } else {
-            "Название категории"
+            tr("Название категории")
         },
     );
-    widgets::text_field(ui, &mut state.name, "Название", NAME_MAX);
+    widgets::text_field(ui, &mut state.name, tr("Название"), NAME_MAX);
     if channel {
-        widgets::field_label(ui, "Тема");
-        widgets::text_area(ui, &mut state.topic, "О чём этот канал?", TOPIC_MAX, 3);
+        widgets::field_label(ui, tr("Тема"));
+        widgets::text_area(ui, &mut state.topic, tr("О чём этот канал?"), TOPIC_MAX, 3);
         ui.label(
-            RichText::new(
+            RichText::new(tr(
                 "Показывается в заголовке канала. Оттуда любой может открыть полный текст.",
-            )
+            ))
             .size(12.0)
             .color(theme::text_muted()),
         );
@@ -339,11 +340,11 @@ fn overview(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
         ui.add_space(12.0);
         ui.horizontal(|ui| {
             let label = if state.busy {
-                "Сохранение…"
+                tr("Сохранение…")
             } else if channel {
-                "Переименовать канал"
+                tr("Переименовать канал")
             } else {
-                "Переименовать категорию"
+                tr("Переименовать категорию")
             };
             let valid = !state.name.trim().is_empty();
             if ui
@@ -366,7 +367,7 @@ fn overview(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
                 };
                 state.request(bridge, op);
             }
-            if ui.button("Отменить изменения").clicked() {
+            if ui.button(tr("Отменить изменения")).clicked() {
                 state.name.clone_from(&state.saved_name);
                 state.topic.clone_from(&state.saved_topic);
             }
@@ -394,15 +395,19 @@ fn privacy(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) 
         });
     let (label, description, note) = if state.is_channel() {
         (
-            "Закрытый канал",
-            "Только выбранные участники и роли смогут видеть этот канал.",
-            "Этот канал скрыт от участников без явного доступа. Пользователи с правом администратора и владельцы пространства всегда видят все каналы.",
+            tr("Закрытый канал"),
+            tr("Только выбранные участники и роли смогут видеть этот канал."),
+            tr(
+                "Этот канал скрыт от участников без явного доступа. Пользователи с правом администратора и владельцы пространства всегда видят все каналы.",
+            ),
         )
     } else {
         (
-            "Закрытая категория",
-            "Только выбранные участники и роли смогут видеть каналы в этой категории.",
-            "Эта категория скрыта от участников без явного доступа. Каналы внутри наследуют это ограничение, если для них не задано явное переопределение.",
+            tr("Закрытая категория"),
+            tr("Только выбранные участники и роли смогут видеть каналы в этой категории."),
+            tr(
+                "Эта категория скрыта от участников без явного доступа. Каналы внутри наследуют это ограничение, если для них не задано явное переопределение.",
+            ),
         )
     };
     ui.add_space(14.0);
@@ -469,7 +474,7 @@ fn toggle_private(state: &mut ChannelSettings, bridge: &mut Bridge, make_private
 fn danger_zone(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) {
     ui.add_space(22.0);
     ui.label(
-        RichText::new("ОПАСНАЯ ЗОНА")
+        RichText::new(tr("ОПАСНАЯ ЗОНА"))
             .size(11.0)
             .family(theme::bold_family())
             .color(theme::rose()),
@@ -477,20 +482,24 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Brid
     ui.add_space(6.0);
     let channel = state.is_channel();
     let description = if channel && state.voice {
-        "Канал и все его сообщения будут удалены навсегда. Все, кто сейчас находится в этом голосовом канале, будут отключены. Это действие нельзя отменить."
+        tr(
+            "Канал и все его сообщения будут удалены навсегда. Все, кто сейчас находится в этом голосовом канале, будут отключены. Это действие нельзя отменить.",
+        )
     } else if channel {
-        "Канал и все его сообщения будут удалены навсегда. Это действие нельзя отменить."
+        tr("Канал и все его сообщения будут удалены навсегда. Это действие нельзя отменить.")
     } else {
-        "Категория будет удалена навсегда. Каналы внутри неё будут перемещены на верхний уровень. Это действие нельзя отменить."
+        tr(
+            "Категория будет удалена навсегда. Каналы внутри неё будут перемещены на верхний уровень. Это действие нельзя отменить.",
+        )
     };
     ui.label(RichText::new(description).color(theme::text_muted()));
     ui.add_space(6.0);
     let label = if state.delete_armed {
-        "Нажмите ещё раз, чтобы подтвердить удаление"
+        tr("Нажмите ещё раз, чтобы подтвердить удаление")
     } else if channel {
-        "Удалить канал"
+        tr("Удалить канал")
     } else {
-        "Удалить категорию"
+        tr("Удалить категорию")
     };
     let button = ui.add_enabled(
         !state.busy,
@@ -520,10 +529,10 @@ struct Entry {
 }
 
 fn access(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, bridge: &mut Bridge) {
-    heading(ui, "Права доступа");
+    heading(ui, tr("Права доступа"));
     status_lines(ui, state);
     let Some(list) = state.overrides.clone() else {
-        ui.label(RichText::new("Загрузка…").color(theme::text_muted()));
+        ui.label(RichText::new(tr("Загрузка…")).color(theme::text_muted()));
         return;
     };
     let (roles, members) = bridge
@@ -563,8 +572,10 @@ fn access(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, bridge
         })
         .unwrap_or_default();
     ui.label(
-        RichText::new("Без переопределения здесь действуют права всего пространства.")
-            .color(theme::text_muted()),
+        RichText::new(tr(
+            "Без переопределения здесь действуют права всего пространства.",
+        ))
+        .color(theme::text_muted()),
     );
     ui.add_space(8.0);
     let has = |kind: OverrideTargetType, id: &str| {
@@ -583,7 +594,7 @@ fn access(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, bridge
         )
     });
     if shown.is_empty() {
-        ui.label(RichText::new("Переопределений для ролей нет. Здесь для каждой роли действуют права всего пространства.").color(theme::text_muted()));
+        ui.label(RichText::new(tr("Переопределений для ролей нет. Здесь для каждой роли действуют права всего пространства.")).color(theme::text_muted()));
     }
     for entry in shown {
         entry_row(ui, state, rights, bridge, &list, entry);
@@ -608,11 +619,11 @@ fn add_menus(
             && rights.top > e.position
     };
     ui.horizontal(|ui| {
-        ui.menu_button("Добавить роль", |ui| {
+        ui.menu_button(tr("Добавить роль"), |ui| {
             let candidates: Vec<_> = roles.iter().filter(free).collect();
             if candidates.is_empty() {
                 ui.label(
-                    RichText::new("Больше нет ролей для добавления").color(theme::text_muted()),
+                    RichText::new(tr("Больше нет ролей для добавления")).color(theme::text_muted()),
                 );
             }
             for entry in candidates {
@@ -623,8 +634,8 @@ fn add_menus(
                 }
             }
         });
-        ui.menu_button("Добавить участника", |ui| {
-            widgets::text_field(ui, &mut state.member_search, "Поиск участников…", 64);
+        ui.menu_button(tr("Добавить участника"), |ui| {
+            widgets::text_field(ui, &mut state.member_search, tr("Поиск участников…"), 64);
             let needle = state.member_search.trim().to_lowercase();
             let candidates: Vec<_> = members
                 .iter()
@@ -696,9 +707,9 @@ fn entry_row(
 
 fn plural_overrides(count: u32) -> String {
     let word = match (count % 10, count % 100) {
-        (1, n) if n != 11 => "переопределение",
-        (2..=4, n) if !(12..=14).contains(&n) => "переопределения",
-        _ => "переопределений",
+        (1, n) if n != 11 => tr("переопределение"),
+        (2..=4, n) if !(12..=14).contains(&n) => tr("переопределения"),
+        _ => tr("переопределений"),
     };
     format!("{count} {word}")
 }
@@ -724,9 +735,9 @@ fn tri_state_row(
                 0
             };
             for (value, text, tip) in [
-                (-1, "✗", "Запретить"),
-                (0, "–", "Нейтрально (наследовать)"),
-                (1, "✓", "Разрешить"),
+                (-1, "✗", tr("Запретить")),
+                (0, "–", tr("Нейтрально (наследовать)")),
+                (1, "✓", tr("Разрешить")),
             ] {
                 let button = egui::Button::new(text)
                     .selected(state_now == value)
@@ -751,7 +762,7 @@ fn tri_state_row(
             .on_hover_text(if held {
                 ""
             } else {
-                "У вас нет этого права"
+                tr("У вас нет этого права")
             });
     });
 }
@@ -777,19 +788,27 @@ fn editor(
     if above {
         ui.label(
             RichText::new(if entry.kind == OverrideTargetType::Role {
-                "Эта роль находится на уровне вашей самой высокой роли или выше. Её переопределение можно просматривать, но не изменять и не удалять."
+                tr("Эта роль находится на уровне вашей самой высокой роли или выше. Её переопределение можно просматривать, но не изменять и не удалять.")
             } else {
-                "Этот участник находится на вашем уровне или выше. Его переопределение можно просматривать, но не изменять и не удалять."
+                tr("Этот участник находится на вашем уровне или выше. Его переопределение можно просматривать, но не изменять и не удалять.")
             })
             .size(12.0)
             .color(theme::text_muted()),
         );
     }
     for (group, list) in PERMISSION_GROUPS {
-        widgets::section_label(ui, group);
+        widgets::section_label(ui, tr(group));
         for (bit, label) in list {
             let held = rights.perms.contains(*bit);
-            tri_state_row(ui, *bit, label, held, above || !held, &mut allow, &mut deny);
+            tri_state_row(
+                ui,
+                *bit,
+                tr(label),
+                held,
+                above || !held,
+                &mut allow,
+                &mut deny,
+            );
         }
     }
     state.draft = Some((allow, deny));
@@ -804,9 +823,9 @@ fn editor(
             .add_enabled(
                 changed && !state.busy,
                 theme::primary_button(if state.busy {
-                    "Сохранение…"
+                    tr("Сохранение…")
                 } else {
-                    "Сохранить"
+                    tr("Сохранить")
                 }),
             )
             .clicked()
@@ -829,7 +848,10 @@ fn editor(
         }
         if stored.is_some()
             && ui
-                .add_enabled(!state.busy, egui::Button::new("Удалить переопределение"))
+                .add_enabled(
+                    !state.busy,
+                    egui::Button::new(tr("Удалить переопределение")),
+                )
                 .clicked()
         {
             let op = SpaceOp::DeleteOverride(state.target.scope(), entry.kind, entry.id.clone());

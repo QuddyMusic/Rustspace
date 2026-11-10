@@ -4,15 +4,16 @@
 //! [`bs_core::Cache`] и результатов REST в строки и предикаты. Так его легко
 //! покрыть тестами, а экраны `home` и `chat` остаются тонкими обёртками.
 
+use crate::i18n::tr;
 use bs_types::{DmChannel, DmChannelLastMessage, Friend, FriendRequest, User, UserStatus};
 
 /// Подпись статуса присутствия.
-pub(crate) const fn status_label(status: UserStatus) -> &'static str {
+pub(crate) fn status_label(status: UserStatus) -> &'static str {
     match status {
-        UserStatus::Online => "В сети",
-        UserStatus::Idle => "Нет на месте",
-        UserStatus::DoNotDisturb => "Не беспокоить",
-        UserStatus::Offline => "Не в сети",
+        UserStatus::Online => tr("В сети"),
+        UserStatus::Idle => tr("Нет на месте"),
+        UserStatus::DoNotDisturb => tr("Не беспокоить"),
+        UserStatus::Offline => tr("Не в сети"),
     }
 }
 
@@ -118,10 +119,58 @@ pub(crate) fn dm_last_text(channel: &DmChannel) -> Option<String> {
             .as_deref()
             .and_then(bs_types::DmSystemEvent::parse)
             .map_or_else(
-                || bs_types::GENERIC_SYSTEM_TEXT.to_owned(),
-                |event| event.text(&actor, false),
+                || tr("Системное сообщение").to_owned(),
+                |event| system_text(&event, &actor, false),
             ),
     )
+}
+
+/// Текст системного события беседы на языке интерфейса
+/// (`dmSystemText` оригинала); `timeline` — полная форма для ленты.
+pub(crate) fn system_text(event: &bs_types::DmSystemEvent, actor: &str, timeline: bool) -> String {
+    use bs_types::DmSystemEvent as E;
+    use bs_types::dm_system::RemovalReason;
+    match event {
+        E::MemberAdded {
+            target_display_name: target,
+            ..
+        } => crate::tf!(
+            "{actor} добавляет в группу: {target}",
+            actor = actor,
+            target = target
+        ),
+        E::MemberRemoved {
+            target_display_name: target,
+            reason: RemovalReason::Leave,
+            ..
+        } => crate::tf!("{target} выходит из группы", target = target),
+        E::MemberRemoved {
+            target_display_name: target,
+            ..
+        } => crate::tf!(
+            "{actor} удаляет из группы: {target}",
+            actor = actor,
+            target = target
+        ),
+        E::OwnerChanged {
+            new_owner_display_name: owner,
+            ..
+        } => crate::tf!("{owner} теперь владелец группы", owner = owner),
+        E::NameChanged { new_name, .. } => match new_name.as_deref().filter(|n| !n.is_empty()) {
+            None => crate::tf!("{actor} удаляет название группы", actor = actor),
+            Some(name) if timeline => crate::tf!(
+                "{actor} меняет название группы на «{name}»",
+                actor = actor,
+                name = name
+            ),
+            Some(_) => crate::tf!("{actor} меняет название группы", actor = actor),
+        },
+        E::IconChanged => crate::tf!("{actor} меняет значок группы", actor = actor),
+        E::SpaceInvite(invite) => crate::tf!(
+            "📨 Приглашение в {space}",
+            space = invite.snapshot.space_name
+        ),
+    }
 }
 
 /// Уже ли пользователь `id` в друзьях.

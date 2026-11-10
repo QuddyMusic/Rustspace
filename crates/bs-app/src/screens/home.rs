@@ -9,6 +9,7 @@ use egui::{Align, CornerRadius, Layout, Margin, RichText, Sense};
 
 use crate::bridge::BridgeRequest;
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::social::{
     friend_display_name, friend_status_text, is_friend, request_is_incoming, request_name,
@@ -91,7 +92,7 @@ pub(crate) fn show_friends(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Br
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 ui.add(widgets::flat_icon(Icon::User, 20.0, theme::text_faint()));
                 ui.label(
-                    RichText::new("Друзья")
+                    RichText::new(tr("Друзья"))
                         .size(16.0)
                         .family(theme::bold_family())
                         .color(theme::text_bright()),
@@ -102,14 +103,14 @@ pub(crate) fn show_friends(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Br
                     .rect_filled(line, CornerRadius::ZERO, theme::border());
                 ui.add_space(8.0);
                 for (tab, label) in [
-                    (FriendsTab::Online, "В сети".to_owned()),
-                    (FriendsTab::All, "Все".to_owned()),
+                    (FriendsTab::Online, tr("В сети").to_owned()),
+                    (FriendsTab::All, tr("Все").to_owned()),
                     (
                         FriendsTab::Pending,
                         if pending > 0 {
-                            format!("Заявки · {pending}")
+                            crate::tf!("Заявки · {pending}", pending = pending)
                         } else {
-                            "Заявки".to_owned()
+                            tr("Заявки").to_owned()
                         },
                     ),
                 ] {
@@ -118,7 +119,7 @@ pub(crate) fn show_friends(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Br
                         reload(bridge, tab);
                     }
                 }
-                if widgets::mint_button(ui, "Добавить", state.tab == FriendsTab::Add).clicked()
+                if widgets::mint_button(ui, tr("Добавить"), state.tab == FriendsTab::Add).clicked()
                 {
                     state.tab = FriendsTab::Add;
                 }
@@ -176,9 +177,9 @@ fn friends_list(ui: &mut egui::Ui, bridge: &Bridge, online_only: bool) {
         theme::empty_state(
             ui,
             if online_only {
-                "Сейчас никого нет в сети"
+                tr("Сейчас никого нет в сети")
             } else {
-                "Друзей пока нет — найдите людей во вкладке «Добавить»"
+                tr("Друзей пока нет — найдите людей во вкладке «Добавить»")
             },
         );
         return;
@@ -189,9 +190,9 @@ fn friends_list(ui: &mut egui::Ui, bridge: &Bridge, online_only: bool) {
         &format!(
             "{} — {}",
             if online_only {
-                "В сети"
+                tr("В сети")
             } else {
-                "Все друзья"
+                tr("Все друзья")
             },
             friends.len()
         ),
@@ -216,13 +217,13 @@ fn friends_list(ui: &mut egui::Ui, bridge: &Bridge, online_only: bool) {
             },
             |ui| {
                 if widgets::icon_button(ui, Icon::Close, 34.0)
-                    .on_hover_text("Удалить из друзей")
+                    .on_hover_text(tr("Удалить из друзей"))
                     .clicked()
                 {
                     bridge.request(BridgeRequest::RemoveFriend(friend.id.clone()));
                 }
                 if widgets::icon_button(ui, Icon::Chat, 34.0)
-                    .on_hover_text("Написать")
+                    .on_hover_text(tr("Написать"))
                     .clicked()
                 {
                     bridge.request(BridgeRequest::OpenDm(friend.id.clone()));
@@ -237,11 +238,11 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
     let me = bridge.cache().map(|cache| cache.me().id.clone());
     let requests = bridge.friend_requests();
     if requests.is_empty() {
-        theme::empty_state(ui, "Заявок нет");
+        theme::empty_state(ui, tr("Заявок нет"));
         return;
     }
     ui.add_space(10.0);
-    widgets::section_label(ui, &format!("Ожидают — {}", requests.len()));
+    widgets::section_label(ui, &crate::tf!("Ожидают — {a0}", a0 = requests.len()));
     ui.add_space(8.0);
     for request in requests {
         let incoming = me
@@ -254,9 +255,9 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
                 name: &name,
                 handle: None,
                 subtitle: Some(if incoming {
-                    "Входящая заявка"
+                    tr("Входящая заявка")
                 } else {
-                    "Исходящая заявка"
+                    tr("Исходящая заявка")
                 }),
                 status: None,
                 avatar: request.user.as_ref().and_then(|u| u.avatar.as_deref()),
@@ -270,7 +271,7 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
             |ui| {
                 if incoming {
                     if widgets::icon_button(ui, Icon::Close, 34.0)
-                        .on_hover_text("Отклонить")
+                        .on_hover_text(tr("Отклонить"))
                         .clicked()
                     {
                         bridge.request(BridgeRequest::RespondFriendRequest(
@@ -279,7 +280,7 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
                         ));
                     }
                     if widgets::icon_button(ui, Icon::Check, 34.0)
-                        .on_hover_text("Принять")
+                        .on_hover_text(tr("Принять"))
                         .clicked()
                     {
                         bridge.request(BridgeRequest::RespondFriendRequest(
@@ -288,7 +289,7 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
                         ));
                     }
                 } else if widgets::icon_button(ui, Icon::Close, 34.0)
-                    .on_hover_text("Отозвать")
+                    .on_hover_text(tr("Отозвать"))
                     .clicked()
                 {
                     bridge.request(BridgeRequest::CancelFriendRequest(request.id.clone()));
@@ -302,12 +303,12 @@ fn pending_list(ui: &mut egui::Ui, bridge: &Bridge) {
 fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
     ui.add_space(14.0);
     ui.label(
-        RichText::new("Добавить в друзья")
+        RichText::new(tr("Добавить в друзья"))
             .size(16.0)
             .family(theme::bold_family())
             .color(theme::text_bright()),
     );
-    ui.label(theme::muted("Найдите человека по имени пользователя.").size(13.0));
+    ui.label(theme::muted(tr("Найдите человека по имени пользователя.")).size(13.0));
     ui.add_space(10.0);
     egui::Frame::new()
         .fill(theme::bg_input())
@@ -318,13 +319,13 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
                 let width = (ui.available_width() - 100.0).max(80.0);
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut state.add_query)
-                        .hint_text(RichText::new("Имя пользователя").color(theme::text_faint()))
+                        .hint_text(RichText::new(tr("Имя пользователя")).color(theme::text_faint()))
                         .frame(egui::Frame::NONE)
                         .desired_width(width),
                 );
                 let submitted =
                     response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if ui.add(theme::primary_button("Найти")).clicked() || submitted {
+                if ui.add(theme::primary_button(tr("Найти"))).clicked() || submitted {
                     state.search_people(bridge);
                     response.request_focus();
                 }
@@ -334,7 +335,7 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
     let friends = bridge.friends();
     let results = bridge.search_results();
     if results.is_empty() {
-        theme::empty_state(ui, "Ничего не найдено");
+        theme::empty_state(ui, tr("Ничего не найдено"));
         return;
     }
     for user in results {
@@ -346,7 +347,7 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
             &PersonRow {
                 name: &name,
                 handle: Some(&handle),
-                subtitle: already.then_some("Уже в друзьях"),
+                subtitle: already.then_some(tr("Уже в друзьях")),
                 status: Some(user.status),
                 avatar: user.avatar.as_deref(),
                 face: (
@@ -355,11 +356,11 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
                 ),
             },
             |ui| {
-                if !already && ui.add(theme::positive_button("В друзья")).clicked() {
+                if !already && ui.add(theme::positive_button(tr("В друзья"))).clicked() {
                     bridge.request(BridgeRequest::SendFriendRequest(user.id.clone()));
                 }
                 if widgets::icon_button(ui, Icon::Chat, 34.0)
-                    .on_hover_text("Написать")
+                    .on_hover_text(tr("Написать"))
                     .clicked()
                 {
                     bridge.request(BridgeRequest::OpenDm(user.id.clone()));
@@ -381,7 +382,7 @@ pub(crate) fn show_active_now(ui: &mut egui::Ui, bridge: &Bridge) {
         )
         .show(ui, |ui| {
             ui.label(
-                RichText::new("Сейчас онлайн")
+                RichText::new(tr("Сейчас онлайн"))
                     .size(18.0)
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
@@ -397,9 +398,9 @@ pub(crate) fn show_active_now(ui: &mut egui::Ui, bridge: &Bridge) {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     if online.is_empty() && offline.is_empty() {
-                        ui.label(theme::muted("Здесь появятся ваши друзья").size(13.0));
+                        ui.label(theme::muted(tr("Здесь появятся ваши друзья")).size(13.0));
                     }
-                    for (title, group) in [("В сети", &online), ("Не в сети", &offline)]
+                    for (title, group) in [(tr("В сети"), &online), (tr("Не в сети"), &offline)]
                     {
                         if group.is_empty() {
                             continue;
@@ -456,7 +457,7 @@ pub(crate) fn show_explore(
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 ui.add(widgets::flat_icon(Icon::Compass, 20.0, theme::text_faint()));
                 ui.label(
-                    RichText::new("Обзор")
+                    RichText::new(tr("Обзор"))
                         .size(16.0)
                         .family(theme::bold_family())
                         .color(theme::text_bright()),
@@ -464,12 +465,12 @@ pub(crate) fn show_explore(
                 ui.add_space(10.0);
                 ui.allocate_ui(egui::vec2(300.0, 32.0), |ui| {
                     let response =
-                        widgets::search_box(ui, &mut state.explore_query, "Поиск пространств…");
+                        widgets::search_box(ui, &mut state.explore_query, tr("Поиск пространств…"));
                     search = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
-                        .add(theme::primary_button("Создать пространство"))
+                        .add(theme::primary_button(tr("Создать пространство")))
                         .clicked()
                     {
                         *create = true;
@@ -496,25 +497,25 @@ pub(crate) fn show_explore(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.add_space(8.0);
-                    widgets::section_label(ui, "Пространства инстанса");
-                    ui.label(theme::muted("Открытые сообщества на этом сервере").size(13.0));
+                    widgets::section_label(ui, tr("Пространства инстанса"));
+                    ui.label(theme::muted(tr("Открытые сообщества на этом сервере")).size(13.0));
                     ui.add_space(10.0);
                     let Some(page) = bridge.explore().cloned() else {
                         ui.label(theme::muted(if bridge.explore_loading() {
-                            "Загрузка…"
+                            tr("Загрузка…")
                         } else {
-                            "Каталог не загружен"
+                            tr("Каталог не загружен")
                         }));
                         return;
                     };
                     if !page.discovery_enabled {
-                        ui.label(theme::muted(
+                        ui.label(theme::muted(tr(
                             "Каталог выключен администратором этого инстанса.",
-                        ));
+                        )));
                         return;
                     }
                     if page.spaces.is_empty() {
-                        theme::empty_state(ui, "Ничего не найдено");
+                        theme::empty_state(ui, tr("Ничего не найдено"));
                         return;
                     }
                     let columns = ((ui.available_width() / (CARD_WIDTH + 16.0)) as usize).max(1);
@@ -569,9 +570,9 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                     color.gamma_multiply(0.55),
                 );
                 let tag = match (joined, space.visibility) {
-                    (true, _) => "В ПРОСТРАНСТВАХ",
-                    (false, SpaceVisibility::Public) => "ОТКРЫТОЕ",
-                    (false, _) => "ПО ЗАЯВКЕ",
+                    (true, _) => tr("В ПРОСТРАНСТВАХ"),
+                    (false, SpaceVisibility::Public) => tr("ОТКРЫТОЕ"),
+                    (false, _) => tr("ПО ЗАЯВКЕ"),
                 };
                 ui.painter().text(
                     banner.right_top() + egui::vec2(-10.0, 12.0),
@@ -615,7 +616,7 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                             .filter(|d| !d.is_empty());
                         ui.label(description.map_or_else(
                             || {
-                                RichText::new("Нет описания")
+                                RichText::new(tr("Нет описания"))
                                     .italics()
                                     .size(12.5)
                                     .color(theme::text_faint())
@@ -630,12 +631,12 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
                         ui.add_space(6.0);
                         let width = ui.available_width();
                         let (label, fill, text) = if joined {
-                            ("Открыть", theme::mint_bg(), theme::mint())
+                            (tr("Открыть"), theme::mint_bg(), theme::mint())
                         } else if space.visibility == SpaceVisibility::Public {
-                            ("Вступить", theme::accent(), theme::on_accent())
+                            (tr("Вступить"), theme::accent(), theme::on_accent())
                         } else {
                             (
-                                "Подать заявку",
+                                tr("Подать заявку"),
                                 egui::Color32::from_rgb(0x3d, 0x33, 0x14),
                                 theme::amber(),
                             )
@@ -665,10 +666,10 @@ fn space_card(ui: &mut egui::Ui, space: &ExploreSpace, bridge: &Bridge) -> Optio
 /// «1 участник», «2 участника», «5 участников».
 fn members_text(count: u64) -> String {
     let word = match (count % 10, count % 100) {
-        (_, 11..=14) => "участников",
-        (1, _) => "участник",
-        (2..=4, _) => "участника",
-        _ => "участников",
+        (_, 11..=14) => tr("участников"),
+        (1, _) => tr("участник"),
+        (2..=4, _) => tr("участника"),
+        _ => tr("участников"),
     };
     format!("{count} {word}")
 }

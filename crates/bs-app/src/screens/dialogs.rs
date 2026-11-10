@@ -6,6 +6,7 @@ use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense};
 
 use crate::bridge::BridgeRequest;
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::social::user_display_name;
 use crate::theme;
@@ -80,7 +81,7 @@ pub(crate) fn show_create_space(
             ui.set_width(400.0);
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("Создать пространство")
+                    RichText::new(tr("Создать пространство"))
                         .size(19.0)
                         .family(theme::bold_family())
                         .color(theme::text_bright()),
@@ -110,7 +111,7 @@ pub(crate) fn show_create_space(
                     egui::Color32::WHITE,
                 );
             });
-            widgets::field_label(ui, "Цвет значка");
+            widgets::field_label(ui, tr("Цвет значка"));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 for name in theme::PALETTE_NAMES {
@@ -120,40 +121,40 @@ pub(crate) fn show_create_space(
                     }
                 }
             });
-            widgets::field_label(ui, "Название");
+            widgets::field_label(ui, tr("Название"));
             let name_response = widgets::text_field(
                 ui,
                 &mut form.name,
-                "Моё замечательное пространство",
+                tr("Моё замечательное пространство"),
                 SPACE_NAME_MAX,
             );
-            widgets::field_label(ui, "Видимость");
+            widgets::field_label(ui, tr("Видимость"));
             for (value, title, hint) in [
                 (
                     SpaceVisibility::Private,
-                    "Приватное",
-                    "Только по ссылке-приглашению",
+                    tr("Приватное"),
+                    tr("Только по ссылке-приглашению"),
                 ),
                 (
                     SpaceVisibility::Request,
-                    "По заявке",
-                    "Видно в обзоре, вступление по запросу",
+                    tr("По заявке"),
+                    tr("Видно в обзоре, вступление по запросу"),
                 ),
                 (
                     SpaceVisibility::Public,
-                    "Публичное",
-                    "Видно в обзоре, вступить может любой",
+                    tr("Публичное"),
+                    tr("Видно в обзоре, вступить может любой"),
                 ),
             ] {
                 if widgets::radio_card(ui, title, hint, form.visibility == value).clicked() {
                     form.visibility = value;
                 }
             }
-            widgets::field_label(ui, "Описание");
+            widgets::field_label(ui, tr("Описание"));
             widgets::text_area(
                 ui,
                 &mut form.description,
-                "Коротко о вашем пространстве…",
+                tr("Коротко о вашем пространстве…"),
                 SPACE_DESCRIPTION_MAX,
                 3,
             );
@@ -170,9 +171,9 @@ pub(crate) fn show_create_space(
                 let create = ui.add_enabled(
                     request.is_some() && !busy,
                     theme::primary_button(if busy {
-                        "Создаём…"
+                        tr("Создаём…")
                     } else {
-                        "Создать"
+                        tr("Создать")
                     }),
                 );
                 if create.clicked() || (enter && !busy) {
@@ -181,7 +182,7 @@ pub(crate) fn show_create_space(
                         bridge.request(BridgeRequest::CreateSpace(request));
                     }
                 }
-                if ui.button("Отмена").clicked() {
+                if ui.button(tr("Отмена")).clicked() {
                     keep_open = false;
                 }
             });
@@ -205,6 +206,8 @@ pub(crate) enum SettingsSection {
     Hotkeys,
     /// Системные уведомления.
     Notifications,
+    /// Язык интерфейса.
+    Language,
     /// Приватность.
     Privacy,
     /// Соединение с инстансом.
@@ -228,28 +231,29 @@ pub(crate) enum SettingsSection {
 }
 
 impl SettingsSection {
-    const fn title(self) -> &'static str {
+    fn title(self) -> &'static str {
         match self {
-            Self::Account => "Аккаунт",
-            Self::Appearance => "Внешний вид",
-            Self::Voice => "Голос и видео",
-            Self::Hotkeys => "Горячие клавиши",
-            Self::Notifications => "Уведомления",
-            Self::Privacy => "Приватность",
-            Self::Connections => "Подключения",
-            Self::Instance => "Инстанс",
-            Self::Users => "Пользователи",
-            Self::Storage => "Хранилище",
-            Self::Registration => "Регистрация",
-            Self::Federation => "Федерация",
-            Self::Streaming => "Стриминг",
-            Self::Telemetry => "Телеметрия",
-            Self::Updates => "Обновления",
+            Self::Account => tr("Аккаунт"),
+            Self::Appearance => tr("Внешний вид"),
+            Self::Voice => tr("Голос и видео"),
+            Self::Hotkeys => tr("Горячие клавиши"),
+            Self::Notifications => tr("Уведомления"),
+            Self::Language => tr("Язык"),
+            Self::Privacy => tr("Приватность"),
+            Self::Connections => tr("Подключения"),
+            Self::Instance => tr("Инстанс"),
+            Self::Users => tr("Пользователи"),
+            Self::Storage => tr("Хранилище"),
+            Self::Registration => tr("Регистрация"),
+            Self::Federation => tr("Федерация"),
+            Self::Streaming => tr("Стриминг"),
+            Self::Telemetry => tr("Телеметрия"),
+            Self::Updates => tr("Обновления"),
         }
     }
 
     /// Раздел только для администратора.
-    const fn is_admin(self) -> bool {
+    fn is_admin(self) -> bool {
         matches!(
             self,
             Self::Instance
@@ -312,7 +316,7 @@ pub(crate) struct SettingsState {
 }
 
 /// Выбранный статус из текущего присутствия (`offline` выбрать нельзя).
-const fn chosen_from(status: UserStatus) -> ChosenUserStatus {
+fn chosen_from(status: UserStatus) -> ChosenUserStatus {
     match status {
         UserStatus::Idle => ChosenUserStatus::Idle,
         UserStatus::DoNotDisturb => ChosenUserStatus::DoNotDisturb,
@@ -399,7 +403,15 @@ pub(crate) fn show_settings(
         .live_origins()
         .into_iter()
         .filter(|i| bridge.cache_at(*i).is_some_and(|c| c.me().is_admin))
-        .map(|i| (i, bridge.base_at(i).unwrap_or("домашний").to_owned()))
+        .map(|i| {
+            (
+                i,
+                bridge
+                    .base_at(i)
+                    .unwrap_or_else(|| tr("домашний"))
+                    .to_owned(),
+            )
+        })
         .collect();
     let previous = bridge.focus_index();
     if state.section.is_admin() {
@@ -476,7 +488,7 @@ fn show_settings_inner(
         .show(ui, |ui| {
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                 if widgets::icon_button(ui, Icon::Close, 38.0)
-                    .on_hover_text("Закрыть (Esc)")
+                    .on_hover_text(tr("Закрыть (Esc)"))
                     .clicked()
                 {
                     action = SettingsAction::Close;
@@ -556,7 +568,7 @@ fn settings_nav(
             };
             group(
                 ui,
-                "Пользователь",
+                tr("Пользователь"),
                 &[
                     SettingsSection::Account,
                     SettingsSection::Appearance,
@@ -566,10 +578,11 @@ fn settings_nav(
             );
             group(
                 ui,
-                "Приложение",
+                tr("Приложение"),
                 &[
                     SettingsSection::Notifications,
                     SettingsSection::Hotkeys,
+                    SettingsSection::Language,
                     SettingsSection::Connections,
                 ],
             );
@@ -602,7 +615,7 @@ fn settings_nav(
                 }
                 group(
                     ui,
-                    "Администрирование",
+                    tr("Администрирование"),
                     &[
                         SettingsSection::Instance,
                         SettingsSection::Users,
@@ -628,7 +641,7 @@ fn settings_nav(
             ui.painter().text(
                 egui::pos2(rect.left() + 18.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                "Выйти",
+                tr("Выйти"),
                 egui::FontId::proportional(15.0),
                 theme::rose(),
             );
@@ -682,6 +695,7 @@ fn section_content(
         SettingsSection::Voice => voice_settings(ui, state, bridge, voice),
         SettingsSection::Hotkeys => super::settings_app::hotkeys(ui, &mut state.hotkeys),
         SettingsSection::Notifications => super::settings_app::notifications(ui),
+        SettingsSection::Language => super::settings_app::language(ui),
         SettingsSection::Privacy => privacy(ui, state, me, bridge),
         SettingsSection::Connections => connections(ui, state, bridge, action),
         SettingsSection::Instance if me.is_admin => {
@@ -716,9 +730,9 @@ fn section_content(
         | SettingsSection::Streaming
         | SettingsSection::Telemetry
         | SettingsSection::Updates => {
-            page_title(ui, "Недоступно");
+            page_title(ui, tr("Недоступно"));
             card(ui, |ui| {
-                ui.label("Этот раздел только для администратора инстанса.");
+                ui.label(tr("Этот раздел только для администратора инстанса."));
             });
         }
     }
@@ -734,14 +748,14 @@ fn save_bar(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Br
     }
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(request.is_some(), theme::primary_button("Сохранить"))
+            .add_enabled(request.is_some(), theme::primary_button(tr("Сохранить")))
             .clicked()
             && let Some(request) = request
         {
             bridge.request(BridgeRequest::UpdateProfile(request));
         }
         if ui
-            .add_enabled(state.diff(me).is_some(), egui::Button::new("Сбросить"))
+            .add_enabled(state.diff(me).is_some(), egui::Button::new(tr("Сбросить")))
             .clicked()
         {
             *state = SettingsState::from_user(me);
@@ -756,8 +770,8 @@ fn save_bar(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Br
     reason = "раскладка egui читается лучше одним блоком"
 )]
 fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bridge) {
-    page_title(ui, "Мой аккаунт");
-    widgets::section_label(ui, "Профиль");
+    page_title(ui, tr("Мой аккаунт"));
+    widgets::section_label(ui, tr("Профиль"));
     ui.add_space(6.0);
     let shown = if state.display_name.trim().is_empty() {
         me.username.clone()
@@ -844,7 +858,7 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
     ui.add_space(14.0);
     card(ui, |ui| {
         super::settings_extra::images_card(ui, &mut state.extra, me, bridge);
-        widgets::field_label(ui, "Цвет аватара");
+        widgets::field_label(ui, tr("Цвет аватара"));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for name in theme::PALETTE_NAMES {
@@ -855,14 +869,14 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
                 }
             }
         });
-        widgets::field_label(ui, "Обо мне");
-        widgets::text_area(ui, &mut state.bio, "Расскажите о себе…", 190, 3);
+        widgets::field_label(ui, tr("Обо мне"));
+        widgets::text_area(ui, &mut state.bio, tr("Расскажите о себе…"), 190, 3);
     });
     ui.add_space(14.0);
-    widgets::section_label(ui, "Учётная запись");
+    widgets::section_label(ui, tr("Учётная запись"));
     ui.add_space(6.0);
     card(ui, |ui| {
-        widgets::section_label(ui, "Статус");
+        widgets::section_label(ui, tr("Статус"));
         ui.add_space(4.0);
         egui::ComboBox::from_id_salt("settings_status")
             .width(ui.available_width())
@@ -876,10 +890,10 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
                     ui.selectable_value(&mut state.status, value, chosen_label(value));
                 }
             });
-        widgets::field_label(ui, "Отображаемое имя");
+        widgets::field_label(ui, tr("Отображаемое имя"));
         widgets::text_field(ui, &mut state.display_name, &me.username, 32);
-        widgets::field_label(ui, "Пользовательский статус");
-        widgets::text_field(ui, &mut state.custom_status, "Чем занимаетесь?", 128);
+        widgets::field_label(ui, tr("Пользовательский статус"));
+        widgets::text_field(ui, &mut state.custom_status, tr("Чем занимаетесь?"), 128);
     });
     save_bar(ui, state, me, bridge);
     ui.add_space(18.0);
@@ -887,11 +901,11 @@ fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bri
 }
 
 /// Подпись выбранного статуса.
-const fn chosen_label(status: ChosenUserStatus) -> &'static str {
+fn chosen_label(status: ChosenUserStatus) -> &'static str {
     match status {
-        ChosenUserStatus::Online => "В сети",
-        ChosenUserStatus::Idle => "Нет на месте",
-        ChosenUserStatus::DoNotDisturb => "Не беспокоить",
+        ChosenUserStatus::Online => tr("В сети"),
+        ChosenUserStatus::Idle => tr("Нет на месте"),
+        ChosenUserStatus::DoNotDisturb => tr("Не беспокоить"),
     }
 }
 
@@ -903,13 +917,13 @@ fn voice_settings(
     voice: &mut crate::voice::VoiceState,
 ) {
     use crate::voice_media::{DeviceKind, MediaEngine};
-    page_title(ui, "Голос и видео");
+    page_title(ui, tr("Голос и видео"));
     if !MediaEngine::available() {
         card(ui, |ui| {
-            ui.label(
+            ui.label(tr(
                 "Эта сборка клиента без LiveKit: присутствие в голосовых каналах работает, \
                  а звук — нет. Соберите с флагом `--features voice`.",
-            );
+            ));
         });
         ui.add_space(10.0);
     }
@@ -926,7 +940,7 @@ fn voice_settings(
         card(ui, |ui| {
             changed |= device_picker(
                 ui,
-                "Микрофон",
+                tr("Микрофон"),
                 "voice_input",
                 inputs,
                 &mut voice.prefs.input,
@@ -934,13 +948,13 @@ fn voice_settings(
             ui.add_space(8.0);
             changed |= device_picker(
                 ui,
-                "Устройство воспроизведения",
+                tr("Устройство воспроизведения"),
                 "voice_output",
                 outputs,
                 &mut voice.prefs.output,
             );
             ui.add_space(8.0);
-            if ui.button("Обновить список устройств").clicked() {
+            if ui.button(tr("Обновить список устройств")).clicked() {
                 refresh = true;
             }
         });
@@ -953,18 +967,18 @@ fn voice_settings(
         let prefs = &mut voice.prefs;
         for (title, hint, flag) in [
             (
-                "Эхоподавление",
-                "Убирает эхо ваших колонок из микрофона.",
+                tr("Эхоподавление"),
+                tr("Убирает эхо ваших колонок из микрофона."),
                 &mut prefs.echo_cancellation,
             ),
             (
-                "Шумоподавление",
-                "Приглушает фоновый шум.",
+                tr("Шумоподавление"),
+                tr("Приглушает фоновый шум."),
                 &mut prefs.noise_suppression,
             ),
             (
-                "Автоусиление микрофона",
-                "Выравнивает громкость вашего голоса.",
+                tr("Автоусиление микрофона"),
+                tr("Выравнивает громкость вашего голоса."),
                 &mut prefs.auto_gain_control,
             ),
         ] {
@@ -996,7 +1010,7 @@ fn mic_test_card(
 ) {
     let now = ui.input(|i| i.time);
     card(ui, |ui| {
-        widgets::section_label(ui, "Проверка микрофона");
+        widgets::section_label(ui, tr("Проверка микрофона"));
         ui.add_space(6.0);
         let running = state.mic_test_until.is_some_and(|until| now < until);
         if !running && state.mic_test_until.take().is_some() {
@@ -1005,13 +1019,13 @@ fn mic_test_card(
         let in_call = voice.call.is_some() || voice.dm.is_some();
         ui.horizontal(|ui| {
             let label = if running {
-                "Остановить"
+                tr("Остановить")
             } else {
-                "Проверить микрофон"
+                tr("Проверить микрофон")
             };
             if ui
                 .add_enabled(!in_call, egui::Button::new(label))
-                .on_disabled_hover_text("Во время звонка проверка недоступна")
+                .on_disabled_hover_text(tr("Во время звонка проверка недоступна"))
                 .clicked()
             {
                 if running {
@@ -1053,13 +1067,13 @@ fn mic_test_card(
         ui.add_space(4.0);
         let hint = state.mic_test_error.as_deref().map_or_else(
             || {
-                theme::muted(
+                theme::muted(tr(
                     "Скажите что-нибудь: полоса покажет уровень сигнала выбранного микрофона.",
-                )
+                ))
                 .size(12.5)
             },
             |err| {
-                RichText::new(format!("Микрофон не открылся: {err}"))
+                RichText::new(crate::tf!("Микрофон не открылся: {err}", err = err))
                     .size(12.5)
                     .color(theme::rose())
             },
@@ -1081,14 +1095,12 @@ fn device_picker(
     let current = selected
         .as_ref()
         .and_then(|id| devices.iter().find(|d| &d.id == id))
-        .map_or("Системное по умолчанию", |d| {
-            d.name.as_str()
-        });
+        .map_or_else(|| tr("Системное по умолчанию"), |d| d.name.as_str());
     egui::ComboBox::from_id_salt(id)
         .selected_text(theme::truncate_chars(current, 40))
         .width(320.0)
         .show_ui(ui, |ui| {
-            ui.selectable_value(selected, None, "Системное по умолчанию");
+            ui.selectable_value(selected, None, tr("Системное по умолчанию"));
             for device in devices {
                 ui.selectable_value(selected, Some(device.id.clone()), &device.name);
             }
@@ -1098,15 +1110,19 @@ fn device_picker(
 
 /// «Приватность»: видимость в поиске и показ активности.
 fn privacy(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bridge) {
-    page_title(ui, "Приватность");
+    page_title(ui, tr("Приватность"));
     card(ui, |ui| {
         for (value, title, hint) in [
             (
                 0,
-                "Показывать меня в поиске",
-                "Другие смогут найти вас среди людей инстанса.",
+                tr("Показывать меня в поиске"),
+                tr("Другие смогут найти вас среди людей инстанса."),
             ),
-            (1, "Показывать активность", "Друзья увидят, чем вы заняты."),
+            (
+                1,
+                tr("Показывать активность"),
+                tr("Друзья увидят, чем вы заняты."),
+            ),
         ] {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
@@ -1136,7 +1152,7 @@ fn connections(
     bridge: &Bridge,
     action: &mut SettingsAction,
 ) {
-    page_title(ui, "Подключённые серверы");
+    page_title(ui, tr("Подключённые серверы"));
     let chosen = super::connections::show(ui, &mut state.connections, bridge);
     if chosen != super::connections::ConnAction::None {
         *action = SettingsAction::Connections(chosen);

@@ -9,6 +9,7 @@ use egui::{CornerRadius, Margin, RichText};
 
 use crate::bridge::{BridgeRequest, SpaceEvent, SpaceOp};
 use crate::fleet::Bridge;
+use crate::i18n::tr;
 use crate::{theme, widgets};
 
 /// Состояние окна.
@@ -45,9 +46,9 @@ const DURATIONS: [(NotificationMuteDuration, &str); 4] = [
 
 fn level_label(level: NotificationLevel) -> &'static str {
     match level {
-        NotificationLevel::All => "Обо всех сообщениях",
-        NotificationLevel::Mentions => "Только об @упоминаниях",
-        NotificationLevel::Nothing => "Ни о чём",
+        NotificationLevel::All => tr("Обо всех сообщениях"),
+        NotificationLevel::Mentions => tr("Только об @упоминаниях"),
+        NotificationLevel::Nothing => tr("Ни о чём"),
     }
 }
 
@@ -67,9 +68,9 @@ impl NotificationSettings {
         let title = match channel_id {
             Some(id) => {
                 let channel = space.channels.iter().find(|c| c.id == id)?;
-                format!("Уведомления для #{}", channel.name)
+                crate::tf!("Уведомления для #{a0}", a0 = channel.name)
             }
-            None => format!("Уведомления для «{}»", space.space.name),
+            None => crate::tf!("Уведомления для «{a0}»", a0 = space.space.name),
         };
         Some(Self {
             origin,
@@ -136,7 +137,7 @@ pub(crate) fn show(
             ui.add_space(10.0);
             body(ui, state, bridge);
             ui.add_space(12.0);
-            if ui.button("Закрыть").clicked() {
+            if ui.button(tr("Закрыть")).clicked() {
                 keep_open = false;
             }
         });
@@ -167,13 +168,15 @@ fn body(ui: &mut egui::Ui, state: &mut NotificationSettings, bridge: &mut Bridge
         choices.push(Choice::Inherit);
     }
     choices.extend(LEVELS.map(Choice::Level));
-    widgets::section_label(ui, "Уведомлять");
+    widgets::section_label(ui, tr("Уведомлять"));
     ui.add_space(4.0);
     let mut change = None;
     ui.add_enabled_ui(!state.busy, |ui| {
         for choice in choices {
             let title = match choice {
-                Choice::Inherit => format!("Как в пространстве ({})", level_label(inherited)),
+                Choice::Inherit => {
+                    crate::tf!("Как в пространстве ({a0})", a0 = level_label(inherited))
+                }
                 Choice::Level(level) => level_label(level).to_owned(),
             };
             if widgets::radio_card(ui, &title, "", choice == selected).clicked()
@@ -191,15 +194,17 @@ fn body(ui: &mut egui::Ui, state: &mut NotificationSettings, bridge: &mut Bridge
         }
     });
     ui.add_space(10.0);
-    widgets::section_label(ui, "Заглушить");
+    widgets::section_label(ui, tr("Заглушить"));
     ui.add_space(4.0);
     mute_block(ui, state, own.as_ref(), now, &mut change);
     if is_channel && mute_active(space.as_ref(), now) {
         ui.add_space(4.0);
         ui.label(
-            RichText::new("Это пространство заглушено, поэтому заглушены и его каналы.")
-                .size(12.0)
-                .color(theme::amber()),
+            RichText::new(tr(
+                "Это пространство заглушено, поэтому заглушены и его каналы.",
+            ))
+            .size(12.0)
+            .color(theme::amber()),
         );
     }
     if !is_channel {
@@ -207,7 +212,7 @@ fn body(ui: &mut egui::Ui, state: &mut NotificationSettings, bridge: &mut Bridge
     }
     ui.add_space(8.0);
     ui.label(
-        RichText::new("О личных сообщениях вы получаете уведомления всегда.")
+        RichText::new(tr("О личных сообщениях вы получаете уведомления всегда."))
             .size(12.0)
             .color(theme::text_muted()),
     );
@@ -229,13 +234,13 @@ fn mute_block(
 ) {
     if let Some(setting) = own.filter(|s| mute_active(Some(s), now)) {
         let text = setting.muted_until.map_or_else(
-            || "Заглушено, пока вы не отмените".to_owned(),
-            |end| format!("Заглушено до {}", theme::stamp(end, now)),
+            || tr("Заглушено, пока вы не отмените").to_owned(),
+            |end| crate::tf!("Заглушено до {a0}", a0 = theme::stamp(end, now)),
         );
         ui.horizontal(|ui| {
             ui.label(RichText::new(text).color(theme::text_muted()));
             if ui
-                .add_enabled(!state.busy, egui::Button::new("Отменить заглушение"))
+                .add_enabled(!state.busy, egui::Button::new(tr("Отменить заглушение")))
                 .clicked()
             {
                 *change = Some(UpdateNotificationSettingRequest {
@@ -249,7 +254,7 @@ fn mute_block(
     ui.add_enabled_ui(!state.busy, |ui| {
         ui.horizontal_wrapped(|ui| {
             for (duration, label) in DURATIONS {
-                if ui.button(label).clicked() {
+                if ui.button(tr(label)).clicked() {
                     *change = Some(UpdateNotificationSettingRequest {
                         mute: Some(Some(duration)),
                         ..UpdateNotificationSettingRequest::default()
@@ -267,16 +272,16 @@ fn mass_mentions(
     change: &mut Option<UpdateNotificationSettingRequest>,
 ) {
     ui.add_space(10.0);
-    widgets::section_label(ui, "Групповые упоминания");
+    widgets::section_label(ui, tr("Групповые упоминания"));
     ui.add_space(4.0);
     for (label, current, roles) in [
         (
-            "Подавлять @everyone и @here",
+            tr("Подавлять @everyone и @here"),
             own.and_then(|s| s.suppress_everyone) == Some(true),
             false,
         ),
         (
-            "Подавлять упоминания ролей",
+            tr("Подавлять упоминания ролей"),
             own.and_then(|s| s.suppress_roles) == Some(true),
             true,
         ),
@@ -299,7 +304,7 @@ fn mass_mentions(
     ui.add_space(2.0);
     ui.label(
         RichText::new(
-            "@here доходит до тех же участников, что и @everyone. Упоминания вас по имени всегда приходят.",
+            tr("@here доходит до тех же участников, что и @everyone. Упоминания вас по имени всегда приходят."),
         )
         .size(12.0)
         .color(theme::text_muted()),
