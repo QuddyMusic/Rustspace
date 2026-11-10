@@ -47,6 +47,10 @@ impl Default for SoundPrefs {
 /// Системные уведомления рабочего стола.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "независимые переключатели настроек"
+)]
 pub(crate) struct DesktopPrefs {
     /// Показывать системные уведомления о новых сообщениях.
     pub(crate) notifications: bool,
@@ -54,6 +58,10 @@ pub(crate) struct DesktopPrefs {
     pub(crate) previews: bool,
     /// Только когда окно не в фокусе.
     pub(crate) only_unfocused: bool,
+    /// Горячие клавиши работают и вне окна (если сборка и система позволяют).
+    pub(crate) global_hotkeys: bool,
+    /// Закрытие окна прячет его в трей (как десктоп оригинала).
+    pub(crate) close_to_tray: bool,
 }
 
 impl Default for DesktopPrefs {
@@ -62,6 +70,8 @@ impl Default for DesktopPrefs {
             notifications: true,
             previews: true,
             only_unfocused: true,
+            global_hotkeys: true,
+            close_to_tray: true,
         }
     }
 }
@@ -169,7 +179,7 @@ pub(crate) struct Prefs {
     pub(crate) sounds: SoundPrefs,
     /// Системные уведомления.
     pub(crate) desktop: DesktopPrefs,
-    /// Горячие клавиши (работают, пока окно в фокусе).
+    /// Горячие клавиши.
     pub(crate) keybinds: std::collections::BTreeMap<Action, Keybind>,
     /// Язык интерфейса (код каталога: `ru`, `en`, …).
     pub(crate) language: String,

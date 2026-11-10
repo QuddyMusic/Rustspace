@@ -1037,5 +1037,12 @@
   "Камера": "Camera",
   "камер не найдено": "no cameras found",
   "Первая": "First",
-  "В ЭФИРЕ": "LIVE"
+  "В ЭФИРЕ": "LIVE",
+  "Показать": "Show",
+  "Микрофон вкл/выкл": "Toggle microphone",
+  "Звук вкл/выкл": "Toggle sound",
+  "Работают вне окна": "Work outside the window",
+  "Сочетания срабатывают, даже когда Backspace свёрнут или в трее.": "Shortcuts fire even when Backspace is minimized or in the tray.",
+  "Сворачивать в трей": "Minimize to tray",
+  "Закрытие окна прячет Backspace в трей; выйти — через меню значка.": "Closing the window hides Backspace in the tray; quit from the icon menu."
 }

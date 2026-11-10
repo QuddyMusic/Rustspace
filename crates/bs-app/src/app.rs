@@ -34,6 +34,8 @@ pub(crate) struct BackspaceApp {
     pub(crate) chat: ChatScreen,
     /// Общий кэш картинок.
     images: ImageHub,
+    /// Трей и глобальные клавиши.
+    desktop: crate::desktop::Desktop,
 }
 
 impl BackspaceApp {
@@ -62,6 +64,7 @@ impl BackspaceApp {
             login,
             chat: ChatScreen::with_prefs(),
             images: ImageHub::default(),
+            desktop: crate::desktop::Desktop::start(ctx),
         }
     }
 }
@@ -189,7 +192,20 @@ impl eframe::App for BackspaceApp {
         crate::prefs::flush(true);
     }
 
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.desktop.logic(ctx);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let prefs = crate::prefs::get();
+        let input = self.desktop.frame(
+            ui.ctx(),
+            &prefs.keybinds,
+            prefs.desktop.global_hotkeys,
+            prefs.desktop.close_to_tray,
+        );
+        self.chat
+            .accept_desktop(input, self.desktop.global_actions());
         self.bridge.poll();
 
         let ready = self.bridge.take_ready();

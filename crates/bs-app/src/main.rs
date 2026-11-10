@@ -18,6 +18,7 @@ mod app;
 mod brand;
 mod bridge;
 mod clipboard;
+mod desktop;
 mod dmcall;
 mod download;
 mod emoji_data;

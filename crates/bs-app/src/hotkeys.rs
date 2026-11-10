@@ -1,9 +1,10 @@
 //! Горячие клавиши голосовых действий.
 //!
-//! Работают, пока окно в фокусе (глобальный перехват клавиатуры требует
-//! прав в системе и отдельной зависимости — оставлен на потом). Если
-//! фокус в поле ввода, срабатывают только сочетания с Ctrl или Alt, чтобы
-//! обычный набор текста не переключал микрофон.
+//! В окне — через события egui: если фокус в поле ввода, срабатывают только
+//! сочетания с Ctrl или Alt, чтобы обычный набор текста не переключал
+//! микрофон. Со сборкой `global-hotkeys` те же сочетания перехватываются
+//! глобально (см. [`crate::desktop`]), и тогда окно их не обрабатывает,
+//! чтобы действие не сработало дважды.
 
 use std::collections::BTreeMap;
 
@@ -21,9 +22,42 @@ pub(crate) struct PushToTalk {
 ///
 /// `muted` — выключен ли микрофон сейчас: рация включает его на время
 /// нажатия и выключает при отпускании.
+/// Переводит нажатие или отпускание привязки в действие звонка.
+pub(crate) fn dispatch(
+    action: Action,
+    pressed: bool,
+    ptt: &mut PushToTalk,
+    muted: bool,
+    out: &mut Vec<DockAction>,
+) {
+    if action == Action::PushToTalk {
+        if pressed && muted && !ptt.active {
+            ptt.active = true;
+            out.push(DockAction::ToggleMute);
+        } else if !pressed && ptt.active {
+            ptt.active = false;
+            out.push(DockAction::ToggleMute);
+        }
+        return;
+    }
+    if !pressed {
+        return;
+    }
+    out.push(match action {
+        Action::ToggleMute => DockAction::ToggleMute,
+        Action::ToggleDeafen => DockAction::ToggleDeafen,
+        Action::Disconnect => DockAction::Leave,
+        Action::ToggleCamera => DockAction::ToggleCamera,
+        Action::ToggleScreenShare => DockAction::ToggleScreenShare,
+        Action::PushToTalk => return,
+    });
+}
+
+/// Действия по клавишам окна. `global` — привязки, перехваченные глобально.
 pub(crate) fn poll(
     ctx: &egui::Context,
     binds: &BTreeMap<Action, Keybind>,
+    global: &std::collections::BTreeSet<Action>,
     ptt: &mut PushToTalk,
     muted: bool,
 ) -> Vec<DockAction> {
@@ -48,16 +82,13 @@ pub(crate) fn poll(
                 continue;
             }
             for (action, bind) in binds {
-                if bind.key != *key {
+                if bind.key != *key || global.contains(action) {
                     continue;
                 }
                 // Отпускание рации — без проверки модификаторов: их могли
                 // отпустить раньше основной клавиши.
                 if *action == Action::PushToTalk && !*pressed {
-                    if ptt.active {
-                        ptt.active = false;
-                        out.push(DockAction::ToggleMute);
-                    }
+                    dispatch(*action, false, ptt, muted, &mut out);
                     continue;
                 }
                 if !*pressed || !bind.modifiers_match(*modifiers) {
@@ -66,19 +97,7 @@ pub(crate) fn poll(
                 if typing && !(bind.command || bind.alt) {
                     continue;
                 }
-                match action {
-                    Action::ToggleMute => out.push(DockAction::ToggleMute),
-                    Action::ToggleDeafen => out.push(DockAction::ToggleDeafen),
-                    Action::Disconnect => out.push(DockAction::Leave),
-                    Action::PushToTalk => {
-                        if muted && !ptt.active {
-                            ptt.active = true;
-                            out.push(DockAction::ToggleMute);
-                        }
-                    }
-                    Action::ToggleCamera => out.push(DockAction::ToggleCamera),
-                    Action::ToggleScreenShare => out.push(DockAction::ToggleScreenShare),
-                }
+                dispatch(*action, true, ptt, muted, &mut out);
             }
         }
     });
@@ -151,7 +170,13 @@ mod tests {
             ..Default::default()
         };
         let mut output = ctx.run_ui(input, |ui| {
-            out = poll(ui.ctx(), binds, ptt, muted);
+            out = poll(
+                ui.ctx(),
+                binds,
+                &std::collections::BTreeSet::new(),
+                ptt,
+                muted,
+            );
         });
         output.textures_delta.clear();
         out

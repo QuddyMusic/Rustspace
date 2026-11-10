@@ -48,13 +48,26 @@ pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
         }
     }
     card(ui, |ui| {
-        ui.label(
-            theme::muted(tr(
-                "Сочетания работают, пока окно Backspace в фокусе. В поле ввода срабатывают \
-                 только сочетания с Ctrl или Alt.",
-            ))
-            .size(12.5),
-        );
+        if crate::desktop::global_keys_available() {
+            let mut global = crate::prefs::get().desktop.global_hotkeys;
+            setting_row(
+                ui,
+                tr("Работают вне окна"),
+                tr("Сочетания срабатывают, даже когда Backspace свёрнут или в трее."),
+                &mut global,
+            );
+            if global != crate::prefs::get().desktop.global_hotkeys {
+                crate::prefs::update(|prefs| prefs.desktop.global_hotkeys = global);
+            }
+        } else {
+            ui.label(
+                theme::muted(tr(
+                    "Сочетания работают, пока окно Backspace в фокусе. В поле ввода срабатывают \
+                     только сочетания с Ctrl или Alt.",
+                ))
+                .size(12.5),
+            );
+        }
         ui.add_space(10.0);
         let binds = crate::prefs::get().keybinds;
         for action in Action::ALL {
@@ -172,6 +185,15 @@ pub(crate) fn notifications(ui: &mut egui::Ui) {
                 title: "Backspace".to_owned(),
                 body: tr("Так будут выглядеть уведомления о сообщениях.").to_owned(),
             });
+        }
+        if crate::desktop::tray_available() {
+            ui.add_space(8.0);
+            setting_row(
+                ui,
+                tr("Сворачивать в трей"),
+                tr("Закрытие окна прячет Backspace в трей; выйти — через меню значка."),
+                &mut desktop.close_to_tray,
+            );
         }
     });
     if desktop != before {

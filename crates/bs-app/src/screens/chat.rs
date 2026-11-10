@@ -993,6 +993,10 @@ pub(crate) struct ChatScreen {
     pub(crate) voice: crate::voice::VoiceState,
     /// Рация (push-to-talk) между кадрами.
     ptt: crate::hotkeys::PushToTalk,
+    /// Что пришло из трея и от глобальных клавиш в этом кадре.
+    desktop_input: crate::desktop::DesktopInput,
+    /// Привязки, перехваченные глобально.
+    global_keys: std::collections::BTreeSet<crate::prefs::Action>,
     /// Нажата «Вступить» на приглашении: (инстанс, код).
     pending_join: Option<(usize, String)>,
     /// Окно «Пригласить людей».
@@ -1086,6 +1090,17 @@ impl ChatScreen {
     }
 
     /// Пустой экран с голосовыми настройками из сохранённых.
+    /// Принимает события трея и глобальных клавиш (обработаются в `show`).
+    pub(crate) fn accept_desktop(
+        &mut self,
+        input: crate::desktop::DesktopInput,
+        global: std::collections::BTreeSet<crate::prefs::Action>,
+    ) {
+        self.desktop_input.actions.extend(input.actions);
+        self.desktop_input.keys.extend(input.keys);
+        self.global_keys = global;
+    }
+
     pub(crate) fn with_prefs() -> Self {
         let mut chat = Self::default();
         chat.voice.prefs = crate::prefs::get().voice;
@@ -1278,8 +1293,16 @@ impl ChatScreen {
         self.home.ensure_loaded(bridge);
         let ctx = ui.ctx().clone();
         let binds = crate::prefs::get().keybinds;
-        for hotkey in crate::hotkeys::poll(&ctx, &binds, &mut self.ptt, self.voice.flags().0) {
-            self.voice.apply(hotkey, bridge);
+        let muted = self.voice.flags().0;
+        let mut actions =
+            crate::hotkeys::poll(&ctx, &binds, &self.global_keys, &mut self.ptt, muted);
+        let desktop = std::mem::take(&mut self.desktop_input);
+        for (action, pressed) in desktop.keys {
+            crate::hotkeys::dispatch(action, pressed, &mut self.ptt, muted, &mut actions);
+        }
+        actions.extend(desktop.actions);
+        for action in actions {
+            self.voice.apply(action, bridge);
         }
         let now = ctx.input(|i| i.time);
         if let Some(info) = bridge.take_info() {

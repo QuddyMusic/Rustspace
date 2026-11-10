@@ -44,6 +44,12 @@ voice = ["dep:bs-voice", "sounds"]
 camera = ["voice", "bs-voice/camera"]
 # Звуки интерфейса (rodio): нужна библиотека ALSA на Linux (libasound2-dev).
 sounds = ["dep:rodio"]
+# Глобальные горячие клавиши (X11, Windows, macOS; под Wayland — только в окне).
+global-hotkeys = ["dep:global-hotkey"]
+# Значок в трее и сворачивание в него; на Linux нужны GTK 3 и appindicator.
+tray = ["dep:tray-icon", "dep:gtk"]
+# Всё настольное разом.
+desktop = ["global-hotkeys", "tray"]
 
 [dependencies]
 bs-voice = { workspace = true, optional = true }
@@ -69,6 +75,11 @@ zeroize = { workspace = true }
 chrono = { workspace = true }
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 notify-rust = { version = "4", default-features = false, features = ["z"] }
+global-hotkey = { version = "0.10", optional = true }
+tray-icon = { version = "0.24", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
 
 [dev-dependencies]
 wiremock = "0.6"
