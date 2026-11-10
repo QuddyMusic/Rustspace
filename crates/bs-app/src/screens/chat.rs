@@ -68,10 +68,8 @@ pub(crate) struct Occupant {
     pub(crate) id: String,
     /// Имя.
     pub(crate) name: String,
-    /// Микрофон выключен.
-    pub(crate) muted: bool,
-    /// Звук выключен.
-    pub(crate) deafened: bool,
+    /// Микрофон, звук, камера, экран (`speaking` здесь не заполняется).
+    pub(crate) flags: theme::OccupantFlags,
     /// Аватар (имя файла или адрес); `None` — рисуем инициалы.
     pub(crate) avatar: Option<String>,
 }
@@ -203,8 +201,13 @@ fn occupants(cache: &Cache, names: &HashMap<String, String>, channel_id: &str) -
             Occupant {
                 id: id.clone(),
                 name: names.get(id).cloned().unwrap_or_else(|| id.clone()),
-                muted: state.is_some_and(|s| s.is_muted),
-                deafened: state.is_some_and(|s| s.is_deafened),
+                flags: theme::OccupantFlags {
+                    muted: state.is_some_and(|s| s.is_muted),
+                    deafened: state.is_some_and(|s| s.is_deafened),
+                    speaking: false,
+                    camera: state.is_some_and(|s| s.is_camera_on),
+                    streaming: state.is_some_and(|s| s.is_screen_sharing),
+                },
                 me: *id == cache.me().id,
                 avatar: avatars.get(id).cloned(),
             }
@@ -1338,6 +1341,8 @@ impl ChatScreen {
             .collect();
         self.show_rail(ui, &items, &dms, &hosts, &mut nav);
         self.show_left_column(ui, bridge, &items, &dms, &mut nav);
+        crate::stage::show(ui, &mut self.voice, bridge);
+        crate::stage::show_picker(&ctx, &mut self.voice);
 
         match self.view {
             View::Friends => {
@@ -1782,9 +1787,10 @@ impl ChatScreen {
             let row = theme::occupant_row(
                 ui,
                 &occupant.name,
-                occupant.muted,
-                occupant.deafened,
-                self.voice.speaking.contains(&occupant.id),
+                theme::OccupantFlags {
+                    speaking: self.voice.speaking.contains(&occupant.id),
+                    ..occupant.flags
+                },
                 occupant.avatar.as_deref(),
             );
             if !occupant.me {

@@ -76,9 +76,8 @@ pub(crate) fn poll(
                             out.push(DockAction::ToggleMute);
                         }
                     }
-                    // Камера и показ экрана пока без интерфейса: привязка
-                    // сохраняется (совместимость с настройками оригинала).
-                    Action::ToggleCamera | Action::ToggleScreenShare => {}
+                    Action::ToggleCamera => out.push(DockAction::ToggleCamera),
+                    Action::ToggleScreenShare => out.push(DockAction::ToggleScreenShare),
                 }
             }
         }

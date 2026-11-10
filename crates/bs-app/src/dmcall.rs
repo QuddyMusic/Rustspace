@@ -309,7 +309,7 @@ impl VoiceState {
     /// Действие панели для DM-звонка.
     pub(crate) fn apply_dm(&mut self, action: DockAction, bridge: &mut Bridge) {
         match action {
-            DockAction::None => {}
+            DockAction::None | DockAction::ToggleCamera | DockAction::ToggleScreenShare => {}
             DockAction::Leave => self.end_dm(bridge),
             DockAction::ToggleMute | DockAction::ToggleDeafen => {
                 let Some(call) = self.dm.as_mut() else {

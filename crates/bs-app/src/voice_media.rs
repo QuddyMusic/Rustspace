@@ -92,6 +92,10 @@ pub(crate) struct VoicePrefs {
     pub(crate) stream_attenuation: bool,
     /// Насколько приглушать, 0–100 %.
     pub(crate) attenuation_strength: u8,
+    /// Выбранная камера (номер); `None` — первая.
+    pub(crate) camera: Option<u32>,
+    /// Качество демонстрации экрана.
+    pub(crate) share_quality: crate::video_media::ShareQuality,
 }
 
 impl Default for VoicePrefs {
@@ -110,6 +114,8 @@ impl Default for VoicePrefs {
             stream_mutes: BTreeSet::new(),
             stream_attenuation: false,
             attenuation_strength: 50,
+            camera: None,
+            share_quality: crate::video_media::ShareQuality::default(),
         }
     }
 }
@@ -146,6 +152,7 @@ impl VoicePrefs {
         self.input_volume = self.input_volume.min(200);
         self.output_volume = self.output_volume.min(200);
         self.attenuation_strength = self.attenuation_strength.min(100);
+        self.share_quality.sanitize();
         for volume in self
             .participant_volumes
             .values_mut()
@@ -292,6 +299,8 @@ mod stub {
         pub(crate) fn mic_level(&self) -> Option<f32> {
             None
         }
+
+        pub(crate) fn set_stream_volume(&self, _user_id: &str, _percent: u16) {}
     }
 }
 
@@ -578,6 +587,23 @@ mod real {
 
         pub(crate) fn speaking(&self) -> Speaking {
             lock(&self.shared).speaking.clone()
+        }
+
+        /// Громкость звука трансляции участника прямо сейчас (0 — не слышно).
+        pub(crate) fn set_stream_volume(&self, user_id: &str, percent: u16) {
+            if let Some(audio) = &self.audio {
+                audio.set_volume(user_id, SourceKind::Screen, Volume::new(percent));
+            }
+        }
+
+        /// Живая сессия звонка, если есть.
+        pub(crate) fn session(&self) -> Option<VoiceSession> {
+            lock(&self.shared).session.clone()
+        }
+
+        /// Рантайм для фоновых операций со звонком.
+        pub(crate) fn runtime(&self) -> Handle {
+            self.handle.clone()
         }
     }
 }

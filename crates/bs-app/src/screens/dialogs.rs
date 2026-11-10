@@ -956,8 +956,11 @@ fn voice_settings(
             );
             changed |= volume_slider(ui, tr("Громкость звука"), &mut voice.prefs.output_volume);
             ui.add_space(8.0);
+            changed |= camera_picker(ui, voice);
+            ui.add_space(8.0);
             if ui.button(tr("Обновить список устройств")).clicked() {
                 refresh = true;
+                voice.stage.cameras = None;
             }
         });
     }
@@ -1000,6 +1003,47 @@ fn voice_settings(
     mic_test_card(ui, state, bridge, voice);
     ui.add_space(10.0);
     super::settings_app::sounds_card(ui);
+}
+
+/// Выбор камеры; список ищется один раз (и по «Обновить»).
+fn camera_picker(ui: &mut egui::Ui, voice: &mut crate::voice::VoiceState) -> bool {
+    let cameras = voice
+        .stage
+        .cameras
+        .get_or_insert_with(crate::video_media::VideoControl::cameras);
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label(tr("Камера"));
+        match cameras {
+            Err(err) => {
+                ui.label(theme::muted(err.as_str()));
+            }
+            Ok(list) if list.is_empty() => {
+                ui.label(theme::muted(tr("камер не найдено")));
+            }
+            Ok(list) => {
+                let current = voice.prefs.camera.unwrap_or(0);
+                let name = list
+                    .iter()
+                    .find(|c| c.index == current)
+                    .map_or_else(|| tr("Первая").to_owned(), |c| c.name.clone());
+                egui::ComboBox::from_id_salt("camera_device")
+                    .selected_text(name)
+                    .show_ui(ui, |ui| {
+                        for camera in list.iter() {
+                            if ui
+                                .selectable_label(current == camera.index, &camera.name)
+                                .clicked()
+                            {
+                                voice.prefs.camera = Some(camera.index);
+                                changed = true;
+                            }
+                        }
+                    });
+            }
+        }
+    });
+    changed
 }
 
 /// Приглушение трансляций, пока кто-то говорит.

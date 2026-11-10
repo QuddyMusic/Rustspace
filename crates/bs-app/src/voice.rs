@@ -74,6 +74,12 @@ pub(crate) struct VoiceState {
     pub(crate) sounds: crate::sounds::Sounds,
     /// Каким было состояние комнаты на прошлом кадре (для звуков).
     room_view: crate::sounds::RoomView,
+    /// Своё видео: камера и демонстрация экрана.
+    pub(crate) video: crate::video_media::VideoControl,
+    /// Сцена звонка: текстуры, выбор источника, кого смотрим.
+    pub(crate) stage: crate::stage::StageState,
+    /// Камера и экран, о которых уже сообщили серверу.
+    video_sent: (bool, bool),
 }
 
 /// Что сделать после кадра панели.
@@ -87,6 +93,10 @@ pub(crate) enum DockAction {
     ToggleDeafen,
     /// Завершить звонок.
     Leave,
+    /// Включить или выключить камеру.
+    ToggleCamera,
+    /// Начать (выбрать источник) или остановить демонстрацию экрана.
+    ToggleScreenShare,
 }
 
 /// Новые флаги после переключения наушников: как в оригинале, они тянут за собой микрофон.
@@ -136,6 +146,7 @@ impl VoiceState {
         self.prefs.set_local_audio(audio);
         let prefs = self.prefs.clone();
         self.media(bridge).apply_prefs(&prefs);
+        self.refresh_stream_audio();
         crate::prefs::update(|saved| saved.voice = prefs);
     }
 
@@ -178,7 +189,7 @@ impl VoiceState {
         if flags != (false, false)
             && let Some(call) = self.call.as_ref()
         {
-            send_status(bridge, call);
+            send_status(bridge, call, (false, false));
         }
     }
 
@@ -200,6 +211,13 @@ impl VoiceState {
 
     /// Применяет действие панели.
     pub(crate) fn apply(&mut self, action: DockAction, bridge: &mut Bridge) {
+        if matches!(
+            action,
+            DockAction::ToggleCamera | DockAction::ToggleScreenShare
+        ) {
+            self.toggle_video(action);
+            return;
+        }
         if self.dm.is_some() {
             self.apply_dm(action, bridge);
             return;
@@ -213,12 +231,15 @@ impl VoiceState {
                 DockAction::ToggleDeafen => {
                     (self.idle_muted, self.idle_deafened) = after_deafen_toggle(self.idle_deafened);
                 }
-                DockAction::Leave | DockAction::None => {}
+                DockAction::Leave
+                | DockAction::None
+                | DockAction::ToggleCamera
+                | DockAction::ToggleScreenShare => {}
             }
             return;
         }
         match action {
-            DockAction::None => {}
+            DockAction::None | DockAction::ToggleCamera | DockAction::ToggleScreenShare => {}
             DockAction::Leave => self.leave(bridge),
             DockAction::ToggleMute => {
                 if let Some(call) = self.call.as_mut()
@@ -226,7 +247,7 @@ impl VoiceState {
                     && !call.forced_deafen
                 {
                     (call.muted, call.deafened) = after_mute_toggle(call.muted, call.deafened);
-                    send_status(bridge, call);
+                    send_status(bridge, call, self.video_sent);
                     if let Some(media) = self.media.as_ref() {
                         media.set_flags(call.muted, call.deafened);
                     }
@@ -237,12 +258,112 @@ impl VoiceState {
                     && !call.forced_deafen
                 {
                     (call.muted, call.deafened) = after_deafen_toggle(call.deafened);
-                    send_status(bridge, call);
+                    send_status(bridge, call, self.video_sent);
                     if let Some(media) = self.media.as_ref() {
                         media.set_flags(call.muted, call.deafened);
                     }
                 }
             }
+        }
+    }
+
+    /// Камера или экран с панели или горячей клавишей.
+    fn toggle_video(&mut self, action: DockAction) {
+        let in_call = (self.call.is_some() || self.dm.is_some()) && self.status.is_live();
+        let Some(media) = self.media.as_ref().filter(|_| in_call) else {
+            self.notice = Some(tr("Камера и экран доступны во время звонка").to_owned());
+            return;
+        };
+        let status = self.video.status();
+        if status.busy {
+            return;
+        }
+        self.video.clear_error();
+        match action {
+            DockAction::ToggleCamera if status.camera_on => self.video.stop_camera(media),
+            DockAction::ToggleCamera => self.video.start_camera(media, &self.prefs),
+            DockAction::ToggleScreenShare if status.screen_on => self.video.stop_screen(media),
+            DockAction::ToggleScreenShare => self.stage.open_picker(self.prefs.share_quality),
+            _ => {}
+        }
+    }
+
+    /// Смотреть (или нет) чужую трансляцию: сообщаем ведущему и включаем её звук.
+    pub(crate) fn set_watching(&mut self, bridge: &Bridge, identity: &str, watching: bool) {
+        if watching {
+            self.stage.watching.insert(identity.to_owned());
+        } else {
+            self.stage.watching.remove(identity);
+        }
+        let media = self.media(bridge);
+        crate::video_media::VideoControl::set_watching(media, identity, watching);
+        self.refresh_stream_audio();
+    }
+
+    /// Звук трансляций слышен только у тех, кого смотрим.
+    fn refresh_stream_audio(&self) {
+        let Some(media) = self.media.as_ref() else {
+            return;
+        };
+        for identity in &self.stage.known_streams {
+            let user_id = bs_user_id(identity);
+            let audio = self
+                .prefs
+                .local_audio(user_id, crate::voice_media::AudioSource::Stream);
+            let volume = if self.stage.watching.contains(identity) && !audio.muted {
+                audio.volume
+            } else {
+                0
+            };
+            media.set_stream_volume(user_id, volume);
+        }
+    }
+
+    /// Следит за своим видео и чужими трансляциями; сообщает серверу о камере и экране.
+    fn sync_video(&mut self, bridge: &mut Bridge) {
+        if self.call.is_none() && self.dm.is_none() {
+            if self.video_sent != (false, false) || self.video.status().busy {
+                self.video.reset();
+            }
+            self.video_sent = (false, false);
+            self.stage.clear();
+            return;
+        }
+        let streams: std::collections::BTreeSet<String> = self
+            .media
+            .as_ref()
+            .map(crate::video_media::VideoControl::feeds)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|feed| feed.screen && !feed.local)
+            .map(|feed| feed.identity)
+            .collect();
+        if streams != self.stage.known_streams {
+            let known = &streams;
+            self.stage
+                .watching
+                .retain(|identity| known.contains(identity));
+            self.stage.known_streams = streams;
+            self.refresh_stream_audio();
+        }
+        let status = self.video.status();
+        let now = (status.camera_on, status.screen_on);
+        if now == self.video_sent {
+            return;
+        }
+        self.video_sent = now;
+        if let Some(call) = self.call.as_ref() {
+            send_status(bridge, call, now);
+        } else if let Some(dm) = self.dm.as_ref() {
+            let previous = bridge.focus_index();
+            bridge.focus_on(dm.origin);
+            bridge.send(ClientEvent::VoiceStatus {
+                is_muted: dm.muted,
+                is_deafened: dm.deafened,
+                is_camera_on: now.0,
+                is_screen_sharing: now.1,
+            });
+            bridge.focus_on(previous);
         }
     }
 
@@ -330,6 +451,11 @@ impl VoiceState {
 
     /// Разбирает ответы моста и следит, что сервер нас не отключил.
     pub(crate) fn poll(&mut self, bridge: &mut Bridge) {
+        self.poll_calls(bridge);
+        self.sync_video(bridge);
+    }
+
+    fn poll_calls(&mut self, bridge: &mut Bridge) {
         let mut dm_tokens: Vec<_> = Vec::new();
         for (origin, event) in bridge.take_voice_tokens() {
             dm_tokens.push((origin, event.channel_id.clone(), event.result.clone()));
@@ -413,7 +539,7 @@ impl VoiceState {
         if (want_muted, want_deafened) != (call.muted, call.deafened) {
             call.muted = want_muted;
             call.deafened = want_deafened;
-            send_status(bridge, call);
+            send_status(bridge, call, self.video_sent);
             call.flags_synced = false;
         }
     }
@@ -476,14 +602,20 @@ impl VoiceState {
     }
 }
 
-fn send_status(bridge: &mut Bridge, call: &VoiceCall) {
+/// Id пользователя из identity LiveKit `userId:имя`.
+fn bs_user_id(identity: &str) -> &str {
+    identity.split_once(':').map_or(identity, |(id, _)| id)
+}
+
+/// `voice_status`: микрофон, звук, камера и экран (`video` — камера, экран).
+fn send_status(bridge: &mut Bridge, call: &VoiceCall, video: (bool, bool)) {
     let previous = bridge.focus_index();
     bridge.focus_on(call.origin);
     bridge.send(ClientEvent::VoiceStatus {
         is_muted: call.muted,
         is_deafened: call.deafened,
-        is_camera_on: false,
-        is_screen_sharing: false,
+        is_camera_on: video.0,
+        is_screen_sharing: video.1,
     });
     bridge.focus_on(previous);
 }
@@ -533,6 +665,44 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                                 .clicked()
                             {
                                 action = DockAction::Leave;
+                            }
+                            let video = state.video.status();
+                            if let Some(err) = &video.error {
+                                ui.label(RichText::new("⚠").color(theme::rose()))
+                                    .on_hover_text(err);
+                            }
+                            if video.busy {
+                                ui.spinner();
+                                ui.ctx()
+                                    .request_repaint_after(std::time::Duration::from_millis(100));
+                            }
+                            let screen_tip = if video.screen_on {
+                                tr("Остановить демонстрацию")
+                            } else {
+                                tr("Показать экран")
+                            };
+                            let screen = widgets::icon_button(ui, Icon::Screen, 30.0);
+                            if video.screen_on {
+                                ui.painter().rect_stroke(
+                                    screen.rect.shrink(1.0),
+                                    8.0,
+                                    egui::Stroke::new(1.5, theme::green()),
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
+                            if screen.on_hover_text(screen_tip).clicked() {
+                                action = DockAction::ToggleScreenShare;
+                            }
+                            let (camera_icon, camera_tip) = if video.camera_on {
+                                (Icon::Camera, tr("Выключить камеру"))
+                            } else {
+                                (Icon::CameraOff, tr("Включить камеру"))
+                            };
+                            if widgets::icon_button(ui, camera_icon, 30.0)
+                                .on_hover_text(camera_tip)
+                                .clicked()
+                            {
+                                action = DockAction::ToggleCamera;
                             }
                         });
                     });

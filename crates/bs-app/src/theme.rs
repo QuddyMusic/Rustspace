@@ -1111,15 +1111,36 @@ pub(crate) fn voice_row(ui: &mut egui::Ui, label: &str, active: bool) -> egui::R
     response
 }
 
+/// Что показать у участника голосового канала.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools, reason = "независимые флаги состояния")]
+pub(crate) struct OccupantFlags {
+    /// Микрофон выключен.
+    pub(crate) muted: bool,
+    /// Звук выключен.
+    pub(crate) deafened: bool,
+    /// Говорит прямо сейчас.
+    pub(crate) speaking: bool,
+    /// Включена камера.
+    pub(crate) camera: bool,
+    /// Показывает экран («В ЭФИРЕ»).
+    pub(crate) streaming: bool,
+}
+
 /// Участник голосового канала под его строкой.
 pub(crate) fn occupant_row(
     ui: &mut egui::Ui,
     name: &str,
-    muted: bool,
-    deafened: bool,
-    speaking: bool,
+    flags: OccupantFlags,
     image: Option<&str>,
 ) -> egui::Response {
+    let OccupantFlags {
+        muted,
+        deafened,
+        speaking,
+        camera,
+        streaming,
+    } = flags;
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), Sense::click());
     let avatar_rect = egui::Rect::from_center_size(
@@ -1157,6 +1178,31 @@ pub(crate) fn occupant_row(
             crate::icons::Icon::MicOff,
             rose(),
         );
+        x -= 18.0;
+    }
+    if camera {
+        crate::icons::paint(
+            ui.painter(),
+            egui::pos2(x, rect.center().y),
+            14.0,
+            crate::icons::Icon::Camera,
+            text_muted(),
+        );
+        x -= 18.0;
+    }
+    if streaming {
+        let galley = ui.painter().layout_no_wrap(
+            crate::i18n::tr("В ЭФИРЕ").to_owned(),
+            FontId::proportional(9.5),
+            Color32::WHITE,
+        );
+        let badge = egui::Rect::from_center_size(
+            egui::pos2(x + 7.0 - galley.size().x / 2.0, rect.center().y),
+            galley.size() + egui::vec2(8.0, 3.0),
+        );
+        ui.painter().rect_filled(badge, 4.0, red());
+        ui.painter()
+            .galley(badge.center() - galley.size() / 2.0, galley, Color32::WHITE);
     }
     response
 }
