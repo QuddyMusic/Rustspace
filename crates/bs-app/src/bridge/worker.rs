@@ -1,0 +1,1386 @@
+//! Фоновая tokio-задача сессии: вход, события, REST-запросы.
+
+#![allow(
+    clippy::wildcard_imports,
+    reason = "части одного модуля, разнесённые по файлам"
+)]
+
+use super::*;
+
+/// Параметры входа, переданные фоновой сессии.
+pub(super) struct SessionParams {
+    pub(super) origin: Origin,
+    pub(super) base: String,
+    pub(super) username: String,
+    /// Пароль затирается в памяти, как только логин выполнен.
+    pub(super) password: Zeroizing<String>,
+    /// Регистрация перед входом: федеративный аккаунт на чужом инстансе
+    /// (отказ «занято» не мешает войти) или новый аккаунт на домашнем
+    /// (любой отказ останавливает вход).
+    pub(super) register: Option<RegisterRequest>,
+    /// Сохранённый токен: вход без пароля.
+    pub(super) resume: Option<Secret>,
+    /// Файл, куда писать токен после успешного входа (только домашний инстанс).
+    pub(super) persist: Option<std::path::PathBuf>,
+    pub(super) transport: TransportPolicy,
+}
+
+/// Фоновая сессия: логин, затем пересылка событий и команд.
+pub(super) async fn run_session(
+    params: SessionParams,
+    events: std_mpsc::Sender<BridgeEvent>,
+    mut commands: tokio_mpsc::UnboundedReceiver<ClientEvent>,
+    mut requests: tokio_mpsc::UnboundedReceiver<BridgeRequest>,
+    responses: std_mpsc::Sender<BridgeResponse>,
+) {
+    // Сработает при любом выходе из функции, включая `abort()` и панику.
+    let _end = EndGuard(events.clone());
+    let persist = params.persist.clone();
+    let Some(handle) = sign_in(params, &events).await else {
+        return;
+    };
+    let mut sub = handle.subscribe();
+    // Загрузки картинок идут параллельно, но не больше `MAX_IMAGE_JOBS`
+    // сразу; при выходе из сессии `JoinSet` обрывает незавершённые.
+    let mut jobs: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+    let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_IMAGE_JOBS));
+    loop {
+        tokio::select! {
+            Some(_) = jobs.join_next(), if !jobs.is_empty() => {}
+            event = sub.recv() => {
+                if !forward_event(event, &events, persist.as_deref()) {
+                    return;
+                }
+            }
+            request = requests.recv() => {
+                let Some(request) = request else {
+                    return;
+                };
+                let Some(request) =
+                    spawn_job(request, handle.client(), &gate, &responses, &mut jobs)
+                else {
+                    continue;
+                };
+                let response = handle_request(handle.client(), request).await;
+                if responses.send(response).is_err() {
+                    return;
+                }
+            }
+            command = commands.recv() => {
+                let Some(event) = command else {
+                    return;
+                };
+                if let Err(err) = handle.send(event).await {
+                    let _ = events.send(BridgeEvent::Error { message: err.to_string() });
+                }
+            }
+        }
+    }
+}
+
+/// Регистрация (если нужна), вход, `ready` и сохранение сессии.
+/// `None` — вход не удался, GUI уже знает почему.
+async fn sign_in(
+    params: SessionParams,
+    events: &std_mpsc::Sender<BridgeEvent>,
+) -> Option<InstanceHandle> {
+    let SessionParams {
+        origin,
+        base,
+        username,
+        password,
+        register,
+        resume,
+        persist,
+        transport,
+    } = params;
+    let mut refusal = None;
+    if let Some(request) = register.as_ref().filter(|_| origin == Origin::Home) {
+        if !register_home(&base, request, transport, events).await {
+            return None;
+        }
+    } else if let Some(request) = register {
+        refusal = try_register(&origin, &base, &request, transport, events).await;
+        if refusal == Some(RegisterOutcome::Failed) {
+            return None;
+        }
+    }
+    let mut store = CredentialStore::new();
+    let resuming = resume.is_some();
+    let login = if let Some(token) = resume {
+        store.insert(
+            origin.clone(),
+            bs_identity::AccessToken::new(token.expose()),
+        );
+        InstanceHandle::resume_with_transport(
+            &mut store,
+            origin,
+            &base,
+            Some(ClientKind::Desktop),
+            ReconnectPolicy::default(),
+            transport,
+        )
+        .await
+    } else {
+        InstanceHandle::login_with_transport(
+            &mut store,
+            origin,
+            &base,
+            &username,
+            &password,
+            Some(ClientKind::Desktop),
+            ReconnectPolicy::default(),
+            transport,
+        )
+        .await
+    };
+    drop(password);
+
+    let (handle, ready) = match login {
+        Ok(pair) => pair,
+        Err(err) => {
+            report_login_failure(&err, refusal, resuming, persist.as_deref(), events);
+            return None;
+        }
+    };
+    match ready {
+        ServerEvent::Ready(payload) => {
+            if events.send(BridgeEvent::Ready { payload }).is_err() {
+                return None;
+            }
+        }
+        other => {
+            let _ = events.send(BridgeEvent::Error {
+                message: format!("ожидался ready, пришло {other:?}"),
+            });
+            return None;
+        }
+    }
+    if let Some(path) = persist.as_ref()
+        && let Err(err) =
+            crate::saved_session::save(path, &base, handle.token().expose(), transport)
+    {
+        tracing::warn!(%err, "не удалось сохранить сессию");
+    }
+    Some(handle)
+}
+
+/// Сообщает GUI, почему вход не удался.
+fn report_login_failure(
+    err: &bs_instances::InstanceError,
+    refusal: Option<RegisterOutcome>,
+    resuming: bool,
+    persist: Option<&std::path::Path>,
+    events: &std_mpsc::Sender<BridgeEvent>,
+) {
+    let rejected = matches!(
+        err,
+        bs_instances::InstanceError::Identity(bs_identity::IdentityError::TokenRejected)
+    );
+    if rejected && let Some(path) = persist {
+        crate::saved_session::clear(path);
+    }
+    if resuming && rejected {
+        let _ = events.send(BridgeEvent::LoginFailed {
+            message: tr("Сессия истекла, войдите заново").to_owned(),
+            kind: FailureKind::Auth,
+        });
+        return;
+    }
+    let message = if refusal.is_some() {
+        remote_login_refused(refusal, &err.to_string())
+    } else {
+        err.to_string()
+    };
+    let kind = match refusal {
+        Some(RegisterOutcome::Taken) => FailureKind::CredentialRefused,
+        Some(RegisterOutcome::Closed) => FailureKind::RegistrationClosed,
+        _ if is_network_error(err) => FailureKind::Network,
+        _ => FailureKind::Auth,
+    };
+    let _ = events.send(BridgeEvent::LoginFailed { message, kind });
+}
+
+/// Пересылает событие инстанса в GUI; `false` — сессию пора завершать.
+fn forward_event(
+    event: Result<InstanceEvent, broadcast::error::RecvError>,
+    events: &std_mpsc::Sender<BridgeEvent>,
+    persist: Option<&std::path::Path>,
+) -> bool {
+    match event {
+        Ok(InstanceEvent::Server(boxed)) => {
+            events.send(BridgeEvent::Server { event: boxed }).is_ok()
+        }
+        Ok(InstanceEvent::AuthRejected {
+            failure, message, ..
+        }) => {
+            // Токен больше не годится: в следующий раз войти по нему нельзя.
+            if let Some(path) = persist {
+                crate::saved_session::clear(path);
+            }
+            let _ = events.send(BridgeEvent::Error {
+                message: format!("{message} ({failure:?})"),
+            });
+            true
+        }
+        Ok(InstanceEvent::StateChanged(state)) => events.send(BridgeEvent::State { state }).is_ok(),
+        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+            tracing::warn!(skipped, "пропущены события инстанса");
+            true
+        }
+        Err(broadcast::error::RecvError::Closed) => {
+            let _ = events.send(BridgeEvent::Disconnected);
+            false
+        }
+    }
+}
+
+/// Картинки, скачивания, загрузки файлов идут параллельно в `jobs`.
+/// Остальные запросы возвращаются для обработки по очереди.
+fn spawn_job(
+    request: BridgeRequest,
+    client: &bs_api::ApiClient,
+    gate: &std::sync::Arc<tokio::sync::Semaphore>,
+    responses: &std_mpsc::Sender<BridgeResponse>,
+    jobs: &mut tokio::task::JoinSet<()>,
+) -> Option<BridgeRequest> {
+    let client = client.clone();
+    let tx = responses.clone();
+    match request {
+        BridgeRequest::Image(path) => {
+            let gate = std::sync::Arc::clone(gate);
+            jobs.spawn(async move {
+                let Ok(_permit) = gate.acquire_owned().await else {
+                    return;
+                };
+                let result = load_image(&client, &path).await;
+                let _ = tx.send(BridgeResponse::Image { path, result });
+            });
+        }
+        BridgeRequest::Download { id, path, dest } => {
+            jobs.spawn(async move {
+                let mut reported = 0_u64;
+                let progress_tx = tx.clone();
+                let result = client
+                    .download_asset(&path, &dest, move |got, total| {
+                        // Не чаще раза на каждые 128 КиБ (и в самом начале).
+                        if got == 0 || got.saturating_sub(reported) >= DOWNLOAD_STEP {
+                            reported = got;
+                            let _ = progress_tx.send(BridgeResponse::Download {
+                                id,
+                                state: DownloadState::Progress { got, total },
+                            });
+                        }
+                    })
+                    .await;
+                let state = match result {
+                    Ok(_) => DownloadState::Done,
+                    Err(err) => DownloadState::Failed(download_message(&err)),
+                };
+                let _ = tx.send(BridgeResponse::Download { id, state });
+            });
+        }
+        BridgeRequest::Raw { tag, path } => {
+            jobs.spawn(async move {
+                let result = client
+                    .fetch_asset(&path, bs_media::Limits::default().max_input_bytes)
+                    .await
+                    .map_err(|err| err.to_string());
+                let _ = tx.send(BridgeResponse::Raw { tag, result });
+            });
+        }
+        BridgeRequest::Upload {
+            id,
+            name,
+            mime,
+            bytes,
+        } => {
+            jobs.spawn(async move {
+                let progress_tx = tx.clone();
+                let result = client
+                    .upload_file(&name, &mime, &bytes, move |sent, total| {
+                        let _ = progress_tx.send(BridgeResponse::Compose(ComposeEvent::Progress {
+                            id,
+                            sent,
+                            total,
+                        }));
+                    })
+                    .await
+                    .map(Box::new)
+                    .map_err(|err| upload_message(&err));
+                let _ = tx.send(BridgeResponse::Compose(ComposeEvent::Uploaded {
+                    id,
+                    result,
+                }));
+            });
+        }
+        BridgeRequest::SetImage { kind, name, bytes } => {
+            jobs.spawn(async move {
+                let response = set_profile_image(&client, kind, &name, &bytes).await;
+                let _ = tx.send(response);
+            });
+        }
+        other => return Some(other),
+    }
+    None
+}
+
+/// Чем закончилась попытка регистрации на чужом инстансе.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RegisterOutcome {
+    /// Аккаунт создан.
+    Created,
+    /// Имя занято: аккаунт, возможно, уже есть.
+    Taken,
+    /// Инстанс не принимает новых федеративных аккаунтов.
+    Closed,
+    /// Другая ошибка; текст уже отправлен в GUI.
+    Failed,
+}
+
+/// Сетевая ли это ошибка (инстанс не ответил), а не отказ сервера.
+pub(super) fn is_network_error(err: &bs_instances::InstanceError) -> bool {
+    use bs_api::ApiError;
+    use bs_identity::IdentityError;
+    use bs_instances::InstanceError;
+    matches!(
+        err,
+        InstanceError::Api(ApiError::Transport(_))
+            | InstanceError::Identity(IdentityError::Api(ApiError::Transport(_)))
+            | InstanceError::Ws(_)
+    )
+}
+
+/// Пространство целиком (каналы, участники, роли) для кэша.
+pub(super) async fn full_space(client: &bs_api::ApiClient, space_id: &str) -> BridgeResponse {
+    match client.space(space_id).await {
+        Ok(space) => BridgeResponse::Space(Box::new(space)),
+        Err(err) => BridgeResponse::Failed(err.to_string()),
+    }
+}
+
+/// Создаёт аккаунт на домашнем инстансе. Любой отказ — конец попытки: GUI
+/// получает понятное объяснение.
+pub(super) async fn register_home(
+    base: &str,
+    request: &RegisterRequest,
+    transport: TransportPolicy,
+    events: &std_mpsc::Sender<BridgeEvent>,
+) -> bool {
+    let result = match ApiClient::with_policy(Origin::Home, base, transport) {
+        Ok(client) => client.register(request).await,
+        Err(err) => Err(err),
+    };
+    let Err(err) = result else {
+        return true;
+    };
+    let kind = if matches!(err, bs_api::ApiError::Transport(_)) {
+        FailureKind::Network
+    } else {
+        FailureKind::Auth
+    };
+    let _ = events.send(BridgeEvent::LoginFailed {
+        message: crate::logic::register_error_text(&err),
+        kind,
+    });
+    false
+}
+
+/// Пытается создать аккаунт; отказ «занято/закрыто» не ошибка, дальше идёт вход.
+pub(super) async fn try_register(
+    origin: &Origin,
+    base: &str,
+    request: &RegisterRequest,
+    transport: TransportPolicy,
+    events: &std_mpsc::Sender<BridgeEvent>,
+) -> Option<RegisterOutcome> {
+    let client = match ApiClient::with_policy(origin.clone(), base, transport) {
+        Ok(client) => client,
+        Err(err) => {
+            let _ = events.send(BridgeEvent::Error {
+                message: err.to_string(),
+            });
+            return Some(RegisterOutcome::Failed);
+        }
+    };
+    match client.register(request).await {
+        Ok(_) => Some(RegisterOutcome::Created),
+        Err(bs_api::ApiError::Server { status, .. }) if status.as_u16() == 409 => {
+            Some(RegisterOutcome::Taken)
+        }
+        Err(bs_api::ApiError::Server { status, .. }) if status.as_u16() == 403 => {
+            Some(RegisterOutcome::Closed)
+        }
+        Err(err) => {
+            let kind = if matches!(err, bs_api::ApiError::Transport(_)) {
+                FailureKind::Network
+            } else {
+                FailureKind::Auth
+            };
+            let _ = events.send(BridgeEvent::LoginFailed {
+                message: err.to_string(),
+                kind,
+            });
+            Some(RegisterOutcome::Failed)
+        }
+    }
+}
+
+/// Объяснение отказа входа на чужой инстанс: что именно можно утверждать.
+///
+/// Про существующий аккаунт говорим только после ответа «имя занято»:
+/// закрытый инстанс одинаково отвечает на вход и за несуществующий
+/// аккаунт, и за аккаунт с другим паролем.
+pub(super) fn remote_login_refused(outcome: Option<RegisterOutcome>, raw: &str) -> String {
+    match outcome {
+        Some(RegisterOutcome::Taken) => "На этом инстансе уже есть аккаунт с таким именем, \
+            но он не принимает пароль, выданный вашим домашним инстансом."
+            .to_owned(),
+        Some(RegisterOutcome::Closed) => "Инстанс не принимает новые аккаунты с других \
+            инстансов. Если аккаунт у вас там уже есть, он не принял выданный пароль."
+            .to_owned(),
+        _ => raw.to_owned(),
+    }
+}
+
+/// Сколько картинок качается и декодируется одновременно.
+pub(super) const MAX_IMAGE_JOBS: usize = 6;
+
+/// Скачивает и декодирует картинку; ошибка — готовый текст для показа.
+pub(super) async fn load_image(
+    client: &bs_api::ApiClient,
+    path: &bs_api::AssetPath,
+) -> Result<bs_media::Decoded, String> {
+    let limits = bs_media::Limits::default();
+    let bytes = client
+        .fetch_asset(path, limits.max_input_bytes)
+        .await
+        .map_err(|err| err.to_string())?;
+    // Декодирование грузит процессор — уводим его с рабочих потоков сети.
+    tokio::task::spawn_blocking(move || bs_media::decode(&bytes, &limits))
+        .await
+        .map_err(|err| crate::tf!("декодер упал: {err}", err = err))?
+        .map_err(|err| err.to_string())
+}
+
+/// Выполняет REST-запрос и превращает результат в [`BridgeResponse`].
+/// Проверяет пароль (если он есть) и просит у дома секрет для входа на `origin`.
+pub(super) async fn issue_credential(
+    client: &ApiClient,
+    origin: &str,
+    password: Option<&Secret>,
+) -> BridgeResponse {
+    let result = issue_credential_inner(client, origin, password).await;
+    BridgeResponse::Credential {
+        origin: origin.to_owned(),
+        result,
+    }
+}
+
+pub(super) async fn issue_credential_inner(
+    client: &ApiClient,
+    origin: &str,
+    password: Option<&Secret>,
+) -> Result<IssuedCredential, String> {
+    let me = client.me().await.map_err(|err| err.to_string())?;
+    let home_host = me
+        .home_instance
+        .clone()
+        .unwrap_or_else(|| bs_identity::identity::host_of(client.base()));
+    if bs_identity::identity::host_of(origin) == home_host {
+        return Err(tr("Это ваш домашний инстанс: он уже подключён").to_owned());
+    }
+    if let Some(password) = password
+        && !client
+            .verify_password(password.expose())
+            .await
+            .map_err(|err| err.to_string())?
+    {
+        return Err(tr("Неверный пароль").to_owned());
+    }
+    let issued = client
+        .federation_credential(&FederationCredentialRequest::new(origin))
+        .await
+        .map_err(|err| err.to_string())?;
+    let bare = me.username.split('@').next().unwrap_or(&me.username);
+    Ok(IssuedCredential {
+        username: format!("{bare}@{home_host}"),
+        secret: Secret::new(issued.secret),
+        home_host,
+        home_user_id: me.home_user_id.clone().unwrap_or_else(|| me.id.clone()),
+        display_name: me.display_name.clone(),
+        provisioned: issued.provisioned,
+    })
+}
+
+/// Загружает картинку профиля и привязывает её к аккаунту.
+pub(super) async fn set_profile_image(
+    client: &bs_api::ApiClient,
+    kind: ImageKind,
+    name: &str,
+    bytes: &[u8],
+) -> BridgeResponse {
+    let fail = |message: String| {
+        BridgeResponse::Admin(AdminEvent::Done {
+            action: AdminDone::Image,
+            result: Err(message),
+        })
+    };
+    let file = if bytes.is_empty() {
+        String::new()
+    } else {
+        let mime = crate::media::mime_for_name(name);
+        match client.upload_file(name, mime, bytes, |_, _| {}).await {
+            Ok(attachment) => attachment.filename,
+            Err(err) => return fail(upload_message(&err)),
+        }
+    };
+    let mut request = bs_api::UpdateProfileRequest::default();
+    match kind {
+        ImageKind::Avatar => request.avatar = Some(file),
+        ImageKind::Banner => request.banner = Some(file),
+    }
+    match client.update_me(&request).await {
+        Ok(user) => BridgeResponse::Profile(Box::new(user)),
+        Err(err) => fail(upload_message(&err)),
+    }
+}
+
+/// Выполняет административное действие и, если нужно, перечитывает пространство.
+pub(super) async fn space_admin(
+    client: &bs_api::ApiClient,
+    space_id: String,
+    op: SpaceOp,
+) -> BridgeResponse {
+    if op == SpaceOp::ListBans {
+        let result = client
+            .list_bans(&space_id)
+            .await
+            .map_err(|err| space_message(&err));
+        return BridgeResponse::SpaceAction(SpaceEvent::Bans { space_id, result });
+    }
+    if let SpaceOp::ListOverrides(scope) = &op {
+        let result = client
+            .list_overrides(scope)
+            .await
+            .map_err(|err| space_message(&err));
+        return BridgeResponse::SpaceAction(SpaceEvent::Overrides {
+            space_id,
+            scope: scope.clone(),
+            result,
+        });
+    }
+    if let SpaceOp::Notify(channel, change) = &op {
+        let result = match channel {
+            Some(id) => client.update_channel_notifications(id, change).await,
+            None => client.update_space_notifications(&space_id, change).await,
+        }
+        .map_err(|err| space_message(&err));
+        return BridgeResponse::SpaceAction(SpaceEvent::Notified { space_id, result });
+    }
+    if op == SpaceOp::ListJoinRequests {
+        let result = client
+            .pending_join_requests(&space_id)
+            .await
+            .map_err(|err| space_message(&err));
+        return BridgeResponse::SpaceAction(SpaceEvent::Requests { space_id, result });
+    }
+    if let SpaceOp::UploadImage(banner, name, bytes) = &op {
+        let mime = crate::media::mime_for_name(name);
+        let result = client
+            .upload_file(name, mime, bytes, |_, _| {})
+            .await
+            .map(|attachment| attachment.filename)
+            .map_err(|err| upload_message(&err));
+        return BridgeResponse::SpaceAction(SpaceEvent::Uploaded {
+            space_id,
+            banner: *banner,
+            result,
+        });
+    }
+    let done = match &op {
+        SpaceOp::UpdateChannel(id, update) => client.update_channel(id, update).await,
+        SpaceOp::DeleteChannel(id) => client.delete_channel(id).await,
+        SpaceOp::RenameCategory(id, name) => client.rename_category(id, name).await,
+        SpaceOp::DeleteCategory(id) => client.delete_category(id).await,
+        SpaceOp::PutOverride(scope, entry) => client.put_override(scope, entry).await,
+        SpaceOp::DeleteOverride(scope, kind, id) => client.delete_override(scope, *kind, id).await,
+        SpaceOp::DecideRequest(id, accept) => {
+            client.decide_join_request(&space_id, id, *accept).await
+        }
+        SpaceOp::Update(patch) => client.update_space(&space_id, patch).await,
+        SpaceOp::Delete => client.delete_space(&space_id).await,
+        SpaceOp::Kick(user) => client.leave_space(&space_id, user).await,
+        SpaceOp::Ban(user, reason) => client.ban_member(&space_id, user, reason.as_deref()).await,
+        SpaceOp::Unban(user) => client.unban_member(&space_id, user).await,
+        SpaceOp::Transfer(user) => client.transfer_ownership(&space_id, user).await,
+        SpaceOp::CreateRole(role) => client.create_role(&space_id, role).await.map(|_| ()),
+        SpaceOp::UpdateRole(role_id, update) => client
+            .update_role(&space_id, role_id, update)
+            .await
+            .map(|_| ()),
+        SpaceOp::DeleteRole(role_id) => client.delete_role(&space_id, role_id).await,
+        SpaceOp::AddMemberRole(user, role) => client.add_member_role(&space_id, user, role).await,
+        SpaceOp::RemoveMemberRole(user, role) => {
+            client.remove_member_role(&space_id, user, role).await
+        }
+        SpaceOp::ListBans
+        | SpaceOp::ListJoinRequests
+        | SpaceOp::ListOverrides(_)
+        | SpaceOp::Notify(..)
+        | SpaceOp::UploadImage(..) => Ok(()),
+    };
+    let refresh = done.is_ok()
+        && !matches!(
+            op,
+            SpaceOp::Delete | SpaceOp::Unban(_) | SpaceOp::DecideRequest(_, false)
+        );
+    let space = if refresh {
+        client.space(&space_id).await.ok().map(Box::new)
+    } else {
+        None
+    };
+    BridgeResponse::SpaceAction(SpaceEvent::Admin {
+        space_id,
+        op,
+        result: done.map_err(|err| space_message(&err)),
+        space,
+    })
+}
+
+/// Выполняет действие с инвайтом.
+pub(super) async fn invite_op(client: &bs_api::ApiClient, op: InviteOp) -> Result<String, String> {
+    let fail = |err: bs_api::ApiError| upload_message(&err);
+    match op {
+        InviteOp::Create(new) => client
+            .create_invite(&new)
+            .await
+            .map(|_| tr("Ссылка создана").to_owned())
+            .map_err(fail),
+        InviteOp::Update(id, patch) => client
+            .update_invite(&id, &patch)
+            .await
+            .map(|_| tr("Ссылка обновлена").to_owned())
+            .map_err(fail),
+        InviteOp::Revoke(id) => client
+            .revoke_invite(&id)
+            .await
+            .map(|_| tr("Ссылка отозвана").to_owned())
+            .map_err(fail),
+        InviteOp::Reinstate(id, patch) => client
+            .reinstate_invite(&id, &patch)
+            .await
+            .map(|v| {
+                if v.get("tokenRotated").and_then(serde_json::Value::as_bool) == Some(true) {
+                    tr("Ссылка восстановлена с новым адресом").to_owned()
+                } else {
+                    tr("Ссылка восстановлена").to_owned()
+                }
+            })
+            .map_err(fail),
+        InviteOp::Delete(id) => client
+            .delete_invite(&id)
+            .await
+            .map(|_| tr("Ссылка удалена").to_owned())
+            .map_err(fail),
+        InviteOp::Redemptions(_) => Ok(String::new()),
+    }
+}
+
+/// Выполняет действие с пиром.
+pub(super) async fn peer_op(client: &bs_api::ApiClient, op: PeerOp) -> Result<String, String> {
+    let fail = |err: bs_api::ApiError| upload_message(&err);
+    match op {
+        PeerOp::Recheck(id) => {
+            let result = client.recheck_peer(&id).await.map_err(fail)?;
+            Ok(if result.recovered {
+                tr("Связь восстановлена").to_owned()
+            } else {
+                tr("Инстанс по-прежнему недоступен").to_owned()
+            })
+        }
+        PeerOp::Rotate(id) => client
+            .rotate_peer_secret(&id)
+            .await
+            .map(|_| tr("Ротация секрета начата").to_owned())
+            .map_err(fail),
+        PeerOp::Revoke(id) => client
+            .revoke_peer(&id)
+            .await
+            .map(|_| tr("Пир отозван").to_owned())
+            .map_err(fail),
+        PeerOp::Reset(id) => client
+            .reset_peer(&id)
+            .await
+            .map(|_| tr("Пир сброшен").to_owned())
+            .map_err(fail),
+        PeerOp::Delete(id) => client
+            .delete_peer_permanently(&id)
+            .await
+            .map(|_| tr("Пир удалён").to_owned())
+            .map_err(fail),
+        PeerOp::Interval(id, days) => client
+            .set_peer_interval(&id, days)
+            .await
+            .map(|_| tr("Интервал обновлён").to_owned())
+            .map_err(fail),
+        PeerOp::Initiate(origin) => client
+            .initiate_peering(&origin)
+            .await
+            .map(|_| tr("Запрос на пиринг отправлен").to_owned())
+            .map_err(fail),
+        PeerOp::Answer(id, approve) => client
+            .answer_approval(&id, approve)
+            .await
+            .map(|_| {
+                if approve {
+                    tr("Одобрено")
+                } else {
+                    tr("Отклонено")
+                }
+                .to_owned()
+            })
+            .map_err(fail),
+    }
+}
+
+/// Выполняет запрос настроек.
+pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminRequest) -> AdminEvent {
+    let text = |err: &bs_api::ApiError| upload_message(err);
+    match request {
+        AdminRequest::LoadInvites { archived } => AdminEvent::Invites(
+            client
+                .invites(archived)
+                .await
+                .map(|list| (archived, list))
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::Invite(InviteOp::Redemptions(id)) => {
+            let result = client.invite_redemptions(&id).await.map_err(|e| text(&e));
+            AdminEvent::Redemptions { id, result }
+        }
+        AdminRequest::Invite(op) => AdminEvent::InviteDone(invite_op(client, op).await),
+        AdminRequest::LoadPeers => AdminEvent::Peers(
+            async {
+                let peers = client.peers().await?;
+                let requests = client.approval_requests().await.unwrap_or_default();
+                Ok::<_, bs_api::ApiError>((peers, requests))
+            }
+            .await
+            .map_err(|e| text(&e)),
+        ),
+        AdminRequest::Peer(op) => AdminEvent::PeerDone(peer_op(client, op).await),
+        AdminRequest::LoadStreaming => {
+            AdminEvent::Streaming(client.streaming_limits().await.map_err(|e| text(&e)))
+        }
+        AdminRequest::SaveStreaming(patch) => {
+            AdminEvent::Streaming(client.update_streaming(&patch).await.map_err(|e| text(&e)))
+        }
+        AdminRequest::LoadTelemetry => {
+            AdminEvent::Telemetry(client.telemetry().await.map_err(|e| text(&e)))
+        }
+        AdminRequest::SetTelemetry(on) => {
+            AdminEvent::Telemetry(client.set_telemetry(on).await.map_err(|e| text(&e)))
+        }
+        AdminRequest::LoadTelemetryPreview => AdminEvent::TelemetryPreview(
+            client
+                .telemetry_preview()
+                .await
+                .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::LoadUpdates(refresh) => {
+            AdminEvent::Updates(client.update_status(refresh).await.map_err(|e| text(&e)))
+        }
+        AdminRequest::LoadSettings => {
+            AdminEvent::Settings(client.instance_settings().await.map_err(|e| text(&e)))
+        }
+        AdminRequest::SaveSettings(patch) => AdminEvent::SettingsSaved(
+            client
+                .update_instance_settings(&patch)
+                .await
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::LoadUsers {
+            query,
+            page,
+            show_deleted,
+        } => AdminEvent::Users(
+            client
+                .admin_users(&query, page, show_deleted)
+                .await
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::LoadStorage => {
+            AdminEvent::Storage(client.storage_stats().await.map_err(|e| text(&e)))
+        }
+        AdminRequest::Cleanup { dry_run } => {
+            AdminEvent::Cleaned(client.storage_cleanup(dry_run).await.map_err(|e| text(&e)))
+        }
+        other => match account_admin(client, other).await {
+            Ok(event) | Err(event) => event,
+        },
+    }
+}
+
+/// Учётные записи: роли, сброс и смена пароля, удаление.
+async fn account_admin(
+    client: &bs_api::ApiClient,
+    request: AdminRequest,
+) -> Result<AdminEvent, AdminEvent> {
+    let text = |err: &bs_api::ApiError| upload_message(err);
+    let done =
+        |action: AdminDone, result: Result<String, String>| AdminEvent::Done { action, result };
+    Ok(match request {
+        AdminRequest::SetRole { id, admin } => done(
+            AdminDone::Role,
+            client
+                .admin_set_role(&id, admin)
+                .await
+                .map(|_| tr("Роль изменена").to_owned())
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::ResetPassword(id) => done(
+            AdminDone::Reset,
+            client
+                .admin_reset_password(&id)
+                .await
+                .map(|r| r.temporary_password)
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::DeleteUser(id) => done(
+            AdminDone::Delete,
+            client
+                .admin_delete_user(&id)
+                .await
+                .map(|_| tr("Пользователь удалён").to_owned())
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::ChangePassword { current, new } => {
+            let body = current.map_or_else(
+                || bs_api::ChangePasswordRequest::new(new.expose()),
+                |current| {
+                    bs_api::ChangePasswordRequest::with_current(current.expose(), new.expose())
+                },
+            );
+            done(
+                AdminDone::Password,
+                client
+                    .change_password(&body)
+                    .await
+                    .map(|_| tr("Пароль изменён").to_owned())
+                    .map_err(|e| text(&e)),
+            )
+        }
+        AdminRequest::DeleteAccount { password, username } => done(
+            AdminDone::Account,
+            client
+                .delete_account(password.expose(), &username)
+                .await
+                .map(|_| tr("Аккаунт удалён").to_owned())
+                .map_err(|e| text(&e)),
+        ),
+        _ => {
+            return Err(AdminEvent::Done {
+                action: AdminDone::Account,
+                result: Err(tr("неизвестный запрос").to_owned()),
+            });
+        }
+    })
+}
+
+/// Понятный текст отказа сервера для композера.
+pub(super) fn upload_message(err: &bs_api::ApiError) -> String {
+    use bs_api::ApiError;
+    match err {
+        ApiError::Unexpected { status, .. } if status.as_u16() == 413 => {
+            tr("Файл больше лимита сервера").to_owned()
+        }
+        ApiError::Unexpected { status, .. } if status.as_u16() == 429 => {
+            tr("Слишком много загрузок, подождите минуту").to_owned()
+        }
+        ApiError::Unexpected { status, .. } | ApiError::Server { status, .. }
+            if status.as_u16() == 403 =>
+        {
+            tr("Нет права прикреплять файлы").to_owned()
+        }
+        other => other.to_string(),
+    }
+}
+
+/// Текст отказа сервера на действие над пространством.
+pub(super) async fn group_admin(
+    client: &bs_api::ApiClient,
+    dm_id: String,
+    op: GroupOp,
+) -> BridgeResponse {
+    let mut created = None;
+    let result = match &op {
+        GroupOp::Create(users) => client.create_group_dm(users).await.map(|dm| {
+            created = Some(Box::new(dm));
+        }),
+        GroupOp::Rename(name) => client
+            .update_group_dm(
+                &dm_id,
+                &bs_api::GroupUpdate {
+                    name: Some(name.clone()),
+                    icon: None,
+                },
+            )
+            .await
+            .map(|_| ()),
+        GroupOp::Add(user) => client.add_group_member(&dm_id, user).await.map(|_| ()),
+        GroupOp::Remove(user) => client.remove_group_member(&dm_id, user).await.map(|_| ()),
+        GroupOp::Leave => client.leave_group_dm(&dm_id).await.map(|_| ()),
+        GroupOp::Transfer(user) => client.transfer_group_owner(&dm_id, user).await.map(|_| ()),
+        GroupOp::Icon(bytes) => match group_icon(client, &dm_id, bytes.as_deref()).await {
+            Ok(()) => Ok(()),
+            Err(message) => {
+                let event = GroupEvent {
+                    dm_id,
+                    op,
+                    result: Err(message),
+                };
+                return BridgeResponse::GroupAction(event, None);
+            }
+        },
+    }
+    .map_err(|err| space_message(&err));
+    let dm_id = created.as_ref().map_or(dm_id, |dm| dm.id.clone());
+    BridgeResponse::GroupAction(GroupEvent { dm_id, op, result }, created)
+}
+
+/// Сторона иконки группы после обрезки.
+pub(super) const GROUP_ICON_SIDE: u32 = 512;
+
+/// Обрезает картинку до квадрата, загружает и ставит иконкой группы;
+/// `None` убирает иконку.
+pub(super) async fn group_icon(
+    client: &bs_api::ApiClient,
+    dm_id: &str,
+    bytes: Option<&[u8]>,
+) -> Result<(), String> {
+    let icon = match bytes {
+        None => None,
+        Some(bytes) => {
+            let png = bs_media::square_icon(bytes, GROUP_ICON_SIDE, &bs_media::Limits::default())
+                .map_err(|err| crate::tf!("Картинка не подходит: {err}", err = err))?;
+            let attachment = client
+                .upload_file("group-icon.png", "image/png", &png, |_, _| {})
+                .await
+                .map_err(|err| space_message(&err))?;
+            Some(attachment.filename)
+        }
+    };
+    client
+        .update_group_dm(
+            dm_id,
+            &bs_api::GroupUpdate {
+                name: None,
+                icon: Some(icon),
+            },
+        )
+        .await
+        .map(|_| ())
+        .map_err(|err| space_message(&err))
+}
+
+pub(super) fn space_message(err: &bs_api::ApiError) -> String {
+    let message = err
+        .body()
+        .map_or_else(|| err.to_string(), |b| b.error.clone());
+    crate::logic::describe_server_error(err.code(), &message)
+}
+
+pub(super) async fn handle_request(
+    client: &bs_api::ApiClient,
+    request: BridgeRequest,
+) -> BridgeResponse {
+    let request = match social_request(client, request).await {
+        Ok(response) => return response,
+        Err(request) => request,
+    };
+    let request = match spaces_request(client, request).await {
+        Ok(response) => return response,
+        Err(request) => request,
+    };
+    let request = match federation_request(client, request).await {
+        Ok(response) => return response,
+        Err(request) => request,
+    };
+    let request = match history_request(client, request).await {
+        Ok(response) => return response,
+        Err(request) => request,
+    };
+    match request {
+        BridgeRequest::Admin(request) => BridgeResponse::Admin(handle_admin(client, request).await),
+        BridgeRequest::GifEnabled => BridgeResponse::Compose(ComposeEvent::GifEnabled(
+            client
+                .gif_enabled()
+                .await
+                .map_err(|err| upload_message(&err)),
+        )),
+        BridgeRequest::Gifs { query, pos } => {
+            let result = client
+                .gifs(&query, 30, &pos)
+                .await
+                .map_err(|err| err.to_string());
+            BridgeResponse::Compose(ComposeEvent::Gifs { query, pos, result })
+        }
+        BridgeRequest::DmVoiceToken(dm_id) => {
+            let result = client
+                .livekit_token_dm(&dm_id)
+                .await
+                .map_err(|err| upload_message(&err));
+            BridgeResponse::VoiceToken(VoiceTokenEvent {
+                channel_id: dm_id,
+                result,
+            })
+        }
+        BridgeRequest::VoiceToken(channel_id) => {
+            let result = client
+                .livekit_token_channel(&channel_id)
+                .await
+                .map_err(|err| upload_message(&err));
+            BridgeResponse::VoiceToken(VoiceTokenEvent { channel_id, result })
+        }
+        BridgeRequest::Stickers => BridgeResponse::Compose(ComposeEvent::Stickers(
+            client.stickers().await.map_err(|err| upload_message(&err)),
+        )),
+        BridgeRequest::UploadSticker { name, bytes } => {
+            BridgeResponse::Compose(ComposeEvent::StickerChanged(
+                client
+                    .upload_sticker(&name, &bytes)
+                    .await
+                    .map(|_| ())
+                    .map_err(|err| upload_message(&err)),
+            ))
+        }
+        BridgeRequest::DeleteSticker(id) => BridgeResponse::Compose(ComposeEvent::StickerChanged(
+            client
+                .delete_sticker(&id)
+                .await
+                .map(|_| ())
+                .map_err(|err| upload_message(&err)),
+        )),
+        BridgeRequest::SendRest { channel_id, body } => {
+            match client.send_channel_message(&channel_id, &body).await {
+                Ok(_) => BridgeResponse::Done,
+                Err(err) => BridgeResponse::Compose(ComposeEvent::SendFailed(upload_message(&err))),
+            }
+        }
+        // Остальное разобрано выше, а картинки и загрузки идут
+        // параллельно (см. `spawn_job`).
+        _ => BridgeResponse::Done,
+    }
+}
+
+/// Друзья, личные каналы, профили. Чужие запросы возвращает обратно.
+async fn social_request(
+    client: &bs_api::ApiClient,
+    request: BridgeRequest,
+) -> Result<BridgeResponse, BridgeRequest> {
+    Ok(match request {
+        BridgeRequest::Friends => match client.friends().await {
+            Ok(friends) => BridgeResponse::Friends(friends),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::NotificationSettings => match client.notification_settings().await {
+            Ok(list) => BridgeResponse::NotificationSettings(list),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::FriendRequests => match client.friend_requests().await {
+            Ok(requests) => BridgeResponse::FriendRequests(requests),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::SearchUsers(query) => match client.search_users(&query).await {
+            Ok(users) => BridgeResponse::Users(users),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::DmChannels => match client.dm_channels().await {
+            Ok(channels) => BridgeResponse::DmChannels(channels),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::OpenDm(user_id) => {
+            let request = bs_api::CreateDmRequest::user(user_id);
+            match client.open_dm(&request).await {
+                Ok(channel) => BridgeResponse::DmChannel(Box::new(channel)),
+                Err(err) => BridgeResponse::Failed(err.to_string()),
+            }
+        }
+        BridgeRequest::SendFriendRequest(username) => {
+            let request = bs_api::SendFriendRequest::username(username);
+            match client.send_friend_request(&request).await {
+                Ok(_) => BridgeResponse::Done,
+                Err(err) => BridgeResponse::Failed(err.to_string()),
+            }
+        }
+        BridgeRequest::RespondFriendRequest(id, accept) => {
+            let decision = if accept {
+                bs_api::FriendRequestDecision::Accept
+            } else {
+                bs_api::FriendRequestDecision::Decline
+            };
+            match client.respond_friend_request(&id, decision).await {
+                Ok(()) => BridgeResponse::Done,
+                Err(err) => BridgeResponse::Failed(err.to_string()),
+            }
+        }
+        BridgeRequest::CancelFriendRequest(id) => match client.cancel_friend_request(&id).await {
+            Ok(()) => BridgeResponse::Done,
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::RemoveFriend(user_id) => match client.remove_friend(&user_id).await {
+            Ok(()) => BridgeResponse::Done,
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::Profile(user_id) => {
+            let user = client
+                .user(&user_id)
+                .await
+                .map(Box::new)
+                .map_err(|err| upload_message(&err));
+            let mutuals = client.mutuals(&user_id).await.ok();
+            BridgeResponse::UserProfile(ProfileEvent {
+                user_id,
+                user,
+                mutuals,
+            })
+        }
+        BridgeRequest::UpdateProfile(body) => match client.update_me(&body).await {
+            Ok(user) => BridgeResponse::Profile(Box::new(user)),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        other => return Err(other),
+    })
+}
+
+/// Пространства, приглашения, каналы, каталог. Чужие запросы возвращает обратно.
+async fn spaces_request(
+    client: &bs_api::ApiClient,
+    request: BridgeRequest,
+) -> Result<BridgeResponse, BridgeRequest> {
+    Ok(match request {
+        BridgeRequest::SpaceInvite(space_id) => {
+            let result = client
+                .space_invite_code(&space_id)
+                .await
+                .map_err(|err| space_message(&err));
+            BridgeResponse::SpaceAction(SpaceEvent::Invite { result })
+        }
+        BridgeRequest::InviteFriend { friend_id, request } => {
+            let result = client
+                .send_space_invite(&request)
+                .await
+                .map(|_| ())
+                .map_err(|err| space_message(&err));
+            BridgeResponse::SpaceAction(SpaceEvent::InviteSent { friend_id, result })
+        }
+        BridgeRequest::JoinByCode(code) => {
+            let joined = match client.join_by_code(&code).await {
+                Ok(id) => client.space(&id).await,
+                Err(err) => Err(err),
+            };
+            match joined {
+                Ok(space) => BridgeResponse::Space(Box::new(space)),
+                Err(err) => {
+                    BridgeResponse::SpaceAction(SpaceEvent::JoinFailed(space_message(&err)))
+                }
+            }
+        }
+        BridgeRequest::LeaveSpace { space_id, user_id } => {
+            let result = client
+                .leave_space(&space_id, &user_id)
+                .await
+                .map_err(|err| space_message(&err));
+            BridgeResponse::SpaceAction(SpaceEvent::Left { space_id, result })
+        }
+        BridgeRequest::SpaceAdmin { space_id, op } => space_admin(client, space_id, op).await,
+        BridgeRequest::GroupAdmin { dm_id, op } => group_admin(client, dm_id, op).await,
+        BridgeRequest::CreateChannel { space_id, channel } => {
+            let result = client
+                .create_channel(&space_id, &channel)
+                .await
+                .map_err(|err| space_message(&err));
+            BridgeResponse::SpaceAction(SpaceEvent::Created(result))
+        }
+        BridgeRequest::CreateCategory { space_id, name } => {
+            let result = client
+                .create_category(&space_id, &name)
+                .await
+                .map_err(|err| space_message(&err));
+            BridgeResponse::SpaceAction(SpaceEvent::Created(result))
+        }
+        // Сервер отвечает голым пространством без каналов и участников:
+        // детали берём отдельным запросом, иначе в кэше оказалось бы пустое
+        // пространство до переподключения.
+        BridgeRequest::CreateSpace(body) => match client.create_space(&body).await {
+            Ok(space) => full_space(client, &space.id).await,
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        BridgeRequest::Explore(query) => match client.explore_spaces(&query, 50, 0).await {
+            Ok(page) => BridgeResponse::Explore(page),
+            Err(err) => BridgeResponse::Failed(err.to_string()),
+        },
+        // Каталог не настроен или хаб недоступен — это не ошибка экрана,
+        // а пустой раздел с пояснением.
+        BridgeRequest::Directory(query) => {
+            BridgeResponse::Directory(match client.directory(&query, 50, 0).await {
+                Ok(feed) => Ok(feed.spaces),
+                Err(err) => Err(err.to_string()),
+            })
+        }
+        BridgeRequest::JoinSpace { id, by_request } => {
+            if by_request {
+                match client.request_join_space(&id, None).await {
+                    Ok(()) => BridgeResponse::JoinRequested,
+                    Err(err) => BridgeResponse::Failed(err.to_string()),
+                }
+            } else {
+                match client.join_public_space(&id).await {
+                    Ok(space) => full_space(client, &space.id).await,
+                    Err(err) => BridgeResponse::Failed(err.to_string()),
+                }
+            }
+        }
+        other => return Err(other),
+    })
+}
+
+/// Подключения других инстансов и реестр. Чужие запросы возвращает обратно.
+async fn federation_request(
+    client: &bs_api::ApiClient,
+    request: BridgeRequest,
+) -> Result<BridgeResponse, BridgeRequest> {
+    Ok(match request {
+        BridgeRequest::IssueCredential { origin, password } => {
+            issue_credential(client, &origin, password.as_ref()).await
+        }
+        BridgeRequest::EnsurePeered(origin) => BridgeResponse::Peering {
+            result: client
+                .ensure_peered(&origin)
+                .await
+                .map(|answer| answer.peering_status)
+                .map_err(|err| err.to_string()),
+            origin,
+        },
+        BridgeRequest::MarkProvisioned(origin) => {
+            let request = FederationCredentialRequest::marking_provisioned(origin);
+            match client.federation_credential(&request).await {
+                Ok(_) => BridgeResponse::Synced,
+                Err(err) => BridgeResponse::Failed(err.to_string()),
+            }
+        }
+        BridgeRequest::LoadRegistry => BridgeResponse::Registry(
+            client
+                .federation_registry()
+                .await
+                .map_err(|e| e.to_string()),
+        ),
+        BridgeRequest::PutRegistry {
+            entries,
+            updated_at,
+        } => BridgeResponse::RegistrySaved(
+            client
+                .put_federation_registry(&entries, updated_at)
+                .await
+                .map_err(|e| e.to_string()),
+        ),
+        BridgeRequest::DeleteIdentity { origins, mode } => BridgeResponse::IdentityDeleted(
+            client
+                .delete_federation_identity(&origins, mode)
+                .await
+                .map_err(|e| e.to_string()),
+        ),
+        BridgeRequest::AdoptSecret(secret) => BridgeResponse::Adopted(
+            client
+                .change_password(&ChangePasswordRequest::new(secret.expose()))
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+        ),
+        BridgeRequest::SyncInstances(entries) => {
+            match client.set_replicated_instances(&entries).await {
+                Ok(_) => BridgeResponse::Synced,
+                Err(err) => BridgeResponse::Failed(err.to_string()),
+            }
+        }
+        other => return Err(other),
+    })
+}
+
+/// История, поиск, переход к сообщению. Чужие запросы возвращает обратно.
+async fn history_request(
+    client: &bs_api::ApiClient,
+    request: BridgeRequest,
+) -> Result<BridgeResponse, BridgeRequest> {
+    Ok(match request {
+        BridgeRequest::History {
+            channel_id,
+            kind,
+            before,
+        } => {
+            let cursor = before.map(bs_api::PagingCursor::Before);
+            let items = match kind {
+                ChannelKind::Space => client
+                    .messages(&channel_id, cursor, Some(HISTORY_PAGE))
+                    .await
+                    .map(|page| HistoryItems::Space(page.messages)),
+                ChannelKind::Dm => client
+                    .dm_messages(&channel_id, cursor, Some(HISTORY_PAGE))
+                    .await
+                    .map(|page| HistoryItems::Dm(page.messages)),
+            };
+            match items {
+                Ok(items) => BridgeResponse::History { channel_id, items },
+                Err(err) => BridgeResponse::HistoryFailed {
+                    channel_id,
+                    message: err.to_string(),
+                },
+            }
+        }
+        BridgeRequest::Search {
+            channel_id,
+            kind,
+            query,
+            seq,
+        } => {
+            let result = match kind {
+                ChannelKind::Space => client
+                    .search_channel_messages(&channel_id, &query)
+                    .await
+                    .map(|r| (hits_of_space(r.results), r.total_count)),
+                ChannelKind::Dm => client
+                    .search_dm_messages(&channel_id, &query)
+                    .await
+                    .map(|r| (hits_of_dm(r.results), r.total_count)),
+            };
+            BridgeResponse::SearchDone {
+                seq,
+                result: result.map_err(|err| space_message(&err)),
+            }
+        }
+        BridgeRequest::Around {
+            channel_id,
+            kind,
+            message_id,
+        } => {
+            let result = match kind {
+                ChannelKind::Space => client
+                    .messages_around(&channel_id, &message_id, Some(AROUND_PAGE))
+                    .await
+                    .map(HistoryItems::Space),
+                ChannelKind::Dm => client
+                    .dm_messages_around(&channel_id, &message_id, Some(AROUND_PAGE))
+                    .await
+                    .map(HistoryItems::Dm),
+            };
+            BridgeResponse::AroundDone {
+                channel_id,
+                message_id,
+                result: result.map_err(|err| space_message(&err)),
+            }
+        }
+        other => return Err(other),
+    })
+}

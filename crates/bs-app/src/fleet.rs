@@ -1403,7 +1403,10 @@ mod tests {
         let mut bridge = Bridge::new(runtime.handle().clone());
         bridge.connect_and_join("orbit.example", "abc123");
         assert!(bridge.take_message().unwrap().contains("домашний"));
-        assert!(bridge.pending_joins.is_empty(), "без подключения ждать нечего");
+        assert!(
+            bridge.pending_joins.is_empty(),
+            "без подключения ждать нечего"
+        );
         bridge.connect_and_join_space("   ", "s1", false);
         assert!(bridge.take_message().unwrap().contains("адрес"));
     }

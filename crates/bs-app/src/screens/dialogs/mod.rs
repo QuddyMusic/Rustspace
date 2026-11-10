@@ -1,5 +1,11 @@
 //! Диалоги: «Создать пространство» и экран настроек пользователя.
 
+mod account;
+mod voice;
+
+use self::account::{account, connections, privacy};
+use self::voice::voice_settings;
+
 use bs_api::{CreateSpaceRequest, UpdateProfileRequest};
 use bs_types::{ChosenUserStatus, SpaceVisibility, User, UserStatus};
 use egui::{Align, Color32, CornerRadius, Layout, Margin, RichText, Sense};
@@ -57,11 +63,65 @@ impl CreateSpaceForm {
     }
 }
 
+/// Значок будущего пространства и выбор его цвета.
+fn space_icon_picker(ui: &mut egui::Ui, form: &mut CreateSpaceForm) {
+    ui.vertical_centered(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(76.0), Sense::hover());
+        let color = theme::palette(form.color).unwrap_or_else(theme::accent);
+        ui.painter().circle_filled(rect.center(), 38.0, color);
+        let letter = form
+            .name
+            .trim()
+            .chars()
+            .next()
+            .map_or_else(|| "S".to_owned(), |c| c.to_uppercase().collect());
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            letter,
+            egui::FontId::new(30.0, theme::bold_family()),
+            egui::Color32::WHITE,
+        );
+    });
+    widgets::field_label(ui, tr("Цвет значка"));
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for name in theme::PALETTE_NAMES {
+            let color = theme::palette(name).unwrap_or_else(theme::accent);
+            if widgets::color_swatch(ui, color, form.color == name, 30.0).clicked() {
+                form.color = name;
+            }
+        }
+    });
+}
+
+/// Приватное, по заявке или публичное.
+fn visibility_picker(ui: &mut egui::Ui, visibility: &mut SpaceVisibility) {
+    widgets::field_label(ui, tr("Видимость"));
+    for (value, title, hint) in [
+        (
+            SpaceVisibility::Private,
+            tr("Приватное"),
+            tr("Только по ссылке-приглашению"),
+        ),
+        (
+            SpaceVisibility::Request,
+            tr("По заявке"),
+            tr("Видно в обзоре, вступление по запросу"),
+        ),
+        (
+            SpaceVisibility::Public,
+            tr("Публичное"),
+            tr("Видно в обзоре, вступить может любой"),
+        ),
+    ] {
+        if widgets::radio_card(ui, title, hint, *visibility == value).clicked() {
+            *visibility = value;
+        }
+    }
+}
+
 /// Рисует модальное окно создания. Возвращает `false`, когда его нужно закрыть.
-#[allow(
-    clippy::too_many_lines,
-    reason = "раскладка egui читается лучше одним блоком"
-)]
 pub(crate) fn show_create_space(
     ctx: &egui::Context,
     form: &mut CreateSpaceForm,
@@ -93,34 +153,7 @@ pub(crate) fn show_create_space(
                 });
             });
             ui.add_space(12.0);
-            ui.vertical_centered(|ui| {
-                let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(76.0), Sense::hover());
-                let color = theme::palette(form.color).unwrap_or_else(theme::accent);
-                ui.painter().circle_filled(rect.center(), 38.0, color);
-                let letter = form
-                    .name
-                    .trim()
-                    .chars()
-                    .next()
-                    .map_or_else(|| "S".to_owned(), |c| c.to_uppercase().collect());
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    letter,
-                    egui::FontId::new(30.0, theme::bold_family()),
-                    egui::Color32::WHITE,
-                );
-            });
-            widgets::field_label(ui, tr("Цвет значка"));
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                for name in theme::PALETTE_NAMES {
-                    let color = theme::palette(name).unwrap_or_else(theme::accent);
-                    if widgets::color_swatch(ui, color, form.color == name, 30.0).clicked() {
-                        form.color = name;
-                    }
-                }
-            });
+            space_icon_picker(ui, form);
             widgets::field_label(ui, tr("Название"));
             let name_response = widgets::text_field(
                 ui,
@@ -128,28 +161,7 @@ pub(crate) fn show_create_space(
                 tr("Моё замечательное пространство"),
                 SPACE_NAME_MAX,
             );
-            widgets::field_label(ui, tr("Видимость"));
-            for (value, title, hint) in [
-                (
-                    SpaceVisibility::Private,
-                    tr("Приватное"),
-                    tr("Только по ссылке-приглашению"),
-                ),
-                (
-                    SpaceVisibility::Request,
-                    tr("По заявке"),
-                    tr("Видно в обзоре, вступление по запросу"),
-                ),
-                (
-                    SpaceVisibility::Public,
-                    tr("Публичное"),
-                    tr("Видно в обзоре, вступить может любой"),
-                ),
-            ] {
-                if widgets::radio_card(ui, title, hint, form.visibility == value).clicked() {
-                    form.visibility = value;
-                }
-            }
+            visibility_picker(ui, &mut form.visibility);
             widgets::field_label(ui, tr("Описание"));
             widgets::text_area(
                 ui,
@@ -509,14 +521,8 @@ fn show_settings_inner(
     action
 }
 
-/// Левая колонка: карточка профиля и список разделов.
-#[allow(clippy::too_many_lines, reason = "навигация одним блоком")]
-fn settings_nav(
-    ui: &mut egui::Ui,
-    state: &mut SettingsState,
-    me: &User,
-    action: &mut SettingsAction,
-) {
+/// Карточка профиля над разделами настроек.
+fn nav_profile(ui: &mut egui::Ui, me: &User) {
     let name = user_display_name(me.display_name.as_deref(), &me.username);
     egui::Frame::new()
         .fill(theme::bg_sidebar())
@@ -544,6 +550,65 @@ fn settings_nav(
                 });
             });
         });
+}
+
+/// Выбор инстанса для администрирования, когда прав хватает на нескольких.
+fn admin_slot_picker(ui: &mut egui::Ui, state: &mut SettingsState) {
+    if state.admin_slots.len() > 1 {
+        let current = state.admin_slot.unwrap_or(state.admin_slots[0].0);
+        let label = state
+            .admin_slots
+            .iter()
+            .find(|(i, _)| *i == current)
+            .map_or("", |(_, base)| base.as_str())
+            .to_owned();
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            egui::ComboBox::from_id_salt("admin_slot")
+                .selected_text(theme::truncate_chars(&label, 26))
+                .show_ui(ui, |ui| {
+                    for (index, base) in &state.admin_slots {
+                        if ui.selectable_label(*index == current, base).clicked()
+                            && *index != current
+                        {
+                            state.admin_slot = Some(*index);
+                            state.extra.admin = super::settings_extra::AdminUi::default();
+                        }
+                    }
+                });
+        });
+        ui.add_space(4.0);
+    }
+}
+
+/// Группа разделов в левой колонке настроек.
+fn nav_group(
+    ui: &mut egui::Ui,
+    title: &str,
+    items: &[SettingsSection],
+    section: &mut SettingsSection,
+) {
+    ui.horizontal(|ui| {
+        ui.add_space(8.0);
+        widgets::section_label(ui, title);
+    });
+    ui.add_space(2.0);
+    for &item in items {
+        if theme::list_row(ui, item.title(), *section == item, false).clicked() {
+            *section = item;
+        }
+    }
+    ui.add_space(8.0);
+}
+
+/// Левая колонка: карточка профиля и список разделов.
+fn settings_nav(
+    ui: &mut egui::Ui,
+    state: &mut SettingsState,
+    me: &User,
+    action: &mut SettingsAction,
+) {
+    nav_profile(ui, me);
     ui.add_space(10.0);
     egui::Frame::new()
         .fill(theme::bg_sidebar())
@@ -553,20 +618,7 @@ fn settings_nav(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 2.0;
-            let mut group = |ui: &mut egui::Ui, title: &str, items: &[SettingsSection]| {
-                ui.horizontal(|ui| {
-                    ui.add_space(8.0);
-                    widgets::section_label(ui, title);
-                });
-                ui.add_space(2.0);
-                for &item in items {
-                    if theme::list_row(ui, item.title(), state.section == item, false).clicked() {
-                        state.section = item;
-                    }
-                }
-                ui.add_space(8.0);
-            };
-            group(
+            nav_group(
                 ui,
                 tr("Пользователь"),
                 &[
@@ -575,8 +627,9 @@ fn settings_nav(
                     SettingsSection::Voice,
                     SettingsSection::Privacy,
                 ],
+                &mut state.section,
             );
-            group(
+            nav_group(
                 ui,
                 tr("Приложение"),
                 &[
@@ -585,35 +638,11 @@ fn settings_nav(
                     SettingsSection::Language,
                     SettingsSection::Connections,
                 ],
+                &mut state.section,
             );
             if !state.admin_slots.is_empty() {
-                if state.admin_slots.len() > 1 {
-                    let current = state.admin_slot.unwrap_or(state.admin_slots[0].0);
-                    let label = state
-                        .admin_slots
-                        .iter()
-                        .find(|(i, _)| *i == current)
-                        .map_or("", |(_, base)| base.as_str())
-                        .to_owned();
-                    ui.horizontal(|ui| {
-                        ui.add_space(8.0);
-                        egui::ComboBox::from_id_salt("admin_slot")
-                            .selected_text(theme::truncate_chars(&label, 26))
-                            .show_ui(ui, |ui| {
-                                for (index, base) in &state.admin_slots {
-                                    if ui.selectable_label(*index == current, base).clicked()
-                                        && *index != current
-                                    {
-                                        state.admin_slot = Some(*index);
-                                        state.extra.admin =
-                                            super::settings_extra::AdminUi::default();
-                                    }
-                                }
-                            });
-                    });
-                    ui.add_space(4.0);
-                }
-                group(
+                admin_slot_picker(ui, state);
+                nav_group(
                     ui,
                     tr("Администрирование"),
                     &[
@@ -626,6 +655,7 @@ fn settings_nav(
                         SettingsSection::Telemetry,
                         SettingsSection::Updates,
                     ],
+                    &mut state.section,
                 );
             }
             ui.add_space(6.0);
@@ -762,483 +792,6 @@ fn save_bar(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Br
             state.section = SettingsSection::Account;
         }
     });
-}
-
-/// «Аккаунт»: предпросмотр профиля, цвет, «обо мне», статус и имя.
-#[allow(
-    clippy::too_many_lines,
-    reason = "раскладка egui читается лучше одним блоком"
-)]
-fn account(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bridge) {
-    page_title(ui, tr("Мой аккаунт"));
-    widgets::section_label(ui, tr("Профиль"));
-    ui.add_space(6.0);
-    let shown = if state.display_name.trim().is_empty() {
-        me.username.clone()
-    } else {
-        state.display_name.trim().to_owned()
-    };
-    let banner_color = state
-        .avatar_color
-        .as_deref()
-        .and_then(theme::palette)
-        .unwrap_or_else(theme::accent);
-    egui::Frame::new()
-        .fill(theme::bg_sidebar())
-        .stroke(egui::Stroke::new(1.0, theme::border()))
-        .corner_radius(CornerRadius::same(10))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            let (banner, _) =
-                ui.allocate_exact_size(egui::vec2(ui.available_width(), 80.0), Sense::hover());
-            ui.painter().rect_filled(
-                banner,
-                CornerRadius {
-                    nw: 10,
-                    ne: 10,
-                    sw: 0,
-                    se: 0,
-                },
-                banner_color.gamma_multiply(0.5),
-            );
-            if let Some(value) = me.banner.as_deref() {
-                crate::images::paint_value(
-                    ui.painter(),
-                    banner,
-                    value,
-                    CornerRadius {
-                        nw: 10,
-                        ne: 10,
-                        sw: 0,
-                        se: 0,
-                    },
-                    true,
-                    egui::Color32::WHITE,
-                );
-            }
-            let avatar_rect = egui::Rect::from_min_size(
-                banner.left_bottom() + egui::vec2(16.0, -32.0),
-                egui::Vec2::splat(64.0),
-            );
-            ui.painter()
-                .circle_filled(avatar_rect.center(), 35.0, theme::bg_sidebar());
-            theme::paint_avatar(
-                ui.painter(),
-                avatar_rect,
-                theme::Face {
-                    name: &shown,
-                    key: Some(me.home_user_id.as_deref().unwrap_or(&me.id)),
-                    // Предпросмотр показывает ещё не сохранённый выбор цвета.
-                    color: state.avatar_color.as_deref(),
-                },
-                None,
-                false,
-                me.avatar.as_deref(),
-            );
-            ui.add_space(38.0);
-            ui.horizontal(|ui| {
-                ui.add_space(16.0);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    ui.label(
-                        RichText::new(&shown)
-                            .size(16.0)
-                            .family(theme::bold_family())
-                            .color(theme::text_bright()),
-                    );
-                    ui.label(theme::muted(format!("@{}", me.username)).size(12.5));
-                    if !state.bio.trim().is_empty() {
-                        ui.add_space(4.0);
-                        ui.label(theme::muted(theme::truncate_chars(state.bio.trim(), 90)));
-                    }
-                    ui.add_space(12.0);
-                });
-            });
-        });
-    ui.add_space(14.0);
-    card(ui, |ui| {
-        super::settings_extra::images_card(ui, &mut state.extra, me, bridge);
-        widgets::field_label(ui, tr("Цвет аватара"));
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for name in theme::PALETTE_NAMES {
-                let color = theme::palette(name).unwrap_or_else(theme::accent);
-                let selected = state.avatar_color.as_deref() == Some(name);
-                if widgets::color_swatch(ui, color, selected, 32.0).clicked() {
-                    state.avatar_color = Some(name.to_owned());
-                }
-            }
-        });
-        widgets::field_label(ui, tr("Обо мне"));
-        widgets::text_area(ui, &mut state.bio, tr("Расскажите о себе…"), 190, 3);
-    });
-    ui.add_space(14.0);
-    widgets::section_label(ui, tr("Учётная запись"));
-    ui.add_space(6.0);
-    card(ui, |ui| {
-        widgets::section_label(ui, tr("Статус"));
-        ui.add_space(4.0);
-        egui::ComboBox::from_id_salt("settings_status")
-            .width(ui.available_width())
-            .selected_text(chosen_label(state.status))
-            .show_ui(ui, |ui| {
-                for value in [
-                    ChosenUserStatus::Online,
-                    ChosenUserStatus::Idle,
-                    ChosenUserStatus::DoNotDisturb,
-                ] {
-                    ui.selectable_value(&mut state.status, value, chosen_label(value));
-                }
-            });
-        widgets::field_label(ui, tr("Отображаемое имя"));
-        widgets::text_field(ui, &mut state.display_name, &me.username, 32);
-        widgets::field_label(ui, tr("Пользовательский статус"));
-        widgets::text_field(ui, &mut state.custom_status, tr("Чем занимаетесь?"), 128);
-    });
-    save_bar(ui, state, me, bridge);
-    ui.add_space(18.0);
-    super::settings_extra::security_cards(ui, &mut state.extra, me, bridge);
-}
-
-/// Подпись выбранного статуса.
-fn chosen_label(status: ChosenUserStatus) -> &'static str {
-    match status {
-        ChosenUserStatus::Online => tr("В сети"),
-        ChosenUserStatus::Idle => tr("Нет на месте"),
-        ChosenUserStatus::DoNotDisturb => tr("Не беспокоить"),
-    }
-}
-
-/// «Голос и видео»: устройства и обработка звука.
-fn voice_settings(
-    ui: &mut egui::Ui,
-    state: &mut SettingsState,
-    bridge: &Bridge,
-    voice: &mut crate::voice::VoiceState,
-) {
-    use crate::voice_media::{DeviceKind, MediaEngine};
-    page_title(ui, tr("Голос и видео"));
-    if !MediaEngine::available() {
-        card(ui, |ui| {
-            ui.label(tr(
-                "Эта сборка клиента без LiveKit: присутствие в голосовых каналах работает, \
-                 а звук — нет. Соберите с флагом `--features voice`.",
-            ));
-        });
-        ui.add_space(10.0);
-    }
-    if state.voice_devices.is_none() {
-        let prefs = voice.prefs.clone();
-        let media = voice.media(bridge);
-        let inputs = media.devices(DeviceKind::Input, &prefs);
-        let outputs = media.devices(DeviceKind::Output, &prefs);
-        state.voice_devices = Some((inputs, outputs));
-    }
-    let mut changed = false;
-    let mut refresh = false;
-    if let Some((inputs, outputs)) = state.voice_devices.as_ref() {
-        card(ui, |ui| {
-            changed |= device_picker(
-                ui,
-                tr("Микрофон"),
-                "voice_input",
-                inputs,
-                &mut voice.prefs.input,
-            );
-            changed |= volume_slider(ui, tr("Громкость микрофона"), &mut voice.prefs.input_volume);
-            ui.add_space(8.0);
-            changed |= device_picker(
-                ui,
-                tr("Устройство воспроизведения"),
-                "voice_output",
-                outputs,
-                &mut voice.prefs.output,
-            );
-            changed |= volume_slider(ui, tr("Громкость звука"), &mut voice.prefs.output_volume);
-            ui.add_space(8.0);
-            changed |= camera_picker(ui, voice);
-            ui.add_space(8.0);
-            if ui.button(tr("Обновить список устройств")).clicked() {
-                refresh = true;
-                voice.stage.cameras = None;
-            }
-        });
-    }
-    if refresh {
-        state.voice_devices = None;
-    }
-    ui.add_space(10.0);
-    card(ui, |ui| {
-        let prefs = &mut voice.prefs;
-        for (title, hint, flag) in [
-            (
-                tr("Эхоподавление"),
-                tr("Убирает эхо ваших колонок из микрофона."),
-                &mut prefs.echo_cancellation,
-            ),
-            (
-                tr("Шумоподавление"),
-                tr("Приглушает фоновый шум."),
-                &mut prefs.noise_suppression,
-            ),
-            (
-                tr("Автоусиление микрофона"),
-                tr("Выравнивает громкость вашего голоса."),
-                &mut prefs.auto_gain_control,
-            ),
-        ] {
-            let before = *flag;
-            super::settings_extra::setting_row(ui, title, hint, flag);
-            changed |= before != *flag;
-        }
-    });
-    ui.add_space(10.0);
-    changed |= attenuation_card(ui, &mut voice.prefs);
-    if changed {
-        let prefs = voice.prefs.clone();
-        voice.media(bridge).apply_prefs(&prefs);
-        crate::prefs::update(|saved| saved.voice = prefs);
-    }
-    ui.add_space(10.0);
-    mic_test_card(ui, state, bridge, voice);
-    ui.add_space(10.0);
-    super::settings_app::sounds_card(ui);
-}
-
-/// Выбор камеры; список ищется один раз (и по «Обновить»).
-fn camera_picker(ui: &mut egui::Ui, voice: &mut crate::voice::VoiceState) -> bool {
-    let cameras = voice
-        .stage
-        .cameras
-        .get_or_insert_with(crate::video_media::VideoControl::cameras);
-    let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.label(tr("Камера"));
-        match cameras {
-            Err(err) => {
-                ui.label(theme::muted(err.as_str()));
-            }
-            Ok(list) if list.is_empty() => {
-                ui.label(theme::muted(tr("камер не найдено")));
-            }
-            Ok(list) => {
-                let current = voice.prefs.camera.unwrap_or(0);
-                let name = list
-                    .iter()
-                    .find(|c| c.index == current)
-                    .map_or_else(|| tr("Первая").to_owned(), |c| c.name.clone());
-                egui::ComboBox::from_id_salt("camera_device")
-                    .selected_text(name)
-                    .show_ui(ui, |ui| {
-                        for camera in list.iter() {
-                            if ui
-                                .selectable_label(current == camera.index, &camera.name)
-                                .clicked()
-                            {
-                                voice.prefs.camera = Some(camera.index);
-                                changed = true;
-                            }
-                        }
-                    });
-            }
-        }
-    });
-    changed
-}
-
-/// Приглушение трансляций, пока кто-то говорит.
-fn attenuation_card(ui: &mut egui::Ui, prefs: &mut crate::voice_media::VoicePrefs) -> bool {
-    let mut changed = false;
-    card(ui, |ui| {
-        let before = prefs.stream_attenuation;
-        super::settings_extra::setting_row(
-            ui,
-            tr("Приглушать трансляции"),
-            tr("Пока кто-то говорит, звук демонстраций экрана становится тише."),
-            &mut prefs.stream_attenuation,
-        );
-        changed |= before != prefs.stream_attenuation;
-        if prefs.stream_attenuation {
-            ui.horizontal(|ui| {
-                ui.label(tr("Насколько"));
-                changed |= ui
-                    .add(egui::Slider::new(&mut prefs.attenuation_strength, 0..=100).suffix(" %"))
-                    .changed();
-            });
-        }
-    });
-    changed
-}
-
-/// Ползунок громкости 0–200 %.
-fn volume_slider(ui: &mut egui::Ui, title: &str, value: &mut u16) -> bool {
-    ui.horizontal(|ui| {
-        ui.label(title);
-        ui.add(egui::Slider::new(value, 0..=200).suffix(" %"))
-            .changed()
-    })
-    .inner
-}
-
-/// Сколько длится проверка микрофона.
-const MIC_TEST_SECONDS: f64 = 15.0;
-
-/// «Проверка микрофона»: индикатор уровня сигнала без звонка.
-fn mic_test_card(
-    ui: &mut egui::Ui,
-    state: &mut SettingsState,
-    bridge: &Bridge,
-    voice: &mut crate::voice::VoiceState,
-) {
-    let now = ui.input(|i| i.time);
-    card(ui, |ui| {
-        widgets::section_label(ui, tr("Проверка микрофона"));
-        ui.add_space(6.0);
-        let running = state.mic_test_until.is_some_and(|until| now < until);
-        if !running && state.mic_test_until.take().is_some() {
-            voice.media(bridge).stop_mic_test();
-        }
-        let in_call = voice.call.is_some() || voice.dm.is_some();
-        ui.horizontal(|ui| {
-            let label = if running {
-                tr("Остановить")
-            } else {
-                tr("Проверить микрофон")
-            };
-            if ui
-                .add_enabled(!in_call, egui::Button::new(label))
-                .on_disabled_hover_text(tr("Во время звонка проверка недоступна"))
-                .clicked()
-            {
-                if running {
-                    state.mic_test_until = None;
-                    voice.media(bridge).stop_mic_test();
-                } else {
-                    let prefs = voice.prefs.clone();
-                    match voice.media(bridge).start_mic_test(&prefs) {
-                        Ok(()) => {
-                            state.mic_test_until = Some(now + MIC_TEST_SECONDS);
-                            state.mic_test_error = None;
-                        }
-                        Err(err) => state.mic_test_error = Some(err),
-                    }
-                }
-            }
-            let level = voice.media(bridge).mic_level().unwrap_or(0.0);
-            let (rect, _) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width().min(320.0), 10.0),
-                egui::Sense::hover(),
-            );
-            ui.painter()
-                .rect_filled(rect, CornerRadius::same(5), theme::bg_input());
-            let mut filled = rect;
-            filled.set_width(rect.width() * level);
-            let color = if level > 0.9 {
-                theme::rose()
-            } else if level > 0.6 {
-                theme::amber()
-            } else {
-                theme::green()
-            };
-            ui.painter()
-                .rect_filled(filled, CornerRadius::same(5), color);
-            if running {
-                ui.ctx().request_repaint();
-            }
-        });
-        ui.add_space(4.0);
-        let hint = state.mic_test_error.as_deref().map_or_else(
-            || {
-                theme::muted(tr(
-                    "Скажите что-нибудь: полоса покажет уровень сигнала выбранного микрофона.",
-                ))
-                .size(12.5)
-            },
-            |err| {
-                RichText::new(crate::tf!("Микрофон не открылся: {err}", err = err))
-                    .size(12.5)
-                    .color(theme::rose())
-            },
-        );
-        ui.label(hint);
-    });
-}
-
-/// Выпадающий список устройств; `None` — системное по умолчанию.
-fn device_picker(
-    ui: &mut egui::Ui,
-    title: &str,
-    id: &str,
-    devices: &[crate::voice_media::Device],
-    selected: &mut Option<String>,
-) -> bool {
-    let before = selected.clone();
-    widgets::field_label(ui, title);
-    let current = selected
-        .as_ref()
-        .and_then(|id| devices.iter().find(|d| &d.id == id))
-        .map_or_else(|| tr("Системное по умолчанию"), |d| d.name.as_str());
-    egui::ComboBox::from_id_salt(id)
-        .selected_text(theme::truncate_chars(current, 40))
-        .width(320.0)
-        .show_ui(ui, |ui| {
-            ui.selectable_value(selected, None, tr("Системное по умолчанию"));
-            for device in devices {
-                ui.selectable_value(selected, Some(device.id.clone()), &device.name);
-            }
-        });
-    *selected != before
-}
-
-/// «Приватность»: видимость в поиске и показ активности.
-fn privacy(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bridge) {
-    page_title(ui, tr("Приватность"));
-    card(ui, |ui| {
-        for (value, title, hint) in [
-            (
-                0,
-                tr("Показывать меня в поиске"),
-                tr("Другие смогут найти вас среди людей инстанса."),
-            ),
-            (
-                1,
-                tr("Показывать активность"),
-                tr("Друзья увидят, чем вы заняты."),
-            ),
-        ] {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(ui.available_width() - 60.0);
-                    ui.label(RichText::new(title).color(theme::text_bright()));
-                    ui.label(theme::muted(hint).size(12.5));
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let flag = if value == 0 {
-                        &mut state.discoverable
-                    } else {
-                        &mut state.show_activity
-                    };
-                    widgets::toggle(ui, flag);
-                });
-            });
-            ui.add_space(10.0);
-        }
-    });
-    save_bar(ui, state, me, bridge);
-}
-
-/// Панель «Подключения».
-fn connections(
-    ui: &mut egui::Ui,
-    state: &mut SettingsState,
-    bridge: &Bridge,
-    action: &mut SettingsAction,
-) {
-    page_title(ui, tr("Подключённые серверы"));
-    let chosen = super::connections::show(ui, &mut state.connections, bridge);
-    if chosen != super::connections::ConnAction::None {
-        *action = SettingsAction::Connections(chosen);
-    }
 }
 
 #[cfg(test)]
