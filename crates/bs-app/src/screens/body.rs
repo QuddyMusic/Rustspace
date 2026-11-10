@@ -179,14 +179,27 @@ pub(crate) fn show_text(ui: &mut egui::Ui, salt: &str, blocks: &[Block], edited:
                     ui.vertical(|ui| show_spans(ui, &format!("{salt}{index}"), spans, None));
                 });
             }
-            Block::Code(code) => {
+            Block::Code { lang, code } => {
                 egui::Frame::new()
                     .fill(theme::bg_input())
                     .stroke(Stroke::new(1.0, theme::border()))
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(Margin::symmetric(10, 8))
                     .show(ui, |ui| {
-                        ui.label(RichText::new(code).monospace().color(theme::text_bright()));
+                        let font = egui::TextStyle::Monospace.resolve(ui.style());
+                        let highlighted = lang.as_deref().and_then(|lang| {
+                            crate::highlight::job(code, lang, &font, theme::is_dark())
+                        });
+                        match highlighted {
+                            Some(job) => {
+                                ui.label(job);
+                            }
+                            None => {
+                                ui.label(
+                                    RichText::new(code).monospace().color(theme::text_bright()),
+                                );
+                            }
+                        }
                     });
             }
         }

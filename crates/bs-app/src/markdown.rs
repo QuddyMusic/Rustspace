@@ -58,8 +58,13 @@ pub(crate) enum Block {
     Paragraph(Vec<Span>),
     /// Цитата.
     Quote(Vec<Span>),
-    /// Блок кода.
-    Code(String),
+    /// Блок кода: язык из ограды (` ```bash `) и сам код.
+    Code {
+        /// Язык; `None` — ограда без языка.
+        lang: Option<String>,
+        /// Код.
+        code: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -95,19 +100,22 @@ pub(crate) fn parse(text: &str, name_of: &dyn Fn(&str) -> Option<String>) -> Vec
         {
             flush(&mut blocks, &mut paragraph, &mut quote);
             let code = &after[..end];
-            // Язык после открывающих кавычек (`rust\n…`) не показываем.
-            let code = match code.split_once('\n') {
+            // Язык после открывающих кавычек (`rust\n…`) — для подсветки.
+            let (lang, code) = match code.split_once('\n') {
                 Some((first, body))
-                    if !first.is_empty()
-                        && first
-                            .chars()
-                            .all(|c| c.is_alphanumeric() || c == '+' || c == '-') =>
+                    if !first.trim().is_empty()
+                        && first.trim().chars().all(|c| {
+                            c.is_alphanumeric() || matches!(c, '+' | '-' | '#' | '_' | '.')
+                        }) =>
                 {
-                    body
+                    (Some(first.trim().to_owned()), body)
                 }
-                _ => code,
+                _ => (None, code),
             };
-            blocks.push(Block::Code(code.trim_matches('\n').to_owned()));
+            blocks.push(Block::Code {
+                lang,
+                code: code.trim_matches('\n').to_owned(),
+            });
             rest = &after[end + 3..];
             rest = rest.strip_prefix('\n').unwrap_or(rest);
             continue;
@@ -383,7 +391,21 @@ mod tests {
         assert_eq!(spans[0].text, "**не жирный**");
         let blocks = parse("до\n```rust\nlet a = *b;\n```\nпосле", &none);
         assert_eq!(blocks.len(), 3);
-        assert_eq!(blocks[1], Block::Code("let a = *b;".into()));
+        assert_eq!(
+            blocks[1],
+            Block::Code {
+                lang: Some("rust".into()),
+                code: "let a = *b;".into()
+            }
+        );
+        let bare = parse("```\nls -la\n```", &none);
+        assert_eq!(
+            bare[0],
+            Block::Code {
+                lang: None,
+                code: "ls -la".into()
+            }
+        );
     }
 
     #[test]

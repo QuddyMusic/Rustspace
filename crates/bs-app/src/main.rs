@@ -26,6 +26,7 @@ mod emoji_data;
 mod fake_instance;
 mod fleet;
 mod gif_favorites;
+mod highlight;
 mod hotkeys;
 mod i18n;
 mod icons;

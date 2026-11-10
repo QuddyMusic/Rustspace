@@ -395,6 +395,12 @@ fn current() -> Palette {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// Тёмная ли текущая тема.
+#[must_use]
+pub(crate) fn is_dark() -> bool {
+    current().dark
+}
+
 macro_rules! palette_accessors {
     ($($(#[$doc:meta])* $name:ident),* $(,)?) => {
         $(

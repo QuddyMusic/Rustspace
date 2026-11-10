@@ -27,7 +27,8 @@ every WebSocket frame and REST response the client receives.
   bans, invites, join requests, the instance directory, notification settings per space and
   per channel (including timed mute).
 - **Messages.** Send, edit, delete, replies, reactions, mentions, markdown, read state,
-  history paging, message search with filters and jump-to-result. Text longer than the
+  history paging, message search with filters and jump-to-result. Code blocks are
+  syntax-highlighted by the fence language (` ```bash `, ` ```rust `…; Prism aliases too). Text longer than the
   server limit (4000 characters) is sent as several messages in a row; a code block cut at
   the break is closed with ` ``` ` and reopened with the same fence (and language) in the
   next message.
@@ -72,7 +73,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
 | `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, data-channel signals | 75 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 215 |
+| `bs-app` | The GUI and its entry point | 218 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
@@ -198,4 +199,5 @@ AGPL-3.0-only, like the original Backspace.
 
 Third-party assets: the [Inter](https://rsms.me/inter/) font (`crates/bs-app/assets/fonts/`,
 SIL Open Font License 1.1); interface sounds from the original Backspace
-(`crates/bs-app/assets/sounds`, AGPL-3.0-only).
+(`crates/bs-app/assets/sounds`, AGPL-3.0-only); syntax grammars and colour themes from
+[bat](https://github.com/sharkdp/bat) via `two-face` (each under its own licence, see that crate).
