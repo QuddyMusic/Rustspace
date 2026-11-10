@@ -9,7 +9,9 @@ mod roles;
 pub(crate) use roles::GROUPS as PERMISSION_GROUPS;
 
 use bs_api::{Ban, SpaceUpdate};
-use bs_permissions::{Permissions, can_manage_role_at, has_permission_bit, parse_permission_string};
+use bs_permissions::{
+    Permissions, can_manage_role_at, has_permission_bit, parse_permission_string,
+};
 use bs_types::SpaceVisibility;
 use egui::{Align, CornerRadius, Layout, Margin, RichText};
 
@@ -55,7 +57,10 @@ struct Fields {
 
 /// Состояние окна настроек пространства.
 #[derive(Debug)]
-#[allow(clippy::struct_excessive_bools, reason = "независимые флаги интерфейса")]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "независимые флаги интерфейса"
+)]
 pub(crate) struct SpaceSettings {
     origin: usize,
     space_id: String,
@@ -101,7 +106,11 @@ impl SpaceSettings {
         let space = bridge.cache_at(origin)?.space(space_id)?;
         let fields = Fields {
             name: space.space.name.clone(),
-            color: space.space.avatar_color.clone().unwrap_or_else(|| "mint".to_owned()),
+            color: space
+                .space
+                .avatar_color
+                .clone()
+                .unwrap_or_else(|| "mint".to_owned()),
             description: space.space.description.clone().unwrap_or_default(),
             visibility: space.space.visibility,
             icon: space.space.icon.clone().unwrap_or_default(),
@@ -133,7 +142,10 @@ impl SpaceSettings {
     }
 
     /// Учитывает итог действия. `false` — окно надо закрыть.
-    #[allow(clippy::too_many_lines, reason = "плоская таблица итогов по видам действий")]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "плоская таблица итогов по видам действий"
+    )]
     pub(crate) fn apply(&mut self, event: &SpaceEvent) -> bool {
         match event {
             SpaceEvent::Admin {
@@ -146,7 +158,9 @@ impl SpaceSettings {
                 match (op, result) {
                     (SpaceOp::Delete, Ok(())) => return false,
                     (op, Err(err)) => {
-                        if matches!(op, SpaceOp::UpdateRole(_, _)) && err.starts_with("Кто-то другой") {
+                        if matches!(op, SpaceOp::UpdateRole(_, _))
+                            && err.starts_with("Кто-то другой")
+                        {
                             self.roles.reload();
                         }
                         self.error = Some(err.clone());
@@ -222,7 +236,8 @@ impl SpaceSettings {
                     }
                 }
             }
-            SpaceEvent::Requests { space_id, result } if *space_id == self.space_id => match result {
+            SpaceEvent::Requests { space_id, result } if *space_id == self.space_id => match result
+            {
                 Ok(list) => self.requests = Some(list.clone()),
                 Err(err) => {
                     self.requests = Some(Vec::new());
@@ -459,10 +474,8 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge
     );
     ui.add_space(6.0);
     ui.label(
-        RichText::new(
-            "Передать права владельца другому участнику. Вы станете обычным участником.",
-        )
-        .color(theme::TEXT_MUTED),
+        RichText::new("Передать права владельца другому участнику. Вы станете обычным участником.")
+            .color(theme::TEXT_MUTED),
     );
     ui.add_space(6.0);
     if state.transfer_open {
@@ -473,10 +486,8 @@ fn danger_zone(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge
     }
     ui.add_space(14.0);
     ui.label(
-        RichText::new(
-            "Удалить это пространство и все его данные навсегда. Это нельзя отменить.",
-        )
-        .color(theme::TEXT_MUTED),
+        RichText::new("Удалить это пространство и все его данные навсегда. Это нельзя отменить.")
+            .color(theme::TEXT_MUTED),
     );
     ui.add_space(6.0);
     let label = if state.delete_armed {
@@ -529,7 +540,11 @@ fn transfer_picker(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Br
             if ui
                 .add_enabled(
                     !state.busy,
-                    theme::primary_button(if state.busy { "Передаём права…" } else { "Передать" }),
+                    theme::primary_button(if state.busy {
+                        "Передаём права…"
+                    } else {
+                        "Передать"
+                    }),
                 )
                 .clicked()
             {
@@ -606,9 +621,7 @@ fn members(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, bridge:
                 .collect()
         })
         .unwrap_or_default();
-    ui.label(
-        RichText::new("Управляйте участниками этого пространства.").color(theme::TEXT_MUTED),
-    );
+    ui.label(RichText::new("Управляйте участниками этого пространства.").color(theme::TEXT_MUTED));
     ui.add_space(8.0);
     widgets::section_label(ui, &format!("Участники ({})", rows.len()));
     ui.add_space(6.0);
@@ -675,7 +688,8 @@ fn member_row(
                     if rights.kick && ui.button("Исключить").clicked() {
                         state.confirm = Some(Confirm::Kick(row.id.clone()));
                     }
-                    let outranks = rights.top > row.top || rights.perms.contains(Permissions::ADMINISTRATOR);
+                    let outranks =
+                        rights.top > row.top || rights.perms.contains(Permissions::ADMINISTRATOR);
                     if rights.manage_roles && outranks {
                         ui.menu_button("Роли", |ui| {
                             member_roles_menu(ui, state, rights, bridge, row, assignable);
@@ -712,7 +726,10 @@ fn member_roles_menu(
         let mut has = row.role_ids.contains(id);
         let was = has;
         if ui
-            .add_enabled(allowed && !state.busy, egui::Checkbox::new(&mut has, name.as_str()))
+            .add_enabled(
+                allowed && !state.busy,
+                egui::Checkbox::new(&mut has, name.as_str()),
+            )
             .changed()
             && has != was
         {
@@ -822,18 +839,14 @@ fn bans(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Bridge) {
                     theme::avatar(ui, &name, 32.0, None, None);
                     ui.vertical(|ui| {
                         ui.label(RichText::new(&name).color(theme::TEXT_BRIGHT));
-                        let by = ban.moderator.as_ref().map_or_else(
-                            || "неизвестно".to_owned(),
-                            display_name,
+                        let by = ban
+                            .moderator
+                            .as_ref()
+                            .map_or_else(|| "неизвестно".to_owned(), display_name);
+                        let text = ban.reason.as_deref().filter(|r| !r.is_empty()).map_or_else(
+                            || format!("Заблокировано пользователем {by}"),
+                            |reason| format!("Заблокировано пользователем {by}: {reason}"),
                         );
-                        let text = ban
-                            .reason
-                            .as_deref()
-                            .filter(|r| !r.is_empty())
-                            .map_or_else(
-                                || format!("Заблокировано пользователем {by}"),
-                                |reason| format!("Заблокировано пользователем {by}: {reason}"),
-                            );
                         ui.label(RichText::new(text).size(12.0).color(theme::TEXT_MUTED));
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -908,7 +921,11 @@ mod tests {
     #[test]
     fn ban_success_clears_confirm_and_error_keeps_it() {
         let mut s = state();
-        assert!(s.apply(&admin(SpaceOp::Ban("u2".to_owned(), None), Err("нет".to_owned()), "s1")));
+        assert!(s.apply(&admin(
+            SpaceOp::Ban("u2".to_owned(), None),
+            Err("нет".to_owned()),
+            "s1"
+        )));
         assert_eq!(s.error.as_deref(), Some("нет"));
         assert!(s.confirm.is_some());
         assert!(s.apply(&admin(SpaceOp::Ban("u2".to_owned(), None), Ok(()), "s1")));
@@ -957,7 +974,11 @@ mod tests {
     fn deciding_a_request_drops_it_from_the_list() {
         let mut s = state();
         s.requests = Some(Vec::new());
-        assert!(s.apply(&admin(SpaceOp::DecideRequest("j1".to_owned(), true), Ok(()), "s1")));
+        assert!(s.apply(&admin(
+            SpaceOp::DecideRequest("j1".to_owned(), true),
+            Ok(()),
+            "s1"
+        )));
         assert_eq!(s.requests.as_ref().map(Vec::len), Some(0));
     }
 

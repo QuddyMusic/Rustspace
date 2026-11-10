@@ -131,7 +131,12 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
         Icon::Join => {
             line(vec![p(12.0, 15.5), p(12.0, 4.5)]);
             line(vec![p(7.5, 9.0), p(12.0, 4.5), p(16.5, 9.0)]);
-            line(vec![p(4.5, 15.0), p(4.5, 19.5), p(19.5, 19.5), p(19.5, 15.0)]);
+            line(vec![
+                p(4.5, 15.0),
+                p(4.5, 19.5),
+                p(19.5, 19.5),
+                p(19.5, 15.0),
+            ]);
         }
         Icon::User => {
             painter.circle_stroke(p(12.0, 8.0), 3.9 * unit, stroke);

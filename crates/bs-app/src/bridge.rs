@@ -2113,7 +2113,11 @@ impl Session {
 
     /// Сообщение, к которому надо прокрутить ленту этого канала (однократно).
     pub(crate) fn take_jump(&mut self, channel_id: &str) -> Option<String> {
-        if self.jump.as_ref().is_some_and(|(chan, _)| chan == channel_id) {
+        if self
+            .jump
+            .as_ref()
+            .is_some_and(|(chan, _)| chan == channel_id)
+        {
             return self.jump.take().map(|(_, id)| id);
         }
         None
@@ -2207,7 +2211,10 @@ impl Session {
     }
 
     /// Применяет ответ REST-запроса.
-    #[allow(clippy::too_many_lines, reason = "по ветке на каждый вид ответа; разобьём при рефакторинге")]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "по ветке на каждый вид ответа; разобьём при рефакторинге"
+    )]
     fn handle_response(&mut self, response: BridgeResponse) {
         match response {
             BridgeResponse::History { channel_id, items } => {
@@ -2408,7 +2415,10 @@ async fn run_session(
     let mut store = CredentialStore::new();
     let resuming = resume.is_some();
     let login = if let Some(token) = resume {
-        store.insert(origin.clone(), bs_identity::AccessToken::new(token.expose()));
+        store.insert(
+            origin.clone(),
+            bs_identity::AccessToken::new(token.expose()),
+        );
         InstanceHandle::resume_with_transport(
             &mut store,
             origin,
@@ -2870,9 +2880,7 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
         SpaceOp::Update(patch) => client.update_space(&space_id, patch).await,
         SpaceOp::Delete => client.delete_space(&space_id).await,
         SpaceOp::Kick(user) => client.leave_space(&space_id, user).await,
-        SpaceOp::Ban(user, reason) => {
-            client.ban_member(&space_id, user, reason.as_deref()).await
-        }
+        SpaceOp::Ban(user, reason) => client.ban_member(&space_id, user, reason.as_deref()).await,
         SpaceOp::Unban(user) => client.unban_member(&space_id, user).await,
         SpaceOp::Transfer(user) => client.transfer_ownership(&space_id, user).await,
         SpaceOp::CreateRole(role) => client.create_role(&space_id, role).await.map(|_| ()),
@@ -2881,9 +2889,7 @@ async fn space_admin(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) 
             .await
             .map(|_| ()),
         SpaceOp::DeleteRole(role_id) => client.delete_role(&space_id, role_id).await,
-        SpaceOp::AddMemberRole(user, role) => {
-            client.add_member_role(&space_id, user, role).await
-        }
+        SpaceOp::AddMemberRole(user, role) => client.add_member_role(&space_id, user, role).await,
         SpaceOp::RemoveMemberRole(user, role) => {
             client.remove_member_role(&space_id, user, role).await
         }
@@ -3181,7 +3187,9 @@ async fn group_admin(client: &bs_api::ApiClient, dm_id: String, op: GroupOp) -> 
 }
 
 fn space_message(err: &bs_api::ApiError) -> String {
-    let message = err.body().map_or_else(|| err.to_string(), |b| b.error.clone());
+    let message = err
+        .body()
+        .map_or_else(|| err.to_string(), |b| b.error.clone());
     crate::logic::describe_server_error(err.code(), &message)
 }
 
@@ -3298,7 +3306,9 @@ async fn handle_request(client: &bs_api::ApiClient, request: BridgeRequest) -> B
             };
             match joined {
                 Ok(space) => BridgeResponse::Space(Box::new(space)),
-                Err(err) => BridgeResponse::SpaceAction(SpaceEvent::JoinFailed(space_message(&err))),
+                Err(err) => {
+                    BridgeResponse::SpaceAction(SpaceEvent::JoinFailed(space_message(&err)))
+                }
             }
         }
         BridgeRequest::LeaveSpace { space_id, user_id } => {
@@ -4001,16 +4011,22 @@ mod tests {
         })
         .await
         .expect("join");
-        assert!(matches!(&ready.1, Ok(BridgeEvent::Ready { .. })), "{:?}", ready.1);
+        assert!(
+            matches!(&ready.1, Ok(BridgeEvent::Ready { .. })),
+            "{:?}",
+            ready.1
+        );
 
         let ok_path = dir.join("a.bin");
         let bad_path = dir.join("b.bin");
-        for (id, name, dest) in [(1, "a.bin", ok_path.clone()), (2, "gone.bin", bad_path.clone())] {
+        for (id, name, dest) in [
+            (1, "a.bin", ok_path.clone()),
+            (2, "gone.bin", bad_path.clone()),
+        ] {
             requests_tx
                 .send(BridgeRequest::Download {
                     id,
-                    path: bs_api::AssetPath::parse(&format!("/api/uploads/{name}"))
-                        .expect("путь"),
+                    path: bs_api::AssetPath::parse(&format!("/api/uploads/{name}")).expect("путь"),
                     dest,
                 })
                 .expect("запрос");
@@ -4086,11 +4102,10 @@ mod tests {
             requests_rx,
             responses_tx,
         ));
-        let event = tokio::task::spawn_blocking(move || {
-            events_rx.recv_timeout(Duration::from_secs(10))
-        })
-        .await
-        .expect("join");
+        let event =
+            tokio::task::spawn_blocking(move || events_rx.recv_timeout(Duration::from_secs(10)))
+                .await
+                .expect("join");
         assert!(matches!(&event, Ok(BridgeEvent::Ready { .. })), "{event:?}");
         let saved = crate::saved_session::load(&path).expect("сессия сохранена");
         assert_eq!(saved.base, base);

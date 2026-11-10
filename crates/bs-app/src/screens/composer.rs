@@ -924,7 +924,11 @@ impl Composer {
         ui.add_space(4.0);
         let favorites_only = self.gifs.favorites_only;
         // Избранное — просто адреса: ему ключ Klipy не нужен.
-        let gate = if favorites_only { Some(true) } else { self.gifs.enabled };
+        let gate = if favorites_only {
+            Some(true)
+        } else {
+            self.gifs.enabled
+        };
         match gate {
             None => {
                 if let Some(error) = &self.gifs.enabled_error {

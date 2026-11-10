@@ -152,9 +152,7 @@ pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String
         Some("role_not_in_space") => "Эта роль не принадлежит этому пространству.",
         Some("member_not_found") => "Участник не найден.",
         Some("space_owner_only") => "Это может сделать только владелец пространства.",
-        Some("cannot_grant_unowned_permissions") => {
-            "Нельзя выдать права, которых нет у вас самих."
-        }
+        Some("cannot_grant_unowned_permissions") => "Нельзя выдать права, которых нет у вас самих.",
         Some("cannot_deny_unowned_permissions") => {
             "Нельзя запретить права, которых нет у вас самих."
         }

@@ -102,8 +102,7 @@ fn external_client() -> Result<&'static reqwest::Client, ApiError> {
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             // CDN иногда отвечает перенаправлением на соседний путь; идём
             // только по ссылкам, которые сами бы приняли.
-            if attempt.previous().len() < 3
-                && AssetPath::external(attempt.url().as_str()).is_some()
+            if attempt.previous().len() < 3 && AssetPath::external(attempt.url().as_str()).is_some()
             {
                 attempt.follow()
             } else {
@@ -128,7 +127,10 @@ pub async fn fetch_external(asset: &AssetPath, limit: usize) -> Result<Vec<u8>, 
     }
     let response = external_client()?
         .get(asset.as_str())
-        .header(header::ACCEPT, "image/webp,image/gif,image/*;q=0.8,*/*;q=0.5")
+        .header(
+            header::ACCEPT,
+            "image/webp,image/gif,image/*;q=0.8,*/*;q=0.5",
+        )
         .send()
         .await?;
     let status = response.status();

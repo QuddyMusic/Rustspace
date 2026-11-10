@@ -111,7 +111,11 @@ impl NotificationSettings {
 }
 
 /// Рисует окно. Возвращает `false`, когда его надо закрыть.
-pub(crate) fn show(ctx: &egui::Context, state: &mut NotificationSettings, bridge: &mut Bridge) -> bool {
+pub(crate) fn show(
+    ctx: &egui::Context,
+    state: &mut NotificationSettings,
+    bridge: &mut Bridge,
+) -> bool {
     let mut keep_open = true;
     let response = egui::Modal::new(egui::Id::unique("notification_settings"))
         .frame(
@@ -151,7 +155,11 @@ fn body(ui: &mut egui::Ui, state: &mut NotificationSettings, bridge: &mut Bridge
     let is_channel = state.channel_id.is_some();
     let inherited = resolve_policy(space.as_ref(), None, now).level;
     let selected = own.as_ref().and_then(|s| s.level).map_or(
-        if is_channel { Choice::Inherit } else { Choice::Level(DEFAULT_LEVEL) },
+        if is_channel {
+            Choice::Inherit
+        } else {
+            Choice::Level(DEFAULT_LEVEL)
+        },
         Choice::Level,
     );
     let mut choices = Vec::new();
@@ -168,7 +176,9 @@ fn body(ui: &mut egui::Ui, state: &mut NotificationSettings, bridge: &mut Bridge
                 Choice::Inherit => format!("Как в пространстве ({})", level_label(inherited)),
                 Choice::Level(level) => level_label(level).to_owned(),
             };
-            if widgets::radio_card(ui, &title, "", choice == selected).clicked() && choice != selected {
+            if widgets::radio_card(ui, &title, "", choice == selected).clicked()
+                && choice != selected
+            {
                 // Для пространства «наследовать» нет: сброс — это умолчание.
                 change = Some(UpdateNotificationSettingRequest {
                     level: Some(match choice {

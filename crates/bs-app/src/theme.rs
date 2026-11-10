@@ -470,7 +470,10 @@ pub(crate) fn muted_mark(ui: &egui::Ui, row: &egui::Rect) {
     let stroke = egui::Stroke::new(1.4, TEXT_FAINT);
     ui.painter().circle_stroke(center, 5.5, stroke);
     ui.painter().line_segment(
-        [center + egui::vec2(-3.8, 3.8), center + egui::vec2(3.8, -3.8)],
+        [
+            center + egui::vec2(-3.8, 3.8),
+            center + egui::vec2(3.8, -3.8),
+        ],
         stroke,
     );
 }
@@ -531,11 +534,8 @@ pub(crate) fn occupant_row(
     );
     paint_avatar(ui.painter(), avatar_rect, name, None, false, image);
     if speaking {
-        ui.painter().circle_stroke(
-            avatar_rect.center(),
-            12.5,
-            egui::Stroke::new(2.0, GREEN),
-        );
+        ui.painter()
+            .circle_stroke(avatar_rect.center(), 12.5, egui::Stroke::new(2.0, GREEN));
     }
     ui.painter().text(
         egui::pos2(rect.left() + 58.0, rect.center().y),
@@ -597,8 +597,12 @@ pub(crate) fn category_header(ui: &mut egui::Ui, name: &str, add: bool) -> Categ
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
                     plus = Some(
-                        ui.add(crate::widgets::flat_icon(crate::icons::Icon::Plus, 16.0, TEXT_FAINT))
-                            .on_hover_text("Создать канал"),
+                        ui.add(crate::widgets::flat_icon(
+                            crate::icons::Icon::Plus,
+                            16.0,
+                            TEXT_FAINT,
+                        ))
+                        .on_hover_text("Создать канал"),
                     );
                 });
             }

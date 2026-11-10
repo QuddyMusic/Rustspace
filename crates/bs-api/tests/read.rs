@@ -266,9 +266,10 @@ async fn around_reports_missing_message() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/dm/d1/messages/around"))
-        .respond_with(ResponseTemplate::new(404).set_body_json(
-            json!({"error": "Message not found", "code": "message_not_found"}),
-        ))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(json!({"error": "Message not found", "code": "message_not_found"})),
+        )
         .mount(&server)
         .await;
     let err = client(&server)

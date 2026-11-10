@@ -2,7 +2,9 @@
 //!
 //! Хранятся на инстансе, где живёт пространство: у каждого инстанса — свои.
 
-use bs_types::{NotificationSetting, NotificationSettingsResponse, UpdateNotificationSettingRequest};
+use bs_types::{
+    NotificationSetting, NotificationSettingsResponse, UpdateNotificationSettingRequest,
+};
 
 use crate::client::ApiClient;
 use crate::error::ApiError;

@@ -275,10 +275,7 @@ pub(crate) fn show_reactions(
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 response.show_tooltip_text(group.names.join(", "));
             }
-            targets.push((
-                rect,
-                ReactionClick::Toggle(group.emoji.clone(), group.mine),
-            ));
+            targets.push((rect, ReactionClick::Toggle(group.emoji.clone(), group.mine)));
         }
         if !groups.is_empty() {
             let (rect, response) = ui.allocate_exact_size(Vec2::new(30.0, 24.0), Sense::hover());

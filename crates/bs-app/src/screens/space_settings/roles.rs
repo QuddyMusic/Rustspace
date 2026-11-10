@@ -4,7 +4,10 @@
 //! Блокировки по правам и иерархии здесь лишь подсказка; решает сервер.
 
 use bs_api::{NewRole, RoleSide, RoleUpdate};
-use bs_permissions::{Permissions, can_manage_role_at, parse_permission_string, permissions_to_string, permissions_version};
+use bs_permissions::{
+    Permissions, can_manage_role_at, parse_permission_string, permissions_to_string,
+    permissions_version,
+};
 use bs_types::Role;
 use egui::{Color32, CornerRadius, Margin, RichText};
 
@@ -41,8 +44,14 @@ pub(crate) const GROUPS: [(&str, &[(Permissions, &str)]); 3] = [
             (Permissions::SEND_MESSAGES, "Отправка сообщений"),
             (Permissions::MANAGE_MESSAGES, "Управление сообщениями"),
             (Permissions::ATTACH_FILES, "Прикрепление файлов"),
-            (Permissions::MENTION_EVERYONE, "Упоминать @everyone, @here и роли"),
-            (Permissions::READ_MESSAGE_HISTORY, "Чтение истории сообщений"),
+            (
+                Permissions::MENTION_EVERYONE,
+                "Упоминать @everyone, @here и роли",
+            ),
+            (
+                Permissions::READ_MESSAGE_HISTORY,
+                "Чтение истории сообщений",
+            ),
             (Permissions::ADD_REACTIONS, "Добавление реакций"),
         ],
     ),
@@ -132,7 +141,12 @@ fn ordered(bridge: &Bridge, state: &SpaceSettings) -> Vec<Role> {
         .and_then(|cache| cache.space(&state.space_id))
         .map(|space| space.roles.clone())
         .unwrap_or_default();
-    roles.sort_by_key(|role| (role.is_everyone == Some(true), std::cmp::Reverse(role.position)));
+    roles.sort_by_key(|role| {
+        (
+            role.is_everyone == Some(true),
+            std::cmp::Reverse(role.position),
+        )
+    });
     roles
 }
 
@@ -211,7 +225,8 @@ fn role_row(
 ) {
     let role = &roles[index];
     let everyone = role.is_everyone == Some(true);
-    let editable = rights.manage_roles && can_manage_role_at(rights.top, role.position, rights.perms);
+    let editable =
+        rights.manage_roles && can_manage_role_at(rights.top, role.position, rights.perms);
     let mut open = false;
     let mut mv: Option<(String, RoleSide)> = None;
     egui::Frame::new()
@@ -222,24 +237,41 @@ fn role_row(
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let color = hex_color(&role.color).unwrap_or(theme::TEXT_MUTED);
-                let (dot, _) = ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::hover());
+                let (dot, _) =
+                    ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::hover());
                 ui.painter().circle_filled(dot.center(), 6.0, color);
-                let name = if everyone { "@everyone" } else { role.name.as_str() };
+                let name = if everyone {
+                    "@everyone"
+                } else {
+                    role.name.as_str()
+                };
                 if ui
-                    .add(egui::Label::new(RichText::new(name).color(theme::TEXT_BRIGHT)).sense(egui::Sense::click()))
+                    .add(
+                        egui::Label::new(RichText::new(name).color(theme::TEXT_BRIGHT))
+                            .sense(egui::Sense::click()),
+                    )
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 {
                     open = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(if editable { "Изменить" } else { "Просмотр" }).clicked() {
+                    if ui
+                        .button(if editable {
+                            "Изменить"
+                        } else {
+                            "Просмотр"
+                        })
+                        .clicked()
+                    {
                         open = true;
                     }
                     if !editable || everyone {
                         return;
                     }
-                    let below = roles.get(index + 1).filter(|next| next.is_everyone != Some(true));
+                    let below = roles
+                        .get(index + 1)
+                        .filter(|next| next.is_everyone != Some(true));
                     if ui
                         .add_enabled(below.is_some() && !state.busy, egui::Button::new("▼"))
                         .on_hover_text(format!("Переместить «{}» ниже", role.name))
@@ -296,11 +328,17 @@ fn editor(
     bridge: &mut Bridge,
     role: &Role,
 ) {
-    if state.roles.draft.as_ref().is_none_or(|d| d.role_id != role.id) {
+    if state
+        .roles
+        .draft
+        .as_ref()
+        .is_none_or(|d| d.role_id != role.id)
+    {
         state.roles.draft = Some(load_draft(role));
     }
     let everyone = role.is_everyone == Some(true);
-    let editable = rights.manage_roles && can_manage_role_at(rights.top, role.position, rights.perms);
+    let editable =
+        rights.manage_roles && can_manage_role_at(rights.top, role.position, rights.perms);
     if ui.button("← Вернуться к ролям").clicked() {
         state.roles.closed();
         return;
@@ -329,8 +367,13 @@ fn editor(
                 ui.spacing_mut().item_spacing.x = 4.0;
                 for preset in PRESETS {
                     let color = hex_color(preset).unwrap_or(theme::TEXT_MUTED);
-                    if widgets::color_swatch(ui, color, draft.color.eq_ignore_ascii_case(preset), 30.0)
-                        .clicked()
+                    if widgets::color_swatch(
+                        ui,
+                        color,
+                        draft.color.eq_ignore_ascii_case(preset),
+                        30.0,
+                    )
+                    .clicked()
                     {
                         preset.clone_into(&mut draft.color);
                     }
@@ -365,7 +408,11 @@ fn permission_grid(ui: &mut egui::Ui, perms: &mut Permissions, rights: Rights, e
                     let changed = ui
                         .add_enabled_ui(held, |ui| widgets::toggle(ui, &mut on))
                         .inner;
-                    let color = if held { theme::TEXT_BRIGHT } else { theme::TEXT_MUTED };
+                    let color = if held {
+                        theme::TEXT_BRIGHT
+                    } else {
+                        theme::TEXT_MUTED
+                    };
                     ui.label(RichText::new(*label).color(color));
                     changed
                 })
@@ -409,7 +456,11 @@ fn buttons(
             ui.label(RichText::new("Роль с таким названием уже существует").color(theme::ROSE));
         }
         ui.horizontal(|ui| {
-            let label = if state.busy { "Сохранение…" } else { "Сохранить" };
+            let label = if state.busy {
+                "Сохранение…"
+            } else {
+                "Сохранить"
+            };
             if ui
                 .add_enabled(!invalid && !state.busy, theme::primary_button(label))
                 .clicked()
@@ -464,7 +515,11 @@ fn buttons(
             state.request(bridge, op);
             state.roles.closed();
         }
-        let label = if state.roles.delete_armed { "Подтвердить?" } else { "Удалить роль" };
+        let label = if state.roles.delete_armed {
+            "Подтвердить?"
+        } else {
+            "Удалить роль"
+        };
         let delete = ui.add_enabled(
             foreign.is_empty() && !state.busy,
             egui::Button::new(RichText::new(label).color(theme::BG_RAIL))
@@ -500,7 +555,10 @@ mod tests {
 
     #[test]
     fn hex_colors_parse_strictly() {
-        assert_eq!(hex_color("#3498db"), Some(Color32::from_rgb(0x34, 0x98, 0xdb)));
+        assert_eq!(
+            hex_color("#3498db"),
+            Some(Color32::from_rgb(0x34, 0x98, 0xdb))
+        );
         assert_eq!(hex_color("3498db"), None);
         assert_eq!(hex_color("#34"), None);
         assert_eq!(hex_color("#zzzzzz"), None);
@@ -510,7 +568,10 @@ mod tests {
     #[test]
     fn draft_starts_clean_with_version_of_loaded_bits() {
         let draft = load_draft(&role("1088"));
-        assert_eq!(draft.perms, Permissions::KICK_MEMBERS | Permissions::SEND_MESSAGES);
+        assert_eq!(
+            draft.perms,
+            Permissions::KICK_MEMBERS | Permissions::SEND_MESSAGES
+        );
         assert_eq!(draft.perms, draft.base_perms);
         assert_eq!(draft.version, permissions_version(draft.perms));
     }

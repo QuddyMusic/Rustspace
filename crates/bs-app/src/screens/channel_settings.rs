@@ -42,7 +42,10 @@ enum Tab {
 
 /// Состояние окна.
 #[derive(Debug)]
-#[allow(clippy::struct_excessive_bools, reason = "независимые флаги интерфейса")]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "независимые флаги интерфейса"
+)]
 pub(crate) struct ChannelSettings {
     origin: usize,
     space_id: String,
@@ -140,13 +143,11 @@ impl ChannelSettings {
             } if *space_id == self.space_id => {
                 self.busy = false;
                 match (op, result) {
-                    (SpaceOp::DeleteChannel(id), Ok(()))
-                        if matches!(&self.target, Target::Channel(mine) if mine == id) =>
+                    (SpaceOp::DeleteChannel(id), Ok(())) if matches!(&self.target, Target::Channel(mine) if mine == id) =>
                     {
                         return false;
                     }
-                    (SpaceOp::DeleteCategory(id), Ok(()))
-                        if matches!(&self.target, Target::Category(mine) if mine == id) =>
+                    (SpaceOp::DeleteCategory(id), Ok(())) if matches!(&self.target, Target::Category(mine) if mine == id) =>
                     {
                         return false;
                     }
@@ -236,7 +237,11 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut ChannelSettings, bridge: &mu
 }
 
 fn title(state: &ChannelSettings) -> &'static str {
-    if state.is_channel() { "Настройки канала" } else { "Настройки категории" }
+    if state.is_channel() {
+        "Настройки канала"
+    } else {
+        "Настройки категории"
+    }
 }
 
 fn nav(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, keep_open: &mut bool) {
@@ -250,8 +255,16 @@ fn nav(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, keep_open
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add_space(14.0);
-            let prefix = if !state.is_channel() { "" } else if state.voice { "🔊 " } else { "# " };
-            ui.label(RichText::new(format!("{prefix}{}", state.saved_name)).color(theme::TEXT_MUTED));
+            let prefix = if !state.is_channel() {
+                ""
+            } else if state.voice {
+                "🔊 "
+            } else {
+                "# "
+            };
+            ui.label(
+                RichText::new(format!("{prefix}{}", state.saved_name)).color(theme::TEXT_MUTED),
+            );
         });
         ui.add_space(8.0);
         let mut tabs = vec![(Tab::Overview, "Основное", crate::icons::Icon::Gear)];
@@ -301,7 +314,11 @@ fn overview(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
     let channel = state.is_channel();
     widgets::field_label(
         ui,
-        if channel { "Название канала" } else { "Название категории" },
+        if channel {
+            "Название канала"
+        } else {
+            "Название категории"
+        },
     );
     widgets::text_field(ui, &mut state.name, "Название", NAME_MAX);
     if channel {
@@ -343,7 +360,9 @@ fn overview(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
                                 .then(|| state.topic.trim().to_owned()),
                         },
                     ),
-                    Target::Category(id) => SpaceOp::RenameCategory(id, state.name.trim().to_owned()),
+                    Target::Category(id) => {
+                        SpaceOp::RenameCategory(id, state.name.trim().to_owned())
+                    }
                 };
                 state.request(bridge, op);
             }
@@ -393,7 +412,11 @@ fn privacy(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) 
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.label(RichText::new(label).color(theme::TEXT_BRIGHT));
-            ui.label(RichText::new(description).size(12.0).color(theme::TEXT_MUTED));
+            ui.label(
+                RichText::new(description)
+                    .size(12.0)
+                    .color(theme::TEXT_MUTED),
+            );
         });
         ui.add_enabled_ui(!state.busy, |ui| widgets::toggle(ui, &mut flipped));
     });
@@ -513,7 +536,11 @@ fn access(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, bridge
                 .map(|r| Entry {
                     kind: OverrideTargetType::Role,
                     id: r.id.clone(),
-                    name: if r.is_everyone == Some(true) { "@everyone".to_owned() } else { r.name.clone() },
+                    name: if r.is_everyone == Some(true) {
+                        "@everyone".to_owned()
+                    } else {
+                        r.name.clone()
+                    },
                     position: r.position,
                 })
                 .collect();
@@ -523,7 +550,12 @@ fn access(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, bridge
                 .map(|m| Entry {
                     kind: OverrideTargetType::Member,
                     id: m.user.id.clone(),
-                    name: m.user.display_name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| m.user.username.clone()),
+                    name: m
+                        .user
+                        .display_name
+                        .clone()
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or_else(|| m.user.username.clone()),
                     position: m.roles.iter().map(|r| r.position).max().unwrap_or(0),
                 })
                 .collect();
@@ -535,13 +567,21 @@ fn access(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, bridge
             .color(theme::TEXT_MUTED),
     );
     ui.add_space(8.0);
-    let has = |kind: OverrideTargetType, id: &str| list.iter().any(|o| o.target_type == kind && o.target_id == id);
+    let has = |kind: OverrideTargetType, id: &str| {
+        list.iter()
+            .any(|o| o.target_type == kind && o.target_id == id)
+    };
     let mut shown: Vec<&Entry> = roles
         .iter()
         .chain(members.iter())
         .filter(|e| has(e.kind, &e.id))
         .collect();
-    shown.sort_by_key(|e| (e.kind == OverrideTargetType::Member, std::cmp::Reverse(e.position)));
+    shown.sort_by_key(|e| {
+        (
+            e.kind == OverrideTargetType::Member,
+            std::cmp::Reverse(e.position),
+        )
+    });
     if shown.is_empty() {
         ui.label(RichText::new("Переопределений для ролей нет. Здесь для каждой роли действуют права всего пространства.").color(theme::TEXT_MUTED));
     }
@@ -562,7 +602,9 @@ fn add_menus(
     list: &[PermissionOverride],
 ) {
     let free = |e: &&Entry| {
-        !list.iter().any(|o| o.target_type == e.kind && o.target_id == e.id)
+        !list
+            .iter()
+            .any(|o| o.target_type == e.kind && o.target_id == e.id)
             && rights.top > e.position
     };
     ui.horizontal(|ui| {
@@ -617,12 +659,22 @@ fn entry_row(
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            let prefix = if entry.kind == OverrideTargetType::Member { "@ " } else { "" };
+            let prefix = if entry.kind == OverrideTargetType::Member {
+                "@ "
+            } else {
+                ""
+            };
             let header = ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("{prefix}{}", entry.name)).color(theme::TEXT_BRIGHT));
+                ui.label(
+                    RichText::new(format!("{prefix}{}", entry.name)).color(theme::TEXT_BRIGHT),
+                );
                 if let Some(o) = stored {
                     let n = (bits(&o.allow) | bits(&o.deny)).bits().count_ones();
-                    ui.label(RichText::new(format!("· {}", plural_overrides(n))).size(12.0).color(theme::TEXT_MUTED));
+                    ui.label(
+                        RichText::new(format!("· {}", plural_overrides(n)))
+                            .size(12.0)
+                            .color(theme::TEXT_MUTED),
+                    );
                 }
             });
             if header.response.interact(egui::Sense::click()).clicked() {
@@ -649,6 +701,59 @@ fn plural_overrides(count: u32) -> String {
     format!("{count} {word}")
 }
 
+/// Строка права с тремя состояниями: запретить, наследовать, разрешить.
+fn tri_state_row(
+    ui: &mut egui::Ui,
+    bit: Permissions,
+    label: &str,
+    held: bool,
+    locked: bool,
+    allow: &mut Permissions,
+    deny: &mut Permissions,
+) {
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(!locked, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let state_now = if allow.contains(bit) {
+                1
+            } else if deny.contains(bit) {
+                -1
+            } else {
+                0
+            };
+            for (value, text, tip) in [
+                (-1, "✗", "Запретить"),
+                (0, "–", "Нейтрально (наследовать)"),
+                (1, "✓", "Разрешить"),
+            ] {
+                let button = egui::Button::new(text)
+                    .selected(state_now == value)
+                    .min_size(egui::vec2(26.0, 22.0));
+                if ui.add(button).on_hover_text(tip).clicked() {
+                    allow.remove(bit);
+                    deny.remove(bit);
+                    match value {
+                        1 => allow.insert(bit),
+                        -1 => deny.insert(bit),
+                        _ => {}
+                    }
+                }
+            }
+        });
+        let color = if held {
+            theme::TEXT_BRIGHT
+        } else {
+            theme::TEXT_MUTED
+        };
+        ui.label(RichText::new(label).color(color))
+            .on_hover_text(if held {
+                ""
+            } else {
+                "У вас нет этого права"
+            });
+    });
+}
+
 fn editor(
     ui: &mut egui::Ui,
     state: &mut ChannelSettings,
@@ -658,10 +763,14 @@ fn editor(
     stored: Option<&PermissionOverride>,
 ) {
     let above = rights.top <= entry.position;
-    let (mut allow, mut deny) = state
-        .draft
-        .unwrap_or_else(|| stored.map_or((Permissions::empty(), Permissions::empty()), |o| (bits(&o.allow), bits(&o.deny))));
-    let original = stored.map_or((Permissions::empty(), Permissions::empty()), |o| (bits(&o.allow), bits(&o.deny)));
+    let (mut allow, mut deny) = state.draft.unwrap_or_else(|| {
+        stored.map_or((Permissions::empty(), Permissions::empty()), |o| {
+            (bits(&o.allow), bits(&o.deny))
+        })
+    });
+    let original = stored.map_or((Permissions::empty(), Permissions::empty()), |o| {
+        (bits(&o.allow), bits(&o.deny))
+    });
     ui.add_space(6.0);
     if above {
         ui.label(
@@ -678,28 +787,7 @@ fn editor(
         widgets::section_label(ui, group);
         for (bit, label) in list {
             let held = rights.perms.contains(*bit);
-            let locked = above || !held;
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(!locked, |ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    let state_now = if allow.contains(*bit) { 1 } else if deny.contains(*bit) { -1 } else { 0 };
-                    for (value, text, tip) in [(-1, "✗", "Запретить"), (0, "–", "Нейтрально (наследовать)"), (1, "✓", "Разрешить")] {
-                        let button = egui::Button::new(text).selected(state_now == value).min_size(egui::vec2(26.0, 22.0));
-                        if ui.add(button).on_hover_text(tip).clicked() {
-                            allow.remove(*bit);
-                            deny.remove(*bit);
-                            match value {
-                                1 => allow.insert(*bit),
-                                -1 => deny.insert(*bit),
-                                _ => {}
-                            }
-                        }
-                    }
-                });
-                let color = if held { theme::TEXT_BRIGHT } else { theme::TEXT_MUTED };
-                ui.label(RichText::new(*label).color(color))
-                    .on_hover_text(if held { "" } else { "У вас нет этого права" });
-            });
+            tri_state_row(ui, *bit, label, held, above || !held, &mut allow, &mut deny);
         }
     }
     state.draft = Some((allow, deny));
@@ -711,7 +799,14 @@ fn editor(
         let changed = (allow, deny) != original;
         let empty = allow.is_empty() && deny.is_empty();
         if ui
-            .add_enabled(changed && !state.busy, theme::primary_button(if state.busy { "Сохранение…" } else { "Сохранить" }))
+            .add_enabled(
+                changed && !state.busy,
+                theme::primary_button(if state.busy {
+                    "Сохранение…"
+                } else {
+                    "Сохранить"
+                }),
+            )
             .clicked()
         {
             let scope = state.target.scope();

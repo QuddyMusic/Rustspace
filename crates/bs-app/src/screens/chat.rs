@@ -693,44 +693,44 @@ fn channel_menu(
 
 /// Шапка пространства: имя (ПКМ — меню) и кнопка приглашения.
 fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
-        ui.horizontal(|ui| {
-            ui.add_space(14.0);
-            ui.add(
-                egui::Label::new(
-                    RichText::new(theme::truncate_chars(&space.name, 24))
-                        .size(15.5)
-                        .family(theme::bold_family())
-                        .color(theme::TEXT_BRIGHT),
-                )
-                .sense(Sense::click()),
+    ui.horizontal(|ui| {
+        ui.add_space(14.0);
+        ui.add(
+            egui::Label::new(
+                RichText::new(theme::truncate_chars(&space.name, 24))
+                    .size(15.5)
+                    .family(theme::bold_family())
+                    .color(theme::TEXT_BRIGHT),
             )
-            .context_menu(|ui| space_menu(ui, space, nav));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_space(10.0);
-                if space.rights.invite
-                    && ui
-                        .add(widgets::flat_icon(Icon::Users, 20.0, theme::TEXT_MUTED))
-                        .on_hover_text("Пригласить людей")
-                        .clicked()
-                {
-                    *nav = Some(Nav::Invite {
-                        origin: space.origin,
-                        space_id: space.id.clone(),
-                    });
-                }
-                if space.rights.can_open_settings()
-                    && ui
-                        .add(widgets::flat_icon(Icon::Gear, 20.0, theme::TEXT_MUTED))
-                        .on_hover_text("Настройки пространства")
-                        .clicked()
-                {
-                    *nav = Some(Nav::SpaceSettings {
-                        origin: space.origin,
-                        space_id: space.id.clone(),
-                    });
-                }
-            });
+            .sense(Sense::click()),
+        )
+        .context_menu(|ui| space_menu(ui, space, nav));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_space(10.0);
+            if space.rights.invite
+                && ui
+                    .add(widgets::flat_icon(Icon::Users, 20.0, theme::TEXT_MUTED))
+                    .on_hover_text("Пригласить людей")
+                    .clicked()
+            {
+                *nav = Some(Nav::Invite {
+                    origin: space.origin,
+                    space_id: space.id.clone(),
+                });
+            }
+            if space.rights.can_open_settings()
+                && ui
+                    .add(widgets::flat_icon(Icon::Gear, 20.0, theme::TEXT_MUTED))
+                    .on_hover_text("Настройки пространства")
+                    .clicked()
+            {
+                *nav = Some(Nav::SpaceSettings {
+                    origin: space.origin,
+                    space_id: space.id.clone(),
+                });
+            }
         });
+    });
 }
 
 /// Кнопки «Создать канал» и «Создать категорию» под списком каналов.
@@ -741,7 +741,8 @@ fn create_buttons(
     nav: &mut Option<Nav>,
 ) {
     ui.add_space(12.0);
-    for (label, category) in [("Создать канал", false), ("Создать категорию", true)] {
+    for (label, category) in [("Создать канал", false), ("Создать категорию", true)]
+    {
         if widgets::nav_row(ui, Icon::Plus, label, false).clicked() {
             *nav = Some(Nav::SpaceDialog(if category {
                 super::space_dialogs::SpaceDialog::category(space.origin, &space.id)
@@ -780,7 +781,8 @@ fn space_menu(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
         });
         ui.close();
     }
-    if space.rights.can_open_settings() && ui.button("Настройки пространства").clicked() {
+    if space.rights.can_open_settings() && ui.button("Настройки пространства").clicked()
+    {
         *nav = Some(Nav::SpaceSettings {
             origin: space.origin,
             space_id: space.id.clone(),
@@ -878,10 +880,7 @@ enum Nav {
         target: super::channel_settings::Target,
     },
     /// Создать ссылку-приглашение и скопировать её.
-    Invite {
-        origin: usize,
-        space_id: String,
-    },
+    Invite { origin: usize, space_id: String },
     /// Действие панели голоса.
     Voice(crate::voice::DockAction),
     /// Модерация голоса.
@@ -1104,7 +1103,8 @@ impl ChatScreen {
                     super::space_settings::SpaceSettings::open(bridge, origin, &space_id);
             }
             Nav::GroupCreate => {
-                self.group_dialog = Some(super::group_dm::GroupDialog::create(bridge.focus_index()));
+                self.group_dialog =
+                    Some(super::group_dm::GroupDialog::create(bridge.focus_index()));
             }
             Nav::Notifications {
                 origin,
@@ -1279,7 +1279,8 @@ impl ChatScreen {
                 .map(|cache| cache.me().id.clone())
                 .unwrap_or_default();
             let right_edge = ctx.content_rect().right()
-                - if self.show_members && self.active_space.is_some() && self.view == View::Channel {
+                - if self.show_members && self.active_space.is_some() && self.view == View::Channel
+                {
                     236.0
                 } else {
                     0.0
@@ -1546,9 +1547,8 @@ impl ChatScreen {
                             .on_hover_text("Присоединиться к пространству")
                             .clicked()
                         {
-                            *nav = Some(Nav::SpaceDialog(
-                                super::space_dialogs::SpaceDialog::join(),
-                            ));
+                            *nav =
+                                Some(Nav::SpaceDialog(super::space_dialogs::SpaceDialog::join()));
                         }
                         if widgets::rail_action(
                             ui,
@@ -1638,57 +1638,55 @@ impl ChatScreen {
         channel: &SidebarChannel,
         nav: &mut Option<Nav>,
     ) {
-            let active = self.voice.call.as_ref().is_some_and(|c| {
-                (c.origin, c.channel_id.as_str()) == (space.origin, channel.id.as_str())
+        let active = self.voice.call.as_ref().is_some_and(|c| {
+            (c.origin, c.channel_id.as_str()) == (space.origin, channel.id.as_str())
+        });
+        let row = theme::voice_row(ui, &channel.name, active).on_hover_text(if active {
+            "Нажмите, чтобы отключиться"
+        } else {
+            "Нажмите, чтобы подключиться"
+        });
+        if channel.muted {
+            theme::muted_mark(ui, &row.rect);
+        }
+        channel_menu(&row, space, channel, nav);
+        if row.clicked() {
+            *nav = Some(Nav::VoiceJoin {
+                origin: space.origin,
+                channel_id: channel.id.clone(),
+                channel: channel.name.clone(),
+                space: space.name.clone(),
+                space_id: space.id.clone(),
             });
-            let row = theme::voice_row(ui, &channel.name, active).on_hover_text(if active {
-                "Нажмите, чтобы отключиться"
-            } else {
-                "Нажмите, чтобы подключиться"
-            });
-            if channel.muted {
-                theme::muted_mark(ui, &row.rect);
-            }
-            channel_menu(&row, space, channel, nav);
-            if row.clicked() {
-                *nav = Some(Nav::VoiceJoin {
-                    origin: space.origin,
-                    channel_id: channel.id.clone(),
-                    channel: channel.name.clone(),
-                    space: space.name.clone(),
-                    space_id: space.id.clone(),
+        }
+        for occupant in &channel.occupants {
+            let row = theme::occupant_row(
+                ui,
+                &occupant.name,
+                occupant.muted,
+                occupant.deafened,
+                self.voice.speaking.contains(&occupant.id),
+                occupant.avatar.as_deref(),
+            );
+            if !occupant.me {
+                let others: Vec<(String, String)> = space
+                    .groups
+                    .iter()
+                    .flat_map(|g| g.channels.iter())
+                    .filter(|c| c.voice && c.id != channel.id)
+                    .map(|c| (c.id.clone(), c.name.clone()))
+                    .collect();
+                row.context_menu(|ui| {
+                    if let Some(op) = crate::voice::moderation_menu(ui, &occupant.id, &others) {
+                        *nav = Some(Nav::VoiceMod {
+                            origin: space.origin,
+                            op,
+                        });
+                        ui.close();
+                    }
                 });
             }
-            for occupant in &channel.occupants {
-                let row = theme::occupant_row(
-                    ui,
-                    &occupant.name,
-                    occupant.muted,
-                    occupant.deafened,
-                    self.voice.speaking.contains(&occupant.id),
-                    occupant.avatar.as_deref(),
-                );
-                if !occupant.me {
-                    let others: Vec<(String, String)> = space
-                        .groups
-                        .iter()
-                        .flat_map(|g| g.channels.iter())
-                        .filter(|c| c.voice && c.id != channel.id)
-                        .map(|c| (c.id.clone(), c.name.clone()))
-                        .collect();
-                    row.context_menu(|ui| {
-                        if let Some(op) =
-                            crate::voice::moderation_menu(ui, &occupant.id, &others)
-                        {
-                            *nav = Some(Nav::VoiceMod {
-                                origin: space.origin,
-                                op,
-                            });
-                            ui.close();
-                        }
-                    });
-                }
-            }
+        }
     }
 
     /// Каналы пространства по категориям.
@@ -1718,12 +1716,14 @@ impl ChatScreen {
             if let Some(name) = &group.name {
                 let header = theme::category_header(ui, name, space.rights.manage_channels);
                 if header.plus.is_some_and(|plus| plus.clicked()) {
-                    *nav = Some(Nav::SpaceDialog(super::space_dialogs::SpaceDialog::channel(
-                        space.origin,
-                        &space.id,
-                        categories.clone(),
-                        group.id.clone(),
-                    )));
+                    *nav = Some(Nav::SpaceDialog(
+                        super::space_dialogs::SpaceDialog::channel(
+                            space.origin,
+                            &space.id,
+                            categories.clone(),
+                            group.id.clone(),
+                        ),
+                    ));
                 }
                 if let Some(id) = group.id.as_ref().filter(|_| space.rights.manage_channels) {
                     header.label.context_menu(|ui| {

@@ -30,8 +30,8 @@ pub mod error;
 pub mod federation;
 pub mod groups;
 pub mod instance;
-pub mod notifications;
 pub mod invites;
+pub mod notifications;
 pub mod peers;
 pub mod profile;
 pub mod read;
@@ -53,11 +53,11 @@ pub use client::{ApiClient, DEFAULT_TIMEOUT, MAX_RESPONSE_BYTES, USER_AGENT};
 pub use community::{CreateSpaceRequest, ExplorePage, UpdateProfileRequest};
 pub use compose::{GifItem, GifPage, MAX_UPLOAD_CHUNK, PersonalSticker, SendMessageBody};
 pub use error::ApiError;
-pub use space_manage::{Ban, ChannelUpdate, JoinRequest, NewChannel, OverrideScope, PermissionOverride, NewRole, RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input};
 pub use federation::{
     AttachProofResponse, ChangePasswordRequest, ChangePasswordResponse,
     FederationCredentialRequest, FederationCredentialResponse, ReattachRequest, ReattachResponse,
 };
+pub use groups::{GROUP_MAX_MEMBERS, GROUP_NAME_MAX, GroupMember, GroupUpdate};
 pub use instance::{
     InstanceInfo, PeerEnsureResponse, RegisterRequest, ReplicatedEntry, VerifyPasswordResponse,
 };
@@ -71,8 +71,11 @@ pub use read::{
 pub use registry::{
     IdentityDeleteMode, IdentityDeleteResult, RegistryEntry, RegistryResponse, RegistryStatus,
 };
+pub use space_manage::{
+    Ban, ChannelUpdate, JoinRequest, NewChannel, NewRole, OverrideScope, PermissionOverride,
+    RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input,
+};
 pub use write::{
     CreateDmRequest, FriendRequestDecision, MessageSearchQuery, SEARCH_LIMIT_DEFAULT,
     SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN, SendFriendRequest,
 };
-pub use groups::{GROUP_MAX_MEMBERS, GROUP_NAME_MAX, GroupMember, GroupUpdate};

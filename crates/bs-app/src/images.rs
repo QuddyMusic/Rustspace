@@ -199,7 +199,12 @@ impl ImageHub {
     /// Просит владельца инстанса сохранить файл на диск. `label` — подпись для
     /// уведомления. `false`, если путь недопустим, инстанс не подключён или
     /// этот файл уже скачивается.
-    pub(crate) fn request_download(&self, value: &str, dest: std::path::PathBuf, label: &str) -> bool {
+    pub(crate) fn request_download(
+        &self,
+        value: &str,
+        dest: std::path::PathBuf,
+        label: &str,
+    ) -> bool {
         let Some(key) = self.resolve(value) else {
             return false;
         };
@@ -226,10 +231,16 @@ impl ImageHub {
             });
         if sent {
             inner.download_ids.insert(id, value.to_owned());
+            inner.downloads.insert(
+                value.to_owned(),
+                Download::Running {
+                    got: 0,
+                    total: None,
+                },
+            );
             inner
-                .downloads
-                .insert(value.to_owned(), Download::Running { got: 0, total: None });
-            inner.download_labels.insert(value.to_owned(), label.to_owned());
+                .download_labels
+                .insert(value.to_owned(), label.to_owned());
         }
         sent
     }
@@ -240,10 +251,16 @@ impl ImageHub {
         let Some(value) = inner.download_ids.get(&id).cloned() else {
             return;
         };
-        let label = inner.download_labels.get(&value).cloned().unwrap_or_default();
+        let label = inner
+            .download_labels
+            .get(&value)
+            .cloned()
+            .unwrap_or_default();
         match state {
             DownloadState::Progress { got, total } => {
-                inner.downloads.insert(value, Download::Running { got, total });
+                inner
+                    .downloads
+                    .insert(value, Download::Running { got, total });
             }
             DownloadState::Done => {
                 inner.download_ids.remove(&id);

@@ -249,8 +249,7 @@ pub fn parse_invite_input(input: &str) -> Result<(String, Option<String>), Strin
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
         let url = url::Url::parse(trimmed).map_err(|_| "Неверная ссылка".to_owned())?;
         let mut segments = url.path_segments().ok_or("Неверная ссылка")?;
-        let (Some("join"), Some(code), None) =
-            (segments.next(), segments.next(), segments.next())
+        let (Some("join"), Some(code), None) = (segments.next(), segments.next(), segments.next())
         else {
             return Err("Ссылка должна быть вида https://сервер/join/КОД".to_owned());
         };
@@ -321,7 +320,8 @@ impl ApiClient {
     /// Нет права `MANAGE_SPACE` или неверные поля.
     pub async fn update_space(&self, space_id: &str, update: &SpaceUpdate) -> Result<(), ApiError> {
         let path = format!("/api/spaces/{space_id}");
-        self.patch_json::<serde_json::Value, _>(&path, update).await?;
+        self.patch_json::<serde_json::Value, _>(&path, update)
+            .await?;
         Ok(())
     }
 
@@ -373,10 +373,19 @@ impl ApiClient {
     ///
     /// # Errors
     /// Не владелец, цель не участник.
-    pub async fn transfer_ownership(&self, space_id: &str, new_owner: &str) -> Result<(), ApiError> {
+    pub async fn transfer_ownership(
+        &self,
+        space_id: &str,
+        new_owner: &str,
+    ) -> Result<(), ApiError> {
         let path = format!("/api/spaces/{space_id}/transfer-ownership");
-        self.patch_json::<serde_json::Value, _>(&path, &OwnerBody { new_owner_id: new_owner })
-            .await?;
+        self.patch_json::<serde_json::Value, _>(
+            &path,
+            &OwnerBody {
+                new_owner_id: new_owner,
+            },
+        )
+        .await?;
         Ok(())
     }
 
@@ -406,7 +415,8 @@ impl ApiClient {
         let body = DecisionBody {
             action: if accept { "accept" } else { "decline" },
         };
-        self.patch_json::<serde_json::Value, _>(&path, &body).await?;
+        self.patch_json::<serde_json::Value, _>(&path, &body)
+            .await?;
         Ok(())
     }
 
@@ -435,8 +445,11 @@ impl ApiClient {
     /// # Errors
     /// Нет `MANAGE_CHANNELS`, неверное имя.
     pub async fn rename_category(&self, id: &str, name: &str) -> Result<(), ApiError> {
-        self.patch_json::<serde_json::Value, _>(&format!("/api/categories/{id}"), &NameBody { name })
-            .await?;
+        self.patch_json::<serde_json::Value, _>(
+            &format!("/api/categories/{id}"),
+            &NameBody { name },
+        )
+        .await?;
         Ok(())
     }
 
@@ -607,10 +620,16 @@ mod tests {
 
     #[test]
     fn bare_code_and_url_are_parsed() {
-        assert_eq!(parse_invite_input(" abc123 "), Ok(("abc123".to_owned(), None)));
+        assert_eq!(
+            parse_invite_input(" abc123 "),
+            Ok(("abc123".to_owned(), None))
+        );
         assert_eq!(
             parse_invite_input("https://x.example:8443/join/abc123"),
-            Ok(("abc123".to_owned(), Some("https://x.example:8443".to_owned())))
+            Ok((
+                "abc123".to_owned(),
+                Some("https://x.example:8443".to_owned())
+            ))
         );
         assert!(parse_invite_input("").is_err());
         assert!(parse_invite_input("https://x.example/other/abc").is_err());

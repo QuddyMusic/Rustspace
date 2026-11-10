@@ -135,7 +135,11 @@ fn image_row(
         ui.vertical(|ui| {
             ui.add_enabled_ui(rights.manage_space, |ui| {
                 let busy = state.picking.is_some() || state.uploading == Some(banner);
-                let text = if state.uploading == Some(banner) { "Загрузка…" } else { upload };
+                let text = if state.uploading == Some(banner) {
+                    "Загрузка…"
+                } else {
+                    upload
+                };
                 if ui.add_enabled(!busy, egui::Button::new(text)).clicked() {
                     state.picking = Some(pick(ui.ctx(), banner));
                 }
@@ -164,7 +168,11 @@ pub(super) fn save_bar(
     ui.add_space(12.0);
     ui.horizontal(|ui| {
         let valid = !state.fields.name.trim().is_empty() && state.uploading.is_none();
-        let label = if state.busy { "Сохранение…" } else { "Сохранить" };
+        let label = if state.busy {
+            "Сохранение…"
+        } else {
+            "Сохранить"
+        };
         if ui
             .add_enabled(valid && !state.busy, theme::primary_button(label))
             .clicked()
@@ -189,8 +197,10 @@ pub(super) fn show(
     ui.add_enabled_ui(rights.manage_space, |ui| {
         widgets::field_label(ui, "Видимость");
         ui.label(
-            RichText::new("Управляйте тем, кто может находить это пространство и присоединяться к нему.")
-                .color(theme::TEXT_MUTED),
+            RichText::new(
+                "Управляйте тем, кто может находить это пространство и присоединяться к нему.",
+            )
+            .color(theme::TEXT_MUTED),
         );
         ui.add_space(4.0);
         for (value, title, hint) in [
@@ -296,10 +306,10 @@ fn join_requests(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Brid
         return;
     }
     for request in &list {
-        let name = request.user.as_ref().map_or_else(
-            || "Неизвестно".to_owned(),
-            super::display_name,
-        );
+        let name = request
+            .user
+            .as_ref()
+            .map_or_else(|| "Неизвестно".to_owned(), super::display_name);
         egui::Frame::new()
             .fill(theme::BG_RAIL)
             .corner_radius(CornerRadius::same(10))
@@ -310,27 +320,26 @@ fn join_requests(ui: &mut egui::Ui, state: &mut SpaceSettings, bridge: &mut Brid
                     theme::avatar(ui, &name, 32.0, None, None);
                     ui.vertical(|ui| {
                         ui.label(RichText::new(&name).color(theme::TEXT_BRIGHT));
-                        if let Some(message) = request.message.as_deref().filter(|m| !m.is_empty()) {
+                        if let Some(message) = request.message.as_deref().filter(|m| !m.is_empty())
+                        {
                             ui.label(RichText::new(message).size(12.0).color(theme::TEXT_MUTED));
                         }
                     });
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            if ui
-                                .add_enabled(!state.busy, egui::Button::new("Отклонить"))
-                                .clicked()
-                            {
-                                state.request(bridge, SpaceOp::DecideRequest(request.id.clone(), false));
-                            }
-                            if ui
-                                .add_enabled(!state.busy, egui::Button::new("Принять"))
-                                .clicked()
-                            {
-                                state.request(bridge, SpaceOp::DecideRequest(request.id.clone(), true));
-                            }
-                        },
-                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(!state.busy, egui::Button::new("Отклонить"))
+                            .clicked()
+                        {
+                            state
+                                .request(bridge, SpaceOp::DecideRequest(request.id.clone(), false));
+                        }
+                        if ui
+                            .add_enabled(!state.busy, egui::Button::new("Принять"))
+                            .clicked()
+                        {
+                            state.request(bridge, SpaceOp::DecideRequest(request.id.clone(), true));
+                        }
+                    });
                 });
             });
         ui.add_space(4.0);

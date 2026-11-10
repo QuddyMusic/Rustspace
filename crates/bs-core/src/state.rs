@@ -8,9 +8,9 @@ use std::collections::HashMap;
 
 use bs_types::{
     ActiveCallInfo, Activity, Channel, ChannelId, DmChannel, DmMessageWithUser, Friend,
-    FriendRequest, MessageWithUser, NotificationSetting, PresenceIdentity, ReadState, ReadyPayload, SpaceFolder,
-    SpaceId, SpaceLayoutItem, SpaceVoiceState, SpaceWithChannelsAndMembers, User, UserId,
-    UserStatus, VoiceUserState,
+    FriendRequest, MessageWithUser, NotificationSetting, PresenceIdentity, ReadState, ReadyPayload,
+    SpaceFolder, SpaceId, SpaceLayoutItem, SpaceVoiceState, SpaceWithChannelsAndMembers, User,
+    UserId, UserStatus, VoiceUserState,
 };
 
 /// Сколько «печатает…» живёт без продления (мс).

@@ -242,8 +242,7 @@ impl VoiceState {
         let do_not_disturb = self.incoming.as_ref().is_some_and(|incoming| {
             bridge.cache_at(incoming.origin).is_some_and(|cache| {
                 let me = cache.me();
-                cache.user_status(&me.id).unwrap_or(me.status)
-                    == bs_types::UserStatus::DoNotDisturb
+                cache.user_status(&me.id).unwrap_or(me.status) == bs_types::UserStatus::DoNotDisturb
             })
         });
         self.cue_messages(bridge);
@@ -306,8 +305,7 @@ impl VoiceState {
         let quiet = arrived.iter().all(|(origin, _)| {
             bridge.cache_at(*origin).is_none_or(|cache| {
                 let me = cache.me();
-                cache.user_status(&me.id).unwrap_or(me.status)
-                    == bs_types::UserStatus::DoNotDisturb
+                cache.user_status(&me.id).unwrap_or(me.status) == bs_types::UserStatus::DoNotDisturb
             })
         });
         if !quiet {
@@ -504,8 +502,9 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
-                            let status =
-                                ui.label(RichText::new(info.status.0).size(12.5).color(info.status.1));
+                            let status = ui.label(
+                                RichText::new(info.status.0).size(12.5).color(info.status.1),
+                            );
                             if let Some(detail) = &info.detail {
                                 status.on_hover_text(detail);
                             }
@@ -678,7 +677,10 @@ pub(crate) fn moderate(bridge: &mut Bridge, origin: usize, op: ModOp) {
 }
 
 /// Нужно ли сообщить об этом сообщении (правило оригинала, см. `sounds`).
-pub(crate) fn message_alerts_user(cache: &bs_core::Cache, message: &crate::bridge::NewMessage) -> bool {
+pub(crate) fn message_alerts_user(
+    cache: &bs_core::Cache,
+    message: &crate::bridge::NewMessage,
+) -> bool {
     let me = cache.me();
     let own = message.author_id == me.id;
     if message.dm {

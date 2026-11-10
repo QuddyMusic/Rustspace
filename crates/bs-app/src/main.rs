@@ -13,9 +13,10 @@
 
 mod app;
 mod brand;
-mod clipboard;
 mod bridge;
+mod clipboard;
 mod dmcall;
+mod download;
 mod emoji_data;
 #[cfg(test)]
 mod fake_instance;
@@ -27,7 +28,6 @@ mod logic;
 mod markdown;
 mod media;
 mod registry;
-mod download;
 mod saved_session;
 mod screens;
 mod social;

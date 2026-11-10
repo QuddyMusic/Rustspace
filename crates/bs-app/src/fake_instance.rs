@@ -97,7 +97,10 @@ async fn handle_conn(
             let user = serde_json::from_str::<serde_json::Value>(&login_response()).unwrap();
             ("200 OK", user["user"].to_string())
         } else {
-            ("401 Unauthorized", r#"{"error":"Unauthorized","code":"unauthorized"}"#.to_owned())
+            (
+                "401 Unauthorized",
+                r#"{"error":"Unauthorized","code":"unauthorized"}"#.to_owned(),
+            )
         };
         let response = format!(
             "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",

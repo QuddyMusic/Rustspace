@@ -224,47 +224,52 @@ fn join_target(bridge: &Bridge, origin: Option<&str>) -> Result<usize, String> {
 }
 
 fn show_join(ctx: &egui::Context, form: &mut JoinForm, bridge: &mut Bridge) -> bool {
-    modal(ctx, "join_space", "Присоединиться к пространству", |ui| {
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new("Есть код приглашения?")
-                .size(13.0)
-                .color(theme::TEXT_MUTED),
-        );
-        widgets::field_label(ui, "Код или ссылка");
-        let field = widgets::text_field(
-            ui,
-            &mut form.input,
-            "abc123 или https://сервер/join/abc123",
-            200,
-        );
-        error_line(ui, form.error.as_ref());
-        ui.add_space(14.0);
-        let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let go = ui.add_enabled(
-                !form.busy && !form.input.trim().is_empty(),
-                theme::primary_button(if form.busy {
-                    "Присоединение…"
-                } else {
-                    "Присоединиться"
-                }),
+    modal(
+        ctx,
+        "join_space",
+        "Присоединиться к пространству",
+        |ui| {
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("Есть код приглашения?")
+                    .size(13.0)
+                    .color(theme::TEXT_MUTED),
             );
-            if (go.clicked() || enter) && !form.busy && !form.input.trim().is_empty() {
-                match bs_api::parse_invite_input(&form.input).and_then(|(code, origin)| {
-                    join_target(bridge, origin.as_deref()).map(|index| (code, index))
-                }) {
-                    Ok((code, index)) => {
-                        form.error = None;
-                        form.busy = true;
-                        bridge.focus_on(index);
-                        bridge.request(BridgeRequest::JoinByCode(code));
+            widgets::field_label(ui, "Код или ссылка");
+            let field = widgets::text_field(
+                ui,
+                &mut form.input,
+                "abc123 или https://сервер/join/abc123",
+                200,
+            );
+            error_line(ui, form.error.as_ref());
+            ui.add_space(14.0);
+            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let go = ui.add_enabled(
+                    !form.busy && !form.input.trim().is_empty(),
+                    theme::primary_button(if form.busy {
+                        "Присоединение…"
+                    } else {
+                        "Присоединиться"
+                    }),
+                );
+                if (go.clicked() || enter) && !form.busy && !form.input.trim().is_empty() {
+                    match bs_api::parse_invite_input(&form.input).and_then(|(code, origin)| {
+                        join_target(bridge, origin.as_deref()).map(|index| (code, index))
+                    }) {
+                        Ok((code, index)) => {
+                            form.error = None;
+                            form.busy = true;
+                            bridge.focus_on(index);
+                            bridge.request(BridgeRequest::JoinByCode(code));
+                        }
+                        Err(err) => form.error = Some(err),
                     }
-                    Err(err) => form.error = Some(err),
                 }
-            }
-        });
-    })
+            });
+        },
+    )
 }
 
 fn show_channel(ctx: &egui::Context, form: &mut ChannelForm, bridge: &mut Bridge) -> bool {
@@ -280,13 +285,8 @@ fn show_channel(ctx: &egui::Context, form: &mut ChannelForm, bridge: &mut Bridge
         {
             form.voice = false;
         }
-        if widgets::radio_card(
-            ui,
-            "Голосовой",
-            "Общайтесь голосом и по видео",
-            form.voice,
-        )
-        .clicked()
+        if widgets::radio_card(ui, "Голосовой", "Общайтесь голосом и по видео", form.voice)
+            .clicked()
         {
             form.voice = true;
         }
@@ -347,33 +347,39 @@ fn show_channel(ctx: &egui::Context, form: &mut ChannelForm, bridge: &mut Bridge
 }
 
 fn show_category(ctx: &egui::Context, form: &mut CategoryForm, bridge: &mut Bridge) -> bool {
-    modal(ctx, "create_category", "Создать категорию", |ui| {
-        widgets::field_label(ui, "Название категории");
-        let field = widgets::text_field(ui, &mut form.name, "новая-категория", CATEGORY_NAME_MAX);
-        error_line(ui, form.error.as_ref());
-        ui.add_space(14.0);
-        let ready = !form.name.trim().is_empty() && !form.busy;
-        let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let go = ui.add_enabled(
-                ready,
-                theme::primary_button(if form.busy {
-                    "Создание…"
-                } else {
-                    "Создать категорию"
-                }),
-            );
-            if (go.clicked() || enter) && ready {
-                form.busy = true;
-                form.error = None;
-                bridge.focus_on(form.origin);
-                bridge.request(BridgeRequest::CreateCategory {
-                    space_id: form.space_id.clone(),
-                    name: form.name.trim().to_owned(),
-                });
-            }
-        });
-    })
+    modal(
+        ctx,
+        "create_category",
+        "Создать категорию",
+        |ui| {
+            widgets::field_label(ui, "Название категории");
+            let field =
+                widgets::text_field(ui, &mut form.name, "новая-категория", CATEGORY_NAME_MAX);
+            error_line(ui, form.error.as_ref());
+            ui.add_space(14.0);
+            let ready = !form.name.trim().is_empty() && !form.busy;
+            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let go = ui.add_enabled(
+                    ready,
+                    theme::primary_button(if form.busy {
+                        "Создание…"
+                    } else {
+                        "Создать категорию"
+                    }),
+                );
+                if (go.clicked() || enter) && ready {
+                    form.busy = true;
+                    form.error = None;
+                    bridge.focus_on(form.origin);
+                    bridge.request(BridgeRequest::CreateCategory {
+                        space_id: form.space_id.clone(),
+                        name: form.name.trim().to_owned(),
+                    });
+                }
+            });
+        },
+    )
 }
 
 fn show_leave(ctx: &egui::Context, form: &mut LeaveForm, bridge: &mut Bridge) -> bool {

@@ -134,7 +134,10 @@ async fn download_into_a_missing_folder_reports_an_io_error() {
         .mount(&server)
         .await;
     let client = ApiClient::home(server.uri()).unwrap();
-    let dest = temp_file("nofolder").parent().unwrap().join("нет/такой/папки.bin");
+    let dest = temp_file("nofolder")
+        .parent()
+        .unwrap()
+        .join("нет/такой/папки.bin");
     let err = client
         .download_asset(&asset("/api/uploads/a.bin"), &dest, |_, _| {})
         .await

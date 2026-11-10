@@ -62,7 +62,11 @@ pub fn resolve_policy(
 mod tests {
     use super::*;
 
-    fn setting(level: Option<NotificationLevel>, muted: bool, until: Option<i64>) -> NotificationSetting {
+    fn setting(
+        level: Option<NotificationLevel>,
+        muted: bool,
+        until: Option<i64>,
+    ) -> NotificationSetting {
         NotificationSetting {
             suppress_everyone: None,
             suppress_roles: None,

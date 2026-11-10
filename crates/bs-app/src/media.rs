@@ -150,11 +150,12 @@ fn download_badge(
     } else {
         Color32::TRANSPARENT
     };
-    ui.painter().circle_filled(rect.center(), rect.width() / 2.0, fill);
+    ui.painter()
+        .circle_filled(rect.center(), rect.width() / 2.0, fill);
     match state {
         Some(Download::Running { got, total }) => {
-            let text = Download::percent(*got, *total)
-                .map_or_else(|| "…".to_owned(), |p| format!("{p}%"));
+            let text =
+                Download::percent(*got, *total).map_or_else(|| "…".to_owned(), |p| format!("{p}%"));
             ui.painter().text(
                 rect.center(),
                 Align2::CENTER_CENTER,
@@ -168,10 +169,20 @@ fn download_badge(
             crate::icons::paint(ui.painter(), rect.center(), 16.0, Icon::Check, theme::GREEN);
         }
         Some(Download::Failed(_)) => {
-            crate::icons::paint(ui.painter(), rect.center(), 16.0, Icon::Download, theme::RED);
+            crate::icons::paint(
+                ui.painter(),
+                rect.center(),
+                16.0,
+                Icon::Download,
+                theme::RED,
+            );
         }
         None => {
-            let color = if hover { theme::TEXT_BRIGHT } else { theme::TEXT_MUTED };
+            let color = if hover {
+                theme::TEXT_BRIGHT
+            } else {
+                theme::TEXT_MUTED
+            };
             crate::icons::paint(ui.painter(), rect.center(), 16.0, Icon::Download, color);
         }
     }
@@ -209,21 +220,32 @@ pub(crate) fn show_download_all(
         .iter()
         .filter(|s| matches!(s, Some(Download::Running { .. })))
         .count();
-    let done = states.iter().filter(|s| matches!(s, Some(Download::Done))).count();
+    let done = states
+        .iter()
+        .filter(|s| matches!(s, Some(Download::Done)))
+        .count();
     let total: i64 = attachments.iter().map(|a| a.size).sum();
     let label = if running > 0 {
         format!("Скачивается… ({running} из {})", attachments.len())
     } else if done == attachments.len() {
         format!("Все файлы сохранены ({})", attachments.len())
     } else {
-        format!("Скачать все ({} · {})", attachments.len(), human_size(total))
+        format!(
+            "Скачать все ({} · {})",
+            attachments.len(),
+            human_size(total)
+        )
     };
     let (rect, _) = ui.allocate_exact_size(Vec2::new(250.0, 30.0), Sense::hover());
     let hover = ui.rect_contains_pointer(rect) && running == 0;
     ui.painter().rect(
         rect,
         CornerRadius::same(8),
-        if hover { theme::BG_HOVER } else { theme::BG_BUBBLE },
+        if hover {
+            theme::BG_HOVER
+        } else {
+            theme::BG_BUBBLE
+        },
         egui::Stroke::new(1.0, theme::BORDER),
         egui::StrokeKind::Inside,
     );
@@ -231,8 +253,16 @@ pub(crate) fn show_download_all(
         ui.painter(),
         egui::pos2(rect.min.x + 18.0, rect.center().y),
         16.0,
-        if done == attachments.len() { Icon::Check } else { Icon::Download },
-        if done == attachments.len() { theme::GREEN } else { theme::TEXT_MUTED },
+        if done == attachments.len() {
+            Icon::Check
+        } else {
+            Icon::Download
+        },
+        if done == attachments.len() {
+            theme::GREEN
+        } else {
+            theme::TEXT_MUTED
+        },
     );
     ui.painter().text(
         egui::pos2(rect.min.x + 34.0, rect.center().y),
@@ -307,7 +337,13 @@ pub(crate) fn show_attachment(
             egui::pos2(rect.max.x - DL_BUTTON - 8.0, rect.min.y + 8.0),
             Vec2::splat(DL_BUTTON),
         );
-        download_badge(ui, button, ui.auto_id_with(("dl", &att.filename)), state.as_ref(), true);
+        download_badge(
+            ui,
+            button,
+            ui.auto_id_with(("dl", &att.filename)),
+            state.as_ref(),
+            true,
+        );
         downloads.push((button, Click::One(target_of(att))));
     }
     ready.then(|| (rect, att.filename.clone()))
@@ -400,8 +436,7 @@ fn file_card(ui: &mut egui::Ui, att: &AttachmentView, downloads: &mut Vec<Downlo
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.label(
-                        egui::RichText::new(theme::truncate_chars(&att.name, 40))
-                            .color(theme::SKY),
+                        egui::RichText::new(theme::truncate_chars(&att.name, 40)).color(theme::SKY),
                     );
                     ui.label(theme::muted(human_size(att.size)).size(11.5));
                 });
