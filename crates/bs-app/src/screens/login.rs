@@ -16,6 +16,10 @@ pub(crate) struct LoginScreen {
     pub(crate) password: String,
     /// Пользователь явно разрешил соединение по открытому `http://`.
     pub(crate) allow_insecure: bool,
+    /// Показана форма регистрации вместо входа.
+    registering: bool,
+    /// Состояние формы регистрации.
+    register: super::register::RegisterForm,
 }
 
 impl std::fmt::Debug for LoginScreen {
@@ -25,7 +29,8 @@ impl std::fmt::Debug for LoginScreen {
             .field("username", &self.username)
             .field("password", &"<redacted>")
             .field("allow_insecure", &self.allow_insecure)
-            .finish()
+            .field("registering", &self.registering)
+            .finish_non_exhaustive()
     }
 }
 
@@ -42,16 +47,36 @@ impl LoginScreen {
             .frame(egui::Frame::new().fill(theme::BG_RAIL))
             .show(ui, |ui| {
                 ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    ui.add_space((ui.available_height() * 0.18).max(24.0));
+                    let top = if self.registering { 0.06 } else { 0.18 };
+                    ui.add_space((ui.available_height() * top).max(24.0));
                     egui::Frame::new()
                         .fill(theme::BG_CHAT)
                         .corner_radius(egui::CornerRadius::same(10))
                         .inner_margin(egui::Margin::same(28))
                         .show(ui, |ui| {
                             ui.set_width(380.0);
-                            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                                self.card(ui, bridge);
-                            });
+                            egui::ScrollArea::vertical()
+                                .max_height(ui.ctx().content_rect().height() * 0.9)
+                                .show(ui, |ui| {
+                                    ui.with_layout(
+                                        egui::Layout::top_down(egui::Align::Min),
+                                        |ui| {
+                                            if self.registering {
+                                                let back = self.register.card(
+                                                    ui,
+                                                    bridge,
+                                                    &mut self.base,
+                                                    &mut self.allow_insecure,
+                                                );
+                                                if back {
+                                                    self.registering = false;
+                                                }
+                                            } else {
+                                                self.card(ui, bridge);
+                                            }
+                                        },
+                                    );
+                                });
                         });
                 });
             });
@@ -155,5 +180,11 @@ impl LoginScreen {
             ui.add_space(10.0);
             ui.label(egui::RichText::new(err).color(theme::ROSE));
         }
+        ui.add_space(10.0);
+        ui.vertical_centered(|ui| {
+            if ui.link("Нет аккаунта? Зарегистрироваться").clicked() {
+                self.registering = true;
+            }
+        });
     }
 }

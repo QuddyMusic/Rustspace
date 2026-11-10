@@ -1147,7 +1147,7 @@ pub(crate) struct Session {
 /// схема `https://` подставляется автоматически. Явно указанная схема
 /// (`http://`, `ws://` и т.п.) сохраняется как есть, а допустимость
 /// открытого текста решает [`TransportPolicy`].
-fn normalize_base(raw: &str) -> Option<String> {
+pub(crate) fn normalize_base(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -1638,6 +1638,45 @@ impl Session {
             }),
             resume: None,
             persist: None,
+            transport,
+        });
+    }
+
+    /// Регистрирует новый аккаунт на домашнем инстансе и сразу входит в него.
+    pub(crate) fn start_register(
+        &mut self,
+        base: &str,
+        request: RegisterRequest,
+        transport: TransportPolicy,
+    ) {
+        if self.phase != Phase::Idle {
+            self.last_error = Some("Сначала выйдите из текущего инстанса".to_owned());
+            return;
+        }
+        let Some(base) = normalize_base(base) else {
+            self.last_error = Some("укажите адрес инстанса".to_owned());
+            return;
+        };
+        match url::Url::parse(&base) {
+            Ok(parsed) => {
+                if let Err(err) = transport.check(&parsed) {
+                    self.last_error = Some(err.to_string());
+                    return;
+                }
+            }
+            Err(err) => {
+                self.last_error = Some(format!("некорректный адрес: {err}"));
+                return;
+            }
+        }
+        self.launch(SessionParams {
+            origin: Origin::Home,
+            base,
+            username: request.username.clone(),
+            password: Zeroizing::new(request.password.clone()),
+            register: Some(request),
+            resume: None,
+            persist: self.persist.clone(),
             transport,
         });
     }
@@ -2372,7 +2411,9 @@ struct SessionParams {
     username: String,
     /// Пароль затирается в памяти, как только логин выполнен.
     password: Zeroizing<String>,
-    /// Регистрация перед входом (федеративный аккаунт на чужом инстансе).
+    /// Регистрация перед входом: федеративный аккаунт на чужом инстансе
+    /// (отказ «занято» не мешает войти) или новый аккаунт на домашнем
+    /// (любой отказ останавливает вход).
     register: Option<RegisterRequest>,
     /// Сохранённый токен: вход без пароля.
     resume: Option<Secret>,
@@ -2407,7 +2448,11 @@ async fn run_session(
         transport,
     } = params;
     let mut refusal = None;
-    if let Some(request) = register {
+    if let Some(request) = register.as_ref().filter(|_| origin == Origin::Home) {
+        if !register_home(&base, request, transport, &events).await {
+            return;
+        }
+    } else if let Some(request) = register {
         refusal = try_register(&origin, &base, &request, transport, &events).await;
         if refusal == Some(RegisterOutcome::Failed) {
             return;
@@ -2662,6 +2707,33 @@ async fn full_space(client: &bs_api::ApiClient, space_id: &str) -> BridgeRespons
         Ok(space) => BridgeResponse::Space(Box::new(space)),
         Err(err) => BridgeResponse::Failed(err.to_string()),
     }
+}
+
+/// Создаёт аккаунт на домашнем инстансе. Любой отказ — конец попытки: GUI
+/// получает понятное объяснение.
+async fn register_home(
+    base: &str,
+    request: &RegisterRequest,
+    transport: TransportPolicy,
+    events: &std_mpsc::Sender<BridgeEvent>,
+) -> bool {
+    let result = match ApiClient::with_policy(Origin::Home, base, transport) {
+        Ok(client) => client.register(request).await,
+        Err(err) => Err(err),
+    };
+    let Err(err) = result else {
+        return true;
+    };
+    let kind = if matches!(err, bs_api::ApiError::Transport(_)) {
+        FailureKind::Network
+    } else {
+        FailureKind::Auth
+    };
+    let _ = events.send(BridgeEvent::LoginFailed {
+        message: crate::logic::register_error_text(&err),
+        kind,
+    });
+    false
 }
 
 /// Пытается создать аккаунт; отказ «занято/закрыто» не ошибка, дальше идёт вход.

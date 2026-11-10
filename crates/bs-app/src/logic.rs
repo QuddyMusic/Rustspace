@@ -194,6 +194,68 @@ pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String
     }
 }
 
+/// Текст отказа регистрации нового аккаунта.
+pub(crate) fn register_error_text(err: &bs_api::ApiError) -> String {
+    if err.is_rate_limited() {
+        return "Слишком много попыток регистрации: подождите пару минут".to_owned();
+    }
+    let known = match err.code() {
+        Some("username_taken") => "Это имя уже занято",
+        Some("username_length_invalid") => "Имя: от 3 до 32 символов",
+        Some("username_characters_invalid") => {
+            "В имени допустимы только латинские буквы, цифры и подчёркивание"
+        }
+        Some("username_required") => "Укажите имя пользователя",
+        Some("password_required") => "Укажите пароль",
+        Some("password_too_short") => "Пароль слишком короткий: минимум 8 символов",
+        Some("registration_closed") => "Регистрация на этом инстансе закрыта",
+        Some("invite_required") => {
+            "Регистрация только по приглашению: вставьте ссылку или код приглашения"
+        }
+        Some("invite_invalid") => "Приглашение недействительно, истекло или уже использовано",
+        _ => "",
+    };
+    if !known.is_empty() {
+        return known.to_owned();
+    }
+    err.body().map_or_else(
+        || err.to_string(),
+        |body| describe_server_error(body.code.as_deref(), &body.error),
+    )
+}
+
+/// Достаёт токен приглашения из ссылки вида `…/register?invite=TOKEN` или
+/// возвращает строку как есть, если это уже сам токен.
+pub(crate) fn invite_token_from_input(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(url) = url::Url::parse(trimmed) {
+        return url
+            .query_pairs()
+            .find(|(key, _)| key == "invite")
+            .map(|(_, value)| value.into_owned())
+            .filter(|token| !token.is_empty());
+    }
+    Some(trimmed.to_owned())
+}
+
+/// Локальная проверка имени по правилам сервера (3–32, `[a-z0-9_]`).
+pub(crate) fn username_problem(name: &str) -> Option<&'static str> {
+    let name = name.trim();
+    let len = name.chars().count();
+    if len == 0 {
+        Some("Укажите имя пользователя")
+    } else if !(3..=32).contains(&len) {
+        Some("Имя: от 3 до 32 символов")
+    } else if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        Some("Только латинские буквы, цифры и подчёркивание")
+    } else {
+        None
+    }
+}
+
 /// Расстояние до верха ленты (px), с которого подгружается более старая страница.
 pub(crate) const LOAD_OLDER_THRESHOLD_PX: f32 = 40.0;
 
@@ -213,6 +275,37 @@ pub(crate) fn should_load_older(
         return true;
     }
     was_scrolled_down && offset_y < LOAD_OLDER_THRESHOLD_PX
+}
+
+#[cfg(test)]
+mod register_tests {
+    use super::{invite_token_from_input, username_problem};
+
+    #[test]
+    fn invite_token_comes_from_link_or_raw_input() {
+        assert_eq!(
+            invite_token_from_input("https://chat.example/register?invite=abc_DEF-123").as_deref(),
+            Some("abc_DEF-123")
+        );
+        assert_eq!(
+            invite_token_from_input("  rawtoken ").as_deref(),
+            Some("rawtoken")
+        );
+        assert_eq!(
+            invite_token_from_input("https://chat.example/register"),
+            None
+        );
+        assert_eq!(invite_token_from_input("   "), None);
+    }
+
+    #[test]
+    fn username_rules_match_server() {
+        assert!(username_problem("ab").is_some());
+        assert!(username_problem("alice").is_none());
+        assert!(username_problem("Alice_42").is_none());
+        assert!(username_problem("алиса").is_some());
+        assert!(username_problem(&"a".repeat(33)).is_some());
+    }
 }
 
 #[cfg(test)]

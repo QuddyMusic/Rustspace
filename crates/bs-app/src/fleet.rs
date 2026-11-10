@@ -268,6 +268,22 @@ impl Bridge {
         self.focus = 0;
     }
 
+    /// Регистрирует аккаунт на домашнем инстансе и входит в него.
+    pub(crate) fn start_register(
+        &mut self,
+        base: &str,
+        request: bs_api::RegisterRequest,
+        transport: TransportPolicy,
+    ) {
+        self.transport = transport;
+        self.leaving = false;
+        self.lost = false;
+        let home = &mut self.slots[0];
+        home.session.start_register(base, request, transport);
+        home.base = canonical_base(base);
+        self.focus = 0;
+    }
+
     /// Включает сохранение сессии в файл и входит по ней, если она есть.
     ///
     /// Возвращает адрес инстанса, в который пошёл автоматический вход.
