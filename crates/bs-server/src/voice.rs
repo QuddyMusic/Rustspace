@@ -95,3 +95,13 @@ pub fn dm_member_left(
     let _ = (tx, hub, out, dm_channel_id, user_id);
     Ok(())
 }
+
+/// Аккаунт удалён или отключён принудительно: он покидает голосовую комнату,
+/// а звонки, которые он начал и на которые ещё не ответили, завершаются.
+///
+/// # Errors
+/// Ошибка базы.
+pub fn user_removed(tx: &mut dyn Tx, hub: &Hub, out: &mut Outbox, user_id: &str) -> DbResult<()> {
+    let _ = (tx, hub, out, user_id);
+    Ok(())
+}

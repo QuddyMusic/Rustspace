@@ -58,17 +58,34 @@ pub fn append_mutation_log(
     mutation_type: &str,
     payload: Option<&Value>,
 ) -> DbResult<()> {
+    append_mutation_log_in(tx, ids, entity_id, context_id, "dm", mutation_type, payload)
+}
+
+/// Запись в журнал мутаций с явным видом контекста (`dm`, `profile`, `friend`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn append_mutation_log_in(
+    tx: &mut dyn Tx,
+    ids: &Snowflake,
+    entity_id: &str,
+    context_id: &str,
+    context_type: &str,
+    mutation_type: &str,
+    payload: Option<&Value>,
+) -> DbResult<()> {
     if !relay_enabled(tx)? {
         return Ok(());
     }
     tx.execute(
         "INSERT INTO federation_mutation_log \
          (id, entity_id, context_id, context_type, mutation_type, mutated_at, payload) \
-         VALUES (?, ?, ?, 'dm', ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
         params![
             ids.next(),
             entity_id,
             context_id,
+            context_type,
             mutation_type,
             now_ms(),
             payload.map(Value::to_string)
@@ -354,5 +371,57 @@ pub fn queue_dm_delete(
         "delete",
         &dm_target_origins(tx, config, dm_channel_id)?,
     );
+    Ok(())
+}
+
+/// Профиль пользователя для других инстансов (`FederationProfileUpdatePayload`).
+///
+/// # Errors
+/// В строке нет нужных столбцов.
+pub fn profile_payload(config: &Config, user: &crate::db::Row) -> DbResult<Value> {
+    let origin = our_origin(config);
+    let asset = |column: &str| -> DbResult<Option<String>> {
+        Ok(user.opt_text(column)?.map(|value| {
+            if value.is_empty() || value.starts_with("http") {
+                value
+            } else {
+                format!("{origin}/api/uploads/{value}")
+            }
+        }))
+    };
+    Ok(json!({"profileUpdate": {
+        "homeUserId": user.text("id")?,
+        "homeInstance": origin,
+        "profileUpdatedAt": user.opt_int("profile_updated_at")?.unwrap_or_else(now_ms),
+        "username": user.text("username")?,
+        "displayName": user.opt_text("display_name")?,
+        "avatar": asset("avatar")?,
+        "banner": asset("banner")?,
+        "accentColor": user.opt_text("accent_color")?,
+        "avatarColor": user.opt_text("avatar_color")?,
+        "bio": user.opt_text("bio")?,
+    }}))
+}
+
+/// Событие для всех установленных пиров (профиль, присутствие). Пока
+/// доставка не перенесена, отмечается только предупреждением, если пиры есть.
+///
+/// # Errors
+/// Ошибка базы.
+pub fn broadcast_outbox(tx: &mut dyn Tx, context_id: &str, event_type: &str) -> DbResult<()> {
+    let peers = tx
+        .query_one(
+            "SELECT count(*) AS n FROM federation_peers WHERE status IN ('active', 'unreachable')",
+            params![],
+        )?
+        .map_or(Ok(0), |row| row.int("n"))?;
+    if peers > 0 {
+        tracing::warn!(
+            context = context_id,
+            event = event_type,
+            peers,
+            "событие для других инстансов не отправлено: доставка федерации ещё не перенесена"
+        );
+    }
     Ok(())
 }

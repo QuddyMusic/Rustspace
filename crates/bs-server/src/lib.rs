@@ -157,7 +157,21 @@ pub fn app(state: AppState) -> Router {
         .route("/api/auth/login", post(routes::auth::login))
         .route("/api/auth/check-username", get(routes::auth::check_username_route))
         .route("/api/auth/check-invite", get(routes::auth::check_invite))
-        .route("/api/users/@me", get(routes::users::me))
+        .route(
+            "/api/users/@me",
+            get(routes::users::me)
+                .patch(routes::account::update_me)
+                .delete(routes::account::delete_me),
+        )
+        .route("/api/users/@me/verify-password", post(routes::account::verify_password))
+        .route("/api/users/@me/change-password", post(routes::account::change_password))
+        .route(
+            "/api/users/@me/federation-registry",
+            get(routes::account::registry).put(routes::account::put_registry),
+        )
+        .route("/api/users/@me/space-layout", axum::routing::put(routes::account::put_space_layout))
+        .route("/api/users/{id}", get(routes::account::get_user))
+        .route("/api/users/{id}/mutuals", get(routes::account::mutuals))
         .route("/api/spaces", get(routes::spaces::list).post(routes::spaces::create))
         .route("/api/spaces/join", post(routes::spaces::join_by_code))
         .route("/api/spaces/invite/{code}/preview", get(routes::spaces::invite_preview))

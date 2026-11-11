@@ -49,6 +49,7 @@ class Ctx:
         s, b = http(self.port, 'POST', '/api/auth/register', {'username': full, 'password': 'password123'})
         assert s in (200, 201), (s, b)
         self.tok[name] = b['token']; self.uid[name] = b['user']['id']; self.n.tok(b['user']['id'])
+        http(self.port, 'PATCH', '/api/users/@me', {'avatarColor': 'sky'}, b['token'])
         if listen: self.ws[name] = Listener(self.port, b['token'])
         return b['user']['id']
     def listen(self, name): self.ws[name] = Listener(self.port, self.tok[name])
