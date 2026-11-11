@@ -62,6 +62,8 @@ struct Inner {
 /// Концентратор соединений.
 #[derive(Debug, Clone, Default)]
 pub struct Hub {
+    /// Голосовые комнаты и звонки.
+    pub voice: crate::voice::Voice,
     inner: Arc<Mutex<Inner>>,
     next_id: Arc<AtomicU64>,
 }

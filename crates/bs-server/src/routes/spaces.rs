@@ -712,6 +712,7 @@ pub async fn update_member(
     if !body.is_object() {
         return Err(ApiError::bad_request("validation_failed"));
     }
+    let hub = state.hub.clone();
     state
         .run(move |tx, out| {
             let space = require_space(tx, &id)?;
@@ -827,7 +828,7 @@ pub async fn update_member(
             }
             if roles_changed {
                 broadcast::access_changed(out, &id);
-                crate::voice::access_changed(tx, out, &id, std::slice::from_ref(&uid))?;
+                crate::voice::access_changed(tx, &hub, out, &id, std::slice::from_ref(&uid))?;
             }
             let member = member_json(tx, &id, &uid)?;
             out.to_space(
@@ -1074,6 +1075,7 @@ pub async fn create_role(
     JsonBody(body): JsonBody,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     let ids = state.ids.clone();
+    let hub = state.hub.clone();
     state
         .run(move |tx, out| {
             if !perms::has_permission(tx, &user.id, &id, Permissions::MANAGE_ROLES)? {
@@ -1114,7 +1116,7 @@ pub async fn create_role(
             normalize_role_positions(tx, &id)?;
             let role = role_row(tx, &id, &role_id)?.ok_or_else(ApiError::internal)?;
             broadcast::access_changed(out, &id);
-            crate::voice::access_changed(tx, out, &id, &[])?;
+            crate::voice::access_changed(tx, &hub, out, &id, &[])?;
             Ok((
                 StatusCode::CREATED,
                 Json(role_response(tx, &id, &user.id, &role)?),
@@ -1131,6 +1133,7 @@ pub async fn update_role(
     Path((id, role_id)): Path<(String, String)>,
     JsonBody(body): JsonBody,
 ) -> ApiResult<Json<Value>> {
+    let hub = state.hub.clone();
     state
         .run(move |tx, out| {
             if !perms::has_permission(tx, &user.id, &id, Permissions::MANAGE_ROLES)? {
@@ -1226,7 +1229,7 @@ pub async fn update_role(
             let updated = role_row(tx, &id, &role_id)?.ok_or_else(missing_role)?;
             broadcast::access_changed(out, &id);
             let holders = role_holders(tx, &id, &role_id)?;
-            crate::voice::access_changed(tx, out, &id, &holders)?;
+            crate::voice::access_changed(tx, &hub, out, &id, &holders)?;
             Ok(Json(role_response(tx, &id, &user.id, &updated)?))
         })
         .await
@@ -1238,6 +1241,7 @@ pub async fn delete_role(
     user: AuthUser,
     Path((id, role_id)): Path<(String, String)>,
 ) -> ApiResult<Json<Value>> {
+    let hub = state.hub.clone();
     state
         .run(move |tx, out| {
             if !perms::has_permission(tx, &user.id, &id, Permissions::MANAGE_ROLES)? {
@@ -1281,7 +1285,7 @@ pub async fn delete_role(
             )?;
             normalize_role_positions(tx, &id)?;
             broadcast::access_changed(out, &id);
-            crate::voice::access_changed(tx, out, &id, &holders)?;
+            crate::voice::access_changed(tx, &hub, out, &id, &holders)?;
             Ok(Json(json!({"success": true})))
         })
         .await
@@ -1339,6 +1343,7 @@ pub async fn add_member_role(
     Path((id, uid)): Path<(String, String)>,
     JsonBody(body): JsonBody,
 ) -> ApiResult<Json<Value>> {
+    let hub = state.hub.clone();
     state
         .run(move |tx, out| {
             let role_id = str_field(&body, "roleId");
@@ -1349,7 +1354,7 @@ pub async fn add_member_role(
                 params![&id, &uid, role_id],
             )?;
             broadcast::access_changed(out, &id);
-            crate::voice::access_changed(tx, out, &id, std::slice::from_ref(&uid))?;
+            crate::voice::access_changed(tx, &hub, out, &id, std::slice::from_ref(&uid))?;
             Ok(Json(json!({"success": true})))
         })
         .await
@@ -1361,6 +1366,7 @@ pub async fn remove_member_role(
     user: AuthUser,
     Path((id, uid, role_id)): Path<(String, String, String)>,
 ) -> ApiResult<Json<Value>> {
+    let hub = state.hub.clone();
     state
         .run(move |tx, out| {
             check_single_role_change(tx, &id, &user.id, &uid, Some(&role_id), false)?;
@@ -1369,7 +1375,7 @@ pub async fn remove_member_role(
                 params![&id, &uid, &role_id],
             )?;
             broadcast::access_changed(out, &id);
-            crate::voice::access_changed(tx, out, &id, std::slice::from_ref(&uid))?;
+            crate::voice::access_changed(tx, &hub, out, &id, std::slice::from_ref(&uid))?;
             Ok(Json(json!({"success": true})))
         })
         .await
@@ -1386,6 +1392,7 @@ pub async fn transfer_ownership(
         .filter(|id| !id.is_empty())
         .ok_or_else(|| ApiError::bad_request("new_owner_required"))?
         .to_owned();
+    let hub = state.hub.clone();
     state
         .run(move |tx, out| {
             let space = require_space(tx, &id)?;
@@ -1411,7 +1418,7 @@ pub async fn transfer_ownership(
             let data = space_json(&updated)?;
             out.to_space(&id, &json!({"type": "space_updated", "space": data}));
             broadcast::access_changed(out, &id);
-            crate::voice::access_changed(tx, out, &id, &[user.id.clone(), new_owner])?;
+            crate::voice::access_changed(tx, &hub, out, &id, &[user.id.clone(), new_owner])?;
             Ok(Json(data))
         })
         .await
@@ -1471,6 +1478,7 @@ pub async fn ban(
         .map(js_trim)
         .filter(|reason| !reason.is_empty())
         .map(str::to_owned);
+    let hub = state.hub.clone();
     state
         .run(move |tx, out| {
             if !perms::has_permission(tx, &user.id, &id, Permissions::BAN_MEMBERS)? {
@@ -1493,6 +1501,7 @@ pub async fn ban(
                 params![&id, &target, &reason, &user.id, now_ms()],
             )?;
             remove_member(tx, &id, &target)?;
+            crate::voice::check_permissions(tx, &hub, out, &id)?;
             out.to_space(&id, &json!({"type": "member_left", "spaceId": id, "userId": target}));
             out.to_user(&target, &json!({"type": "member_banned", "spaceId": id, "reason": reason}));
             out.leave_space(&target, &id);

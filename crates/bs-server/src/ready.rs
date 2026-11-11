@@ -576,6 +576,7 @@ pub fn build(tx: &mut dyn Tx, hub: &Hub, user_id: &str) -> DbResult<Map<String, 
         space_ids.push(row.text("id")?);
         spaces.push(view);
     }
+    let voice_spaces = space_ids.clone();
     hub.set_user_spaces(user_id, space_ids);
 
     let dm_channels = open_dm_channels(tx, user_id)?;
@@ -694,12 +695,28 @@ pub fn build(tx: &mut dyn Tx, hub: &Hub, user_id: &str) -> DbResult<Map<String, 
     ready.insert("folders".into(), json!(folders(tx, user_id)?));
     ready.insert("spaceLayout".into(), space_layout);
     ready.insert("layoutUpdatedAt".into(), layout_updated_at);
-    ready.insert("voiceStates".into(), json!({}));
-    ready.insert("voiceChannelElapsedSeconds".into(), json!({}));
-    ready.insert("voiceUserStates".into(), json!({}));
-    ready.insert("spaceVoiceStates".into(), json!({}));
+    let (mut voice_states, mut voice_elapsed, mut voice_users, mut voice_flags) =
+        (Map::new(), Map::new(), Map::new(), Map::new());
+    for space in &voice_spaces {
+        let (states, elapsed, users, flags) =
+            crate::voice::space_snapshot(tx, hub, space, user_id)?;
+        voice_states.extend(states);
+        voice_elapsed.extend(elapsed);
+        voice_users.extend(users);
+        voice_flags.extend(flags);
+    }
+    let (active_calls, call_states, call_users) = crate::voice::dm_calls(hub, user_id, &dm_ids);
+    voice_states.extend(call_states);
+    voice_users.extend(call_users);
+    ready.insert("voiceStates".into(), Value::Object(voice_states));
+    ready.insert(
+        "voiceChannelElapsedSeconds".into(),
+        Value::Object(voice_elapsed),
+    );
+    ready.insert("voiceUserStates".into(), Value::Object(voice_users));
+    ready.insert("spaceVoiceStates".into(), Value::Object(voice_flags));
     ready.insert("readStates".into(), json!(read_states));
-    ready.insert("activeCalls".into(), json!([]));
+    ready.insert("activeCalls".into(), json!(active_calls));
     ready.insert("userActivities".into(), Value::Object(user_activities));
     ready.insert(
         "userActivityIdentities".into(),

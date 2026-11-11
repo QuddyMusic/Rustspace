@@ -25,6 +25,8 @@
     clippy::result_unit_err,
     clippy::unused_async,
     clippy::too_many_arguments,
+    clippy::struct_excessive_bools,
+    clippy::semicolon_if_nothing_returned,
     reason = "порядок проверок и форма ответов повторяют оригинальный сервер"
 )]
 
@@ -269,6 +271,7 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/api/social/discover", get(routes::social::discover))
         .route("/api/social/search", get(routes::social::search))
+        .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(state.clone(), global_limit))

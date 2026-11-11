@@ -113,6 +113,41 @@ pub async fn handle(
                 "activity_update" => activity_update(&app, tx, out, cx, &event)?,
                 "reaction_add" => reaction_add(&app, tx, out, cx, &event)?,
                 "reaction_remove" => reaction_remove(&app, tx, out, cx, &event)?,
+                "voice_join" => {
+                    crate::voice::join(tx, &app.hub, out, &cx.user_id, cx.connection, &event)?;
+                }
+                "voice_leave" => crate::voice::leave(tx, &app.hub, out, &cx.user_id)?,
+                "voice_status" => {
+                    crate::voice::status(tx, &app.hub, out, &cx.user_id, cx.connection, &event)?;
+                }
+                "voice_space_mute" => {
+                    crate::voice::moderate(tx, &app.hub, out, &cx.user_id, &event, false)?;
+                }
+                "voice_space_deafen" => {
+                    crate::voice::moderate(tx, &app.hub, out, &cx.user_id, &event, true)?;
+                }
+                "voice_move" => crate::voice::move_member(tx, &app.hub, out, &cx.user_id, &event)?,
+                "voice_disconnect" => {
+                    crate::voice::disconnect_member(tx, &app.hub, out, &cx.user_id, &event)?;
+                }
+                "dm_call_start" => crate::voice::call_start(
+                    &app,
+                    tx,
+                    out,
+                    &cx.user_id,
+                    &cx.username,
+                    cx.connection,
+                    &event,
+                )?,
+                "dm_call_accept" => {
+                    crate::voice::call_accept(&app, tx, out, &cx.user_id, cx.connection, &event)?;
+                }
+                "dm_call_reject" => {
+                    crate::voice::call_stop(&app, tx, out, &cx.user_id, &event, true)?;
+                }
+                "dm_call_end" => {
+                    crate::voice::call_stop(&app, tx, out, &cx.user_id, &event, false)?;
+                }
                 "channel_ack" => channel_ack(&app, tx, out, cx, &event, false)?,
                 "mark_unread" => channel_ack(&app, tx, out, cx, &event, true)?,
                 other => {
@@ -144,7 +179,7 @@ pub async fn handle(
 
 /// Соединение закрылось: снять с него то, что к нему привязано (голос).
 pub fn connection_closed(state: &AppState, user_id: &str, connection: u64) {
-    let _ = (state, user_id, connection);
+    crate::voice::connection_closed(state, user_id, connection);
 }
 
 /// Текст сообщения из события, проверенный так же, как в оригинале.

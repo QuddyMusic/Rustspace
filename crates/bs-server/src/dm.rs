@@ -392,6 +392,29 @@ pub fn broadcast_message(
             );
         }
     }
+    reopen_closed_with(tx, out, channel, Some(message))?;
+    let event = json!({"type": "dm_message_created", "message": message});
+    for member in &members {
+        broadcast::to_user(tx, out, member, &event)?;
+    }
+    Ok(())
+}
+
+/// Открывает переписку тем участникам, кто её закрыл, и сообщает им о ней
+/// (`reopenForClosedMembers`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn reopen_closed(tx: &mut dyn Tx, out: &mut Outbox, channel: &str) -> DbResult<()> {
+    reopen_closed_with(tx, out, channel, None)
+}
+
+fn reopen_closed_with(
+    tx: &mut dyn Tx,
+    out: &mut Outbox,
+    channel: &str,
+    last_message: Option<&Value>,
+) -> DbResult<()> {
     let closed: Vec<String> = tx
         .query(
             "SELECT user_id FROM dm_members WHERE dm_channel_id = ? AND closed = 1",
@@ -400,24 +423,22 @@ pub fn broadcast_message(
         .iter()
         .map(|row| row.text("user_id"))
         .collect::<DbResult<_>>()?;
-    if !closed.is_empty() {
-        tx.execute(
-            "UPDATE dm_members SET closed = 0, closed_changed_at = ? WHERE dm_channel_id = ? AND closed = 1",
-            params![now_ms(), channel],
-        )?;
-        if let Some(mut wire) = channel_wire(tx, channel)? {
-            // Тем, кому переписка открывается заново, последнее сообщение
-            // уходит целиком, как его передал отправитель.
-            wire["lastMessage"] = message.clone();
-            let event = json!({"type": "dm_channel_created", "dmChannel": wire});
-            for user in &closed {
-                broadcast::to_user(tx, out, user, &event)?;
-            }
-        }
+    if closed.is_empty() {
+        return Ok(());
     }
-    let event = json!({"type": "dm_message_created", "message": message});
-    for member in &members {
-        broadcast::to_user(tx, out, member, &event)?;
+    tx.execute(
+        "UPDATE dm_members SET closed = 0, closed_changed_at = ? WHERE dm_channel_id = ? AND closed = 1",
+        params![now_ms(), channel],
+    )?;
+    if let Some(mut wire) = channel_wire(tx, channel)? {
+        // Последнее сообщение уходит целиком, как его передал отправитель.
+        if let Some(message) = last_message {
+            wire["lastMessage"] = message.clone();
+        }
+        let event = json!({"type": "dm_channel_created", "dmChannel": wire});
+        for user in &closed {
+            broadcast::to_user(tx, out, user, &event)?;
+        }
     }
     Ok(())
 }

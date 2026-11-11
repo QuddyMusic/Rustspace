@@ -58,6 +58,18 @@ sign-in, tokens):
 | S3 | Low | Snowflake ids follow the wall clock: if it steps back, ids go back and may repeat. | The generator never goes back in time; ids stay increasing and unique. |
 | S4 | Info | `account_deleted` is answered for a deleted account whatever the password, revealing that the account existed. | Kept for compatibility (clients show a specific message); timing is equalised. |
 | S5 | Info | bcrypt only uses the first 72 bytes of a password. | Same format on purpose: hashes stay interchangeable with the original. |
+| S6 | High | The LiveKit token route and `voice_join` checked only `CONNECT`. A private channel is closed by denying `VIEW_CHANNEL` while `CONNECT` stays granted, so a member could get a token for a hidden voice room and listen in. | Fixed: both rights are required; a member who loses access is removed from the room. |
+| S7 | Medium | The recipient of a friend request could answer it again: its status was not checked. A request accepted long ago could be "accepted" once more, restoring a friendship the other side had ended (and with it the right to add them to groups and send invites). | Fixed: only a pending request can be answered. |
+| S8 | Medium | A kicked or departed member kept their role rows and personal permission overrides and got them back on rejoining by invite, moderator roles included. | Fixed: roles and personal overrides are removed with the membership. |
+| S9 | Medium | An author could edit their messages after being kicked or banned: only authorship was checked. | Fixed: editing requires that the author still sees the channel. |
+| S10 | Medium | A kicked or banned member stayed subscribed to the space's events until reconnecting. | Fixed: the subscription ends right after `member_left`. |
+| S11 | Medium | Voice events (`voice_state_update`, statuses, moderator mutes) went to the whole space, revealing who sits in a hidden channel and when. | Fixed: only members who can view the channel receive them. |
+| S12 | Medium | `channel_ack` parsed an id of any length as a `BigInt`: a megabyte of digits stalled the server's only thread, repeatable twice a second. | Fixed: ids are at most 20 digits. |
+| S13 | Low | Reaction strings had no length limit, and a reaction could be added in a channel the member cannot view. | Fixed: at most 256 characters, and view access is required. |
+| S14 | Low | `POST /api/users/@me/verify-password` had no rate limit. | Fixed: same limit as login. |
+| S15 | Low | An attachment with no recorded uploader could be attached by anyone who knew its id. | Fixed: only the uploader can attach it. |
+| S16 | Info | Moderator mute, deafen and disconnect are enforced by the client: the LiveKit session is not torn down, so a modified client stays in the room until its token expires (one hour). | Partly: restrictions are applied when a token is issued. Forced removal through the LiveKit API is planned. |
+| S17 | Info | Changing the password does not close open WebSocket connections (REST tokens are revoked). A replicated account needs no current password to change it. | As in the original; closing connections risks logging out a client that has not stored its new token yet. |
 
 Kept exactly as in the original: bcrypt hashes (cost 12), HS256 tokens with the same fields
 (tokens and password hashes work on both servers with the same `JWT_SECRET`), revocation of
