@@ -53,6 +53,7 @@ pub mod hub;
 pub mod media;
 pub mod mentions;
 pub mod messages;
+pub mod net;
 pub mod perms;
 pub mod ratelimit;
 pub mod ready;
@@ -308,6 +309,7 @@ pub fn app(state: AppState) -> Router {
         .route("/api/files", any(routes::files::tus))
         .route("/api/files/{*rest}", any(routes::files::tus))
         .route("/api/uploads/{filename}", get(routes::uploads::get))
+        .route("/api/utils/metadata", get(routes::utils::metadata))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)

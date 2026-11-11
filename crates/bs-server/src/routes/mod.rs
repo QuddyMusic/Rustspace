@@ -16,3 +16,4 @@ pub mod social;
 pub mod spaces;
 pub mod uploads;
 pub mod users;
+pub mod utils;
