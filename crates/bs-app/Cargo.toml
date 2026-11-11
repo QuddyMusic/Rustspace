@@ -78,7 +78,9 @@ semver = "1"
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 notify-rust = { version = "4", default-features = false, features = ["z"] }
 global-hotkey = { version = "0.10", optional = true }
-tray-icon = { version = "0.24", optional = true }
+# Без libxdo: в меню трея только свои пункты и разделители, а libxdo
+# нет в ряде дистрибутивов по умолчанию.
+tray-icon = { version = "0.24", optional = true, default-features = false, features = ["gtk"] }
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
 

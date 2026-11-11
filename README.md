@@ -148,7 +148,7 @@ cargo run -p bs-tui -- --allow-insecure                # arguments after `--` go
 | `sounds` | interface sounds (rodio) | Linux: `libasound2-dev` |
 | `voice` | voice, screen sharing, call stage (includes `sounds`) | clang **21+**, `libclang`, `pkg-config`; Linux: PipeWire, X11/Wayland headers; `libwebrtc` is downloaded at build time |
 | `camera` | webcam via nokhwa (V4L2, Media Foundation, AVFoundation; includes `voice`) | — |
-| `tray` | tray icon and hide-to-tray | Linux: `libgtk-3-dev`, `libxdo-dev`, `libayatana-appindicator3-dev` |
+| `tray` | tray icon and hide-to-tray | Linux: `libgtk-3-dev`, `libayatana-appindicator3-dev` |
 | `global-hotkeys` | hotkeys outside the window (X11, Windows, macOS; Wayland through the GlobalShortcuts portal) | Linux: X11 headers |
 | `desktop` | `tray` + `global-hotkeys` | as above |
 
