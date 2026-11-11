@@ -69,7 +69,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{any, delete, get, patch, post};
 use serde_json::json;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -305,6 +305,9 @@ pub fn app(state: AppState) -> Router {
         .route("/api/channels/{id}/messages/around", get(routes::search::channel_around))
         .route("/api/dm/{id}/search", get(routes::search::dm_channel))
         .route("/api/dm/{id}/messages/around", get(routes::search::dm_around))
+        .route("/api/files", any(routes::files::tus))
+        .route("/api/files/{*rest}", any(routes::files::tus))
+        .route("/api/uploads/{filename}", get(routes::uploads::get))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)
@@ -323,4 +326,16 @@ pub fn app(state: AppState) -> Router {
         ))
         .layer(cors())
         .with_state(state)
+}
+
+/// Запускает фоновые работы сервера: уборку незавершённых загрузок.
+pub fn spawn_background(state: &AppState) {
+    let uploads = state.clone();
+    tokio::spawn(async move {
+        let mut timer = tokio::time::interval(std::time::Duration::from_hours(1));
+        loop {
+            timer.tick().await;
+            routes::files::sweep_expired(&uploads).await;
+        }
+    });
 }

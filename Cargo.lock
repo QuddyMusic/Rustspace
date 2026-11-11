@@ -987,6 +987,8 @@ dependencies = [
  "bs-permissions",
  "futures-util",
  "hex",
+ "httpdate",
+ "image",
  "jsonwebtoken",
  "rand 0.9.5",
  "regex",

@@ -36,6 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              события для них не отправляются и не принимаются"
         );
     }
+    bs_server::spawn_background(&state);
     let listener = tokio::net::TcpListener::bind(&address).await?;
     tracing::info!("Backspace server running at http://{address}");
     axum::serve(

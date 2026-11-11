@@ -61,6 +61,22 @@ class Ctx:
         s, b = http(self.port, method, path, body, self.tok.get(who))
         self.log.append((label or f'{who} {method} {self.n.text(path)}', s, self.n.val(b)))
         return b if isinstance(b, (dict, list)) else {}
+    def raw(self, who, method, path, headers=None, data=None, keep=(), label=None, auth=True):
+        """Запрос с произвольными заголовками и телом; сравниваются статус, выбранные заголовки и тело."""
+        import http.client
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=20)
+        h = dict(headers or {})
+        if auth and who: h['Authorization'] = 'Bearer ' + self.tok[who]
+        conn.request(method, path, body=data, headers=h)
+        r = conn.getresponse(); body = r.read(); got = {k.lower(): v for k, v in r.getheaders()}; conn.close()
+        try: parsed = json.loads(body) if body else None
+        except Exception: parsed = body.decode(errors='replace') if len(body) < 400 else f'<{len(body)} байт>'
+        shown = {k: self.n.text(re.sub(r'/api/files/[0-9a-f]{32}', lambda m: '/api/files/' + self.n.tok(m.group(0)[11:]), got.get(k, '<нет>'))) for k in keep}
+        for k in ('upload-expires',):
+            if k in shown and shown[k] != '<нет>': shown[k] = '<дата>'
+        path_text = re.sub(r'[0-9a-f]{32}', lambda m: self.n.tok(m.group(0)), path)
+        self.log.append((label or f'{who} {method} {self.n.text(path_text)}', r.status, {'headers': shown, 'body': self.n.val(parsed)}))
+        return r.status, got, (parsed if isinstance(parsed, (dict, list)) else body)
     def send(self, who, event): self.ws[who].send(event)
     def settle(self, t=0.5): time.sleep(t)
     def events(self):
