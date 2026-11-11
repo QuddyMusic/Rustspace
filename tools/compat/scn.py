@@ -13,6 +13,9 @@ class Norm:
         return self.ids[s]
     def text(self, s):
         s = re.sub(r'\d{15,}', lambda m: self.tok(m.group(0)), s)
+        for raw, tok in list(self.ids.items()):
+            if re.fullmatch(r'[0-9a-f]{8}', raw) and raw in s: s = s.replace(raw, tok)
+        s = re.sub(r'(localhost|127\.0\.0\.1):310[56]', r'\1:PORT', s)
         return s
     def val(self, v, key=''):
         if isinstance(v, dict): return {self.text(k): self.val(v[k], k) for k in sorted(v)}

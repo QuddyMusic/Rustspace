@@ -392,7 +392,7 @@ pub fn dm_channel_view(tx: &mut dyn Tx, channel: &Row) -> DbResult<Value> {
         .collect::<DbResult<Vec<_>>>()?;
     let last = tx.query_one(
         "SELECT id, dm_channel_id, user_id, content, created_at, type FROM dm_messages \
-         WHERE dm_channel_id = ? ORDER BY created_at DESC LIMIT 1",
+         WHERE dm_channel_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
         params![&id],
     )?;
     let last_message = match last {

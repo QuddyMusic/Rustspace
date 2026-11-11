@@ -257,6 +257,18 @@ pub fn app(state: AppState) -> Router {
             "/api/dm/{id}/messages",
             get(routes::dm::history).post(routes::dm::create_message),
         )
+        .route("/api/social/friends", get(routes::social::friends))
+        .route("/api/social/friends/{id}", delete(routes::social::remove_friend))
+        .route(
+            "/api/social/requests",
+            get(routes::social::requests).post(routes::social::send_request),
+        )
+        .route(
+            "/api/social/requests/{id}",
+            patch(routes::social::answer_request).delete(routes::social::cancel_request),
+        )
+        .route("/api/social/discover", get(routes::social::discover))
+        .route("/api/social/search", get(routes::social::search))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(state.clone(), global_limit))
