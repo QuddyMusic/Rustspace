@@ -289,7 +289,14 @@ pub(crate) fn notifications(ui: &mut egui::Ui) {
             setting_row(
                 ui,
                 tr("Сворачивать в трей"),
-                tr("Закрытие окна прячет Backspace в трей; выйти — через меню значка."),
+                if crate::desktop::is_wayland() {
+                    tr(
+                        "Закрытие окна сворачивает Backspace (спрятать окно Wayland не позволяет); \
+                        выйти — через меню значка в трее.",
+                    )
+                } else {
+                    tr("Закрытие окна прячет Backspace в трей; выйти — через меню значка.")
+                },
                 &mut desktop.close_to_tray,
             );
         }

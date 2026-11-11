@@ -173,9 +173,9 @@ impl Portal {
             PATH,
             Some("org.freedesktop.host.portal.Registry"),
             "Register",
-            &("backspace-rs", options),
+            &(crate::APP_ID, options),
         ) {
-            tracing::debug!(%err, "Registry.Register не сработал");
+            tracing::info!(%err, "портал не принял идентификатор приложения");
         }
     }
 

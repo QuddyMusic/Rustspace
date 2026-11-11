@@ -53,6 +53,13 @@ pub(crate) fn tray_available() -> bool {
     TRAY_UP.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Окно живёт в сеансе Wayland (не XWayland).
+pub(crate) fn is_wayland() -> bool {
+    cfg!(target_os = "linux")
+        && std::env::var_os("WAYLAND_DISPLAY").is_some()
+        && std::env::var("XDG_SESSION_TYPE").is_ok_and(|kind| kind.eq_ignore_ascii_case("wayland"))
+}
+
 /// Работает ли глобальный перехват клавиш.
 pub(crate) fn global_keys_available() -> bool {
     KEYS_UP.load(std::sync::atomic::Ordering::Relaxed) || portal_ready()
@@ -247,6 +254,10 @@ impl Desktop {
                 }
             }
         }
+        // Под Wayland свёрнутое окно возвращают с панели задач, не из трея.
+        if self.hidden && is_wayland() && ctx.input(|i| i.viewport().focused == Some(true)) {
+            self.hidden = false;
+        }
         let close = ctx.input(|i| i.viewport().close_requested());
         if close && self.tray && close_to_tray && !self.quitting {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -267,7 +278,14 @@ impl Desktop {
             return;
         }
         self.hidden = true;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        if is_wayland() {
+            // Протокол Wayland не умеет прятать окно (winit игнорирует
+            // Visible(false)), поэтому окно сворачивается, а Backspace
+            // продолжает работать.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
     }
 
     #[cfg(feature = "tray")]

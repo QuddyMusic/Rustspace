@@ -569,16 +569,87 @@ fn pick_config(
     fallback().map_err(|err| VoiceError::Device(err.to_string()))
 }
 
+/// Кандидаты по порядку: выбранное устройство, системное по умолчанию и
+/// звуковые серверы ALSA (`pipewire`, `pulse`, `default`). Устройство
+/// `hw:` занято, пока его держит PipeWire или PulseAudio, — тогда звук
+/// открывается через сервер, а не пропадает.
+fn candidates(wanted: Option<&str>, kind: DeviceKind) -> Vec<cpal::Device> {
+    let mut out: Vec<cpal::Device> = Vec::new();
+    let mut push = |device: Option<cpal::Device>| {
+        if let Some(device) = device {
+            let id = device.id().ok().map(|id| id.to_string());
+            if !out.iter().any(|d| d.id().ok().map(|i| i.to_string()) == id) {
+                out.push(device);
+            }
+        }
+    };
+    push(find_device(wanted, kind));
+    push(find_device(None, kind));
+    let host = cpal::default_host();
+    let all = match kind {
+        DeviceKind::Input => host.input_devices().ok().map(Iterator::collect::<Vec<_>>),
+        DeviceKind::Output => host.output_devices().ok().map(Iterator::collect::<Vec<_>>),
+    };
+    for server in ["pipewire", "pulse", "default"] {
+        let found = all.iter().flatten().find(|device| {
+            device
+                .id()
+                .is_ok_and(|id| id.to_string().rsplit(':').next() == Some(server))
+        });
+        push(found.cloned());
+    }
+    out
+}
+
+/// Открывает первое устройство из кандидатов, которое удалось открыть.
+fn open_first(
+    wanted: Option<&str>,
+    kind: DeviceKind,
+    open: impl Fn(&cpal::Device) -> VoiceResult<cpal::Stream>,
+) -> VoiceResult<cpal::Stream> {
+    let mut last = None;
+    for device in candidates(wanted, kind) {
+        let id = device
+            .id()
+            .map_or_else(|_| "?".to_owned(), |id| id.to_string());
+        match open(&device) {
+            Ok(stream) => {
+                info!(device = %id, ?kind, "звуковое устройство открыто");
+                return Ok(stream);
+            }
+            Err(err) => {
+                warn!(device = %id, ?kind, error = %err, "устройство не открылось, пробуем следующее");
+                last = Some(err);
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| match kind {
+        DeviceKind::Input => VoiceError::NoMicrophone,
+        DeviceKind::Output => VoiceError::Device("нет устройства воспроизведения".into()),
+    }))
+}
+
 fn open_input(wanted: Option<&str>, shared: &Arc<Shared>) -> VoiceResult<cpal::Stream> {
-    let device = find_device(wanted, DeviceKind::Input).ok_or(VoiceError::NoMicrophone)?;
+    open_first(wanted, DeviceKind::Input, |device| {
+        open_input_device(device, shared)
+    })
+}
+
+fn open_output(wanted: Option<&str>, shared: &Arc<Shared>) -> VoiceResult<cpal::Stream> {
+    open_first(wanted, DeviceKind::Output, |device| {
+        open_output_device(device, shared)
+    })
+}
+
+fn open_input_device(device: &cpal::Device, shared: &Arc<Shared>) -> VoiceResult<cpal::Stream> {
     let ranges = device
         .supported_input_configs()
         .map_err(|err| VoiceError::Device(err.to_string()))?;
     let config = pick_config(ranges, || device.default_input_config())?;
     let stream = match config.sample_format() {
-        SampleFormat::F32 => build_input::<f32>(&device, &config, shared),
-        SampleFormat::I16 => build_input::<i16>(&device, &config, shared),
-        SampleFormat::U16 => build_input::<u16>(&device, &config, shared),
+        SampleFormat::F32 => build_input::<f32>(device, &config, shared),
+        SampleFormat::I16 => build_input::<i16>(device, &config, shared),
+        SampleFormat::U16 => build_input::<u16>(device, &config, shared),
         other => Err(VoiceError::Device(format!(
             "формат {other} не поддерживается"
         ))),
@@ -626,17 +697,15 @@ where
         .map_err(|err| VoiceError::Device(err.to_string()))
 }
 
-fn open_output(wanted: Option<&str>, shared: &Arc<Shared>) -> VoiceResult<cpal::Stream> {
-    let device = find_device(wanted, DeviceKind::Output)
-        .ok_or_else(|| VoiceError::Device("нет устройства воспроизведения".into()))?;
+fn open_output_device(device: &cpal::Device, shared: &Arc<Shared>) -> VoiceResult<cpal::Stream> {
     let ranges = device
         .supported_output_configs()
         .map_err(|err| VoiceError::Device(err.to_string()))?;
     let config = pick_config(ranges, || device.default_output_config())?;
     let stream = match config.sample_format() {
-        SampleFormat::F32 => build_output::<f32>(&device, &config, shared),
-        SampleFormat::I16 => build_output::<i16>(&device, &config, shared),
-        SampleFormat::U16 => build_output::<u16>(&device, &config, shared),
+        SampleFormat::F32 => build_output::<f32>(device, &config, shared),
+        SampleFormat::I16 => build_output::<i16>(device, &config, shared),
+        SampleFormat::U16 => build_output::<u16>(device, &config, shared),
         other => Err(VoiceError::Device(format!(
             "формат {other} не поддерживается"
         ))),

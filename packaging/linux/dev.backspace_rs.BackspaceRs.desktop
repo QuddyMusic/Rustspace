@@ -10,4 +10,4 @@ Icon=backspace-rs
 Terminal=false
 Categories=Network;InstantMessaging;Chat;
 Keywords=backspace;chat;voice;discord;
-StartupWMClass=backspace-rs
+StartupWMClass=dev.backspace_rs.BackspaceRs

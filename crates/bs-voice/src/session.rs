@@ -580,8 +580,16 @@ impl VoiceSession {
 
     /// Отключается от комнаты.
     pub async fn disconnect(&self) -> VoiceResult<()> {
-        let _ = self.stop_screen_share().await;
-        let _ = self.stop_camera().await;
+        // Захваты останавливаем, а публикации не снимаем по одной: это
+        // запускало пересогласование SDP, которое гонялось с закрытием
+        // комнаты («Called in wrong state: closed»).
+        let audio = self.screen_audio.lock().await.take();
+        if let Some(audio) = audio {
+            audio.forward.abort();
+            let _ = tokio::task::spawn_blocking(move || drop(audio.capture)).await;
+        }
+        self.stage.drop_local(TrackKind::ScreenShare).await;
+        self.stage.drop_local(TrackKind::Video).await;
         self.stage.clear();
         self.audio.release_mic_track();
         self.audio.stop().ok();

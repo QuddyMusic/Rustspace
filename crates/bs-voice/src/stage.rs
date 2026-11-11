@@ -272,6 +272,16 @@ impl VideoStage {
         Ok(true)
     }
 
+    /// Останавливает захват без снятия публикации — при выходе из звонка
+    /// публикации снимет закрытие комнаты, а лишняя пересогласовка SDP
+    /// гонялась бы с ним.
+    pub(crate) async fn drop_local(&self, kind: TrackKind) {
+        let share = self.slot_for(kind).lock().await.take();
+        if let Some(mut share) = share {
+            share.capture.stop();
+        }
+    }
+
     /// Идёт ли наш поток этого вида.
     pub(crate) async fn is_local_running(&self, kind: TrackKind) -> bool {
         self.slot_for(kind).lock().await.is_some()

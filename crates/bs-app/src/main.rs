@@ -52,11 +52,20 @@ mod voice;
 mod voice_media;
 mod widgets;
 
+/// Идентификатор приложения: app_id окна Wayland, имя .desktop-файла и имя
+/// для порталов (без точек портал его не примет).
+pub(crate) const APP_ID: &str = "dev.backspace_rs.BackspaceRs";
+
 fn main() -> eframe::Result {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new(
+                    // Штатное закрытие соединения с PulseAudio крейт пишет как
+                    // ERROR, а e2ee LiveKit — служебные INFO на каждый трек.
+                    "info,pulseaudio::client::reactor=off,livekit::room::e2ee=warn",
+                )
+            }),
         )
         .init();
 
@@ -73,7 +82,7 @@ fn main() -> eframe::Result {
         .with_min_inner_size([720.0, 480.0])
         .with_title("Backspace RS")
         // Совпадает с StartupWMClass в .desktop: окно получает иконку панели.
-        .with_app_id("backspace-rs");
+        .with_app_id(APP_ID);
     match eframe::icon_data::from_png_bytes(include_bytes!(
         "../../../packaging/linux/backspace-rs.png"
     )) {
