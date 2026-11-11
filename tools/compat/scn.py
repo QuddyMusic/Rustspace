@@ -18,6 +18,7 @@ class Norm:
         if isinstance(v, dict): return {self.text(k): self.val(v[k], k) for k in sorted(v)}
         if isinstance(v, list): return [self.val(x, key) for x in v]
         if isinstance(v, str):
+            if key == 'federatedId' and re.fullmatch(r'[0-9a-f]{32}', v): return self.tok(v)
             if key in ('inviteCode', 'token', 'code') and v: return self.tok(v) if key != 'token' else '<token>'
             return self.text(v)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and TS_KEYS.search(key) and v > 1_600_000_000_000: return '<ts>'

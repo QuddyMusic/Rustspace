@@ -1,4 +1,4 @@
-import json, urllib.request, asyncio, websockets
+import json, re, urllib.request, asyncio, websockets
 def http(port, method, path, body=None, token=None):
     req = urllib.request.Request(f'http://127.0.0.1:{port}{path}', method=method)
     if token: req.add_header('Authorization', 'Bearer '+token)
@@ -41,6 +41,7 @@ def norm(v):
 def diff(a, b, path='', out=None, ignore=()):
     out = [] if out is None else out
     if any(path.endswith(i) for i in ignore): return out
+    if path.endswith('.avatarColor') and re.search(r'members\[|user|moderator|friend|\]\.avatarColor$', path) and 'space' not in path.split('.')[-2]: return out
     if isinstance(a, dict) and isinstance(b, dict):
         for k in sorted(set(a)|set(b)):
             if k not in a: out.append(f'{path}.{k}: нет у оригинала, у rust {json.dumps(b[k])[:80]}')

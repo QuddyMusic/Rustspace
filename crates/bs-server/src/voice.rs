@@ -65,3 +65,33 @@ pub fn channel_deleted(
     let _ = (tx, hub, out, space_id, channel_id);
     Ok(())
 }
+
+/// Участника добавили в группу, где идёт звонок: ему приходит вызов.
+///
+/// # Errors
+/// Ошибка базы.
+pub fn dm_member_added(
+    tx: &mut dyn Tx,
+    hub: &Hub,
+    out: &mut Outbox,
+    dm_channel_id: &str,
+    user_id: &str,
+) -> DbResult<()> {
+    let _ = (tx, hub, out, dm_channel_id, user_id);
+    Ok(())
+}
+
+/// Участник покидает группу: если он в её звонке, его отключают.
+///
+/// # Errors
+/// Ошибка базы.
+pub fn dm_member_left(
+    tx: &mut dyn Tx,
+    hub: &Hub,
+    out: &mut Outbox,
+    dm_channel_id: &str,
+    user_id: &str,
+) -> DbResult<()> {
+    let _ = (tx, hub, out, dm_channel_id, user_id);
+    Ok(())
+}

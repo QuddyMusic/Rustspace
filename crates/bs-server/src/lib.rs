@@ -24,6 +24,7 @@
     clippy::cognitive_complexity,
     clippy::result_unit_err,
     clippy::unused_async,
+    clippy::too_many_arguments,
     reason = "порядок проверок и форма ответов повторяют оригинальный сервер"
 )]
 
@@ -223,6 +224,24 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/api/messages/{id}",
             patch(routes::messages::update).delete(routes::messages::delete),
+        )
+        .route("/api/dm", get(routes::dm::list).post(routes::dm::open))
+        .route("/api/dm/group", post(routes::dm::create_group))
+        .route("/api/dm/space-invite", post(routes::dm::space_invite))
+        .route(
+            "/api/dm/messages/{id}",
+            patch(routes::dm::update_message).delete(routes::dm::delete_message),
+        )
+        .route("/api/dm/{id}", patch(routes::dm::update).delete(routes::dm::close))
+        .route(
+            "/api/dm/{id}/members",
+            post(routes::dm::add_member).delete(routes::dm::leave),
+        )
+        .route("/api/dm/{id}/members/{target}", delete(routes::dm::kick))
+        .route("/api/dm/{id}/transfer", post(routes::dm::transfer))
+        .route(
+            "/api/dm/{id}/messages",
+            get(routes::dm::history).post(routes::dm::create_message),
         )
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)

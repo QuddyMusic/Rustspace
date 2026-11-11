@@ -113,8 +113,8 @@ pub async fn handle(
                 "activity_update" => activity_update(&app, tx, out, cx, &event)?,
                 "reaction_add" => reaction_add(&app, tx, out, cx, &event)?,
                 "reaction_remove" => reaction_remove(&app, tx, out, cx, &event)?,
-                "channel_ack" => channel_ack(tx, out, cx, &event, false)?,
-                "mark_unread" => channel_ack(tx, out, cx, &event, true)?,
+                "channel_ack" => channel_ack(&app, tx, out, cx, &event, false)?,
+                "mark_unread" => channel_ack(&app, tx, out, cx, &event, true)?,
                 other => {
                     if !crate::dm_events::handle(
                         &app,
@@ -124,6 +124,7 @@ pub async fn handle(
                         other,
                         &event,
                         &mut after.stale_files,
+                        &mut after.embeds,
                     )? {
                         error(out, &cx.user_id, &format!("Unknown event type: {other}"));
                     }
@@ -822,6 +823,7 @@ fn id_greater(a: &str, b: &str) -> bool {
 /// `channel_ack` и `mark_unread`: позиция чтения пользователя в канале или
 /// переписке.
 fn channel_ack(
+    app: &AppState,
     tx: &mut dyn Tx,
     out: &mut Outbox,
     cx: &Context,
@@ -884,7 +886,14 @@ fn channel_ack(
         &json!({"type": kind, "channelId": channel, "messageId": message_id}),
     )?;
     if !(mark_unread && message_id == "0") {
-        crate::federation::queue_read_state(tx, channel, message_id, &cx.user_id)?;
+        crate::federation::queue_read_state(
+            tx,
+            &app.config,
+            &app.ids,
+            channel,
+            message_id,
+            &cx.user_id,
+        )?;
     }
     Ok(())
 }
