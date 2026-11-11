@@ -237,7 +237,46 @@ impl eframe::App for BackspaceApp {
         self.desktop.logic(ctx);
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.frame_ui(ui, frame);
+        drop_unsafe_links(ui.ctx());
+    }
+}
+
+/// Ссылка, которую можно отдать системе: только `http(s)://` с именем узла.
+///
+/// Адреса приходят и с сервера (исходный код инстанса, страница релиза,
+/// вложения), а система открывает любую схему — `file:`, `smb:`, обработчики
+/// приложений. Чужой инстанс не должен уметь запускать их одним щелчком.
+#[must_use]
+pub(crate) fn safe_link(link: &str) -> bool {
+    url::Url::parse(link.trim()).is_ok_and(|url| {
+        matches!(url.scheme(), "http" | "https")
+            && url.host_str().is_some_and(|host| !host.is_empty())
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
+}
+
+/// Единая застава: выбрасывает из вывода кадра все открытия небезопасных
+/// ссылок, откуда бы они ни пришли (`hyperlink`, `open_url`).
+fn drop_unsafe_links(ctx: &egui::Context) {
+    ctx.output_mut(|output| {
+        output.commands.retain(|command| match command {
+            egui::OutputCommand::OpenUrl(open) => {
+                let ok = safe_link(&open.url);
+                if !ok {
+                    tracing::warn!("небезопасная ссылка не открыта");
+                }
+                ok
+            }
+            _ => true,
+        });
+    });
+}
+
+impl BackspaceApp {
+    fn frame_ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let prefs = crate::prefs::get();
         let input = self.desktop.frame(
             ui.ctx(),
@@ -307,6 +346,29 @@ impl eframe::App for BackspaceApp {
         // Фоновые события приходят из tokio; без этого окно спало бы вечно.
         if should_wake(self.bridge.is_busy(), self.bridge.cache().is_some()) {
             ui.ctx().request_repaint_after(WAKE_INTERVAL);
+        }
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::safe_link;
+
+    #[test]
+    fn only_plain_web_links_open() {
+        assert!(safe_link("https://github.com/TheZwiss/backspace"));
+        assert!(safe_link("http://192.168.1.2:3000/x"));
+        for bad in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "smb://host/share",
+            "ms-msdt:/id",
+            "https://user:pw@example.org",
+            "https://",
+            "/etc/passwd",
+            "",
+        ] {
+            assert!(!safe_link(bad), "{bad}");
         }
     }
 }

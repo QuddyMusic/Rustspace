@@ -239,6 +239,34 @@ pub(crate) struct ConnectRequest {
     pub(crate) deafened: bool,
 }
 
+/// Можно ли подключаться к этому адресу LiveKit.
+///
+/// `wss://` — всегда. Открытый `ws://` — только к loopback или когда сам
+/// инстанс открыт по `http://` (пользователь это уже разрешил): иначе
+/// инстанс мог бы незаметно снять шифрование со звонка.
+#[must_use]
+pub(crate) fn livekit_url_allowed(livekit: &str, instance_base: &str) -> bool {
+    let Ok(url) = url::Url::parse(livekit.trim()) else {
+        return false;
+    };
+    if !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    match url.scheme() {
+        "wss" | "https" => url.host_str().is_some(),
+        "ws" | "http" => {
+            let loopback = match url.host() {
+                Some(url::Host::Domain(host)) => host == "localhost",
+                Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+                Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+                None => false,
+            };
+            loopback || instance_base.trim_start().starts_with("http://")
+        }
+        _ => false,
+    }
+}
+
 #[cfg(feature = "voice")]
 pub(crate) use real::MediaEngine;
 #[cfg(not(feature = "voice"))]
@@ -605,5 +633,36 @@ mod real {
         pub(crate) fn runtime(&self) -> Handle {
             self.handle.clone()
         }
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::livekit_url_allowed;
+
+    #[test]
+    fn plaintext_livekit_only_for_loopback_or_http_instance() {
+        assert!(livekit_url_allowed(
+            "wss://lk.example.org",
+            "https://example.org"
+        ));
+        assert!(!livekit_url_allowed(
+            "ws://lk.example.org",
+            "https://example.org"
+        ));
+        assert!(livekit_url_allowed(
+            "ws://127.0.0.1:7880",
+            "https://example.org"
+        ));
+        assert!(livekit_url_allowed(
+            "ws://192.168.1.5:7880",
+            "http://192.168.1.5:3000"
+        ));
+        assert!(!livekit_url_allowed("file:///etc/passwd", "http://a"));
+        assert!(!livekit_url_allowed(
+            "wss://user:pw@lk.example.org",
+            "https://example.org"
+        ));
+        assert!(!livekit_url_allowed("not a url", "https://example.org"));
     }
 }

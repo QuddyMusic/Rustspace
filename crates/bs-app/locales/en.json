@@ -1146,5 +1146,6 @@
   "Снова напоминать об этой версии": "Remind me about this version again",
   "укажите репозиторий в виде owner/repo": "set the repository as owner/repo",
   "Экран {name}": "Screen {name}",
-  "Закрытие окна сворачивает Backspace (спрятать окно Wayland не позволяет); выйти — через меню значка в трее.": "Closing the window minimizes Backspace (Wayland does not allow hiding a window); quit from the tray icon menu."
+  "Закрытие окна сворачивает Backspace (спрятать окно Wayland не позволяет); выйти — через меню значка в трее.": "Closing the window minimizes Backspace (Wayland does not allow hiding a window); quit from the tray icon menu.",
+  "Сервер звонков работает без шифрования (ws://) — подключение отклонено": "The call server is unencrypted (ws://) — connection refused"
 }

@@ -473,7 +473,18 @@ impl VoiceState {
 
     fn poll_calls(&mut self, bridge: &mut Bridge) {
         let mut dm_tokens: Vec<_> = Vec::new();
-        for (origin, event) in bridge.take_voice_tokens() {
+        for (origin, mut event) in bridge.take_voice_tokens() {
+            // Инстанс по https не должен увести звонок на открытый ws://.
+            let base = bridge.base_at(origin).unwrap_or_default().to_owned();
+            if let Ok(token) = &event.result
+                && !crate::voice_media::livekit_url_allowed(&token.url, &base)
+            {
+                tracing::warn!("инстанс прислал небезопасный адрес LiveKit — звонок отклонён");
+                event.result = Err(crate::i18n::tr(
+                    "Сервер звонков работает без шифрования (ws://) — подключение отклонено",
+                )
+                .to_owned());
+            }
             dm_tokens.push((origin, event.channel_id.clone(), event.result.clone()));
             if let Some(limits) = event.limits {
                 self.host_limits.insert(origin, limits);
