@@ -292,6 +292,14 @@ pub fn app(state: AppState) -> Router {
         .route("/api/admin/invites/{id}/revoke", post(routes::invites::revoke))
         .route("/api/admin/invites/{id}/reinstate", post(routes::invites::reinstate))
         .route("/api/admin/invites/{id}/redemptions", get(routes::invites::redemptions))
+        .route(
+            "/api/settings/streaming",
+            get(routes::settings::streaming).patch(routes::settings::update_streaming),
+        )
+        .route(
+            "/api/settings/instance",
+            get(routes::settings::instance).patch(routes::settings::update_instance),
+        )
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)
