@@ -1,4 +1,4 @@
-import sys, asyncio; sys.path.insert(0,'/tmp/stand')
+import sys, asyncio; sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__)))
 from lib import *
 P=3105
 def reg(name):

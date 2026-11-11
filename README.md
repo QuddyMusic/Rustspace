@@ -88,7 +88,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-app` | The GUI and its entry point | 232 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server (in progress): configuration, storage with the original's migrations, sign-up, sign-in, profile | 16 |
+| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 31 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
 ## Building and running
@@ -191,6 +191,87 @@ cargo xtask contract --url http://127.0.0.1:3000    # against a running server
 
 The contract stand needs Node.js 22+ and `pnpm install` in the Backspace checkout. Aliases:
 `cargo fc` (fmt check), `cargo c` (clippy), `cargo t` (tests), `cargo f` (fmt).
+
+## Server (`bs-server`)
+
+The Rust server mirrors the original Backspace server: the same routes, WebSocket events,
+environment variables and the same SQLite database. The original's database file opens as is
+(same migrations; applied ones are not repeated), and the other way round: a database that
+`bs-server` has worked with opens in the original. Tokens and password hashes are shared.
+
+**Ported:** sign-up and sign-in, invites; profile, password, account deletion; spaces,
+members, roles, bans, channels, categories, permission overrides; messages, reactions, read
+positions, pokes; direct and group conversations; friends and people search; notification
+settings; voice channels, calls, voice moderation, LiveKit tokens; instance settings. Every
+route and event is compared with the original by the scenarios in `tools/compat`.
+
+**Not there yet:** file uploads (tus) and serving `/api/uploads`, link previews, message
+search, the space directory and join requests, stickers, GIFs, storage and users in the admin
+panel, serving the web client, federation (delivering and receiving events between
+instances). Next on the plan: PostgreSQL, two-factor authentication and end-to-end encrypted
+DMs; see [ROADMAP.md](ROADMAP.md). The server is not yet fit for an instance with federation
+peers, and says so at startup.
+
+### Build
+
+```sh
+cargo build --release -p bs-server      # target/release/backspace-server
+```
+
+Only a C compiler is needed (SQLite is built in). No Node.js.
+
+### Run
+
+```sh
+JWT_SECRET="$(openssl rand -hex 32)" \
+DB_PATH=data/backspace.db UPLOAD_DIR=data/uploads \
+target/release/backspace-server
+```
+
+The server listens on `0.0.0.0:3000`. The first registered user becomes the administrator.
+It stops on `Ctrl+C` or `SIGTERM`, letting open requests finish.
+
+To move over from the original server: stop it, copy the database and start
+`backspace-server` with the same `JWT_SECRET`, `DB_PATH` and `UPLOAD_DIR`. Going back works
+the same way.
+
+### Configuration
+
+The environment variables are the original's.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `JWT_SECRET` | none (required) | Token signing key, at least 32 characters |
+| `JWT_EXPIRES_IN` | `30d` | Token lifetime (`30d`, `12h`, `3600`) |
+| `PORT`, `HOST` | `3000`, `0.0.0.0` | Where to listen |
+| `DB_PATH` | `data/backspace.db` | SQLite database file |
+| `UPLOAD_DIR` | `data/uploads` | Directory for uploaded files |
+| `MAX_UPLOAD_SIZE` | `104857600` | File size limit, bytes |
+| `DOMAIN` | none | Instance domain (invite links, `user@domain` names) |
+| `PUBLIC_ORIGIN` | none | Full public address when it is not `https://DOMAIN` |
+| `TRUSTED_PROXY_HOPS` | `1` | How many proxies in front write `X-Forwarded-For` (0–4). Rate limits key on it: `1` behind one nginx, `0` with no proxy |
+| `REGISTRATION_OPEN` | `true` | Whether sign-up works without an invite (the admin can change it in settings) |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | none | LiveKit server for voice; voice is off without them |
+| `DIRECTORY_ENDPOINT` | the project's directory | Space directory address; an empty string turns it off |
+| `DISABLE_RATE_LIMITS` | `false` | Turn rate limits off (tests only) |
+| `BACKSPACE_SOURCE_URL`, `BACKSPACE_COMMIT` | none | Shown in the instance info |
+| `BS_PASSWORD_HASH_COST` | `12` | bcrypt cost (4–16); change for tests only |
+| `RUST_LOG` | `info` | Log detail (`debug`, `bs_server=trace`) |
+
+Put a TLS reverse proxy in front that passes WebSocket through on `/ws`.
+
+### Compatibility check
+
+`tools/compat` starts the original server and `bs-server` on copies of one database and runs
+the same scenarios against both, comparing responses and WebSocket events:
+
+```sh
+tools/compat/up.sh                    # needs a Backspace checkout with `pnpm install`
+python3 tools/compat/s_spaces.py      # also s_channels, s_messages, s_dm, s_social,
+                                      # s_account, s_voice, s_admin; cmp_ready.py
+```
+
+The checkout path comes from the `ORIG` variable (see the top of `up.sh`).
 
 ## Translations
 

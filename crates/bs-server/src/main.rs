@@ -18,6 +18,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = Db::open_sqlite(&config.db_path)?;
     let address = format!("{}:{}", config.host, config.port);
     let state = AppState::new(config, db)?;
+    let peers = state
+        .run(|tx, _| {
+            Ok(tx
+                .query_one(
+                    "SELECT count(*) AS n FROM federation_peers WHERE status IN ('active', 'unreachable')",
+                    &[],
+                )?
+                .map_or(Ok(0), |row| row.int("n"))?)
+        })
+        .await
+        .unwrap_or(0);
+    if peers > 0 {
+        tracing::warn!(
+            peers,
+            "у инстанса есть пиры федерации, а обмен между инстансами в этом сервере ещё не перенесён: \
+             события для них не отправляются и не принимаются"
+        );
+    }
     let listener = tokio::net::TcpListener::bind(&address).await?;
     tracing::info!("Backspace server running at http://{address}");
     axum::serve(

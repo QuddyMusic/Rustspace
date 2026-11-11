@@ -101,21 +101,41 @@ original server.
   the owner's decision.
 
 ## Server stage (in progress)
-1. **Security audit.** Client: done, see [SECURITY-AUDIT.md](SECURITY-AUDIT.md). Server: goes
-   along with the port, findings are added to the same file.
-2. **Rust server** (`bs-server`, Axum), compatible with existing clients and instances.
-   - Done: configuration (same environment variables), storage layer with the original's
-     SQLite migrations (the same database file opens in both servers, in both directions),
-     sign-up with invites, sign-in, tokens, own profile, instance info, rate limits, security
-     headers. Responses, including errors, were compared with the original one by one.
-   - Next: spaces, channels, messages and the WebSocket gateway (then the contract stand runs
-     against the Rust server) → DMs, friends, files, stickers, search, admin, LiveKit →
-     federation.
-3. **PostgreSQL** as a storage option: the storage layer is already database-neutral; the
-   PostgreSQL backend and schema come after the core.
-4. **Two-factor authentication** (TOTP), as an optional extension that old clients survive.
+1. **Security audit.** Client: done. Server: goes along with the port — 17 findings (S1–S17),
+   13 of them fixed in `bs-server`, the rest kept for compatibility and documented; see [SECURITY-AUDIT.md](SECURITY-AUDIT.md). Still to
+   review: what is not ported yet — uploads, link previews, federation.
+2. **Rust server** (`bs-server`, Axum), compatible with existing clients and instances. How to
+   build, run and configure it: [README.md](README.md#server-bs-server).
+   - [x] Configuration, storage layer with the original's SQLite migrations (the same database
+     file opens in both servers, in both directions), rate limits, security headers.
+   - [x] Sign-up with invites, sign-in, tokens; profile, password, account deletion.
+   - [x] WebSocket gateway: auth, `ready`, heartbeat, presence, activity.
+   - [x] Spaces, members, roles, bans, channels, categories, permission overrides.
+   - [x] Messages, reactions, read positions, pokes.
+   - [x] Direct and group conversations, friends, people search.
+   - [x] Voice: rooms, calls, moderation, LiveKit tokens.
+   - [x] Notification settings, registration invites, instance settings.
+   - [x] Compatibility stand (`tools/compat`): 8 scenarios, responses and events compared
+     with the original.
+   - [ ] Files: uploads (tus), serving, thumbnails, storage cleanup.
+   - [ ] Link previews (guarded against requests into the internal network), metadata.
+   - [ ] Message search and "messages around".
+   - [ ] Space directory, public join and join requests.
+   - [ ] Stickers, GIFs.
+   - [ ] Admin: users, storage, updates, telemetry.
+   - [ ] Serving the web client, CSP reports.
+   - [ ] Forced voice disconnect through the LiveKit API (finding S16).
+   - [ ] Federation: handshake and keys, outbox and delivery, receiving events, sync, account
+     replicas, cross-instance calls. The mutation log is already written as the original does.
+   - [ ] A full run of the `bs-contract` stand against `bs-server`.
+3. **PostgreSQL** as a storage option. The storage layer is database-neutral and queries are
+   written portably; left: the backend, PostgreSQL schema and migrations, moving data over
+   from SQLite.
+4. **Two-factor authentication** (TOTP), as an optional extension that old clients survive:
+   server and a client screen.
 5. **End-to-end encryption for DMs only**, without breaking compatibility with instances that
-   do not support it (so that an instance admin can no longer read private messages).
+   do not support it (so that an instance admin can no longer read private messages). The
+   original's schema already has an `encryption_version` column on DM messages to build on.
 
 ## Technical notes
 - Permissions (`bs-permissions`) only drive what the UI shows; the server always decides.

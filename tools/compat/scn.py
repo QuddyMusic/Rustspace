@@ -1,7 +1,7 @@
 """Сценарии совместимости: одни и те же запросы к оригиналу и к Rust-серверу,
 ответы и события WebSocket сравниваются после нормализации идентификаторов."""
 import sys, json, re, time, threading, asyncio, random, string
-sys.path.insert(0, '/tmp/stand')
+sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__)))
 from lib import http, diff
 import websockets
 

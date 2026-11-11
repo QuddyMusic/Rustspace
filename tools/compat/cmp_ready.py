@@ -1,4 +1,4 @@
-import sys; sys.path.insert(0,'/tmp/stand')
+import sys; sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__)))
 from lib import *
 bad=0
 for name in sys.argv[1:] or ['alice','bob','carol']:

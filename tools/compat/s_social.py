@@ -1,4 +1,4 @@
-import sys; sys.path.insert(0,'/tmp/stand')
+import sys; sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__)))
 from scn import run
 def social(c):
     a=c.user('al'); b=c.user('bo'); d=c.user('ca'); e=c.user('ev')
