@@ -15,6 +15,7 @@ class Norm:
         s = re.sub(r'\d{15,}', lambda m: self.tok(m.group(0)), s)
         for raw, tok in list(self.ids.items()):
             if re.fullmatch(r'[0-9a-f]{8}', raw) and raw in s: s = s.replace(raw, tok)
+        s = re.sub(r'invite=[\w-]{22}', lambda m: 'invite=' + self.tok(m.group(0)[7:]), s)
         s = re.sub(r'(localhost|127\.0\.0\.1):310[56]', r'\1:PORT', s)
         return s
     def val(self, v, key=''):
@@ -22,7 +23,7 @@ class Norm:
         if isinstance(v, list): return [self.val(x, key) for x in v]
         if isinstance(v, str):
             if key in ('federatedId', 'federatedCallId') and re.fullmatch(r'[0-9a-f]{32}', v): return self.tok(v)
-            if key in ('inviteCode', 'token', 'code') and v: return self.tok(v) if key != 'token' else '<token>'
+            if key in ('inviteCode', 'token', 'code') and v: return self.tok(v) if (key != 'token' or len(v) == 22) else '<token>'
             return self.text(v)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and TS_KEYS.search(key) and v > 1_600_000_000_000: return '<ts>'
         return v

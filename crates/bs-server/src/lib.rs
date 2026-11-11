@@ -26,6 +26,7 @@
     clippy::unused_async,
     clippy::too_many_arguments,
     clippy::struct_excessive_bools,
+    clippy::option_option,
     clippy::semicolon_if_nothing_returned,
     reason = "порядок проверок и форма ответов повторяют оригинальный сервер"
 )]
@@ -271,6 +272,26 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/api/social/discover", get(routes::social::discover))
         .route("/api/social/search", get(routes::social::search))
+        .route("/api/users/@me/notification-settings", get(routes::notifications::list))
+        .route(
+            "/api/spaces/{id}/notification-settings",
+            patch(routes::notifications::update_space),
+        )
+        .route(
+            "/api/channels/{id}/notification-settings",
+            patch(routes::notifications::update_channel),
+        )
+        .route(
+            "/api/admin/invites",
+            get(routes::invites::list).post(routes::invites::create),
+        )
+        .route(
+            "/api/admin/invites/{id}",
+            patch(routes::invites::update).delete(routes::invites::delete),
+        )
+        .route("/api/admin/invites/{id}/revoke", post(routes::invites::revoke))
+        .route("/api/admin/invites/{id}/reinstate", post(routes::invites::reinstate))
+        .route("/api/admin/invites/{id}/redemptions", get(routes::invites::redemptions))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)
