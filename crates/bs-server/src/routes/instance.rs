@@ -1,0 +1,68 @@
+//! Сведения об инстансе и проверка живости.
+
+use axum::Json;
+use axum::extract::State;
+use serde_json::{Value, json};
+
+use crate::db::{DbResult, Tx};
+use crate::error::ApiResult;
+use crate::params;
+use crate::state::{AppState, now_ms};
+
+/// Открыта ли регистрация: решение администратора, а пока его нет —
+/// значение из окружения.
+///
+/// # Errors
+/// Ошибка базы.
+pub fn registration_open(state: &AppState, tx: &mut dyn Tx) -> DbResult<bool> {
+    let row = tx.query_one(
+        "SELECT registration_open FROM instance_settings WHERE id = 1",
+        params![],
+    )?;
+    Ok(row
+        .map(|row| row.opt_flag("registration_open"))
+        .transpose()?
+        .flatten()
+        .unwrap_or(state.config.registration_open))
+}
+
+/// `GET /api/instance/info`.
+pub async fn info(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+    let db = state.db.clone();
+    db.transaction(move |tx| {
+        let open = registration_open(&state, tx)?;
+        let row = tx.query_one(
+            "SELECT instance_name, federated_registration_open, directory_enabled, \
+             directory_browse_enabled, support_card_enabled FROM instance_settings WHERE id = 1",
+            params![],
+        )?;
+        let flag = |name: &str| -> DbResult<Option<bool>> {
+            row.as_ref().map_or(Ok(None), |row| row.opt_flag(name))
+        };
+        let configured = !state.config.directory_endpoint.is_empty();
+        Ok(Json(json!({
+            "name": row
+                .as_ref()
+                .map(|row| row.opt_text("instance_name"))
+                .transpose()?
+                .flatten()
+                .unwrap_or_else(|| "Backspace".to_owned()),
+            "version": state.config.version,
+            "registrationOpen": open,
+            "federatedRegistrationOpen": flag("federated_registration_open")? == Some(true),
+            "instanceId": &*state.instance_id,
+            "sourceCodeUrl": state.config.source_code_url,
+            "commit": state.config.commit,
+            "directoryConfigured": configured,
+            "directoryAvailable": configured && flag("directory_browse_enabled")? == Some(true),
+            "directoryEnabled": flag("directory_enabled")? == Some(true),
+            "supportCardEnabled": flag("support_card_enabled")?.unwrap_or(true),
+        })))
+    })
+    .await
+}
+
+/// `GET /api/health`.
+pub async fn health() -> Json<Value> {
+    Json(json!({ "status": "ok", "timestamp": now_ms() }))
+}

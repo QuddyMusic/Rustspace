@@ -44,3 +44,22 @@ Scope of this pass: the client (`bs-api`, `bs-ws`, `bs-identity`, `bs-media`, `b
 - Display names and link text are shown as sent, including Unicode direction overrides. The
   full address is always in the tooltip; stripping overrides is planned with the server-side
   validation.
+
+## Server
+
+The Rust server (`bs-server`) is written against the original server's code, so each part of
+the original is reviewed as it is ported. Findings so far (configuration, storage, sign-up,
+sign-in, tokens):
+
+| # | Severity | Finding in the original | In the Rust server |
+|---|----------|-------------------------|--------------------|
+| S1 | Low | Sign-in answers for an unknown username before any password hashing, so response time tells whether a username exists. | bcrypt always runs (against a dummy hash when there is no user); timing no longer distinguishes the cases. |
+| S2 | Low | Unhandled exceptions are returned with their message (Fastify default), which can carry SQL or paths. | Internal errors are logged and answered with a fixed body. |
+| S3 | Low | Snowflake ids follow the wall clock: if it steps back, ids go back and may repeat. | The generator never goes back in time; ids stay increasing and unique. |
+| S4 | Info | `account_deleted` is answered for a deleted account whatever the password, revealing that the account existed. | Kept for compatibility (clients show a specific message); timing is equalised. |
+| S5 | Info | bcrypt only uses the first 72 bytes of a password. | Same format on purpose: hashes stay interchangeable with the original. |
+
+Kept exactly as in the original: bcrypt hashes (cost 12), HS256 tokens with the same fields
+(tokens and password hashes work on both servers with the same `JWT_SECRET`), revocation of
+tokens issued before a password change, per-address rate limits behind a bounded number of
+trusted proxies, security headers.

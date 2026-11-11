@@ -85,9 +85,10 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
 | `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, system audio, data-channel signals | 68 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 230 |
+| `bs-app` | The GUI and its entry point | 232 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
+| `bs-server` | The Rust server (in progress): configuration, storage with the original's migrations, sign-up, sign-in, profile | 16 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
 ## Building and running

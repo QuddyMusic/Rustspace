@@ -100,12 +100,20 @@ original server.
 - **TUI** lags behind the GUI (no DM feed, groups, space settings or voice UI). Postponed by
   the owner's decision.
 
-## Next stages (after the owner's go-ahead)
-1. **Security audit** of client and server code.
-2. **Rust server** (Axum), compatible with existing clients and instances and checked by the
-   same contract stand: core → everything else → federation.
-3. **PostgreSQL** as a storage option for the server.
-4. **Two-factor authentication.**
+## Server stage (in progress)
+1. **Security audit.** Client: done, see [SECURITY-AUDIT.md](SECURITY-AUDIT.md). Server: goes
+   along with the port, findings are added to the same file.
+2. **Rust server** (`bs-server`, Axum), compatible with existing clients and instances.
+   - Done: configuration (same environment variables), storage layer with the original's
+     SQLite migrations (the same database file opens in both servers, in both directions),
+     sign-up with invites, sign-in, tokens, own profile, instance info, rate limits, security
+     headers. Responses, including errors, were compared with the original one by one.
+   - Next: spaces, channels, messages and the WebSocket gateway (then the contract stand runs
+     against the Rust server) → DMs, friends, files, stickers, search, admin, LiveKit →
+     federation.
+3. **PostgreSQL** as a storage option: the storage layer is already database-neutral; the
+   PostgreSQL backend and schema come after the core.
+4. **Two-factor authentication** (TOTP), as an optional extension that old clients survive.
 5. **End-to-end encryption for DMs only**, without breaking compatibility with instances that
    do not support it (so that an instance admin can no longer read private messages).
 
