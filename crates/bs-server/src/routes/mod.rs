@@ -14,6 +14,7 @@ pub mod search;
 pub mod settings;
 pub mod social;
 pub mod spaces;
+pub mod stickers;
 pub mod uploads;
 pub mod users;
 pub mod utils;

@@ -33,33 +33,54 @@ fn bad_request(code: &str, message: &str) -> Response {
         .into_response()
 }
 
+/// Читает тело запроса как JSON, не больше `limit` байт.
+///
+/// # Errors
+/// Ответ, которым Fastify отвергает слишком большое, пустое или некорректное тело.
+pub async fn read_json(request: Request, limit: usize) -> Result<Value, Response> {
+    // Запрос без тела и без типа содержимого Fastify передаёт дальше как
+    // «тела нет»: отказ даёт уже проверка по схеме.
+    let untyped = !request
+        .headers()
+        .contains_key(axum::http::header::CONTENT_TYPE);
+    let bytes = axum::body::to_bytes(request.into_body(), limit)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(json!({
+                    "statusCode": 413,
+                    "code": "FST_ERR_CTP_BODY_TOO_LARGE",
+                    "error": "Payload Too Large",
+                    "message": "Request body is too large",
+                })),
+            )
+                .into_response()
+        })?;
+    if bytes.is_empty() && untyped {
+        return Ok(Value::Null);
+    }
+    if bytes.is_empty() {
+        return Err(bad_request(
+            "FST_ERR_CTP_EMPTY_JSON_BODY",
+            "Body cannot be empty when content-type is set to 'application/json'",
+        ));
+    }
+    serde_json::from_slice(&bytes)
+        .map_err(|_| bad_request("FST_ERR_CTP_INVALID_JSON_BODY", "Body is not valid JSON"))
+}
+
+/// Отказ проверки по схеме маршрута (`FST_ERR_VALIDATION`).
+#[must_use]
+pub fn schema_error(message: &str) -> Response {
+    bad_request("FST_ERR_VALIDATION", message)
+}
+
 impl FromRequest<AppState> for JsonBody {
     type Rejection = Response;
 
     async fn from_request(request: Request, _state: &AppState) -> Result<Self, Self::Rejection> {
-        let bytes = axum::body::to_bytes(request.into_body(), BODY_LIMIT)
-            .await
-            .map_err(|_| {
-                (
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    Json(json!({
-                        "statusCode": 413,
-                        "code": "FST_ERR_CTP_BODY_TOO_LARGE",
-                        "error": "Payload Too Large",
-                        "message": "Request body is too large",
-                    })),
-                )
-                    .into_response()
-            })?;
-        if bytes.is_empty() {
-            return Err(bad_request(
-                "FST_ERR_CTP_EMPTY_JSON_BODY",
-                "Body cannot be empty when content-type is set to 'application/json'",
-            ));
-        }
-        let value: Value = serde_json::from_slice(&bytes)
-            .map_err(|_| bad_request("FST_ERR_CTP_INVALID_JSON_BODY", "Body is not valid JSON"))?;
-        Ok(Self(value))
+        read_json(request, BODY_LIMIT).await.map(Self)
     }
 }
 

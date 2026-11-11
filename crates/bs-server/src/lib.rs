@@ -10,6 +10,7 @@
 // зависит, какой код ошибки получит клиент. Поэтому стилистические замечания,
 // которые требуют этот порядок перекроить, для сервера отключены.
 #![allow(
+    clippy::result_large_err,
     clippy::format_push_string,
     clippy::too_many_lines,
     clippy::useless_let_if_seq,
@@ -60,6 +61,7 @@ pub mod ready;
 pub mod routes;
 pub mod snowflake;
 pub mod state;
+pub mod stickers;
 pub mod util;
 pub mod voice;
 pub mod ws;
@@ -310,6 +312,10 @@ pub fn app(state: AppState) -> Router {
         .route("/api/files/{*rest}", any(routes::files::tus))
         .route("/api/uploads/{filename}", get(routes::uploads::get))
         .route("/api/utils/metadata", get(routes::utils::metadata))
+        .route("/api/stickers", get(routes::stickers::list).post(routes::stickers::create))
+        .route("/api/stickers/assets/{filename}", get(routes::stickers::asset))
+        .route("/api/stickers/{id}/collect", post(routes::stickers::collect_existing))
+        .route("/api/stickers/{id}", delete(routes::stickers::remove).patch(routes::stickers::rename))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)
