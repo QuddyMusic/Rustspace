@@ -98,6 +98,12 @@ impl ApiError {
         self.code
     }
 
+    /// Свой текст, если он задан.
+    #[must_use]
+    pub fn custom_text(&self) -> Option<&'static str> {
+        self.text
+    }
+
     /// HTTP-статус.
     #[must_use]
     pub fn status(&self) -> StatusCode {

@@ -6,20 +6,57 @@
 //! миграциями оригинала, регистрация, вход и профиль; остальные маршруты
 //! добавляются по тому же образцу и проверяются контрактным стендом.
 
+// Обработчики повторяют порядок проверок оригинала один к одному: от него
+// зависит, какой код ошибки получит клиент. Поэтому стилистические замечания,
+// которые требуют этот порядок перекроить, для сервера отключены.
+#![allow(
+    clippy::too_many_lines,
+    clippy::useless_let_if_seq,
+    clippy::option_if_let_else,
+    clippy::single_match_else,
+    clippy::similar_names,
+    clippy::needless_pass_by_value,
+    clippy::implicit_hasher,
+    clippy::type_complexity,
+    clippy::assigning_clones,
+    clippy::significant_drop_tightening,
+    clippy::too_long_first_doc_paragraph,
+    clippy::cognitive_complexity,
+    clippy::result_unit_err,
+    clippy::unused_async,
+    reason = "порядок проверок и форма ответов повторяют оригинальный сервер"
+)]
+
 pub mod auth;
+pub mod broadcast;
 pub mod config;
 pub mod db;
+pub mod dm;
+pub mod dm_events;
+pub mod embeds;
 pub mod error;
 #[allow(
     clippy::redundant_pub_crate,
     reason = "таблица только для этого крейта"
 )]
 mod error_messages;
+pub mod events;
 pub mod extract;
+pub mod federation;
+pub mod files;
+pub mod hub;
+pub mod media;
+pub mod mentions;
+pub mod messages;
+pub mod perms;
 pub mod ratelimit;
+pub mod ready;
 pub mod routes;
 pub mod snowflake;
 pub mod state;
+pub mod util;
+pub mod voice;
+pub mod ws;
 
 use axum::Json;
 use axum::Router;
@@ -27,7 +64,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, patch, post};
 use serde_json::json;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -120,6 +157,74 @@ pub fn app(state: AppState) -> Router {
         .route("/api/auth/check-username", get(routes::auth::check_username_route))
         .route("/api/auth/check-invite", get(routes::auth::check_invite))
         .route("/api/users/@me", get(routes::users::me))
+        .route("/api/spaces", get(routes::spaces::list).post(routes::spaces::create))
+        .route("/api/spaces/join", post(routes::spaces::join_by_code))
+        .route("/api/spaces/invite/{code}/preview", get(routes::spaces::invite_preview))
+        .route(
+            "/api/spaces/{id}",
+            get(routes::spaces::detail)
+                .patch(routes::spaces::update)
+                .delete(routes::spaces::delete),
+        )
+        .route("/api/spaces/{id}/invite", post(routes::spaces::invite))
+        .route("/api/spaces/{id}/join", post(routes::spaces::join))
+        .route("/api/spaces/{id}/members", get(routes::spaces::members))
+        .route(
+            "/api/spaces/{id}/members/{uid}",
+            patch(routes::spaces::update_member).delete(routes::spaces::kick),
+        )
+        .route("/api/spaces/{id}/members/{uid}/roles", post(routes::spaces::add_member_role))
+        .route(
+            "/api/spaces/{id}/members/{uid}/roles/{role_id}",
+            delete(routes::spaces::remove_member_role),
+        )
+        .route("/api/spaces/{id}/roles", post(routes::spaces::create_role))
+        .route(
+            "/api/spaces/{id}/roles/{role_id}",
+            patch(routes::spaces::update_role).delete(routes::spaces::delete_role),
+        )
+        .route("/api/spaces/{id}/transfer-ownership", patch(routes::spaces::transfer_ownership))
+        .route("/api/spaces/{id}/bans", get(routes::spaces::bans).post(routes::spaces::ban))
+        .route("/api/spaces/{id}/bans/{uid}", delete(routes::spaces::unban))
+        .route(
+            "/api/spaces/{id}/channels",
+            get(routes::channels::list).post(routes::channels::create),
+        )
+        .route("/api/spaces/{id}/categories", post(routes::channels::create_category))
+        .route("/api/spaces/{id}/channel-layout", patch(routes::channels::update_layout))
+        .route(
+            "/api/channels/{id}",
+            patch(routes::channels::update).delete(routes::channels::delete),
+        )
+        .route(
+            "/api/channels/{id}/overrides",
+            get(routes::channels::channel_overrides).put(routes::channels::put_channel_override),
+        )
+        .route(
+            "/api/channels/{id}/overrides/{target_type}/{target_id}",
+            delete(routes::channels::delete_channel_override),
+        )
+        .route(
+            "/api/categories/{id}",
+            patch(routes::channels::update_category).delete(routes::channels::delete_category),
+        )
+        .route(
+            "/api/categories/{id}/overrides",
+            get(routes::channels::category_overrides).put(routes::channels::put_category_override),
+        )
+        .route(
+            "/api/categories/{id}/overrides/{target_type}/{target_id}",
+            delete(routes::channels::delete_category_override),
+        )
+        .route(
+            "/api/channels/{id}/messages",
+            get(routes::messages::history).post(routes::messages::create),
+        )
+        .route(
+            "/api/messages/{id}",
+            patch(routes::messages::update).delete(routes::messages::delete),
+        )
+        .route("/ws", get(ws::upgrade))
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(state.clone(), global_limit))
         // Заголовки безопасности, как helmet у оригинала.

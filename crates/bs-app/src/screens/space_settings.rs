@@ -97,8 +97,9 @@ pub(crate) struct Rights {
     pub(crate) manage_roles: bool,
     /// Все права текущего пользователя (владелец — все).
     pub(crate) perms: Permissions,
-    /// Позиция высшей роли (владелец — наивысшая).
-    pub(crate) top: i64,
+    /// Место в иерархии ролей: по нему сервер решает, кем и какими ролями
+    /// можно управлять.
+    pub(crate) standing: bs_permissions::Standing,
 }
 
 impl SpaceSettings {
@@ -310,15 +311,21 @@ pub(crate) fn rights_for(bridge: &Bridge, origin: usize, space_id: &str) -> Opti
         ban: has(Permissions::BAN_MEMBERS),
         manage_roles: has(Permissions::MANAGE_ROLES),
         perms: if owner { Permissions::all() } else { bits },
-        top: if owner {
-            i64::MAX
-        } else {
-            space
+        standing: bs_permissions::Standing {
+            is_owner: owner,
+            is_instance_admin: cache.me().is_admin,
+            top_position: space
                 .members
                 .iter()
                 .find(|m| m.user.id == cache.me().id)
-                .and_then(|m| m.roles.iter().map(|r| r.position).max())
-                .unwrap_or(0)
+                .and_then(|m| {
+                    m.roles
+                        .iter()
+                        .filter(|r| r.is_everyone != Some(true))
+                        .map(|r| r.position)
+                        .max()
+                })
+                .unwrap_or(0),
         },
     })
 }
@@ -696,8 +703,14 @@ fn member_row(
                     if rights.kick && ui.button(tr("Исключить")).clicked() {
                         state.confirm = Some(Confirm::Kick(row.id.clone()));
                     }
-                    let outranks =
-                        rights.top > row.top || rights.perms.contains(Permissions::ADMINISTRATOR);
+                    let outranks = bs_permissions::can_act_on_member(
+                        rights.standing,
+                        bs_permissions::Standing {
+                            is_owner: row.owner,
+                            is_instance_admin: false,
+                            top_position: row.top,
+                        },
+                    );
                     if rights.manage_roles && outranks {
                         ui.menu_button(tr("Роли"), |ui| {
                             member_roles_menu(ui, state, rights, bridge, row, assignable);
@@ -730,7 +743,7 @@ fn member_roles_menu(
         ui.label(RichText::new(tr("Ролей пока нет")).color(theme::text_muted()));
     }
     for (id, name, position) in assignable {
-        let allowed = can_manage_role_at(rights.top, *position, rights.perms);
+        let allowed = can_manage_role_at(rights.standing, *position);
         let mut has = row.role_ids.contains(id);
         let was = has;
         if ui

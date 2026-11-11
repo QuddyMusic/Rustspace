@@ -81,6 +81,16 @@ pub fn sanitize_user(row: &Row, is_self: bool) -> DbResult<Value> {
     Ok(user)
 }
 
+/// [`USER_COLUMNS`] с префиксом таблицы — для запросов с соединениями.
+#[must_use]
+pub fn user_columns(alias: &str) -> String {
+    USER_COLUMNS
+        .split(',')
+        .map(|column| format!("{alias}.{}", column.trim()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Строка пользователя по идентификатору.
 ///
 /// # Errors

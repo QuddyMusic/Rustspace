@@ -72,6 +72,17 @@ impl From<i64> for Value {
     }
 }
 
+impl From<f64> for Value {
+    fn from(value: f64) -> Self {
+        if value.fract() == 0.0 && value.abs() < 9.0e15 {
+            #[allow(clippy::cast_possible_truncation, reason = "проверено выше")]
+            Self::Int(value as i64)
+        } else {
+            Self::Real(value)
+        }
+    }
+}
+
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
         Self::Int(i64::from(value))
@@ -93,6 +104,12 @@ impl From<String> for Value {
 impl From<&String> for Value {
     fn from(value: &String) -> Self {
         Self::Text(value.clone())
+    }
+}
+
+impl From<&Option<String>> for Value {
+    fn from(value: &Option<String>) -> Self {
+        value.as_deref().map_or(Self::Null, Into::into)
     }
 }
 
@@ -167,6 +184,22 @@ impl Row {
                 .map(Some)
                 .map_err(|_| DbError::Column(column.to_owned(), "ожидалось целое")),
             _ => Err(DbError::Column(column.to_owned(), "ожидалось целое")),
+        }
+    }
+
+    /// Число как значение JSON: целое остаётся целым, дробное — дробным.
+    ///
+    /// # Errors
+    /// Столбца нет или в нём не число.
+    pub fn opt_number(&self, column: &str) -> DbResult<Option<serde_json::Value>> {
+        match self.value(column)? {
+            Value::Null => Ok(None),
+            Value::Int(value) => Ok(Some(serde_json::json!(value))),
+            Value::Real(value) if value.fract() == 0.0 => {
+                Ok(Some(serde_json::json!(*value as i64)))
+            }
+            Value::Real(value) => Ok(Some(serde_json::json!(value))),
+            _ => Err(DbError::Column(column.to_owned(), "не число")),
         }
     }
 

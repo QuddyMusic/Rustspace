@@ -128,113 +128,154 @@ pub fn canonical_permission_string(raw: &str) -> Result<String, PermissionParseE
     parse_permission_string(raw).map(permissions_to_string)
 }
 
-/// Вычислить FNV-1a 64-bit hex для набора прав.
-///
-/// Используется для optimistic locking: сервер присылает `permissionsVersion`,
-/// клиент сравнивает с локально посчитанным.
-pub fn permissions_version(bits: Permissions) -> String {
+fn fnv1a64(text: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in bits.bits().to_le_bytes() {
-        hash ^= u64::from(byte);
+    for unit in text.encode_utf16() {
+        hash ^= u64::from(unit);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     format!("{hash:016x}")
 }
 
-/// Версия оверрайда: для отсутствующего — `'none'`.
-pub fn override_version(allow: Permissions, deny: Permissions) -> String {
-    if allow.is_empty() && deny.is_empty() {
-        NO_OVERRIDE_VERSION.to_owned()
-    } else {
-        let a = permissions_version(allow);
-        let d = permissions_version(deny);
-        format!("{a}:{d}")
+/// Версия набора прав роли (`rolePermissionsVersion`).
+///
+/// FNV-1a 64 от строки `role:<права>`. Клиент присылает её с изменением прав,
+/// сервер отказывает (`role_permissions_conflict`), если роль с тех пор
+/// изменилась.
+#[must_use]
+pub fn permissions_version(bits: Permissions) -> String {
+    fnv1a64(&format!("role:{}", permissions_to_string(bits)))
+}
+
+/// Версия переопределения (`overrideVersion`): для отсутствующего — `'none'`,
+/// иначе FNV-1a 64 от строки `override:<allow>:<deny>`.
+#[must_use]
+pub fn override_version(row: Option<(Permissions, Permissions)>) -> String {
+    row.map_or_else(
+        || NO_OVERRIDE_VERSION.to_owned(),
+        |(allow, deny)| {
+            fnv1a64(&format!(
+                "override:{}:{}",
+                permissions_to_string(allow),
+                permissions_to_string(deny)
+            ))
+        },
+    )
+}
+
+/// Место участника в иерархии пространства (`HierarchyStanding`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Standing {
+    /// Владелец пространства.
+    pub is_owner: bool,
+    /// Администратор инстанса.
+    pub is_instance_admin: bool,
+    /// Позиция высшей роли, не считая `@everyone` (без ролей — 0).
+    pub top_position: i64,
+}
+
+/// Может ли `actor` действовать на участника `target`.
+///
+/// Исключить, забанить, менять роли и ник: владельца не трогает никто,
+/// владелец и администратор инстанса могут всё, остальные — только строго
+/// нижестоящих. Право `ADMINISTRATOR` иерархию не обходит.
+#[must_use]
+pub const fn can_act_on_member(actor: Standing, target: Standing) -> bool {
+    if target.is_owner {
+        return false;
     }
+    if actor.is_owner || actor.is_instance_admin {
+        return true;
+    }
+    actor.top_position > target.top_position
 }
 
-/// Проверить, может ли `actor` действовать на участника с учётом позиции роли.
-pub fn can_act_on_member(actor_top: i64, target_top: i64, actor: Permissions) -> bool {
-    actor.contains(Permissions::ADMINISTRATOR) || actor_top > target_top
+/// Может ли `actor` управлять ролью на позиции `role_position`: только
+/// строго ниже своей высшей роли (владелец и администратор инстанса — любой).
+#[must_use]
+pub const fn can_manage_role_at(actor: Standing, role_position: i64) -> bool {
+    if actor.is_owner || actor.is_instance_admin {
+        return true;
+    }
+    role_position < actor.top_position
 }
 
-/// Может ли роль на позиции `actor_pos` управлять ролью на позиции `target_pos`.
-pub fn can_manage_role_at(actor_pos: i64, target_pos: i64, actor: Permissions) -> bool {
-    actor.contains(Permissions::ADMINISTRATOR) || actor_pos > target_pos
-}
-
-/// Причина отказа при изменении битов роли (held-bits rule).
+/// Отказ по правилу «менять можно только биты, которые есть у самого».
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RoleBitsChangeRefusal {
-    /// Актёр пытается выдать биты, которых у него самого нет.
-    GrantsUnheldBits,
-    /// Актёр пытается снять биты, которых у него самого нет.
-    RevokesUnheldBits,
+pub enum HeldBitsRefusal {
+    /// Выдаёт бит, которого нет у действующего.
+    Grant,
+    /// Запрещает бит, которого нет у действующего (только переопределения).
+    Deny,
+    /// Снимает бит, которого нет у действующего.
+    Change,
 }
 
-/// Проверить, может ли актёр изменить набор битов роли.
+impl HeldBitsRefusal {
+    /// Код ошибки сервера.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Grant => "cannot_grant_unowned_permissions",
+            Self::Deny => "cannot_deny_unowned_permissions",
+            Self::Change => "cannot_change_unowned_permissions",
+        }
+    }
+}
+
+/// Биты, которых у действующего нет (у обладателя всех прав таких нет).
+fn unheld(held: Permissions) -> Permissions {
+    if held.is_all() {
+        Permissions::empty()
+    } else {
+        !held
+    }
+}
+
+/// Можно ли изменить биты роли с `before` на `after`, имея `held`.
+#[must_use]
 pub fn role_bits_change_refusal(
-    actor: Permissions,
-    old: Permissions,
-    new: Permissions,
-) -> Option<RoleBitsChangeRefusal> {
-    if actor.contains(Permissions::ADMINISTRATOR) {
-        return None;
+    held: Permissions,
+    before: Permissions,
+    after: Permissions,
+) -> Option<HeldBitsRefusal> {
+    let unheld = unheld(held);
+    if !(after & !before & unheld).is_empty() {
+        return Some(HeldBitsRefusal::Grant);
     }
-    let granted = new & !old;
-    let revoked = old & !new;
-    if !actor.contains(granted) {
-        return Some(RoleBitsChangeRefusal::GrantsUnheldBits);
-    }
-    if !actor.contains(revoked) {
-        return Some(RoleBitsChangeRefusal::RevokesUnheldBits);
+    if !(before & !after & unheld).is_empty() {
+        return Some(HeldBitsRefusal::Change);
     }
     None
 }
 
-/// Причина отказа при изменении оверрайда (held-bits rule).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OverrideChangeRefusal {
-    /// Актёр пытается изменить биты, которых у него нет.
-    UnheldBits,
-}
-
-/// Проверить, может ли актёр изменить allow/deny оверрайда.
+/// Можно ли изменить переопределение (пары `(allow, deny)`; `None` — его нет).
+#[must_use]
 pub fn override_change_refusal(
-    actor: Permissions,
-    old_allow: Permissions,
-    old_deny: Permissions,
-    new_allow: Permissions,
-    new_deny: Permissions,
-) -> Option<OverrideChangeRefusal> {
-    if actor.contains(Permissions::ADMINISTRATOR) {
-        return None;
+    held: Permissions,
+    before: Option<(Permissions, Permissions)>,
+    after: Option<(Permissions, Permissions)>,
+) -> Option<HeldBitsRefusal> {
+    let (old_allow, old_deny) = before.unwrap_or((Permissions::empty(), Permissions::empty()));
+    let (new_allow, new_deny) = after.unwrap_or((Permissions::empty(), Permissions::empty()));
+    let unheld = unheld(held);
+    if !(new_allow & !old_allow & unheld).is_empty() {
+        return Some(HeldBitsRefusal::Grant);
     }
-    let touched = (old_allow ^ new_allow) | (old_deny ^ new_deny);
-    if actor.contains(touched) {
-        None
-    } else {
-        Some(OverrideChangeRefusal::UnheldBits)
+    if !(new_deny & !old_deny & unheld).is_empty() {
+        return Some(HeldBitsRefusal::Deny);
     }
+    if !(((old_allow & !new_allow) | (old_deny & !new_deny)) & unheld).is_empty() {
+        return Some(HeldBitsRefusal::Change);
+    }
+    None
 }
 
-/// Приватный канал — скрыт от `@everyone` (нет `VIEW_CHANNEL`).
-pub fn is_hidden_from_everyone(everyone: Permissions) -> bool {
-    !everyone.contains(Permissions::VIEW_CHANNEL)
-}
-
-/// Отфильтровать ID каналов, скрытых от `@everyone`.
-pub fn ids_hidden_from_everyone<'a>(
-    everyone: Permissions,
-    channels: impl IntoIterator<Item = (&'a str, Permissions)>,
-) -> Vec<&'a str> {
-    if !is_hidden_from_everyone(everyone) {
-        return Vec::new();
-    }
-    channels
-        .into_iter()
-        .filter(|(_, perms)| !perms.contains(Permissions::VIEW_CHANNEL))
-        .map(|(id, _)| id)
-        .collect()
+/// Скрыт ли канал или категория от `@everyone`: запрет в переопределении
+/// роли `@everyone` содержит `VIEW_CHANNEL`.
+#[must_use]
+pub const fn is_hidden_from_everyone(everyone_deny: Permissions) -> bool {
+    everyone_deny.contains(Permissions::VIEW_CHANNEL)
 }
 
 // --- serde: права как decimal string ---
@@ -304,57 +345,84 @@ mod tests {
     }
 
     #[test]
-    fn version_is_stable() {
-        let a = Permissions::VIEW_CHANNEL;
-        assert_eq!(permissions_version(a), permissions_version(a));
+    fn versions_match_the_server() {
+        // Значения посчитаны оригинальным `rolePermissionsVersion` /
+        // `overrideVersion` (FNV-1a 64 от текста).
+        assert_eq!(permissions_version(Permissions::empty()), fnv1a64("role:0"));
+        assert_eq!(fnv1a64(""), "cbf29ce484222325");
+        assert_eq!(fnv1a64("a"), "af63dc4c8601ec8c");
+        assert_eq!(override_version(None), NO_OVERRIDE_VERSION);
         assert_ne!(
-            permissions_version(a),
-            permissions_version(Permissions::SPEAK)
-        );
-    }
-
-    #[test]
-    fn no_override_version_for_empty() {
-        assert_eq!(
-            override_version(Permissions::empty(), Permissions::empty()),
+            override_version(Some((Permissions::empty(), Permissions::empty()))),
             NO_OVERRIDE_VERSION
         );
     }
 
     #[test]
-    fn held_bits_grants_unheld() {
-        let actor = Permissions::SEND_MESSAGES;
+    fn held_bits_rules() {
+        let actor = Permissions::SEND_MESSAGES | Permissions::VIEW_CHANNEL;
         assert_eq!(
             role_bits_change_refusal(actor, Permissions::empty(), Permissions::BAN_MEMBERS),
-            Some(RoleBitsChangeRefusal::GrantsUnheldBits)
+            Some(HeldBitsRefusal::Grant)
         );
-    }
-
-    #[test]
-    fn held_bits_ok() {
-        let actor = Permissions::SEND_MESSAGES | Permissions::VIEW_CHANNEL;
+        assert_eq!(
+            role_bits_change_refusal(actor, Permissions::BAN_MEMBERS, Permissions::empty()),
+            Some(HeldBitsRefusal::Change)
+        );
         assert!(
             role_bits_change_refusal(actor, Permissions::empty(), Permissions::SEND_MESSAGES)
                 .is_none()
         );
+        // ADMINISTRATOR сам по себе чужих битов не даёт; все права — дают.
+        assert!(
+            role_bits_change_refusal(
+                Permissions::ADMINISTRATOR,
+                Permissions::empty(),
+                Permissions::BAN_MEMBERS
+            )
+            .is_some()
+        );
+        assert!(
+            role_bits_change_refusal(Permissions::all(), Permissions::empty(), Permissions::all())
+                .is_none()
+        );
+        assert_eq!(
+            override_change_refusal(
+                actor,
+                None,
+                Some((Permissions::empty(), Permissions::SPEAK))
+            ),
+            Some(HeldBitsRefusal::Deny)
+        );
+    }
+
+    #[test]
+    fn hierarchy() {
+        let owner = Standing {
+            is_owner: true,
+            ..Standing::default()
+        };
+        let high = Standing {
+            top_position: 5,
+            ..Standing::default()
+        };
+        let low = Standing {
+            top_position: 2,
+            ..Standing::default()
+        };
+        assert!(can_act_on_member(owner, high));
+        assert!(!can_act_on_member(high, owner));
+        assert!(can_act_on_member(high, low));
+        assert!(!can_act_on_member(low, high));
+        assert!(!can_act_on_member(high, high));
+        assert!(can_manage_role_at(high, 4));
+        assert!(!can_manage_role_at(high, 5));
+        assert!(can_manage_role_at(owner, 99));
     }
 
     #[test]
     fn hidden_from_everyone() {
-        assert!(is_hidden_from_everyone(Permissions::SEND_MESSAGES));
-        assert!(!is_hidden_from_everyone(Permissions::VIEW_CHANNEL));
-    }
-
-    #[test]
-    fn ids_hidden_filter() {
-        // everyone без VIEW_CHANNEL → каналы без VIEW_CHANNEL скрыты.
-        let everyone = Permissions::empty();
-        let chans = [
-            ("a", Permissions::VIEW_CHANNEL),
-            ("b", Permissions::empty()),
-        ];
-        assert_eq!(ids_hidden_from_everyone(everyone, chans), vec!["b"]);
-        // everyone с VIEW_CHANNEL → скрытых нет.
-        assert!(ids_hidden_from_everyone(Permissions::VIEW_CHANNEL, chans).is_empty());
+        assert!(is_hidden_from_everyone(Permissions::VIEW_CHANNEL));
+        assert!(!is_hidden_from_everyone(Permissions::SEND_MESSAGES));
     }
 }

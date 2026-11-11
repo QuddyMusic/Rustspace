@@ -17,6 +17,8 @@ pub struct AppState {
     pub db: Db,
     /// Генератор идентификаторов.
     pub ids: Arc<Snowflake>,
+    /// Соединения WebSocket.
+    pub hub: crate::hub::Hub,
     /// Ограничитель частоты.
     pub limiter: RateLimiter,
     /// Эпоха инстанса (`instance_id`): меняется только при сбросе базы.
@@ -44,12 +46,39 @@ impl AppState {
             .map_err(|_| DbError::Corrupt(format!("worker_id вне диапазона: {worker}")))?;
         Ok(Self {
             dummy_hash: crate::auth::dummy_hash(config.password_hash_cost).into(),
+            hub: crate::hub::Hub::default(),
             limiter: RateLimiter::new(config.disable_rate_limits),
             config: Arc::new(config),
             db,
             ids: Arc::new(Snowflake::new(worker)),
             instance_id: instance_id.into(),
         })
+    }
+}
+
+impl AppState {
+    /// Выполняет `work` в транзакции. События, собранные в [`Outbox`], уходят
+    /// клиентам только после её успешного завершения.
+    ///
+    /// # Errors
+    /// Ошибка из `work` или базы.
+    pub async fn run<T, F>(&self, work: F) -> crate::error::ApiResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut dyn crate::db::Tx, &mut crate::hub::Outbox) -> crate::error::ApiResult<T>
+            + Send
+            + 'static,
+    {
+        let (value, outbox) = self
+            .db
+            .transaction(move |tx| {
+                let mut outbox = crate::hub::Outbox::new();
+                let value = work(tx, &mut outbox)?;
+                Ok::<_, crate::error::ApiError>((value, outbox))
+            })
+            .await?;
+        self.hub.flush(outbox);
+        Ok(value)
     }
 }
 

@@ -228,8 +228,7 @@ fn role_row(
 ) {
     let role = &roles[index];
     let everyone = role.is_everyone == Some(true);
-    let editable =
-        rights.manage_roles && can_manage_role_at(rights.top, role.position, rights.perms);
+    let editable = rights.manage_roles && can_manage_role_at(rights.standing, role.position);
     let mut open = false;
     let mut mv: Option<(String, RoleSide)> = None;
     egui::Frame::new()
@@ -286,7 +285,7 @@ fn role_row(
                     let above = index
                         .checked_sub(1)
                         .and_then(|i| roles.get(i))
-                        .filter(|prev| can_manage_role_at(rights.top, prev.position, rights.perms));
+                        .filter(|prev| can_manage_role_at(rights.standing, prev.position));
                     if ui
                         .add_enabled(above.is_some() && !state.busy, egui::Button::new("▲"))
                         .on_hover_text(crate::tf!("Переместить «{a0}» выше", a0 = role.name))
@@ -340,8 +339,7 @@ fn editor(
         state.roles.draft = Some(load_draft(role));
     }
     let everyone = role.is_everyone == Some(true);
-    let editable =
-        rights.manage_roles && can_manage_role_at(rights.top, role.position, rights.perms);
+    let editable = rights.manage_roles && can_manage_role_at(rights.standing, role.position);
     if ui.button(tr("← Вернуться к ролям")).clicked() {
         state.roles.closed();
         return;
