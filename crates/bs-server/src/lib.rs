@@ -10,6 +10,7 @@
 // зависит, какой код ошибки получит клиент. Поэтому стилистические замечания,
 // которые требуют этот порядок перекроить, для сервера отключены.
 #![allow(
+    clippy::format_push_string,
     clippy::too_many_lines,
     clippy::useless_let_if_seq,
     clippy::option_if_let_else,
@@ -300,6 +301,10 @@ pub fn app(state: AppState) -> Router {
             "/api/settings/instance",
             get(routes::settings::instance).patch(routes::settings::update_instance),
         )
+        .route("/api/channels/{id}/search", get(routes::search::channel))
+        .route("/api/channels/{id}/messages/around", get(routes::search::channel_around))
+        .route("/api/dm/{id}/search", get(routes::search::dm_channel))
+        .route("/api/dm/{id}/messages/around", get(routes::search::dm_around))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)

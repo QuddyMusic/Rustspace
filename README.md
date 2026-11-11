@@ -77,7 +77,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | Crate | Purpose | Tests |
 |---|---|---|
 | `bs-types` | Protocol data types (users, spaces, channels, messages, events) | 59 |
-| `bs-permissions` | Permission bits, role hierarchy, overrides | 13 |
+| `bs-permissions` | Permission bits, role hierarchy, overrides | 11 |
 | `bs-api` | REST client (`/api/*`), Bearer JWT, uploads and downloads, coded errors | 108 |
 | `bs-ws` | WebSocket client: heartbeat, reconnect, event parsing | 11 |
 | `bs-instances` | Connection to one instance: dispatcher, reconnect, password and token sign-in | 14 |

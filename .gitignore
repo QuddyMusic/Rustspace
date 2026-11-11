@@ -6,3 +6,4 @@
 .env.local
 *.log
 /xtask/target
+__pycache__/

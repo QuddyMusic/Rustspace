@@ -9,6 +9,7 @@ pub mod invites;
 pub mod livekit;
 pub mod messages;
 pub mod notifications;
+pub mod search;
 pub mod settings;
 pub mod social;
 pub mod spaces;
