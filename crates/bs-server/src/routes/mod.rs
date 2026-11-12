@@ -4,6 +4,7 @@ pub mod account;
 pub mod auth;
 pub mod channels;
 pub mod dm;
+pub mod explore;
 pub mod files;
 pub mod gif;
 pub mod instance;
