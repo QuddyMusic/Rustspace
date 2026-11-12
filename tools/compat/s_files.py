@@ -55,6 +55,9 @@ def files(c):
     c.raw('al','DELETE',loc,T,keep=K)
     c.raw('al','PATCH',loc,{**T,'Upload-Offset':'5','Content-Type':OCT},b'',keep=K)
     c.raw('al','PUT',loc,T,keep=K)
+    # адрес с косой чертой на конце — так создаёт загрузку клиент на Rust
+    s,h,_=c.raw('al','POST','/api/files/',{**T,'Upload-Length':'3','Upload-Metadata':'filename '+b64('slash.txt')},keep=K)
+    c.raw('al','PATCH',h.get('location','/api/files/x'),{**T,'Upload-Offset':'0','Content-Type':OCT},b'abc',keep=K+('content-type',))
     # отложенная длина
     s,h,_=c.raw('al','POST','/api/files',{**T,'Upload-Defer-Length':'1','Upload-Metadata':'filename '+b64('d.bin')},keep=K)
     loc=h['location']

@@ -129,7 +129,8 @@ original server.
    - [ ] Federation: handshake and keys, outbox and delivery, inbound events, sync, account
      replicas, cross-instance calls. The mutation log is already written as in the original.
      Until then `bs-server` runs as a standalone instance.
-   - [ ] A full run of the `bs-contract` stand against `bs-server`.
+   - [x] The `bs-contract` stand against `bs-server`: both tests pass (REST: 42 calls; the
+     client scenario: no parse errors, no unknown events).
 3. **PostgreSQL** as a storage option: done. A backend behind the same interface
    (`DATABASE_URL`), the schema is derived from the original migrations and extends itself,
    row order in responses matches SQLite, data import: `backspace-server import-sqlite <file>`.

@@ -316,6 +316,7 @@ pub fn app(state: AppState) -> Router {
         .route("/api/dm/{id}/search", get(routes::search::dm_channel))
         .route("/api/dm/{id}/messages/around", get(routes::search::dm_around))
         .route("/api/files", any(routes::files::tus))
+        .route("/api/files/", any(routes::files::tus))
         .route("/api/files/{*rest}", any(routes::files::tus))
         .route("/api/uploads/{filename}", get(routes::uploads::get))
         .route("/api/utils/metadata", get(routes::utils::metadata))
