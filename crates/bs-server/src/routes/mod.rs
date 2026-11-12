@@ -5,6 +5,7 @@ pub mod auth;
 pub mod channels;
 pub mod dm;
 pub mod files;
+pub mod gif;
 pub mod instance;
 pub mod invites;
 pub mod livekit;
