@@ -358,6 +358,11 @@ pub fn app(state: AppState) -> Router {
         .route("/api/auth/2fa/enable", post(routes::twofactor::enable))
         .route("/api/auth/2fa/disable", post(routes::twofactor::disable))
         .route("/api/auth/2fa/recovery-codes", post(routes::twofactor::recovery_codes))
+        .route(
+            "/api/e2ee/key",
+            get(routes::e2ee::mine).put(routes::e2ee::publish).delete(routes::e2ee::withdraw),
+        )
+        .route("/api/e2ee/keys/{userId}", get(routes::e2ee::of_user))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(web::fallback)

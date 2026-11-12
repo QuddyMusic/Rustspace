@@ -110,10 +110,11 @@ fn conditions(
         filter.push_str(" AND messages.type = 'user'");
     }
     if let Some(q) = query.q.as_deref().map(js_trim).filter(|q| !q.is_empty()) {
-        // Сообщения-стикеры (`sticker:<адрес>`) в поиск не попадают.
+        // Сообщения-стикеры (`sticker:<адрес>`) и зашифрованные сообщения в поиск
+        // не попадают: совпадение с шифротекстом ничего не значит.
         filter.push_str(&format!(
             " AND {table}.content LIKE ? AND ({table}.content IS NULL OR {table}.content NOT LIKE \
-             'sticker:http%://%/api/stickers/assets/%.webp')"
+             'sticker:http%://%/api/stickers/assets/%.webp') AND {table}.content NOT LIKE 'bs-e2ee:%'"
         ));
         values.push(format!("%{q}%").into());
     }

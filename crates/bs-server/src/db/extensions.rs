@@ -9,24 +9,34 @@ use super::{DbResult, Tx};
 use crate::params;
 
 /// Расширения по порядку: имя и операторы.
-const EXTENSIONS: &[(&str, &[&str])] = &[(
-    "0001_two_factor",
-    &[
-        "CREATE TABLE bs_totp (
+const EXTENSIONS: &[(&str, &[&str])] = &[
+    (
+        "0001_two_factor",
+        &[
+            "CREATE TABLE bs_totp (
                 user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
                 secret TEXT NOT NULL,
                 enabled_at BIGINT,
                 last_step BIGINT NOT NULL DEFAULT 0,
                 created_at BIGINT NOT NULL
             )",
-        "CREATE TABLE bs_totp_recovery (
+            "CREATE TABLE bs_totp_recovery (
                 user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 code_hash TEXT NOT NULL,
                 used_at BIGINT,
                 PRIMARY KEY (user_id, code_hash)
             )",
-    ],
-)];
+        ],
+    ),
+    (
+        "0002_e2ee_keys",
+        &["CREATE TABLE bs_e2ee_keys (
+                user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                public_key TEXT NOT NULL,
+                updated_at BIGINT NOT NULL
+            )"],
+    ),
+];
 
 /// Создаёт недостающие таблицы расширений.
 ///

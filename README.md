@@ -78,7 +78,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 |---|---|---|
 | `bs-types` | Protocol data types (users, spaces, channels, messages, events) | 59 |
 | `bs-permissions` | Permission bits, role hierarchy, overrides | 11 |
-| `bs-api` | REST client (`/api/*`), Bearer JWT, uploads and downloads, coded errors | 108 |
+| `bs-api` | REST client (`/api/*`), Bearer JWT, uploads and downloads, coded errors | 110 |
 | `bs-ws` | WebSocket client: heartbeat, reconnect, event parsing | 11 |
 | `bs-instances` | Connection to one instance: dispatcher, reconnect, password and token sign-in | 14 |
 | `bs-identity` | Login and registration, token storage, per-remote credentials, `UserKey` | 31 |
@@ -88,7 +88,8 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-app` | The GUI and its entry point | 232 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 31 |
+| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 74 |
+| `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 6 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
 ## Building and running
@@ -195,22 +196,32 @@ The contract stand needs Node.js 22+ and `pnpm install` in the Backspace checkou
 ## Server (`bs-server`)
 
 The Rust server mirrors the original Backspace server: the same routes, WebSocket events,
-environment variables and the same SQLite database. The original's database file opens as is
-(same migrations; applied ones are not repeated), and the other way round: a database that
+environment variables and the same SQLite database. An original database file opens as is
+(same migrations; applied ones are not repeated), and the other way round: a database
 `bs-server` has worked with opens in the original. Tokens and password hashes are shared.
 
-**Ported:** sign-up and sign-in, invites; profile, password, account deletion; spaces,
+**Ported:** registration and login, invites; profile, password, account deletion; spaces,
 members, roles, bans, channels, categories, permission overrides; messages, reactions, read
-positions, pokes; direct and group conversations; friends and people search; notification
-settings; voice channels, calls, voice moderation, LiveKit tokens; instance settings. Every
-route and event is compared with the original by the scenarios in `tools/compat`.
+positions, pokes, search; direct and group conversations; friends and people search;
+notification settings; voice channels, calls, voice moderation, LiveKit tokens; file uploads
+(tus), downloads, thumbnails, storage cleanup; link previews; space directory and join
+requests; stickers and GIF; admin (users, storage, instance settings); serving the web
+client. Every route and event is compared with the original by the scenarios in
+`tools/compat`, on SQLite and on PostgreSQL.
 
-**Not there yet:** file uploads (tus) and serving `/api/uploads`, link previews, message
-search, the space directory and join requests, stickers, GIFs, storage and users in the admin
-panel, serving the web client, federation (delivering and receiving events between
-instances). Next on the plan: PostgreSQL, two-factor authentication and end-to-end encrypted
-DMs; see [ROADMAP.md](ROADMAP.md). The server is not yet fit for an instance with federation
-peers, and says so at startup.
+**Not in the original (extensions):** PostgreSQL storage, two-factor authentication, a key
+directory for end-to-end encrypted DMs. They do not change existing routes: a client that
+does not know about them works as before. Their tables live in the same database under
+`bs_*` names; the original server ignores them.
+
+**Not there yet:** federation (delivering and receiving events between instances). The
+server is not suitable for an instance with federation peers yet and warns about it at
+startup. The server never sends telemetry. See [ROADMAP.md](ROADMAP.md).
+
+**Small differences from the original:** thumbnails and stickers are encoded as lossless
+WebP (larger files); AVIF thumbnails are not made; video and audio need `ffmpeg` and
+`ffprobe` in `PATH` (without them a file is accepted without duration or thumbnail, as in
+the original).
 
 ### Build
 
@@ -218,7 +229,7 @@ peers, and says so at startup.
 cargo build --release -p bs-server      # target/release/backspace-server
 ```
 
-Only a C compiler is needed (SQLite is built in). No Node.js.
+Only a C compiler is needed (SQLite is built with the server). No Node.js.
 
 ### Run
 
@@ -229,15 +240,48 @@ target/release/backspace-server
 ```
 
 The server listens on `0.0.0.0:3000`. The first registered user becomes the administrator.
-It stops on `Ctrl+C` or `SIGTERM`, letting open requests finish.
+It stops on `Ctrl+C` or `SIGTERM`, waiting for open requests.
 
-To move over from the original server: stop it, copy the database and start
-`backspace-server` with the same `JWT_SECRET`, `DB_PATH` and `UPLOAD_DIR`. Going back works
-the same way.
+Moving from the original server: stop it, copy the database and start `backspace-server`
+with the same `JWT_SECRET`, `DB_PATH` and `UPLOAD_DIR`. Going back works the same way.
+
+To have the server also serve the original web client, build it
+(`pnpm --filter client build`) and point at the build: `BS_WEB_DIST=/path/to/packages/client/dist`.
+
+### PostgreSQL
+
+```sh
+createdb -T template0 -E UTF8 --lc-collate=C --lc-ctype=C backspace
+DATABASE_URL=postgres://user:password@127.0.0.1/backspace JWT_SECRET=… target/release/backspace-server
+```
+
+The server creates and extends the schema itself: it is derived from the original
+migrations. The `C` collation makes string order and comparison match SQLite. To move data
+from a SQLite file (of the original server or of `bs-server`) into an empty PostgreSQL
+database:
+
+```sh
+DATABASE_URL=postgres://… JWT_SECRET=… target/release/backspace-server import-sqlite data/backspace.db
+```
+
+The import is one transaction: all or nothing. There is no import back. The PostgreSQL
+connection has no TLS yet: keep the database on the same host or a trusted network. The
+server uses one connection: transactions run one at a time, as with SQLite.
+
+### Two-factor authentication
+
+A user turns it on in account settings (the Rust client) or through `/api/auth/2fa`: `setup`
+(password) returns a secret for an authenticator app, `enable` (code) turns protection on
+and returns ten recovery codes. After that, login needs a `totp` or `recoveryCode` field;
+without it the server answers `401` with code `two_factor_required`. The secret is stored
+encrypted with a key derived from `JWT_SECRET`: after changing `JWT_SECRET`, protection has
+to be set up again. Someone who lost both the phone and the recovery codes is let back in by
+the administrator: a password reset in the admin panel also removes the second factor.
 
 ### Configuration
 
-The environment variables are the original's.
+Environment variables are the same as the original's; those specific to `bs-server` are
+marked.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -245,33 +289,44 @@ The environment variables are the original's.
 | `JWT_EXPIRES_IN` | `30d` | Token lifetime (`30d`, `12h`, `3600`) |
 | `PORT`, `HOST` | `3000`, `0.0.0.0` | Where to listen |
 | `DB_PATH` | `data/backspace.db` | SQLite database file |
+| `DATABASE_URL` | none | *(bs-server)* PostgreSQL address `postgres://…`; when set, `DB_PATH` is not used |
 | `UPLOAD_DIR` | `data/uploads` | Directory for uploaded files |
-| `MAX_UPLOAD_SIZE` | `104857600` | File size limit, bytes |
+| `MAX_UPLOAD_SIZE` | `104857600` | File size limit in bytes (the administrator can change it in settings) |
+| `TUS_EXPIRATION_HOURS` | `24` | How long an unfinished upload lives |
+| `BS_WEB_DIST` | none | *(bs-server)* Directory of the built web client; without it only the API is served |
 | `DOMAIN` | none | Instance domain (invite links, `user@domain` names) |
-| `PUBLIC_ORIGIN` | none | Full public address when it is not `https://DOMAIN` |
-| `TRUSTED_PROXY_HOPS` | `1` | How many proxies in front write `X-Forwarded-For` (0–4). Rate limits key on it: `1` behind one nginx, `0` with no proxy |
-| `REGISTRATION_OPEN` | `true` | Whether sign-up works without an invite (the admin can change it in settings) |
-| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | none | LiveKit server for voice; voice is off without them |
-| `DIRECTORY_ENDPOINT` | the project's directory | Space directory address; an empty string turns it off |
+| `PUBLIC_ORIGIN` | none | Full external address when it is not `https://DOMAIN` |
+| `TRUSTED_PROXY_HOPS` | `1` | How many proxies in front write `X-Forwarded-For` (0–4). Rate limits depend on it: behind one nginx `1`, without a proxy `0` |
+| `REGISTRATION_OPEN` | `true` | Whether registration without an invite is open (the administrator can change it) |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | none | LiveKit server for voice; without them voice is off |
+| `DIRECTORY_ENDPOINT` | project directory | Space directory address; an empty string turns it off. The server contacts it only if the administrator enabled the directory |
+| `BACKSPACE_UPDATE_CHECK` | `false` | Let the admin panel ask GitHub about a new release of the original (the original defaults to `true`) |
+| `BACKSPACE_INSTALL_CHANNEL` | none | `prebuilt` or `source`: what the update panel shows |
 | `DISABLE_RATE_LIMITS` | `false` | Turn rate limits off (tests only) |
-| `BACKSPACE_SOURCE_URL`, `BACKSPACE_COMMIT` | none | Shown in the instance info |
-| `BS_PASSWORD_HASH_COST` | `12` | bcrypt cost (4–16); change for tests only |
-| `RUST_LOG` | `info` | Log detail (`debug`, `bs_server=trace`) |
+| `BACKSPACE_SOURCE_URL`, `BACKSPACE_COMMIT` | none | Shown in instance info |
+| `BS_PASSWORD_HASH_COST` | `12` | *(bs-server)* bcrypt cost (4–16); change for tests only |
+| `RUST_LOG` | `info` | *(bs-server)* Log verbosity (`debug`, `bs_server=trace`) |
 
-Put a TLS reverse proxy in front that passes WebSocket through on `/ws`.
+Put a TLS reverse proxy in front that passes WebSocket on `/ws`.
 
 ### Compatibility check
 
 `tools/compat` starts the original server and `bs-server` on copies of one database and runs
-the same scenarios against both, comparing responses and WebSocket events:
+the same scenarios on both, comparing responses and WebSocket events:
 
 ```sh
 tools/compat/up.sh                    # needs a Backspace checkout with `pnpm install`
-python3 tools/compat/s_spaces.py      # also s_channels, s_messages, s_dm, s_social,
-                                      # s_account, s_voice, s_admin; cmp_ready.py
+python3 tools/compat/s_spaces.py      # and s_channels, s_messages, s_dm, s_social, s_account,
+                                      # s_voice, s_admin, s_search, s_files, s_embeds,
+                                      # s_stickers, s_gif, s_explore, s_directory,
+                                      # s_adminusers; cmp_ready.py
+python3 tools/compat/t_twofactor.py   # bs-server extensions: two-factor
+python3 tools/compat/t_e2ee.py        # and the key directory
 ```
 
-The checkout path comes from the `ORIG` variable (see the top of `up.sh`).
+The checkout path is set by `ORIG` (see the top of `up.sh`). The same run with `bs-server` on
+PostgreSQL: `BS_STAND_PG=postgres://user@host:port tools/compat/up.sh`; the `bs_stand`
+database is recreated and filled from the same SQLite copy.
 
 ## Translations
 

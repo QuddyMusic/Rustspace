@@ -352,6 +352,31 @@ pub(super) fn sync_schema(client: &mut postgres::Client) -> DbResult<()> {
         }
     }
     tx.commit().map_err(pg)?;
+    let composite = schema
+        .tables
+        .iter()
+        .filter_map(|(table, columns)| {
+            let mut key: Vec<&Column> =
+                columns.iter().filter(|column| column.primary > 0).collect();
+            key.sort_by_key(|column| column.primary);
+            // Есть отдельный индекс по первому столбцу ключа — SQLite отбирает
+            // по нему, и строки идут в порядке вставки.
+            let shadowed = key.first().is_some_and(|first| {
+                let lead = format!("ON {} ({}", quote(table), quote(&first.name));
+                schema
+                    .indexes
+                    .iter()
+                    .any(|(_, statement)| statement.contains(&lead))
+            });
+            (key.len() > 1 && !shadowed).then(|| {
+                (
+                    table.clone(),
+                    key.iter().map(|column| column.name.clone()).collect(),
+                )
+            })
+        })
+        .collect();
+    let _ = COMPOSITE_KEYS.set(composite);
     if created > 0 {
         tracing::info!(created, "схема PostgreSQL приведена к схеме оригинала");
     }
@@ -412,6 +437,15 @@ pub(super) fn tables_in_dependency_order(
 /// затрагиваются.
 #[must_use]
 pub fn translate(sql: &str) -> String {
+    translate_with(sql, COMPOSITE_KEYS.get())
+}
+
+/// Составные первичные ключи таблиц: по ним SQLite отдаёт строки, когда
+/// запрос отбирает по первому столбцу ключа.
+static COMPOSITE_KEYS: std::sync::OnceLock<HashMap<String, Vec<String>>> =
+    std::sync::OnceLock::new();
+
+fn translate_with(sql: &str, keys: Option<&HashMap<String, Vec<String>>>) -> String {
     let mut out = String::with_capacity(sql.len() + 16);
     let mut parameter = 0;
     let mut literal = false;
@@ -452,7 +486,7 @@ pub fn translate(sql: &str) -> String {
         }
     }
     flush(&mut word, &mut out);
-    with_insertion_order(out)
+    with_insertion_order(out, keys)
 }
 
 /// Слова запроса вне скобок и строковых литералов: начало и слово в
@@ -512,7 +546,7 @@ fn has_aggregate(select_list: &str) -> bool {
 
 /// Добавляет к простому запросу без своего порядка сортировку по порядку
 /// вставки строк первой таблицы — так, как их отдал бы SQLite.
-fn with_insertion_order(sql: String) -> String {
+fn with_insertion_order(sql: String, keys: Option<&HashMap<String, Vec<String>>>) -> String {
     const AFTER_TABLE: [&str; 13] = [
         "WHERE", "JOIN", "LEFT", "INNER", "CROSS", "RIGHT", "FULL", "ON", "LIMIT", "OFFSET",
         "NATURAL", "FOR", "AS",
@@ -550,7 +584,26 @@ fn with_insertion_order(sql: String) -> String {
         }
         _ => None,
     };
-    let order = format!(" ORDER BY {}.{SEQUENCE}", alias.unwrap_or(table));
+    let name = alias.unwrap_or(table);
+    // Отбор по первому столбцу составного ключа SQLite выполняет по индексу
+    // ключа и отдаёт строки в его порядке, а не в порядке вставки.
+    let by_key = keys
+        .and_then(|keys| keys.get(table.trim_matches('"')))
+        .filter(|key| {
+            let condition = sql[words[from].0..].replace(' ', "");
+            key.first()
+                .is_some_and(|first| condition.contains(&format!("{first}=")))
+        });
+    let order = match by_key {
+        Some(key) => format!(
+            " ORDER BY {}",
+            key.iter()
+                .map(|column| format!("{name}.{column}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        None => format!(" ORDER BY {name}.{SEQUENCE}"),
+    };
     match words
         .iter()
         .skip(from)
@@ -764,6 +817,21 @@ mod tests {
         assert_eq!(
             translate("SELECT a FROM `t` AS x"),
             "SELECT a FROM \"t\" AS x ORDER BY x.bs_seq"
+        );
+        let keys = HashMap::from([(
+            "members".to_owned(),
+            vec!["room".to_owned(), "user_id".to_owned()],
+        )]);
+        assert_eq!(
+            translate_with(
+                "SELECT u.a FROM members m JOIN users u ON u.id = m.user_id WHERE m.room = ?",
+                Some(&keys)
+            ),
+            "SELECT u.a FROM members m JOIN users u ON u.id = m.user_id WHERE m.room = $1 ORDER BY m.room, m.user_id"
+        );
+        assert_eq!(
+            translate_with("SELECT room FROM members WHERE user_id = ?", Some(&keys)),
+            "SELECT room FROM members WHERE user_id = $1 ORDER BY members.bs_seq"
         );
         for kept in [
             "SELECT a FROM t ORDER BY a",

@@ -7,6 +7,7 @@ pub mod auth;
 pub mod channels;
 pub mod directory;
 pub mod dm;
+pub mod e2ee;
 pub mod explore;
 pub mod files;
 pub mod gif;
