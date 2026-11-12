@@ -96,7 +96,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-app` | The GUI and its entry point | 232 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 74 |
+| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 80 |
 | `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 6 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 

@@ -50,6 +50,7 @@ mod error_messages;
 pub mod events;
 pub mod extract;
 pub mod federation;
+pub mod federation_auth;
 pub mod files;
 pub mod hub;
 pub mod media;

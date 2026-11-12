@@ -126,9 +126,20 @@ original server.
    - [x] Forced voice disconnect through the LiveKit API (finding S16).
    - [x] Compatibility stand (`tools/compat`): 16 scenarios, responses and events compared
      with the original on SQLite and on PostgreSQL.
-   - [ ] Federation: handshake and keys, outbox and delivery, inbound events, sync, account
-     replicas, cross-instance calls. The mutation log is already written as in the original.
-     Until then `bs-server` runs as a standalone instance.
+   - [ ] Federation. In the original this is about 36 thousand lines: more than everything
+     ported so far, and the part most sensitive to mistakes; it is ported in steps, each
+     compared with the original on a two-instance stand. Until then `bs-server` runs as a
+     standalone instance. The mutation log is already written as in the original.
+     - [x] Request signatures between instances (HMAC, freshness, secret rotation), checked
+       against the original.
+     - [ ] Handshake and peer management: `/api/federation/*` for peering, secret rotation,
+       epochs and reset; replay protection.
+     - [ ] Outbox and the delivery worker: retries, ordering, rollback of rejected events.
+     - [ ] Inbound events: messages, edits, reactions, conversations, profiles, presence.
+     - [ ] Account replicas and login from another instance, `user@domain` lookup.
+     - [ ] Sync after downtime and state reconciliation.
+     - [ ] Cross-instance calls.
+     - [ ] A two-instance stand (original ↔ `bs-server`) in `tools/compat`, and the audit.
    - [x] The `bs-contract` stand against `bs-server`: both tests pass (REST: 42 calls; the
      client scenario: no parse errors, no unknown events).
 3. **PostgreSQL** as a storage option: done. A backend behind the same interface
