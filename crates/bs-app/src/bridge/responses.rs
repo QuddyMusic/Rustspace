@@ -24,7 +24,11 @@ impl Session {
             HistoryItems::Space(page) => {
                 cache.merge_history(channel_id, page);
             }
-            HistoryItems::Dm(page) => {
+            HistoryItems::Dm(mut page) => {
+                let direct = cache.dm_channel(channel_id).is_some_and(e2ee::is_direct);
+                if let Some(e2ee) = self.e2ee.get_mut().as_mut() {
+                    e2ee.incoming_page(&mut page, direct);
+                }
                 cache.merge_dm_history(channel_id, page);
             }
         }
@@ -57,6 +61,15 @@ impl Session {
                 if let Some(state) = self.history.get_mut(&channel_id) {
                     state.loading = false;
                     state.error = Some(message);
+                }
+            }
+            BridgeResponse::Quiet => {}
+            BridgeResponse::E2eePeerKey {
+                dm_channel_id,
+                public_key,
+            } => {
+                if let Some(e2ee) = self.e2ee.get_mut().as_mut() {
+                    e2ee.directory_key(&dm_channel_id, &public_key);
                 }
             }
             BridgeResponse::NotificationSettings(list) => {

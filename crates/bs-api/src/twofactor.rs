@@ -137,6 +137,43 @@ impl ApiClient {
     }
 }
 
+/// Открытый ключ сквозного шифрования из справочника сервера.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct E2eeKey {
+    /// Чей ключ.
+    pub user_id: String,
+    /// Ключ в base64url; `None` — не опубликован.
+    pub public_key: Option<String>,
+}
+
+impl ApiClient {
+    /// `PUT /api/e2ee/key`: публикует свой открытый ключ в справочнике
+    /// сервера (расширение `bs-server`; оригинал отвечает `404`).
+    ///
+    /// # Errors
+    /// Сетевые ошибки и отказ сервера.
+    pub async fn publish_e2ee_key(&self, public_key: &str) -> Result<E2eeKey, ApiError> {
+        self.put_json(
+            "/api/e2ee/key",
+            &serde_json::json!({ "publicKey": public_key }),
+        )
+        .await
+    }
+
+    /// `GET /api/e2ee/keys/:userId`: открытый ключ пользователя.
+    ///
+    /// # Errors
+    /// Сетевые ошибки; `404` — ключа нет или сервер не ведёт справочник.
+    pub async fn e2ee_key_of(&self, user_id: &str) -> Result<E2eeKey, ApiError> {
+        let id: String = user_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        self.get_json(&format!("/api/e2ee/keys/{id}")).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

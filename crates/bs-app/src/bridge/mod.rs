@@ -18,6 +18,7 @@
 //! [`crate::fleet::Bridge`]: у каждого своя `Session`, но активна (то есть
 //! показана в интерфейсе) только одна.
 
+pub(crate) mod e2ee;
 mod protocol;
 mod responses;
 mod session;
@@ -160,6 +161,10 @@ pub(crate) struct Session {
     second_factor: Option<zeroize::Zeroizing<String>>,
     /// Отказ сервера на действие пользователя (например, `rate_limited`).
     notice: Option<String>,
+    /// Сквозное шифрование переписок этого аккаунта (после входа).
+    e2ee: std::cell::RefCell<Option<e2ee::E2ee>>,
+    /// Почему исходящее сообщение не ушло: показать при ближайшем опросе.
+    e2ee_notice: std::cell::RefCell<Option<String>>,
 }
 
 /// Приводит адрес инстанса к абсолютному URL.

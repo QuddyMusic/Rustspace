@@ -23,6 +23,14 @@ every WebSocket frame and REST response the client receives.
   outside loopback only with explicit consent. The session survives restarts: the token lives
   in the system keyring (Secret Service, Keychain, Credential Manager), with a `0600` file as a
   fallback.
+- **Two-factor authentication** (on a server that supports it, that is `bs-server`): a code at
+  login; turning on, recovery codes and turning off in account settings.
+- **End-to-end encryption for one-to-one conversations.** Turned on from the conversation
+  header; text is encrypted on the device (X25519, XChaCha20-Poly1305) and travels as an
+  ordinary message, so it works through any server, the original included. Keys are exchanged
+  in the conversation itself and verified with a safety number. Attachments and group
+  conversations are not encrypted; there is no forward secrecy; each device has its own key.
+  The other person needs this client: the original web client shows ciphertext.
 - **Spaces.** Channels and categories, roles and permissions, per-channel overrides, members,
   bans, invites, join requests, the instance directory, notification settings per space and
   per channel (including timed mute).

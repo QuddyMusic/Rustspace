@@ -1200,6 +1200,32 @@ impl Bridge {
         self.slots.iter_mut().find_map(|s| s.session.take_info())
     }
 
+    /// Состояние шифрования переписки на инстансе `origin`.
+    pub(crate) fn e2ee_status(
+        &self,
+        origin: usize,
+        dm_id: &str,
+    ) -> crate::bridge::e2ee::ChatStatus {
+        self.slots
+            .get(origin)
+            .map(|slot| slot.session.e2ee_status(dm_id))
+            .unwrap_or_default()
+    }
+
+    /// Включает или выключает шифрование переписки.
+    pub(crate) fn set_e2ee(&mut self, origin: usize, dm_id: &str, enabled: bool) {
+        if let Some(slot) = self.slots.get_mut(origin) {
+            slot.session.set_e2ee(dm_id, enabled);
+        }
+    }
+
+    /// Принимает новый ключ собеседника.
+    pub(crate) fn accept_e2ee_key(&mut self, origin: usize, dm_id: &str) {
+        if let Some(slot) = self.slots.get_mut(origin) {
+            slot.session.accept_e2ee_key(dm_id);
+        }
+    }
+
     /// Отказ сервера на действие: первый, какой есть.
     pub(crate) fn notice(&self) -> Option<&str> {
         self.slots.iter().find_map(|s| s.session.notice())

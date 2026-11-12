@@ -877,6 +877,7 @@ dependencies = [
  "arboard",
  "bs-api",
  "bs-core",
+ "bs-e2ee",
  "bs-identity",
  "bs-instances",
  "bs-media",

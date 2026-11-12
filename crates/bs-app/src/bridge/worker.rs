@@ -1154,6 +1154,25 @@ async fn social_request(
             Ok(friends) => BridgeResponse::Friends(friends),
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
+        // Справочника может не быть (оригинальный сервер): тогда ключи
+        // идут прямо в переписке, и отказ здесь — не ошибка.
+        BridgeRequest::E2eePublish(key) => {
+            let _ = client.publish_e2ee_key(&key).await;
+            BridgeResponse::Quiet
+        }
+        BridgeRequest::E2eePeerKey {
+            dm_channel_id,
+            user_id,
+        } => match client.e2ee_key_of(&user_id).await {
+            Ok(bs_api::E2eeKey {
+                public_key: Some(public_key),
+                ..
+            }) => BridgeResponse::E2eePeerKey {
+                dm_channel_id,
+                public_key,
+            },
+            _ => BridgeResponse::Quiet,
+        },
         BridgeRequest::NotificationSettings => match client.notification_settings().await {
             Ok(list) => BridgeResponse::NotificationSettings(list),
             Err(err) => BridgeResponse::Failed(err.to_string()),

@@ -68,6 +68,8 @@ impl Session {
             last_error: None,
             second_factor: None,
             notice: None,
+            e2ee: std::cell::RefCell::new(None),
+            e2ee_notice: std::cell::RefCell::new(None),
         }
     }
 
@@ -79,6 +81,9 @@ impl Session {
 
     /// Забирает накопленные события из канала (без блокировки).
     pub(crate) fn poll(&mut self) {
+        if let Some(reason) = self.e2ee_notice.get_mut().take() {
+            self.notice = Some(reason);
+        }
         loop {
             let next = self.events.as_ref().map(std_mpsc::Receiver::try_recv);
             match next {
@@ -99,7 +104,8 @@ impl Session {
 
     pub(super) fn handle_event(&mut self, event: BridgeEvent) {
         match event {
-            BridgeEvent::Ready { payload } => {
+            BridgeEvent::Ready { mut payload } => {
+                let publish = self.prepare_e2ee(&mut payload);
                 self.cache = Some(Cache::from_ready(*payload));
                 self.history.clear();
                 self.phase = Phase::Active;
@@ -108,6 +114,9 @@ impl Session {
                 self.session_lost = false;
                 self.last_error = None;
                 self.request(BridgeRequest::NotificationSettings);
+                if let Some(key) = publish {
+                    self.request(BridgeRequest::E2eePublish(key));
+                }
             }
             BridgeEvent::Server { event } => self.apply_server_event(*event),
             BridgeEvent::State { state } => self.connection = state,
@@ -125,7 +134,128 @@ impl Session {
     }
 
     /// Применяет событие сервера к кэшу.
-    pub(super) fn apply_server_event(&mut self, event: ServerEvent) {
+    /// Загружает ключи шифрования аккаунта и расшифровывает то, что пришло
+    /// в `ready`.
+    fn prepare_e2ee(&mut self, payload: &mut bs_types::ReadyPayload) -> Option<String> {
+        let me = payload.user.id.as_str().to_owned();
+        let mut publish = None;
+        let slot = self.e2ee.get_mut();
+        if slot.is_none() {
+            let state = e2ee::E2ee::load(self.persist.as_deref(), &me);
+            let key = state.public_key();
+            *slot = Some(state);
+            publish = Some(key);
+        }
+        if let Some(e2ee) = self.e2ee.get_mut().as_mut() {
+            for channel in &mut payload.dm_channels {
+                e2ee.incoming_channel(channel);
+            }
+        }
+        self.flush_e2ee();
+        publish
+    }
+
+    /// Отправляет в переписки свои открытые ключи, которые пора объявить.
+    fn flush_e2ee(&mut self) {
+        let pending = self
+            .e2ee
+            .get_mut()
+            .as_mut()
+            .map(|e2ee| std::mem::take(&mut e2ee.outbox))
+            .unwrap_or_default();
+        for (dm_channel_id, content) in pending {
+            self.send(ClientEvent::DmMessageCreate {
+                dm_channel_id,
+                content: Some(content),
+                attachments: None,
+                reply_to_id: None,
+            });
+        }
+    }
+
+    /// Расшифровывает личные сообщения в событии сервера.
+    fn unseal(&mut self, event: &mut ServerEvent) {
+        let Some(e2ee) = self.e2ee.get_mut().as_mut() else {
+            return;
+        };
+        let cache = self.cache.as_ref();
+        let direct = |id: &str| {
+            cache
+                .and_then(|cache| cache.dm_channel(id))
+                .is_some_and(e2ee::is_direct)
+        };
+        match event {
+            ServerEvent::DmMessageCreated { message }
+            | ServerEvent::DmMessageUpdated { message } => {
+                let direct = direct(&message.message.dm_channel_id);
+                e2ee.incoming_full(message, direct);
+            }
+            ServerEvent::DmChannelCreated { dm_channel } => e2ee.incoming_channel(dm_channel),
+            _ => {}
+        }
+    }
+
+    /// Состояние шифрования переписки для интерфейса.
+    pub(crate) fn e2ee_status(&self, dm_channel_id: &str) -> e2ee::ChatStatus {
+        self.e2ee
+            .borrow()
+            .as_ref()
+            .map(|e2ee| e2ee.status(dm_channel_id))
+            .unwrap_or_default()
+    }
+
+    /// Включает или выключает шифрование переписки один на один.
+    pub(crate) fn set_e2ee(&mut self, dm_channel_id: &str, enabled: bool) {
+        let peer = self.cache.as_ref().and_then(|cache| {
+            let channel = cache
+                .dm_channel(dm_channel_id)
+                .filter(|channel| e2ee::is_direct(channel))?;
+            let me = cache.me().id.as_str();
+            channel
+                .members
+                .iter()
+                .find(|member| member.id.as_str() != me)
+                .map(|member| member.id.as_str().to_owned())
+        });
+        let Some(user_id) = peer else { return };
+        if let Some(e2ee) = self.e2ee.get_mut().as_mut() {
+            e2ee.set_enabled(dm_channel_id, enabled);
+        }
+        if enabled {
+            self.request(BridgeRequest::E2eePeerKey {
+                dm_channel_id: dm_channel_id.to_owned(),
+                user_id,
+            });
+        }
+        self.flush_e2ee();
+    }
+
+    /// Принимает новый ключ собеседника после сверки контрольного числа.
+    pub(crate) fn accept_e2ee_key(&mut self, dm_channel_id: &str) {
+        if let Some(e2ee) = self.e2ee.get_mut().as_mut() {
+            e2ee.accept_new_key(dm_channel_id);
+        }
+    }
+
+    /// Готовит текст исходящего личного сообщения; `None` — отправлять нельзя
+    /// (причина будет показана пользователю).
+    fn seal_outgoing(&self, dm_channel_id: &str, content: String) -> Option<String> {
+        let slot = self.e2ee.borrow();
+        let Some(e2ee) = slot.as_ref() else {
+            return Some(content);
+        };
+        match e2ee.outgoing(dm_channel_id, content) {
+            Ok(content) => Some(content),
+            Err(reason) => {
+                *self.e2ee_notice.borrow_mut() = Some(reason);
+                None
+            }
+        }
+    }
+
+    pub(super) fn apply_server_event(&mut self, mut event: ServerEvent) {
+        self.unseal(&mut event);
+        self.flush_e2ee();
         match &event {
             // Отказ на действие пользователя: без этого сообщение, которое
             // сервер не принял, просто молча пропадало.
@@ -678,12 +808,17 @@ impl Session {
                 content,
                 reply_to_id,
             },
-            ChannelKind::Dm => ClientEvent::DmMessageCreate {
-                dm_channel_id: channel_id,
-                content: Some(content),
-                attachments: None,
-                reply_to_id,
-            },
+            ChannelKind::Dm => {
+                let Some(content) = self.seal_outgoing(&channel_id, content) else {
+                    return;
+                };
+                ClientEvent::DmMessageCreate {
+                    dm_channel_id: channel_id,
+                    content: Some(content),
+                    attachments: None,
+                    reply_to_id,
+                }
+            }
         });
     }
 
@@ -701,10 +836,31 @@ impl Session {
                 message_id,
                 content,
             },
-            ChannelKind::Dm => ClientEvent::DmMessageEdit {
-                message_id,
-                content,
-            },
+            ChannelKind::Dm => {
+                // Правка шифруется так же, как новое сообщение этой переписки.
+                let dm = self.cache.as_ref().and_then(|cache| {
+                    cache
+                        .dm_channels()
+                        .find(|channel| {
+                            cache
+                                .dm_messages(&channel.id)
+                                .iter()
+                                .any(|m| m.message.id.as_str() == message_id)
+                        })
+                        .map(|channel| channel.id.clone())
+                });
+                let content = match dm {
+                    Some(dm) => match self.seal_outgoing(&dm, content) {
+                        Some(content) => content,
+                        None => return,
+                    },
+                    None => content,
+                };
+                ClientEvent::DmMessageEdit {
+                    message_id,
+                    content,
+                }
+            }
         });
     }
 
@@ -842,6 +998,13 @@ impl Session {
         attachments: Vec<String>,
         reply_to_id: Option<String>,
     ) {
+        let content = match content {
+            Some(text) => match self.seal_outgoing(&channel_id, text) {
+                Some(text) => Some(text),
+                None => return,
+            },
+            None => None,
+        };
         self.send(ClientEvent::DmMessageCreate {
             dm_channel_id: channel_id,
             content,
@@ -1071,7 +1234,13 @@ impl Session {
         };
         match items {
             HistoryItems::Space(page) => cache.replace_history(channel_id, page),
-            HistoryItems::Dm(page) => cache.replace_dm_history(channel_id, page),
+            HistoryItems::Dm(mut page) => {
+                let direct = cache.dm_channel(channel_id).is_some_and(e2ee::is_direct);
+                if let Some(e2ee) = self.e2ee.get_mut().as_mut() {
+                    e2ee.incoming_page(&mut page, direct);
+                }
+                cache.replace_dm_history(channel_id, page);
+            }
         }
         self.history
             .insert(channel_id.to_owned(), HistoryState::default());

@@ -844,6 +844,29 @@ impl ChatScreen {
                     dm,
                 ));
             }
+            if crate::bridge::e2ee::is_direct(dm) {
+                let status = bridge.e2ee_status(selected.origin, &selected.channel);
+                let (label, color) = if status.key_changed {
+                    (tr("Ключ изменился"), theme::amber())
+                } else if status.enabled {
+                    (tr("Зашифровано"), theme::green())
+                } else {
+                    (tr("Шифрование"), theme::text_faint())
+                };
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new(label).size(12.0).color(color))
+                            .frame(false),
+                    )
+                    .on_hover_text(tr("Сквозное шифрование этой переписки"))
+                    .clicked()
+                {
+                    self.e2ee_dialog = Some(crate::screens::e2ee_dialog::E2eeDialog {
+                        origin: selected.origin,
+                        dm_id: selected.channel.clone(),
+                    });
+                }
+            }
             if self.voice.dm.is_none()
                 && ui
                     .add(widgets::flat_icon(Icon::Phone, 22.0, theme::text_faint()))

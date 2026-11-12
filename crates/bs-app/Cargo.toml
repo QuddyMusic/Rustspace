@@ -61,6 +61,7 @@ bs-core = { workspace = true }
 bs-instances = { workspace = true }
 bs-media = { workspace = true }
 bs-identity = { workspace = true }
+bs-e2ee = { path = "../bs-e2ee" }
 bs-types = { workspace = true }
 bs-permissions = { workspace = true }
 tokio = { workspace = true }

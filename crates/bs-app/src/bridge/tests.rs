@@ -69,6 +69,11 @@ fn active_bridge() -> (
         requests_rx.try_recv(),
         Ok(BridgeRequest::NotificationSettings)
     ));
+    // Следом клиент публикует свой открытый ключ шифрования переписок.
+    assert!(matches!(
+        requests_rx.try_recv(),
+        Ok(BridgeRequest::E2eePublish(_))
+    ));
     (bridge, commands_rx, requests_rx)
 }
 

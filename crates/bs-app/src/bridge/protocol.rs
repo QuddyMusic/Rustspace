@@ -199,6 +199,15 @@ pub(crate) enum BridgeRequest {
     Friends,
     /// Настройки уведомлений этого инстанса.
     NotificationSettings,
+    /// Опубликовать свой открытый ключ шифрования в справочнике сервера.
+    E2eePublish(String),
+    /// Узнать в справочнике ключ собеседника по переписке.
+    E2eePeerKey {
+        /// Переписка.
+        dm_channel_id: String,
+        /// Собеседник.
+        user_id: String,
+    },
     /// Список заявок в друзья.
     FriendRequests,
     /// Поиск пользователей по подстроке.
@@ -898,6 +907,15 @@ pub(crate) enum BridgeResponse {
     Friends(Vec<bs_types::Friend>),
     /// Пришли настройки уведомлений.
     NotificationSettings(Vec<bs_types::NotificationSetting>),
+    /// Ключ собеседника из справочника сервера.
+    E2eePeerKey {
+        /// Переписка.
+        dm_channel_id: String,
+        /// Открытый ключ.
+        public_key: String,
+    },
+    /// Запрос выполнен, показывать нечего.
+    Quiet,
     /// Пришли заявки в друзья.
     FriendRequests(Vec<bs_types::FriendRequest>),
     /// Пришли результаты поиска пользователей.

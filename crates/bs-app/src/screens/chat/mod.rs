@@ -146,6 +146,8 @@ pub(crate) struct ChatScreen {
     channel_settings: Option<super::channel_settings::ChannelSettings>,
     notification_settings: Option<super::notification_settings::NotificationSettings>,
     group_dialog: Option<super::group_dm::GroupDialog>,
+    /// Открытое окно шифрования переписки.
+    e2ee_dialog: Option<super::e2ee_dialog::E2eeDialog>,
     /// Открытые настройки.
     settings: Option<SettingsState>,
     /// Картинка, открытая на весь экран (значение поля).
@@ -565,6 +567,11 @@ impl ChatScreen {
             && !super::group_dm::show(ctx, dialog, bridge)
         {
             self.group_dialog = None;
+        }
+        if let Some(dialog) = self.e2ee_dialog.as_ref()
+            && !super::e2ee_dialog::show(ctx, dialog, bridge)
+        {
+            self.e2ee_dialog = None;
         }
     }
 

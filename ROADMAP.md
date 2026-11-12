@@ -137,7 +137,7 @@ original server.
 4. **Two-factor authentication** (TOTP and recovery codes): done, server (`/api/auth/2fa`,
    code at login) and client (field at login, card in account settings). Old clients and the
    original server are unaffected.
-5. **End-to-end encryption for DMs only**: in progress.
+5. **End-to-end encryption for DMs only**: first version done.
    - [x] The scheme and its implementation (`bs-e2ee`): X25519, HKDF-SHA256,
      XChaCha20-Poly1305. An encrypted message travels as plain text `bs-e2ee:1:…`, so it
      passes through any server, including the original and federated ones; the original uses
@@ -145,9 +145,16 @@ original server.
      usable for this.
    - [x] Public key directory in `bs-server` (`/api/e2ee`); encrypted messages are excluded
      from search.
-   - [ ] Client: key storage, turning encryption on per conversation, in-band key exchange
-     (when the server has no directory), safety number, warning on a changed peer key.
-   - Out of the first version: group conversations, attachments, forward secrecy.
+   - [x] Client: the account key is kept on the device (a `0600` file next to the saved
+     session), encryption is turned on per conversation from its header, keys travel as a
+     message in the conversation itself and through the directory, there is a safety number;
+     when the peer's key changes, sending stops until it is accepted.
+   - [ ] A check with two real clients through the original server and through federation
+     (the logic is covered by tests without a network for now).
+   - [ ] Moving the key to a second device (each device has its own key for now, and the
+     peer sees that as a key change); keeping the key in the system secret store.
+   - Out of the first version: group conversations, attachments, forward secrecy, search
+     over encrypted messages.
 
 ## Technical notes
 - Permissions (`bs-permissions`) only drive what the UI shows; the server always decides.

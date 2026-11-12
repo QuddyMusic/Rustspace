@@ -82,7 +82,7 @@ pub use space_manage::{
     Ban, ChannelUpdate, JoinRequest, NewChannel, NewRole, OverrideScope, PermissionOverride,
     RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input,
 };
-pub use twofactor::{TwoFactorSetup, TwoFactorStatus};
+pub use twofactor::{E2eeKey, TwoFactorSetup, TwoFactorStatus};
 pub use write::{
     CreateDmRequest, FriendRequestDecision, MessageSearchQuery, SEARCH_LIMIT_DEFAULT,
     SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN, SendFriendRequest,
