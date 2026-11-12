@@ -388,6 +388,9 @@ pub async fn reset_password(
                 "UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?",
                 params![&hash, now_ms(), &id],
             )?;
+            // Сброс пароля администратором — путь восстановления доступа:
+            // вместе с паролем снимается и второй фактор.
+            crate::twofactor::remove(tx, &id)?;
             out.close_user(&id);
             Ok(())
         })

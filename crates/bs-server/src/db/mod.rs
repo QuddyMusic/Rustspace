@@ -10,6 +10,7 @@
 //! Работа с базой блокирующая, поэтому идёт в `spawn_blocking`; запись — в
 //! одной транзакции на вызов, как у оригинала с его единственным соединением.
 
+pub mod extensions;
 pub mod migrations;
 mod sqlite;
 
@@ -281,9 +282,11 @@ impl Db {
         sqlite::configure(&connection)?;
         sqlite::migrate(&mut connection)?;
         sqlite::ensure_defaults(&mut connection)?;
-        Ok(Self {
+        let db = Self {
             sqlite: Arc::new(Mutex::new(connection)),
-        })
+        };
+        db.transaction_blocking(|tx| extensions::apply(tx))?;
+        Ok(db)
     }
 
     /// Блокирующий вызов в транзакции: изменения применяются целиком или

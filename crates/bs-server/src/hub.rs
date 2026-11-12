@@ -427,6 +427,15 @@ impl Hub {
         true
     }
 
+    /// Исчерпан ли предел [`Hub::allow`] для ключа; сам счётчик не трогает.
+    #[must_use]
+    pub fn exhausted(&self, key: &str, max: u32, window: std::time::Duration) -> bool {
+        self.lock()
+            .windows
+            .get(key)
+            .is_some_and(|(start, count)| start.elapsed() < window && *count >= max)
+    }
+
     /// Отправляет накопленные события. Соединение с переполненной очередью
     /// закрывается.
     pub fn flush(&self, outbox: Outbox) {

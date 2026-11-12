@@ -111,10 +111,28 @@ impl ApiError {
     }
 }
 
+/// Тексты ошибок расширений этого сервера, которых нет у оригинала.
+fn extension_message(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "two_factor_required" => "Two-factor authentication code required",
+        "two_factor_invalid" => "Invalid two-factor authentication code",
+        "two_factor_already_enabled" => "Two-factor authentication is already enabled",
+        "two_factor_not_enabled" => "Two-factor authentication is not enabled",
+        "two_factor_setup_missing" => "Start two-factor setup first",
+        "two_factor_rate_limited" => "Too many two-factor attempts; try again later",
+        "e2ee_key_invalid" => "Invalid encryption key bundle",
+        "e2ee_key_not_found" => "This user has not published an encryption key",
+        "e2ee_payload_invalid" => "Invalid encrypted message",
+        _ => return None,
+    })
+}
+
 /// Текст ошибки по коду с подстановкой `{{имя}}` из `details`.
 #[must_use]
 pub fn error_text(code: &str, details: Option<&Map<String, Value>>) -> String {
-    let template = message(code).unwrap_or(code);
+    let template = message(code)
+        .or_else(|| extension_message(code))
+        .unwrap_or(code);
     let Some(details) = details else {
         return template.to_owned();
     };

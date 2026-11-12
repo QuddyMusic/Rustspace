@@ -64,6 +64,7 @@ pub mod snowflake;
 pub mod state;
 pub mod stickers;
 pub mod storage;
+pub mod twofactor;
 pub mod util;
 pub mod voice;
 pub mod web;
@@ -352,6 +353,11 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/api/admin/telemetry/preview", get(routes::admin_status::telemetry_preview))
         .route("/api/admin/instance/update-status", get(routes::admin_status::update_status))
+        .route("/api/auth/2fa", get(routes::twofactor::status))
+        .route("/api/auth/2fa/setup", post(routes::twofactor::setup))
+        .route("/api/auth/2fa/enable", post(routes::twofactor::enable))
+        .route("/api/auth/2fa/disable", post(routes::twofactor::disable))
+        .route("/api/auth/2fa/recovery-codes", post(routes::twofactor::recovery_codes))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(web::fallback)

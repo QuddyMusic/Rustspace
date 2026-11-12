@@ -461,7 +461,34 @@ pub async fn login(
         // перепроверяет у домашнего инстанса; это часть федерации.
         return Err(invalid());
     }
-    let token = sign_token(&state, &row.text("id")?, &row.text("username")?)?;
+    // Второй фактор спрашивается только после верного пароля: по ответу
+    // нельзя узнать, включена ли защита, не зная пароля.
+    let user_id = row.text("id")?;
+    let (owner, secret, factor_body) = (
+        user_id.clone(),
+        state.config.jwt_secret.clone(),
+        body.clone(),
+    );
+    let protection = state
+        .run(move |tx, _| Ok(crate::twofactor::load(tx, &owner)?))
+        .await?;
+    if let Some(protection) = protection.filter(|state| state.enabled_at.is_some()) {
+        crate::routes::twofactor::count_attempt(&state, &user_id)?;
+        let owner = user_id.clone();
+        let outcome = state
+            .run(move |tx, _| {
+                crate::routes::twofactor::check_second_factor(
+                    tx,
+                    &secret,
+                    &owner,
+                    &protection,
+                    &factor_body,
+                )
+            })
+            .await;
+        crate::routes::twofactor::note_outcome(&state, &user_id, outcome)?;
+    }
+    let token = sign_token(&state, &user_id, &row.text("username")?)?;
     Ok(Json(
         json!({ "token": token, "user": sanitize_user(&row, true)? }),
     ))

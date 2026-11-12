@@ -138,6 +138,7 @@ pub fn tombstone_user(tx: &mut dyn Tx, user_id: &str) -> DbResult<Vec<String>> {
     let Some(user) = user_row(tx, user_id)? else {
         return Ok(Vec::new());
     };
+    crate::twofactor::remove(tx, user_id)?;
     let mut stale = Vec::new();
     for column in ["avatar", "banner"] {
         if let Some(file) = user.opt_text(column)?.filter(|file| !file.is_empty()) {
