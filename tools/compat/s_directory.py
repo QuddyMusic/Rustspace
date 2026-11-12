@@ -7,7 +7,7 @@ def directory(c):
     pub=c.call('al','POST','/api/spaces',{'name':'В каталоге','avatarColor':'sky'})['id']
     c.call('al','PATCH',f'/api/spaces/{pub}',{'visibility':'public','description':'о'*250,'directoryListed':True})
     c.call(None,'GET','/api/directory/spaces')
-    c.call('root','PATCH','/api/admin/settings',{'directoryEnabled':True,'discoveryEnabled':True,'directoryBrowseEnabled':True})
+    c.call('root','PATCH','/api/settings/instance',{'directoryEnabled':True,'discoveryEnabled':True,'directoryBrowseEnabled':True})
     c.call(None,'GET','/api/directory/spaces')
     c.raw(None,'GET','/api/directory/spaces',keep=('cache-control',),auth=False)
     c.call('al','GET','/api/directory'); c.call(None,'GET','/api/directory'); c.call('al','GET','/api/directory?q=x&limit=5&offset=2')

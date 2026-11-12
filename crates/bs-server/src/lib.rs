@@ -63,6 +63,7 @@ pub mod routes;
 pub mod snowflake;
 pub mod state;
 pub mod stickers;
+pub mod storage;
 pub mod util;
 pub mod voice;
 pub mod ws;
@@ -329,6 +330,18 @@ pub fn app(state: AppState) -> Router {
         .route("/api/directory/spaces", get(routes::directory::document))
         .route("/api/directory", get(routes::directory::feed))
         .route("/api/csp-report", post(routes::directory::csp_report))
+        .route("/api/admin/storage/stats", get(routes::admin::storage_stats))
+        .route("/api/admin/storage/orphans", get(routes::admin::storage_orphans))
+        .route("/api/admin/storage/cleanup", post(routes::admin::storage_cleanup))
+        .route("/api/admin/storage/cleanup-media", post(routes::admin::storage_cleanup_media))
+        .route("/api/admin/storage/cleanup-tus", post(routes::admin::storage_cleanup_uploads))
+        .route("/api/admin/users", get(routes::admin::users))
+        .route("/api/admin/users/instances", get(routes::admin::user_instances))
+        .route("/api/admin/users/{id}/role", patch(routes::admin::set_role))
+        .route("/api/admin/users/{id}/reset-password", post(routes::admin::reset_password))
+        .route("/api/admin/users/{id}", delete(routes::admin::delete_user))
+        .route("/api/admin/test/seed-peer", post(routes::admin::test_route))
+        .route("/api/admin/test/federation/resync", post(routes::admin::test_route))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)
