@@ -37,6 +37,7 @@ pub mod auth;
 pub mod broadcast;
 pub mod config;
 pub mod db;
+pub mod directory;
 pub mod dm;
 pub mod dm_events;
 pub mod embeds;
@@ -325,6 +326,9 @@ pub fn app(state: AppState) -> Router {
         .route("/api/spaces/{id}/join-requests", get(routes::explore::list))
         .route("/api/spaces/{id}/join-requests/{requestId}", patch(routes::explore::decide))
         .route("/api/users/@me/join-requests", get(routes::explore::mine))
+        .route("/api/directory/spaces", get(routes::directory::document))
+        .route("/api/directory", get(routes::directory::feed))
+        .route("/api/csp-report", post(routes::directory::csp_report))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)
@@ -345,8 +349,9 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Запускает фоновые работы сервера: уборку незавершённых загрузок.
+/// Запускает фоновые работы сервера: уборку незавершённых загрузок и оповещение каталога.
 pub fn spawn_background(state: &AppState) {
+    tokio::spawn(directory::run_pinger(state.clone()));
     let uploads = state.clone();
     tokio::spawn(async move {
         let mut timer = tokio::time::interval(std::time::Duration::from_hours(1));

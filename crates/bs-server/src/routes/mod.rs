@@ -3,6 +3,7 @@
 pub mod account;
 pub mod auth;
 pub mod channels;
+pub mod directory;
 pub mod dm;
 pub mod explore;
 pub mod files;

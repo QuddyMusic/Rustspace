@@ -68,11 +68,7 @@ fn invite_code() -> String {
 /// # Errors
 /// Ошибка базы.
 pub fn mark_directory_dirty(tx: &mut dyn Tx) -> DbResult<()> {
-    tx.execute(
-        "UPDATE instance_settings SET directory_dirty = 1 WHERE id = 1",
-        params![],
-    )?;
-    Ok(())
+    crate::directory::mark_dirty(tx)
 }
 
 /// Пространство принимает ссылку на картинку, которая стала его значком или
