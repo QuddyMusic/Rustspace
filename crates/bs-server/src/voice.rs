@@ -920,6 +920,8 @@ fn kick_from_room(
         target,
         &json!({"type": "voice_disconnected", "userId": target, "channelId": channel}),
     );
+    // Клиент мог бы не послушаться события: участника убирает сам медиасервер.
+    out.evict_media(channel, target);
     Ok(())
 }
 

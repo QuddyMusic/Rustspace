@@ -57,6 +57,8 @@ struct Inner {
     activities: HashMap<String, Vec<Value>>,
     /// Счётчики ограничителей с фиксированным окном: начало окна и число.
     windows: HashMap<String, (Instant, u32)>,
+    /// Кого надо отключить от медиасервера: комната и участник.
+    evictions: Vec<(String, String)>,
 }
 
 /// Концентратор соединений.
@@ -66,6 +68,7 @@ pub struct Hub {
     pub voice: crate::voice::Voice,
     inner: Arc<Mutex<Inner>>,
     next_id: Arc<AtomicU64>,
+    evicted: Arc<tokio::sync::Notify>,
 }
 
 /// Кому адресовано событие.
@@ -86,6 +89,7 @@ enum Item {
     LeaveSpace { user: String, space: String },
     DropSpace(String),
     CloseUser(String),
+    Evict { room: String, user: String },
 }
 
 /// События и изменения подписок, ждущие завершения транзакции. Выполняются
@@ -165,6 +169,15 @@ impl Outbox {
         self.items.push(Item::CloseUser(user_id.to_owned()));
     }
 
+    /// Отключает участника от комнаты на медиасервере: модератор выгнал
+    /// его или он потерял право быть в канале.
+    pub fn evict_media(&mut self, room: &str, user_id: &str) {
+        self.items.push(Item::Evict {
+            room: room.to_owned(),
+            user: user_id.to_owned(),
+        });
+    }
+
     /// Переносит всё из другого набора в конец этого.
     pub fn append(&mut self, mut other: Self) {
         self.items.append(&mut other.items);
@@ -178,6 +191,17 @@ impl Outbox {
 }
 
 impl Hub {
+    /// Ждёт и забирает накопившиеся отключения от медиасервера.
+    pub async fn next_evictions(&self) -> Vec<(String, String)> {
+        loop {
+            let pending = std::mem::take(&mut self.lock().evictions);
+            if !pending.is_empty() {
+                return pending;
+            }
+            self.evicted.notified().await;
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -427,6 +451,11 @@ impl Hub {
                     for set in inner.spaces.values_mut() {
                         set.remove(&space);
                     }
+                    continue;
+                }
+                Item::Evict { room, user } => {
+                    inner.evictions.push((room, user));
+                    self.evicted.notify_one();
                     continue;
                 }
                 Item::CloseUser(user) => {

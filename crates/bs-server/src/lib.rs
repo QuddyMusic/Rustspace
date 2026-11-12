@@ -382,6 +382,7 @@ pub fn app(state: AppState) -> Router {
 /// Запускает фоновые работы сервера: уборку незавершённых загрузок и хранилища, оповещение каталога.
 pub fn spawn_background(state: &AppState) {
     tokio::spawn(directory::run_pinger(state.clone()));
+    tokio::spawn(routes::livekit::run_evictions(state.clone()));
     let uploads = state.clone();
     tokio::spawn(async move {
         let mut timer = tokio::time::interval(std::time::Duration::from_hours(1));
