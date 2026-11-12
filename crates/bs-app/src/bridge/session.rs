@@ -66,6 +66,7 @@ impl Session {
             session_lost: false,
             connection: ConnectionState::Connecting,
             last_error: None,
+            second_factor: None,
             notice: None,
         }
     }
@@ -365,6 +366,12 @@ impl Session {
     ///
     /// Работает только из фазы [`Phase::Idle`]: пока прежняя сессия не
     /// закрыта до конца, второй вход (в тот же или другой инстанс) отклоняется.
+    /// Задаёт код двухфакторной защиты для следующего входа; пустой — без кода.
+    pub(crate) fn set_second_factor(&mut self, code: &str) {
+        let code = code.trim();
+        self.second_factor = (!code.is_empty()).then(|| Zeroizing::new(code.to_owned()));
+    }
+
     pub(crate) fn start_login(
         &mut self,
         base: &str,
@@ -399,11 +406,13 @@ impl Session {
             }
         }
 
+        let second_factor = self.second_factor.take();
         self.launch(SessionParams {
             origin: Origin::Home,
             base,
             username: username.trim().to_owned(),
             password: Zeroizing::new(password.to_owned()),
+            second_factor,
             register: None,
             resume: None,
             persist: self.persist.clone(),
@@ -440,6 +449,7 @@ impl Session {
             base: base.clone(),
             username: String::new(),
             password: Zeroizing::new(String::new()),
+            second_factor: None,
             register: None,
             resume: Some(saved.token),
             persist: Some(path),
@@ -478,6 +488,7 @@ impl Session {
             base: base.to_owned(),
             username: credential.username.clone(),
             password: Zeroizing::new(credential.secret.expose().to_owned()),
+            second_factor: None,
             register: register.then(|| RegisterRequest {
                 username: credential.username.clone(),
                 password: credential.secret.expose().to_owned(),
@@ -524,6 +535,7 @@ impl Session {
             base,
             username: request.username.clone(),
             password: Zeroizing::new(request.password.clone()),
+            second_factor: None,
             register: Some(request),
             resume: None,
             persist: self.persist.clone(),
@@ -556,6 +568,7 @@ impl Session {
             base: base.to_owned(),
             username: username.to_owned(),
             password: Zeroizing::new(password.expose().to_owned()),
+            second_factor: None,
             register: None,
             resume: None,
             persist: None,

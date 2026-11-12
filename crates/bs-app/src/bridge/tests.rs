@@ -78,6 +78,7 @@ fn params() -> SessionParams {
         base: "http://127.0.0.1:1".to_owned(),
         username: "alice".to_owned(),
         password: zeroize::Zeroizing::new("secret".to_owned()),
+        second_factor: None,
         register: None,
         resume: None,
         persist: None,

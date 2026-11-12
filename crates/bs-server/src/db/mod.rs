@@ -10,8 +10,10 @@
 //! Работа с базой блокирующая, поэтому идёт в `spawn_blocking`; запись — в
 //! одной транзакции на вызов, как у оригинала с его единственным соединением.
 
+pub mod defaults;
 pub mod extensions;
 pub mod migrations;
+pub mod postgres;
 mod sqlite;
 
 use std::path::Path;
@@ -23,6 +25,9 @@ pub enum DbError {
     /// Ошибка SQLite.
     #[error("sqlite: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    /// Ошибка PostgreSQL.
+    #[error("postgres: {0}")]
+    Postgres(#[source] Box<::postgres::Error>),
     /// Ввод-вывод (каталог базы).
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
@@ -41,11 +46,16 @@ impl DbError {
     /// Нарушено ограничение уникальности (или другое ограничение целостности).
     #[must_use]
     pub fn is_unique_violation(&self) -> bool {
-        matches!(
-            self,
-            Self::Sqlite(rusqlite::Error::SqliteFailure(error, _))
-                if error.code == rusqlite::ErrorCode::ConstraintViolation
-        )
+        match self {
+            Self::Sqlite(rusqlite::Error::SqliteFailure(error, _)) => {
+                error.code == rusqlite::ErrorCode::ConstraintViolation
+            }
+            // Класс 23 — нарушение ограничения целостности.
+            Self::Postgres(error) => error
+                .code()
+                .is_some_and(|code| code.code().starts_with("23")),
+            _ => false,
+        }
     }
 }
 
@@ -245,15 +255,53 @@ pub trait Tx {
     }
 }
 
+/// Соединение с PostgreSQL и кэш переведённых запросов.
+struct Postgres {
+    /// `None` только во время закрытия.
+    client: Option<::postgres::Client>,
+    translated: std::collections::HashMap<String, String>,
+}
+
+impl Drop for Postgres {
+    fn drop(&mut self) {
+        // Закрывая соединение, драйвер ждёт на своём исполнителе: из
+        // асинхронного кода так можно только в блокирующем участке.
+        let client = self.client.take();
+        off_runtime(move || drop(client));
+    }
+}
+
+#[derive(Clone)]
+enum Backend {
+    Sqlite(Arc<Mutex<rusqlite::Connection>>),
+    // Одно соединение, как у SQLite: обработчики рассчитаны на то, что
+    // транзакции идут строго по очереди.
+    Postgres(Arc<Mutex<Postgres>>),
+}
+
 /// База данных сервера.
 #[derive(Clone)]
 pub struct Db {
-    sqlite: Arc<Mutex<rusqlite::Connection>>,
+    backend: Backend,
 }
 
 impl std::fmt::Debug for Db {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Db(sqlite)")
+        f.write_str(match self.backend {
+            Backend::Sqlite(_) => "Db(sqlite)",
+            Backend::Postgres(_) => "Db(postgres)",
+        })
+    }
+}
+
+/// Выполняет блокирующую работу с сетью так, чтобы её можно было вызвать и
+/// из асинхронного кода: драйвер PostgreSQL внутри ждёт на своём исполнителе.
+fn off_runtime<T>(work: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(work)
+        }
+        _ => work(),
     }
 }
 
@@ -281,12 +329,92 @@ impl Db {
     fn prepare(mut connection: rusqlite::Connection) -> DbResult<Self> {
         sqlite::configure(&connection)?;
         sqlite::migrate(&mut connection)?;
-        sqlite::ensure_defaults(&mut connection)?;
         let db = Self {
-            sqlite: Arc::new(Mutex::new(connection)),
+            backend: Backend::Sqlite(Arc::new(Mutex::new(connection))),
         };
-        db.transaction_blocking(|tx| extensions::apply(tx))?;
+        db.transaction_blocking(|tx| {
+            defaults::ensure(tx)?;
+            extensions::apply(tx)
+        })?;
         Ok(db)
+    }
+
+    /// Подключается к PostgreSQL по адресу вида
+    /// `postgres://user:password@host/database`, приводит схему к схеме
+    /// оригинала и дополняет значения по умолчанию.
+    ///
+    /// # Errors
+    /// Сервер недоступен или схему не удалось создать.
+    pub fn open_postgres(url: &str) -> DbResult<Self> {
+        let db = off_runtime(|| -> DbResult<Self> {
+            let mut client = ::postgres::Client::connect(url, ::postgres::NoTls)
+                .map_err(|error| DbError::Postgres(Box::new(error)))?;
+            postgres::sync_schema(&mut client)?;
+            let state = Postgres {
+                client: Some(client),
+                translated: std::collections::HashMap::new(),
+            };
+            Ok(Self {
+                backend: Backend::Postgres(Arc::new(Mutex::new(state))),
+            })
+        })?;
+        db.transaction_blocking(|tx| extensions::apply(tx))?;
+        db.transaction_blocking(|tx| defaults::ensure(tx))?;
+        Ok(db)
+    }
+
+    /// Переносит все данные из файла SQLite (оригинального сервера или
+    /// `bs-server`) в эту базу PostgreSQL. База должна быть пустой: в ней не
+    /// должно быть пользователей. Возвращает число перенесённых строк.
+    ///
+    /// # Errors
+    /// База не PostgreSQL, не пуста, либо ошибка чтения или записи.
+    pub fn import_sqlite(&self, path: &Path) -> DbResult<u64> {
+        if !matches!(self.backend, Backend::Postgres(_)) {
+            return Err(DbError::Corrupt(
+                "перенос возможен только в PostgreSQL".to_owned(),
+            ));
+        }
+        let source = Self::open_sqlite(path)?;
+        let Backend::Sqlite(connection) = &source.backend else {
+            return Err(DbError::Corrupt("источник не SQLite".to_owned()));
+        };
+        let mut tables = {
+            let connection = connection.lock().unwrap_or_else(PoisonError::into_inner);
+            postgres::tables_in_dependency_order(&connection)?
+        };
+        // Учёт расширений в новой базе уже свой; их данные переносятся как все.
+        tables.retain(|(table, _)| table != "bs_migrations");
+        self.transaction_blocking(|target| {
+            if target
+                .query_one("SELECT id FROM users LIMIT 1", &[])?
+                .is_some()
+            {
+                return Err(DbError::Corrupt(
+                    "база PostgreSQL не пуста: перенос отменён".to_owned(),
+                ));
+            }
+            // Строки, созданные при подготовке пустой базы, заменяются перенесёнными.
+            target.execute("DELETE FROM instance_settings", &[])?;
+            let mut copied = 0;
+            for (table, columns) in &tables {
+                let list = columns
+                    .iter()
+                    .map(|column| format!("\"{column}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let marks = vec!["?"; columns.len()].join(", ");
+                let rows = source.transaction_blocking(|tx| {
+                    tx.query(&format!("SELECT {list} FROM \"{table}\""), &[])
+                })?;
+                let insert = format!("INSERT INTO \"{table}\" ({list}) VALUES ({marks})");
+                for row in rows {
+                    target.execute(&insert, &row.values)?;
+                    copied += 1;
+                }
+            }
+            Ok(copied)
+        })
     }
 
     /// Блокирующий вызов в транзакции: изменения применяются целиком или
@@ -298,17 +426,33 @@ impl Db {
         &self,
         work: impl FnOnce(&mut dyn Tx) -> Result<T, E>,
     ) -> Result<T, E> {
-        let mut connection = self.sqlite.lock().unwrap_or_else(PoisonError::into_inner);
-        let transaction = connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(DbError::from)?;
-        let mut tx = sqlite::SqliteTx(&transaction);
-        let result = work(&mut tx)?;
-        transaction.commit().map_err(DbError::from)?;
-        drop(connection);
-        Ok(result)
+        match &self.backend {
+            Backend::Sqlite(connection) => {
+                let mut connection = connection.lock().unwrap_or_else(PoisonError::into_inner);
+                let transaction = connection
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .map_err(DbError::from)?;
+                let mut tx = sqlite::SqliteTx(&transaction);
+                let result = work(&mut tx)?;
+                transaction.commit().map_err(DbError::from)?;
+                drop(connection);
+                Ok(result)
+            }
+            Backend::Postgres(state) => off_runtime(|| {
+                let failed = |error: ::postgres::Error| DbError::Postgres(Box::new(error));
+                let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+                let Postgres { client, translated } = &mut *state;
+                let client = client.as_mut().ok_or(DbError::Cancelled)?;
+                let mut transaction = client.transaction().map_err(failed)?;
+                let result = work(&mut postgres::PgTx {
+                    tx: &mut transaction,
+                    translated,
+                })?;
+                transaction.commit().map_err(failed)?;
+                Ok(result)
+            }),
+        }
     }
-
     /// То же из асинхронного кода: работа уходит в пул блокирующих задач.
     ///
     /// # Errors

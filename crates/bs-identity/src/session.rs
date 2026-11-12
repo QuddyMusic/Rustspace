@@ -49,8 +49,27 @@ impl InstanceSession {
         password: &str,
         policy: TransportPolicy,
     ) -> Result<Self, IdentityError> {
+        Self::login_with_factor(store, origin, base, username, password, None, policy).await
+    }
+
+    /// Вход со вторым фактором: кодом из приложения-аутентификатора или
+    /// запасным кодом (для аккаунтов с двухфакторной защитой).
+    ///
+    /// # Errors
+    /// Адрес не проходит политику транспорта, сеть или отказ сервера.
+    pub async fn login_with_factor(
+        store: &mut CredentialStore,
+        origin: Origin,
+        base: &str,
+        username: &str,
+        password: &str,
+        second_factor: Option<&str>,
+        policy: TransportPolicy,
+    ) -> Result<Self, IdentityError> {
         let mut client = ApiClient::with_policy(origin.clone(), base, policy)?;
-        let auth = client.login_and_attach(username, password).await?;
+        let auth = client
+            .login_with_factor_and_attach(username, password, second_factor)
+            .await?;
         let token = AccessToken::new(auth.token);
         store.insert(origin.clone(), token.clone());
         Ok(Self {

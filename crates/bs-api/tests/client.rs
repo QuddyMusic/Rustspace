@@ -153,10 +153,7 @@ fn debug_output_never_contains_secrets() {
     .unwrap();
     assert!(!format!("{response:?}").contains("jwt-in-response"));
 
-    let request = bs_api::auth::LoginRequest {
-        username: "alice",
-        password: "hunter2",
-    };
+    let request = bs_api::auth::LoginRequest::new("alice", "hunter2", Some("123456"));
     let shown = format!("{request:?}");
     assert!(
         shown.contains("alice") && !shown.contains("hunter2"),

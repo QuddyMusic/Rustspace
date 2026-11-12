@@ -15,7 +15,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
     let config = Config::from_env()?;
-    let db = Db::open_sqlite(&config.db_path)?;
+    let db = match &config.database_url {
+        Some(url) => {
+            tracing::info!("хранилище: PostgreSQL");
+            Db::open_postgres(url)?
+        }
+        None => Db::open_sqlite(&config.db_path)?,
+    };
+    // `backspace-server import-sqlite <файл>`: перенос данных в PostgreSQL.
+    let mut arguments = std::env::args().skip(1);
+    if arguments.next().as_deref() == Some("import-sqlite") {
+        let Some(path) = arguments.next() else {
+            return Err("укажите файл базы SQLite: backspace-server import-sqlite <файл>".into());
+        };
+        let rows = db.import_sqlite(std::path::Path::new(&path))?;
+        tracing::info!(rows, "данные перенесены из SQLite в PostgreSQL");
+        return Ok(());
+    }
     let address = format!("{}:{}", config.host, config.port);
     let state = AppState::new(config, db)?;
     let peers = state

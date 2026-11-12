@@ -74,6 +74,9 @@ pub struct Config {
     pub upload_dir: PathBuf,
     /// Файл базы SQLite (`DB_PATH`).
     pub db_path: PathBuf,
+    /// Адрес базы PostgreSQL (`DATABASE_URL`); без него сервер работает с
+    /// файлом SQLite. В адресе есть пароль — в журнал он не выводится.
+    pub database_url: Option<String>,
     /// Предел размера загрузки в байтах (`MAX_UPLOAD_SIZE`).
     pub max_upload_size: u64,
     /// Открыта ли регистрация, пока администратор не решил иначе
@@ -240,6 +243,9 @@ impl Config {
                 .filter(|dir| dir.join("index.html").is_file()),
             upload_dir,
             db_path: PathBuf::from(env.string("DB_PATH", "data/backspace.db")),
+            database_url: env
+                .optional("DATABASE_URL")
+                .filter(|url| url.starts_with("postgres://") || url.starts_with("postgresql://")),
             max_upload_size: env.int("MAX_UPLOAD_SIZE", 104_857_600)?,
             registration_open: env.flag("REGISTRATION_OPEN", true),
             directory_endpoint: env

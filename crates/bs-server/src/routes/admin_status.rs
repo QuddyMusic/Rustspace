@@ -212,7 +212,7 @@ pub async fn telemetry_preview(State(state): State<AppState>, user: AuthUser) ->
         )?;
         let flag = |name: &str| settings.as_ref().and_then(|row| row.opt_flag(name).ok().flatten());
         let installed = settings.as_ref().and_then(|row| row.opt_int("installed_at").ok().flatten()).unwrap_or(now);
-        let storage = count(tx, "SELECT sum(size) AS n FROM attachments WHERE source_url IS NULL", params![])?;
+        let storage = count(tx, "SELECT CAST(COALESCE(sum(size), 0) AS BIGINT) AS n FROM attachments WHERE source_url IS NULL", params![])?;
         let voice = config.livekit.url.is_some() && config.livekit.api_key.is_some() && config.livekit.api_secret.is_some();
         let domain_set = config.domain.as_deref().is_some_and(|domain| !domain.is_empty());
         Ok::<_, ApiError>(json!({

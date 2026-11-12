@@ -156,6 +156,8 @@ pub(crate) struct Session {
     /// Последнее известное состояние соединения.
     connection: ConnectionState,
     last_error: Option<String>,
+    /// Код двухфакторной защиты для ближайшего входа.
+    second_factor: Option<zeroize::Zeroizing<String>>,
     /// Отказ сервера на действие пользователя (например, `rate_limited`).
     notice: Option<String>,
 }

@@ -1,6 +1,5 @@
 //! Бэкенд SQLite: соединение, миграции drizzle и значения по умолчанию.
 
-use rand::Rng as _;
 use sha2::{Digest as _, Sha256};
 
 use super::migrations::MIGRATIONS;
@@ -12,13 +11,6 @@ pub(super) fn configure(connection: &rusqlite::Connection) -> DbResult<()> {
     connection.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
     connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
     Ok(())
-}
-
-fn now_ms() -> i64 {
-    let elapsed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
 }
 
 /// Применяет миграции так же, как мигратор drizzle для better-sqlite3:
@@ -71,66 +63,6 @@ pub(super) fn migrate(connection: &mut rusqlite::Connection) -> DbResult<()> {
         )?;
         tracing::info!(migration = migration.tag, "миграция применена");
     }
-    transaction.commit()?;
-    Ok(())
-}
-
-/// Значения по умолчанию (`ensureDefaults` оригинала): строка настроек,
-/// номер воркера для snowflake, эпоха инстанса, дата установки и первый
-/// администратор.
-pub(super) fn ensure_defaults(connection: &mut rusqlite::Connection) -> DbResult<()> {
-    let transaction = connection.transaction()?;
-    transaction.execute(
-        "INSERT INTO instance_settings
-            (id, max_bitrate_kbps, min_bitrate_kbps, bitrate_step_kbps,
-             allowed_resolutions, allowed_framerates, max_resolution, max_framerate, updated_at)
-         VALUES (1, 20000, 500, 500, '540,720,1080', '30,45,60', 1080, 60, ?1)
-         ON CONFLICT (id) DO NOTHING",
-        [now_ms()],
-    )?;
-    let (worker, instance, installed): (Option<i64>, Option<String>, Option<i64>) = transaction
-        .query_row(
-            "SELECT worker_id, instance_id, installed_at FROM instance_settings WHERE id = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-    if worker.is_none() {
-        let id: i64 = rand::rng().random_range(0..1024);
-        transaction.execute(
-            "UPDATE instance_settings SET worker_id = ?1 WHERE id = 1",
-            [id],
-        )?;
-    }
-    if instance.is_none() {
-        transaction.execute(
-            "UPDATE instance_settings SET instance_id = ?1 WHERE id = 1",
-            [uuid::Uuid::new_v4().to_string()],
-        )?;
-    }
-    if installed.is_none() {
-        let oldest: Option<i64> = transaction
-            .query_row(
-                "SELECT created_at FROM users
-                 WHERE home_instance IS NULL AND (is_deleted IS NULL OR is_deleted = 0)
-                 ORDER BY created_at ASC LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .or_else(|err| match err {
-                rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(other),
-            })?;
-        transaction.execute(
-            "UPDATE instance_settings SET installed_at = ?1 WHERE id = 1",
-            [oldest.unwrap_or_else(now_ms)],
-        )?;
-    }
-    transaction.execute(
-        "UPDATE users SET is_admin = 1
-         WHERE id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1)
-           AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin = 1)",
-        [],
-    )?;
     transaction.commit()?;
     Ok(())
 }

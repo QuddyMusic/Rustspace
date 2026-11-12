@@ -208,12 +208,30 @@ pub(crate) const fn should_wake(busy: bool, has_cache: bool) -> bool {
     busy || has_cache
 }
 
+/// Тексты отказов двухфакторной защиты.
+fn two_factor_error(code: Option<&str>) -> Option<&'static str> {
+    Some(match code {
+        Some("two_factor_required") => tr("У аккаунта включена двухфакторная защита: введите код"),
+        Some("two_factor_invalid") => tr("Код двухфакторной защиты не подошёл"),
+        Some("two_factor_rate_limited") => {
+            tr("Слишком много неверных кодов: подождите четверть часа")
+        }
+        Some("two_factor_already_enabled") => tr("Двухфакторная защита уже включена"),
+        Some("two_factor_not_enabled") => tr("Двухфакторная защита не включена"),
+        Some("two_factor_setup_missing") => tr("Сначала начните настройку защиты"),
+        _ => return None,
+    })
+}
+
 /// Понятный текст отказа сервера на действие пользователя.
 ///
 /// Известные коды получают русскую формулировку. Неизвестный код показывает
 /// текст сервера, но очищенный от управляющих символов и обрезанный: он
 /// приходит с чужого инстанса и не должен ломать интерфейс.
 pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String {
+    if let Some(text) = two_factor_error(code) {
+        return text.to_owned();
+    }
     let known = match code {
         Some("rate_limited") => tr("Слишком часто: подождите несколько секунд"),
         Some("content_too_long") => tr("Сообщение слишком длинное"),

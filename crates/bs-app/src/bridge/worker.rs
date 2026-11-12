@@ -14,6 +14,8 @@ pub(super) struct SessionParams {
     pub(super) username: String,
     /// Пароль затирается в памяти, как только логин выполнен.
     pub(super) password: Zeroizing<String>,
+    /// Код двухфакторной защиты, если пользователь его ввёл.
+    pub(super) second_factor: Option<Zeroizing<String>>,
     /// Регистрация перед входом: федеративный аккаунт на чужом инстансе
     /// (отказ «занято» не мешает войти) или новый аккаунт на домашнем
     /// (любой отказ останавливает вход).
@@ -23,6 +25,41 @@ pub(super) struct SessionParams {
     /// Файл, куда писать токен после успешного входа (только домашний инстанс).
     pub(super) persist: Option<std::path::PathBuf>,
     pub(super) transport: TransportPolicy,
+}
+
+/// Действие с двухфакторной защитой и свежее состояние после него.
+async fn two_factor(client: &bs_api::ApiClient, op: TwoFactorOp) -> Result<TwoFactorView, String> {
+    let text =
+        |err: &bs_api::ApiError| crate::logic::describe_server_error(err.code(), &err.to_string());
+    let mut view = TwoFactorView::default();
+    let acted = match op {
+        TwoFactorOp::Status => Ok(()),
+        TwoFactorOp::Setup(password) => client
+            .two_factor_setup(password.expose())
+            .await
+            .map(|setup| view.setup = Some(setup)),
+        TwoFactorOp::Enable(code) => client
+            .two_factor_enable(&code)
+            .await
+            .map(|codes| view.codes = Some(codes)),
+        TwoFactorOp::Disable(password, code) => {
+            client.two_factor_disable(password.expose(), &code).await
+        }
+        TwoFactorOp::NewCodes(password, code) => client
+            .two_factor_recovery_codes(password.expose(), &code)
+            .await
+            .map(|codes| view.codes = Some(codes)),
+    };
+    acted.map_err(|err| text(&err))?;
+    match client.two_factor_status().await {
+        Ok(status) => view.status = Some(status),
+        // Оригинальный сервер таких маршрутов не знает.
+        Err(bs_api::ApiError::Server { status, .. }) if status.as_u16() == 404 => {
+            view.status = None;
+        }
+        Err(err) => return Err(text(&err)),
+    }
+    Ok(view)
 }
 
 /// Фоновая сессия: логин, затем пересылка событий и команд.
@@ -89,6 +126,7 @@ async fn sign_in(
         base,
         username,
         password,
+        second_factor,
         register,
         resume,
         persist,
@@ -122,12 +160,13 @@ async fn sign_in(
         )
         .await
     } else {
-        InstanceHandle::login_with_transport(
+        InstanceHandle::login_with_factor(
             &mut store,
             origin,
             &base,
             &username,
             &password,
+            second_factor.as_ref().map(|code| code.as_str()),
             Some(ClientKind::Desktop),
             ReconnectPolicy::default(),
             transport,
@@ -135,6 +174,7 @@ async fn sign_in(
         .await
     };
     drop(password);
+    drop(second_factor);
 
     let (handle, ready) = match login {
         Ok(pair) => pair,
@@ -189,6 +229,12 @@ fn report_login_failure(
     }
     let message = if refusal.is_some() {
         remote_login_refused(refusal, &err.to_string())
+    } else if let bs_instances::InstanceError::Identity(bs_identity::IdentityError::Api(api)) = err
+        && api
+            .code()
+            .is_some_and(|code| code.starts_with("two_factor_"))
+    {
+        crate::logic::describe_server_error(api.code(), &err.to_string())
     } else {
         err.to_string()
     };
@@ -814,6 +860,7 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
         AdminRequest::LoadStorage => {
             AdminEvent::Storage(client.storage_stats().await.map_err(|e| text(&e)))
         }
+        AdminRequest::TwoFactor(op) => AdminEvent::TwoFactor(two_factor(client, op).await),
         AdminRequest::Cleanup { dry_run } => {
             AdminEvent::Cleaned(client.storage_cleanup(dry_run).await.map_err(|e| text(&e)))
         }

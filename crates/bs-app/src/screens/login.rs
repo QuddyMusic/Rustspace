@@ -15,6 +15,8 @@ pub(crate) struct LoginScreen {
     pub(crate) base: String,
     pub(crate) username: String,
     pub(crate) password: String,
+    /// Код двухфакторной защиты (если она включена у аккаунта).
+    second_factor: String,
     /// Пользователь явно разрешил соединение по открытому `http://`.
     pub(crate) allow_insecure: bool,
     /// Показана форма регистрации вместо входа.
@@ -38,6 +40,7 @@ impl std::fmt::Debug for LoginScreen {
 impl Drop for LoginScreen {
     fn drop(&mut self) {
         self.password.zeroize();
+        self.second_factor.zeroize();
     }
 }
 
@@ -83,6 +86,19 @@ impl LoginScreen {
             });
     }
 
+    /// Поле кода двухфакторной защиты.
+    fn factor_field(&mut self, ui: &mut egui::Ui, width: f32) -> egui::Response {
+        ui.add_space(8.0);
+        ui.label(theme::section_title(tr("Код двухфакторной защиты")));
+        ui.add(
+            egui::TextEdit::singleline(&mut self.second_factor)
+                .hint_text(tr("Если защита включена: код из приложения или запасной"))
+                .char_limit(32)
+                .desired_width(width)
+                .margin(egui::vec2(10.0, 8.0)),
+        )
+    }
+
     /// Содержимое карточки входа.
     fn card(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) {
         ui.vertical_centered(|ui| {
@@ -124,8 +140,9 @@ impl LoginScreen {
                     .desired_width(width)
                     .margin(egui::vec2(10.0, 8.0)),
             );
+            let factor = self.factor_field(ui, width);
             // Enter в любом поле отправляет форму.
-            if [base, username, password]
+            if [base, username, password, factor]
                 .iter()
                 .any(|r| r.lost_focus() && enter)
             {
@@ -172,9 +189,11 @@ impl LoginScreen {
             } else {
                 TransportPolicy::Strict
             };
+            bridge.set_second_factor(&self.second_factor);
             bridge.start_login(&self.base, &self.username, &self.password, transport);
-            // Пароль нужен только на время отправки: не держим его в форме.
+            // Пароль и код нужны только на время отправки: не держим их в форме.
             self.password.zeroize();
+            self.second_factor.zeroize();
         }
 
         if let Some(err) = bridge.last_error() {

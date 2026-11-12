@@ -37,6 +37,7 @@ pub mod profile;
 pub mod read;
 pub mod registry;
 pub mod space_manage;
+pub mod twofactor;
 pub mod write;
 
 pub use admin::{
@@ -81,6 +82,7 @@ pub use space_manage::{
     Ban, ChannelUpdate, JoinRequest, NewChannel, NewRole, OverrideScope, PermissionOverride,
     RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input,
 };
+pub use twofactor::{TwoFactorSetup, TwoFactorStatus};
 pub use write::{
     CreateDmRequest, FriendRequestDecision, MessageSearchQuery, SEARCH_LIMIT_DEFAULT,
     SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN, SendFriendRequest,

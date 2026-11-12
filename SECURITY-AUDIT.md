@@ -68,8 +68,13 @@ sign-in, tokens):
 | S13 | Low | Reaction strings had no length limit, and a reaction could be added in a channel the member cannot view. | Fixed: at most 256 characters, and view access is required. |
 | S14 | Low | `POST /api/users/@me/verify-password` had no rate limit. | Fixed: same limit as login. |
 | S15 | Low | An attachment with no recorded uploader could be attached by anyone who knew its id. | Fixed: only the uploader can attach it. |
-| S16 | Info | Moderator mute, deafen and disconnect are enforced by the client: the LiveKit session is not torn down, so a modified client stays in the room until its token expires (one hour). | Partly: restrictions are applied when a token is issued. Forced removal through the LiveKit API is planned. |
+| S16 | Info | Moderator mute/deafen and disconnect are carried out by the client: the LiveKit session is not torn down, so a modified client stays in the room until its token expires (one hour). | Fixed for disconnects: `bs-server` removes the participant from the room through the LiveKit API itself (moderator disconnect, lost permission, deleted channel). Mutes are still enforced when a token is issued. |
 | S17 | Info | Changing the password does not close open WebSocket connections (REST tokens are revoked). A replicated account needs no current password to change it. | As in the original; closing connections risks logging out a client that has not stored its new token yet. |
+| S18 | Medium | The upload size limit was checked only at creation: an upload with deferred length (`Upload-Defer-Length`) accepted a file of any size. | Fixed: the limit applies when the length is declared later and to the data stream itself. |
+| S19 | Low | `GET /api/uploads/.tus` (a directory instead of a file) answered 500 with the file system error text. | Fixed: 404. |
+| S20 | Medium | The link-preview guard against requests into the internal network validated the address with a separate DNS lookup and then connected by name again (DNS answer swap between check and connect); only the first address was checked; IPv6 addresses embedding IPv4 (NAT64, 6to4) counted as public. | Fixed: the name is resolved once, every address is checked, the connection goes to the checked address, and each redirect hop is checked the same way. |
+| S21 | Low | Accepting a join request did not check a ban issued after it was filed; a request from someone who had already joined gave a 500. | Fixed. |
+| S22 | Info | The original has no two-factor authentication: a stolen password is enough to sign in. | Added to `bs-server` as an extension (TOTP and recovery codes); the secret is stored encrypted, a code is not accepted twice, wrong codes are limited per account. |
 
 Kept exactly as in the original: bcrypt hashes (cost 12), HS256 tokens with the same fields
 (tokens and password hashes work on both servers with the same `JWT_SECRET`), revocation of

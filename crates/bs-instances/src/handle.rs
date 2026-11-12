@@ -126,9 +126,47 @@ impl InstanceHandle {
         policy: ReconnectPolicy,
         transport: TransportPolicy,
     ) -> Result<(Self, ServerEvent), InstanceError> {
-        let session =
-            InstanceSession::login_with_policy(store, origin, base, username, password, transport)
-                .await?;
+        Self::login_with_factor(
+            store,
+            origin,
+            base,
+            username,
+            password,
+            None,
+            client_kind,
+            policy,
+            transport,
+        )
+        .await
+    }
+
+    /// Как [`InstanceHandle::login_with_transport`], но со вторым фактором
+    /// для аккаунтов с двухфакторной защитой.
+    ///
+    /// # Errors
+    /// Как у входа без второго фактора.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn login_with_factor(
+        store: &mut CredentialStore,
+        origin: Origin,
+        base: &str,
+        username: &str,
+        password: &str,
+        second_factor: Option<&str>,
+        client_kind: Option<ClientKind>,
+        policy: ReconnectPolicy,
+        transport: TransportPolicy,
+    ) -> Result<(Self, ServerEvent), InstanceError> {
+        let session = InstanceSession::login_with_factor(
+            store,
+            origin,
+            base,
+            username,
+            password,
+            second_factor,
+            transport,
+        )
+        .await?;
         Self::from_session(session, client_kind, policy).await
     }
 

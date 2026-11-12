@@ -268,6 +268,11 @@ impl Bridge {
         }
     }
 
+    /// Код двухфакторной защиты для следующего входа в домашний инстанс.
+    pub(crate) fn set_second_factor(&mut self, code: &str) {
+        self.slots[0].session.set_second_factor(code);
+    }
+
     /// Вход в домашний инстанс.
     pub(crate) fn start_login(
         &mut self,

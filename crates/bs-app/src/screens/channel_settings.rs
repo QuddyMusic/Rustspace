@@ -616,7 +616,7 @@ fn add_menus(
         !list
             .iter()
             .any(|o| o.target_type == e.kind && o.target_id == e.id)
-            && rights.top > e.position
+            && bs_permissions::can_manage_role_at(rights.standing, e.position)
     };
     ui.horizontal(|ui| {
         ui.menu_button(tr("Добавить роль"), |ui| {
@@ -775,7 +775,7 @@ fn editor(
     entry: &Entry,
     stored: Option<&PermissionOverride>,
 ) {
-    let above = rights.top <= entry.position;
+    let above = !bs_permissions::can_manage_role_at(rights.standing, entry.position);
     let (mut allow, mut deny) = state.draft.unwrap_or_else(|| {
         stored.map_or((Permissions::empty(), Permissions::empty()), |o| {
             (bits(&o.allow), bits(&o.deny))

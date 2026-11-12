@@ -450,6 +450,8 @@ pub(crate) enum AdminRequest {
         /// Только посчитать.
         dry_run: bool,
     },
+    /// Двухфакторная защита своего аккаунта.
+    TwoFactor(TwoFactorOp),
     /// Сменить свой пароль.
     ChangePassword {
         /// Текущий (для домашнего аккаунта обязателен).
@@ -527,9 +529,37 @@ pub(crate) enum PeerOp {
     Answer(String, bool),
 }
 
+/// Действие с двухфакторной защитой.
+#[derive(Debug, Clone)]
+pub(crate) enum TwoFactorOp {
+    /// Узнать состояние.
+    Status,
+    /// Начать настройку (нужен пароль).
+    Setup(Secret),
+    /// Подтвердить настройку кодом из приложения.
+    Enable(String),
+    /// Снять защиту: пароль и код (из приложения или запасной).
+    Disable(Secret, String),
+    /// Выдать новые запасные коды: пароль и код из приложения.
+    NewCodes(Secret, String),
+}
+
+/// Что известно о двухфакторной защите после запроса.
+#[derive(Debug, Default)]
+pub(crate) struct TwoFactorView {
+    /// Состояние; `None` — сервер защиту не поддерживает.
+    pub(crate) status: Option<bs_api::TwoFactorStatus>,
+    /// Секрет, если настройка только что начата.
+    pub(crate) setup: Option<bs_api::TwoFactorSetup>,
+    /// Запасные коды, если они только что выданы.
+    pub(crate) codes: Option<Vec<String>>,
+}
+
 /// Ответы на [`AdminRequest`] и загрузку картинки профиля.
 #[derive(Debug)]
 pub(crate) enum AdminEvent {
+    /// Двухфакторная защита: состояние или текст ошибки.
+    TwoFactor(Result<TwoFactorView, String>),
     /// Настройки инстанса.
     Settings(Result<bs_api::InstanceSettings, String>),
     /// Итог сохранения настроек.

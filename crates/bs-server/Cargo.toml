@@ -39,6 +39,7 @@ base64 = "0.22"
 bs-permissions = { workspace = true }
 futures-util = { workspace = true }
 httpdate = "1"
+postgres = "0.19"
 reqwest = { workspace = true }
 url = { workspace = true }
 scraper = { version = "0.23", default-features = false }

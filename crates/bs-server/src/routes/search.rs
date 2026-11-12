@@ -112,8 +112,8 @@ fn conditions(
     if let Some(q) = query.q.as_deref().map(js_trim).filter(|q| !q.is_empty()) {
         // Сообщения-стикеры (`sticker:<адрес>`) в поиск не попадают.
         filter.push_str(&format!(
-            " AND {table}.content LIKE ? AND ({table}.content IS NULL OR {table}.content NOT GLOB \
-             'sticker:http*://*/api/stickers/assets/*.webp')"
+            " AND {table}.content LIKE ? AND ({table}.content IS NULL OR {table}.content NOT LIKE \
+             'sticker:http%://%/api/stickers/assets/%.webp')"
         ));
         values.push(format!("%{q}%").into());
     }

@@ -57,6 +57,59 @@ pub(crate) struct AccountUi {
     delete_note: Option<Note>,
     /// После успешной смены пароля или удаления нужно выйти.
     pub(crate) logout: bool,
+    two_factor: TwoFactorUi,
+}
+
+/// Состояние карточки двухфакторной защиты.
+#[derive(Default)]
+struct TwoFactorUi {
+    asked: bool,
+    /// Ответ сервера получен.
+    loaded: bool,
+    /// `None` — сервер защиту не поддерживает.
+    status: Option<bs_api::TwoFactorStatus>,
+    setup: Option<bs_api::TwoFactorSetup>,
+    codes: Option<Vec<String>>,
+    password: String,
+    code: String,
+    note: Option<Note>,
+}
+
+impl std::fmt::Debug for TwoFactorUi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TwoFactorUi")
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TwoFactorUi {
+    fn apply(&mut self, result: Result<crate::bridge::TwoFactorView, String>) {
+        match result {
+            Ok(view) => {
+                self.loaded = true;
+                self.status = view.status;
+                if view.setup.is_some() {
+                    self.setup = view.setup;
+                }
+                if view.codes.is_some() {
+                    self.codes = view.codes;
+                    self.setup = None;
+                }
+                if self
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| !status.enabled && !status.pending)
+                {
+                    self.setup = None;
+                }
+                self.password.clear();
+                self.code.clear();
+                self.note = None;
+            }
+            Err(message) => self.note = Some(fail(message)),
+        }
+    }
 }
 
 struct ReceiverBox(Receiver<Picked>);
@@ -146,6 +199,7 @@ impl ExtraUi {
                 AdminEvent::Done { action, result } => {
                     self.apply_done(action, result);
                 }
+                AdminEvent::TwoFactor(result) => self.account.two_factor.apply(result),
                 other => self.admin.apply(other),
             }
         }
@@ -339,6 +393,153 @@ pub(crate) fn images_card(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bri
     show_note(ui, extra.account.note.as_ref());
 }
 
+/// Включённая защита: новые запасные коды и отключение.
+fn two_factor_enabled(
+    ui: &mut egui::Ui,
+    state: &mut TwoFactorUi,
+    status: &bs_api::TwoFactorStatus,
+    bridge: &Bridge,
+) {
+    use crate::bridge::TwoFactorOp;
+    let send = |op: TwoFactorOp| bridge.request(BridgeRequest::Admin(AdminRequest::TwoFactor(op)));
+    ui.label(
+        RichText::new(tr("Защита включена."))
+            .color(theme::green())
+            .size(13.0),
+    );
+    ui.label(
+        theme::muted(crate::tf!(
+            "Запасных кодов осталось: {a0}",
+            a0 = status.recovery_codes_left
+        ))
+        .size(13.0),
+    );
+    widgets::field_label(ui, tr("Пароль"));
+    widgets::secret_field(ui, &mut state.password, tr("Пароль"), 128);
+    widgets::field_label(
+        ui,
+        tr("Код из приложения (для отключения подойдёт и запасной)"),
+    );
+    widgets::text_field(ui, &mut state.code, "123456", 32);
+    ui.add_space(8.0);
+    show_note(ui, state.note.as_ref());
+    let ready = !state.password.is_empty() && !state.code.trim().is_empty();
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(ready, egui::Button::new(tr("Новые запасные коды")))
+            .clicked()
+        {
+            send(TwoFactorOp::NewCodes(
+                Secret::new(state.password.clone()),
+                state.code.trim().to_owned(),
+            ));
+        }
+        if ui
+            .add_enabled(
+                ready,
+                egui::Button::new(RichText::new(tr("Отключить защиту")).color(theme::red())),
+            )
+            .clicked()
+        {
+            send(TwoFactorOp::Disable(
+                Secret::new(state.password.clone()),
+                state.code.trim().to_owned(),
+            ));
+        }
+    });
+}
+
+/// Карточка двухфакторной защиты: включение, запасные коды, отключение.
+fn two_factor_card(ui: &mut egui::Ui, state: &mut TwoFactorUi, federated: bool, bridge: &Bridge) {
+    use crate::bridge::TwoFactorOp;
+    let send = |op: TwoFactorOp| bridge.request(BridgeRequest::Admin(AdminRequest::TwoFactor(op)));
+    if federated {
+        ui.label(
+            theme::muted(tr(
+                "Вход в этот аккаунт проверяет домашний инстанс: защита настраивается там.",
+            ))
+            .size(13.0),
+        );
+        return;
+    }
+    if !state.asked {
+        state.asked = send(TwoFactorOp::Status);
+    }
+    if !state.loaded {
+        show_note(ui, state.note.as_ref());
+        if state.note.is_none() {
+            ui.spinner();
+        }
+        return;
+    }
+    let Some(status) = state.status.clone() else {
+        ui.label(theme::muted(tr("Этот сервер не поддерживает двухфакторную защиту.")).size(13.0));
+        return;
+    };
+    if let Some(codes) = state.codes.clone() {
+        ui.label(RichText::new(tr("Запасные коды. Сохраните их: каждый сработает один раз, и больше они не будут показаны.")).color(theme::amber()).size(13.0));
+        ui.add_space(4.0);
+        ui.label(RichText::new(codes.join("\n")).monospace());
+        ui.horizontal(|ui| {
+            if ui.button(tr("Скопировать")).clicked() {
+                ui.ctx().copy_text(codes.join("\n"));
+            }
+            if ui.button(tr("Я сохранил коды")).clicked() {
+                state.codes = None;
+            }
+        });
+        return;
+    }
+    if status.enabled {
+        two_factor_enabled(ui, state, &status, bridge);
+        return;
+    }
+    if let Some(setup) = &state.setup {
+        ui.label(theme::muted(tr("Добавьте аккаунт в приложение-аутентификатор: введите ключ вручную или откройте ссылку, затем введите код из приложения.")).size(13.0));
+        ui.add_space(4.0);
+        ui.label(RichText::new(&setup.secret).monospace());
+        ui.horizontal(|ui| {
+            if ui.button(tr("Скопировать ключ")).clicked() {
+                ui.ctx().copy_text(setup.secret.clone());
+            }
+            if ui.button(tr("Скопировать ссылку otpauth")).clicked() {
+                ui.ctx().copy_text(setup.otpauth_url.clone());
+            }
+        });
+        widgets::field_label(ui, tr("Код из приложения"));
+        widgets::text_field(ui, &mut state.code, "123456", 6);
+        ui.add_space(8.0);
+        show_note(ui, state.note.as_ref());
+        let ready = state.code.trim().len() == 6;
+        if ui
+            .add_enabled(ready, theme::primary_button(tr("Включить защиту")))
+            .clicked()
+        {
+            send(TwoFactorOp::Enable(state.code.trim().to_owned()));
+        }
+        return;
+    }
+    ui.label(
+        theme::muted(tr(
+            "При входе, кроме пароля, понадобится код из приложения-аутентификатора.",
+        ))
+        .size(13.0),
+    );
+    widgets::field_label(ui, tr("Пароль"));
+    widgets::secret_field(ui, &mut state.password, tr("Пароль"), 128);
+    ui.add_space(8.0);
+    show_note(ui, state.note.as_ref());
+    if ui
+        .add_enabled(
+            !state.password.is_empty(),
+            theme::primary_button(tr("Настроить")),
+        )
+        .clicked()
+    {
+        send(TwoFactorOp::Setup(Secret::new(state.password.clone())));
+    }
+}
+
 /// Смена пароля и удаление аккаунта.
 pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, bridge: &Bridge) {
     let state = &mut extra.account;
@@ -384,6 +585,12 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
             }));
         }
     });
+    ui.add_space(14.0);
+    page_title_small(ui, tr("Двухфакторная защита"));
+    card(ui, |ui| {
+        two_factor_card(ui, &mut extra.account.two_factor, federated, bridge);
+    });
+    let state = &mut extra.account;
     ui.add_space(14.0);
     page_title_small(ui, tr("Опасная зона"));
     card(ui, |ui| {
