@@ -67,6 +67,9 @@ pub struct Config {
     pub trusted_proxy_hops: u32,
     /// LiveKit.
     pub livekit: LiveKit,
+    /// Каталог собранного веб-клиента (`BS_WEB_DIST`); без него сервер отдаёт
+    /// только API.
+    pub web_dist: Option<PathBuf>,
     /// Каталог загрузок (`UPLOAD_DIR`).
     pub upload_dir: PathBuf,
     /// Файл базы SQLite (`DB_PATH`).
@@ -231,6 +234,10 @@ impl Config {
                 api_key: env.optional("LIVEKIT_API_KEY"),
                 api_secret: env.optional("LIVEKIT_API_SECRET"),
             },
+            web_dist: env
+                .optional("BS_WEB_DIST")
+                .map(PathBuf::from)
+                .filter(|dir| dir.join("index.html").is_file()),
             upload_dir,
             db_path: PathBuf::from(env.string("DB_PATH", "data/backspace.db")),
             max_upload_size: env.int("MAX_UPLOAD_SIZE", 104_857_600)?,

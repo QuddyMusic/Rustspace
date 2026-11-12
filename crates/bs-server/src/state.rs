@@ -25,6 +25,8 @@ pub struct AppState {
     pub instance_id: Arc<str>,
     /// Хеш для холостой проверки пароля.
     pub dummy_hash: Arc<str>,
+    /// Политика содержимого для ответов без собственной.
+    pub csp: Arc<str>,
 }
 
 impl AppState {
@@ -45,6 +47,7 @@ impl AppState {
         let worker = u16::try_from(worker)
             .map_err(|_| DbError::Corrupt(format!("worker_id вне диапазона: {worker}")))?;
         Ok(Self {
+            csp: crate::web::csp_header(config.livekit.url.as_deref()).into(),
             dummy_hash: crate::auth::dummy_hash(config.password_hash_cost).into(),
             hub: crate::hub::Hub::default(),
             limiter: RateLimiter::new(config.disable_rate_limits),

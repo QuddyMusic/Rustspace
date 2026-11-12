@@ -66,16 +66,15 @@ pub mod stickers;
 pub mod storage;
 pub mod util;
 pub mod voice;
+pub mod web;
 pub mod ws;
 
-use axum::Json;
 use axum::Router;
 use axum::extract::{Request, State};
-use axum::http::{HeaderName, HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderName, HeaderValue, Method, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, patch, post};
-use serde_json::json;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
 
@@ -94,22 +93,6 @@ async fn global_limit(
         Ok(()) => next.run(request).await,
         Err(err) => err.into_response(),
     }
-}
-
-/// Ответ на неизвестный маршрут — как у Fastify по умолчанию.
-async fn not_found(method: Method, uri: axum::http::Uri) -> Response {
-    let path = uri
-        .path_and_query()
-        .map_or_else(|| uri.path(), axum::http::uri::PathAndQuery::as_str);
-    (
-        StatusCode::NOT_FOUND,
-        Json(json!({
-            "message": format!("Route {method}:{path} not found"),
-            "error": "Not Found",
-            "statusCode": 404,
-        })),
-    )
-        .into_response()
 }
 
 fn cors() -> CorsLayer {
@@ -152,6 +135,27 @@ fn cors() -> CorsLayer {
             name("upload-metadata"),
             name("upload-expires"),
         ])
+}
+
+async fn content_policy(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let mut response = next.run(request).await;
+    if !response
+        .headers()
+        .contains_key(header::CONTENT_SECURITY_POLICY)
+        && let Ok(policy) = HeaderValue::from_str(&state.csp)
+    {
+        let headers = response.headers_mut();
+        headers.insert(header::CONTENT_SECURITY_POLICY, policy);
+        headers.insert(
+            HeaderName::from_static("reporting-endpoints"),
+            HeaderValue::from_static("csp=\"/api/csp-report\""),
+        );
+    }
+    response
 }
 
 /// Собирает приложение.
@@ -350,8 +354,10 @@ pub fn app(state: AppState) -> Router {
         .route("/api/admin/instance/update-status", get(routes::admin_status::update_status))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
-        .fallback(not_found)
+        .fallback(web::fallback)
         .layer(axum::middleware::from_fn_with_state(state.clone(), global_limit))
+        // Политика содержимого: маршрут, задавший свою (раздача загрузок), сохраняет её.
+        .layer(axum::middleware::from_fn_with_state(state.clone(), content_policy))
         // Заголовки безопасности, как helmet у оригинала.
         .layer(fixed(header::X_CONTENT_TYPE_OPTIONS, "nosniff"))
         .layer(fixed(header::X_FRAME_OPTIONS, "DENY"))
@@ -364,6 +370,11 @@ pub fn app(state: AppState) -> Router {
             HeaderName::from_static("cross-origin-resource-policy"),
             "cross-origin",
         ))
+        .layer(fixed(HeaderName::from_static("origin-agent-cluster"), "?1"))
+        .layer(fixed(HeaderName::from_static("x-dns-prefetch-control"), "off"))
+        .layer(fixed(HeaderName::from_static("x-download-options"), "noopen"))
+        .layer(fixed(HeaderName::from_static("x-permitted-cross-domain-policies"), "none"))
+        .layer(fixed(HeaderName::from_static("x-xss-protection"), "0"))
         .layer(cors())
         .with_state(state)
 }
