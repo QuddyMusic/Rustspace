@@ -151,11 +151,45 @@ struct Session {
     connection: u64,
 }
 
+/// Вид клиента из сообщения `auth` (`parseClientKind`).
+fn client_kind(event: &serde_json::Map<String, Value>) -> &'static str {
+    match event.get("client").and_then(Value::as_str) {
+        Some("desktop") => "desktop",
+        Some("mobile") => "mobile",
+        _ => "web",
+    }
+}
+
+/// Отмечает, что пользователь сегодня заходил (`touchUserActivity`): строка
+/// меняется не чаще раза в сутки.
+fn touch_activity(
+    tx: &mut dyn crate::db::Tx,
+    user_id: &str,
+    client: Option<&'static str>,
+) -> crate::db::DbResult<()> {
+    let today = crate::routes::admin_status::utc_day(crate::state::now_ms(), 0);
+    let fresh = "(last_active_day IS NULL OR last_active_day <> ?)";
+    match client {
+        Some(client) => tx.execute(
+            &format!(
+                "UPDATE users SET last_active_day = ?, last_client = ? WHERE id = ? AND {fresh}"
+            ),
+            params![&today, client, user_id, &today],
+        )?,
+        None => tx.execute(
+            &format!("UPDATE users SET last_active_day = ? WHERE id = ? AND {fresh}"),
+            params![&today, user_id, &today],
+        )?,
+    };
+    Ok(())
+}
+
 async fn authenticate(
     state: &AppState,
     token: String,
     sender: mpsc::Sender<Outgoing>,
     closer: Arc<Notify>,
+    client: Option<&'static str>,
 ) -> Result<Session, &'static str> {
     let hub = state.hub.clone();
     let state_for_tx = state.clone();
@@ -164,6 +198,7 @@ async fn authenticate(
         .db
         .transaction(move |tx| {
             let user = auth::verify_token(&state_for_tx, tx, &token)?;
+            touch_activity(tx, &user.id, client)?;
             let status = connect_status(tx, &user.id)?;
             let mut payload = ready::build(tx, &hub, &user.id)?;
             payload.insert("type".into(), json!("ready"));
@@ -237,6 +272,7 @@ async fn serve(state: AppState, socket: WebSocket, ip: std::net::IpAddr) {
     });
 
     let mut session: Option<Session> = None;
+    let mut active_day = 0i64;
     let auth_deadline = tokio::time::sleep(AUTH_TIMEOUT);
     tokio::pin!(auth_deadline);
     loop {
@@ -292,10 +328,14 @@ async fn serve(state: AppState, socket: WebSocket, ip: std::net::IpAddr) {
                 token.to_owned(),
                 sender.clone(),
                 Arc::clone(&closer),
+                Some(client_kind(&event)),
             )
             .await
             {
-                Ok(new) => session = Some(new),
+                Ok(new) => {
+                    active_day = crate::state::now_ms().div_euclid(86_400_000);
+                    session = Some(new);
+                }
                 Err(message) => {
                     send(message);
                     let _ = sender.try_send(Outgoing::Close);
@@ -307,6 +347,15 @@ async fn serve(state: AppState, socket: WebSocket, ip: std::net::IpAddr) {
 
         if kind == "ping" {
             let _ = sender.try_send(Outgoing::Text(r#"{"type":"pong"}"#.into()));
+            // Соединение пережило полночь: день захода отмечается заново.
+            let day = crate::state::now_ms().div_euclid(86_400_000);
+            if day != active_day {
+                active_day = day;
+                let user_id = current.user_id.clone();
+                let _ = state
+                    .run(move |tx, _| Ok(touch_activity(tx, &user_id, None)?))
+                    .await;
+            }
             continue;
         }
         if !state.hub.consume(&current.user_id) {

@@ -342,6 +342,12 @@ pub fn app(state: AppState) -> Router {
         .route("/api/admin/users/{id}", delete(routes::admin::delete_user))
         .route("/api/admin/test/seed-peer", post(routes::admin::test_route))
         .route("/api/admin/test/federation/resync", post(routes::admin::test_route))
+        .route(
+            "/api/admin/telemetry",
+            get(routes::admin_status::telemetry).put(routes::admin_status::set_telemetry),
+        )
+        .route("/api/admin/telemetry/preview", get(routes::admin_status::telemetry_preview))
+        .route("/api/admin/instance/update-status", get(routes::admin_status::update_status))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         .fallback(not_found)
@@ -362,7 +368,7 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Запускает фоновые работы сервера: уборку незавершённых загрузок и оповещение каталога.
+/// Запускает фоновые работы сервера: уборку незавершённых загрузок и хранилища, оповещение каталога.
 pub fn spawn_background(state: &AppState) {
     tokio::spawn(directory::run_pinger(state.clone()));
     let uploads = state.clone();
@@ -371,6 +377,34 @@ pub fn spawn_background(state: &AppState) {
         loop {
             timer.tick().await;
             routes::files::sweep_expired(&uploads).await;
+        }
+    });
+    let janitor = state.clone();
+    tokio::spawn(async move {
+        // Первая уборка — через час после запуска, дальше раз в сутки.
+        let start = tokio::time::Instant::now() + std::time::Duration::from_hours(1);
+        let mut timer = tokio::time::interval_at(start, std::time::Duration::from_hours(24));
+        loop {
+            timer.tick().await;
+            let config = janitor.config.clone();
+            match janitor
+                .run(move |tx, _| Ok(storage::cleanup(tx, &config, false)?))
+                .await
+            {
+                Ok(done)
+                    if done.deleted_files + done.deleted_records > 0 || !done.errors.is_empty() =>
+                {
+                    tracing::info!(
+                        files = done.deleted_files,
+                        records = done.deleted_records,
+                        bytes = done.freed_bytes,
+                        errors = done.errors.len(),
+                        "уборка хранилища"
+                    )
+                }
+                Ok(_) => {}
+                Err(error) => tracing::warn!(?error, "уборка хранилища не удалась"),
+            }
         }
     });
 }

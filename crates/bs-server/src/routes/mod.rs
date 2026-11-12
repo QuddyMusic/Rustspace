@@ -2,6 +2,7 @@
 
 pub mod account;
 pub mod admin;
+pub mod admin_status;
 pub mod auth;
 pub mod channels;
 pub mod directory;

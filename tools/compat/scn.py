@@ -13,6 +13,7 @@ class Norm:
         return self.ids[s]
     def text(self, s):
         s = re.sub(r'\b[0-9a-f]{64}\b', lambda m: self.tok(m.group(0)), s)
+        s = re.sub(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', lambda m: self.tok(m.group(0)), s)
         s = re.sub(r'\d{15,}', lambda m: self.tok(m.group(0)), s)
         for raw, tok in list(self.ids.items()):
             if re.fullmatch(r'[0-9a-f]{8}', raw) and raw in s: s = s.replace(raw, tok)

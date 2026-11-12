@@ -58,6 +58,11 @@ pub struct Config {
     pub source_code_url: String,
     /// Коммит сборки (`BACKSPACE_COMMIT`).
     pub commit: Option<String>,
+    /// Можно ли по просьбе администратора узнавать о новом выпуске оригинала
+    /// (`BACKSPACE_UPDATE_CHECK`, по умолчанию выключено).
+    pub update_check: bool,
+    /// Способ установки для панели обновлений (`BACKSPACE_INSTALL_CHANNEL`).
+    pub install_channel: Option<String>,
     /// Скольким прокси доверять `X-Forwarded-For` (`TRUSTED_PROXY_HOPS`, 1).
     pub trusted_proxy_hops: u32,
     /// LiveKit.
@@ -218,6 +223,8 @@ impl Config {
             version: COMPAT_VERSION.to_owned(),
             source_code_url,
             commit: env.optional("BACKSPACE_COMMIT"),
+            update_check: env.flag("BACKSPACE_UPDATE_CHECK", false),
+            install_channel: env.optional("BACKSPACE_INSTALL_CHANNEL"),
             trusted_proxy_hops,
             livekit: LiveKit {
                 url: env.optional("LIVEKIT_URL"),

@@ -68,5 +68,17 @@ def adminusers(c):
     c.call('root','GET',f'/api/admin/users?q={tag}&showDeleted=true&sort=oldest')
     c.call('bo','GET',f"/api/spaces/{sp['id']}/members")
     c.call('root','POST','/api/admin/test/seed-peer',{'origin':'http://x','hmacSecret':'s'*40})
+    # телеметрия и обновления
+    c.call('bo','GET','/api/admin/telemetry'); c.call('root','GET','/api/admin/telemetry')
+    for body in [None,{},{'enabled':'yes'},{'enabled':False},{'enabled':True},{'enabled':True},{'enabled':False}]:
+        c.call('root','PUT','/api/admin/telemetry',body)
+    c.call('bo','PUT','/api/admin/telemetry',{'enabled':True})
+    p=c.call('root','GET','/api/admin/telemetry/preview'); c.call('bo','GET','/api/admin/telemetry/preview')
+    # среда исполнения у серверов разная по определению
+    i=[k for k,e in enumerate(c.log) if e[0].endswith('/api/admin/telemetry/preview')][0]
+    body=dict(p); body.pop('runtime',None); body['build']=dict(body.get('build',{}),modified=None)
+    c.log[i]=(c.log[i][0],c.log[i][1],c.n.val(body))
+    c.call('root','GET','/api/admin/instance/update-status'); c.call('root','GET','/api/admin/instance/update-status?refresh=true')
+    c.call('bo','GET','/api/admin/instance/update-status')
 
 if __name__=='__main__': sys.exit(1 if run(adminusers, show='-v' in sys.argv) else 0)
