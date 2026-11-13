@@ -34,7 +34,7 @@ const IN_PROGRESS: &str = "A peering handshake with this instance is already in 
 const TOO_MANY: &str = "Too many peering requests — try again later";
 
 /// Ответ с произвольным телом и кодом.
-fn send(status: u16, body: Value) -> Response {
+pub(crate) fn send(status: u16, body: Value) -> Response {
     (
         StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
         Json(body),
@@ -43,7 +43,7 @@ fn send(status: u16, body: Value) -> Response {
 }
 
 /// Отказ в виде `{error, statusCode}`.
-fn fail(status: u16, text: &str) -> Response {
+pub(crate) fn fail(status: u16, text: &str) -> Response {
     send(status, json!({"error": text, "statusCode": status}))
 }
 
@@ -637,6 +637,25 @@ pub async fn epoch(State(state): State<AppState>, request: Request) -> Outcome {
     ))
 }
 
+/// Предел частоты запросов пира в минуту (`S2SRateLimiter`).
+#[derive(Debug, Clone, Copy)]
+struct Limit {
+    name: &'static str,
+    max: usize,
+    retry_after: Option<u32>,
+}
+
+const RELAY_LIMIT: Limit = Limit {
+    name: "relay",
+    max: 90,
+    retry_after: None,
+};
+const LOOKUP_LIMIT: Limit = Limit {
+    name: "lookup",
+    max: 60,
+    retry_after: Some(60),
+};
+
 /// Проверка подписанного запроса пира (`authenticateS2SPeer`): заголовки,
 /// действующий пир, предел частоты (до проверки подписи), подпись,
 /// одноразовое число. Возвращает пира и одноразовое число запроса.
@@ -646,7 +665,7 @@ fn authenticate_s2s(
     body: &SignedBody,
     peer: Option<Peer>,
     signed: Option<&Signed>,
-    rate_limit: Option<(u32, Duration)>,
+    rate_limit: Option<Limit>,
 ) -> Result<(Peer, Option<String>), Response> {
     let Some(signed) = signed else {
         return Err(fail(401, "Missing or malformed federation headers"));
@@ -655,12 +674,21 @@ fn authenticate_s2s(
     let Some(peer) = peer.filter(|peer| peer.status == "active") else {
         return Err(fail(403, "Unknown or inactive peer"));
     };
-    if let Some((max, window)) = rate_limit
-        && !state
-            .hub
-            .allow(&format!("federation-relay:{}", peer.origin), max, window)
+    if let Some(limit) = rate_limit
+        && state.federation.limited(
+            &format!("{}:{}", limit.name, peer.origin),
+            limit.max,
+            60_000,
+            now_ms(),
+        )
     {
-        return Err(fail(429, "Rate limit exceeded"));
+        let mut refusal = fail(429, "Rate limit exceeded");
+        if let Some(seconds) = limit.retry_after
+            && let Ok(value) = axum::http::HeaderValue::from_str(&seconds.to_string())
+        {
+            refusal.headers_mut().insert("retry-after", value);
+        }
+        return Err(refusal);
     }
     if !verified(body.stringified(), signed, peer.secrets()) {
         return Err(fail(401, "Invalid signature"));
@@ -711,7 +739,7 @@ pub async fn relay(State(state): State<AppState>, request: Request) -> Outcome {
         &body,
         peer,
         signed.as_ref(),
-        Some((90, Duration::from_mins(1))),
+        Some(RELAY_LIMIT),
     ) {
         Ok(found) => found,
         Err(refusal) => return Ok(refusal),
@@ -812,6 +840,169 @@ pub async fn relay(State(state): State<AppState>, request: Request) -> Outcome {
         );
     }
     Ok(send(200, response))
+}
+
+async fn s2s_preamble(
+    state: &AppState,
+    request: Request,
+    limit: Option<Limit>,
+) -> Result<Result<(Peer, SignedBody), Response>, ApiError> {
+    let (headers, body) = match signed_body(request).await {
+        Ok(read) => read,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    let signed = signed_headers(&headers);
+    let peer = s2s_peer(state, signed.as_ref()).await?;
+    Ok(
+        match authenticate_s2s(state, &headers, &body, peer, signed.as_ref(), limit) {
+            Ok((peer, _)) => Ok((peer, body)),
+            Err(refusal) => Err(refusal),
+        },
+    )
+}
+
+fn lookup_profile(row: &crate::db::Row, versioned: bool) -> DbResult<Value> {
+    let mut profile = json!({
+        "displayName": row.opt_text("display_name")?,
+        "avatar": row.opt_text("avatar")?,
+        "avatarColor": row.opt_text("avatar_color")?,
+        "banner": row.opt_text("banner")?,
+        "bio": row.opt_text("bio")?,
+        "status": row.opt_text("status")?,
+    });
+    if versioned {
+        profile["accentColor"] = json!(row.opt_text("accent_color")?);
+        profile["profileUpdatedAt"] = json!(
+            row.opt_int("profile_updated_at")?
+                .or(row.opt_int("created_at")?)
+        );
+    }
+    Ok(profile)
+}
+
+/// `POST /api/federation/users/lookup`: пользователь по имени.
+pub async fn users_lookup(State(state): State<AppState>, request: Request) -> Outcome {
+    let body = match s2s_preamble(&state, request, Some(LOOKUP_LIMIT)).await? {
+        Ok((_, body)) => body,
+        Err(refusal) => return Ok(refusal),
+    };
+    let Some(raw) = body.value.get("username").and_then(Value::as_str) else {
+        return Ok(fail(400, "username is required (string)"));
+    };
+    let username = crate::util::js_trim(raw).to_lowercase();
+    if username.is_empty() {
+        return Ok(fail(400, "username is required"));
+    }
+    state
+        .run(move |tx, _| {
+            let Some(user) = tx.query_one(
+                "SELECT * FROM users WHERE username = ? AND is_deleted = 0 AND home_instance IS NULL",
+                params![&username],
+            )?
+            else {
+                return Ok(send(404, json!({"found": false, "code": "user_not_found"})));
+            };
+            let name = crate::federation::relay::relay_handle(&user)?
+                .map_or_else(|| user.text("username"), Ok)?;
+            Ok(send(
+                200,
+                json!({"found": true, "user": {
+                    "homeUserId": user.text("id")?,
+                    "username": name,
+                    "profile": lookup_profile(&user, false)?,
+                }}),
+            ))
+        })
+        .await
+}
+
+/// `POST /api/federation/users/by-home-id`: пользователь по идентификатору.
+pub async fn users_by_home_id(State(state): State<AppState>, request: Request) -> Outcome {
+    let body = match s2s_preamble(&state, request, Some(LOOKUP_LIMIT)).await? {
+        Ok((_, body)) => body,
+        Err(refusal) => return Ok(refusal),
+    };
+    let raw = body.value.get("homeUserId").and_then(Value::as_str);
+    let Some(id) = raw.map(crate::util::js_trim).filter(|id| !id.is_empty()) else {
+        return Ok(fail(400, "homeUserId is required (string)"));
+    };
+    let id = id.to_owned();
+    state
+        .run(move |tx, _| {
+            let Some(user) = tx.query_one(
+                "SELECT * FROM users WHERE is_deleted = 0 AND home_instance IS NULL \
+                 AND (id = ? OR home_user_id = ?)",
+                params![&id, &id],
+            )?
+            else {
+                return Ok(send(200, json!({"found": false})));
+            };
+            let name = crate::federation::relay::relay_handle(&user)?
+                .map_or_else(|| user.text("username"), Ok)?;
+            let home_id = user
+                .opt_text("home_user_id")?
+                .map_or_else(|| user.text("id"), Ok)?;
+            Ok(send(
+                200,
+                json!({"found": true, "user": {
+                    "homeUserId": home_id,
+                    "username": name,
+                    "profile": lookup_profile(&user, true)?,
+                }}),
+            ))
+        })
+        .await
+}
+
+/// `POST /api/federation/verify-attach-proof`: пир проверяет доказательство,
+/// выданное нашему пользователю.
+pub async fn verify_attach_proof(State(state): State<AppState>, request: Request) -> Outcome {
+    let (peer, body) = match s2s_preamble(&state, request, Some(LOOKUP_LIMIT)).await? {
+        Ok(found) => found,
+        Err(refusal) => return Ok(refusal),
+    };
+    let secret = peer.secret.clone();
+    let token = body
+        .value
+        .get("token")
+        .and_then(Value::as_str)
+        .filter(|token| token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map(str::to_owned);
+    let Some(token) = token else {
+        return Ok(signed_json(&state, &json!({"valid": false}), &secret));
+    };
+    let domain = reset::domain_of(&peer.origin).to_lowercase();
+    let answer = state
+        .run(move |tx, _| {
+            let now = now_ms();
+            let claimed = tx.query_one(
+                "SELECT home_user_id FROM federation_attach_proofs WHERE token = ? AND used_at IS NULL \
+                 AND expires_at > ? AND lower(target_domain) = ?",
+                params![&token, now, &domain],
+            )?;
+            let Some(claimed) = claimed else {
+                return Ok(json!({"valid": false}));
+            };
+            let used = tx.execute(
+                "UPDATE federation_attach_proofs SET used_at = ? WHERE token = ? AND used_at IS NULL",
+                params![now, &token],
+            )?;
+            if used == 0 {
+                return Ok(json!({"valid": false}));
+            }
+            let Some(user) = tx.query_one(
+                "SELECT * FROM users WHERE id = ? AND is_deleted = 0 AND home_instance IS NULL",
+                params![claimed.text("home_user_id")?],
+            )?
+            else {
+                return Ok(json!({"valid": false}));
+            };
+            let name = crate::federation::relay::relay_handle(&user)?
+                .map_or_else(|| user.text("username"), Ok)?;
+            Ok(json!({"valid": true, "homeUserId": user.text("id")?, "username": name}))
+        })
+        .await?;
+    Ok(signed_json(&state, &answer, &secret))
 }
 
 /// `DELETE /api/federation/identity`: дом удаляет своего пользователя здесь.

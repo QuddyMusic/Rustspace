@@ -7,7 +7,7 @@
 (журнал применённых событий, часы, очередь файлов) и события WebSocket.
 
 Копия пользователя X на Y создаётся прямо в базе Y — так, как её создаёт
-оригинал: поиск `user@домен` переносится следующим шагом.
+оригинал; поиск `user@домен` проверяет `f_lookup.py`.
 """
 import base64, http.client, json, os, sys, time
 from fed import run
@@ -55,7 +55,7 @@ def local_view(x, who, label):
 
 def replicas(x, label):
     rows = x.db('SELECT username, display_name, avatar, banner, bio, home_instance, '
-                'password_hash, status, is_deleted FROM users WHERE home_instance IS NOT NULL AND (username LIKE ? OR username LIKE ?) '
+                'password_hash = \'!federation-replicated\', status, is_deleted FROM users WHERE home_instance IS NOT NULL AND (username LIKE ? OR username LIKE ?) '
                 'ORDER BY username', (f'%{x.pair.tag}%', '!deleted:%'))
     rows = [r for r in rows if x.pair.tag in r[0] or r[0].startswith('!deleted:') and r[0][9:] in x.pair.n.ids]
     x.note(f'копии {label}', [list(r) for r in rows])
@@ -123,11 +123,6 @@ def inbound(p):
     local_view(x, 'al', 'удаления и закрытия')
 
     # Группа: создание, название, добавление, исключение, передача, выход.
-    # dan сперва пишет al: так его копия на X получает имя из события, а не
-    # из запроса к дому (поиск по дому — следующий шаг переноса).
-    _, dan_dm = y.call('dan', 'POST', '/api/dm', {'userId': al}, quiet=True)
-    y.call('dan', 'POST', f"/api/dm/{dan_dm.get('id')}/messages", {'content': 'я dan'}, label='dan пишет al')
-    wait_quiet(p)
     _, group = y.call('bob', 'POST', '/api/dm/group', {'users': [{'id': al}, {'id': y.uid['dan']}]}, label='bob создаёт группу')
     gid = group.get('id')
     wait_quiet(p)
@@ -260,8 +255,6 @@ def relay_checks(p):
 if __name__ == '__main__':
     show = '-v' in sys.argv
     names = [a for a in sys.argv[1:] if not a.startswith('-')] or ['inbound', 'relay_checks']
-    # Печатание и звонки между инстансами — шаг 7 переноса. Профиль новой
-    # копии оригинал спрашивает у её дома (`scheduleHomeRecordPull`, шаг 5):
-    # отсюда время изменения профиля и лишний `user_updated`.
-    sys.exit(1 if sum(run(globals()[n], show=show, ignore_events=('dm_typing_start', 'dm_typing_stop', 'user_updated'),
-                          ignore_keys=('profileUpdatedAt',)) for n in names) else 0)
+    # Печатание и звонки между инстансами — шаг 7 переноса.
+    sys.exit(1 if sum(run(globals()[n], show=show, ignore_events=('dm_typing_start', 'dm_typing_stop'))
+                      for n in names) else 0)

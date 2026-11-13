@@ -96,7 +96,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-app` | The GUI and its entry point | 232 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 110 |
+| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 113 |
 | `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 6 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
@@ -218,7 +218,8 @@ client; from federation: request signatures, the outbox and delivery to peers (m
 edits, reactions, read positions, groups, friendships, profile, presence; retries with
 backoff, unreachable peers, refusals by the receiver), receiving events from peers (the same events the other way,
 attribution checks, replicas of other instances' users, profile picture and attachment
-downloads, deleting a replica at its home's request), the handshake and peer management
+downloads, deleting a replica at its home's request), `user@domain` lookup and friend requests across
+instances, signing in to a replica, attaching and re-attaching accounts, the handshake and peer management
 (approval, denial, secret rotation, detecting a reinstalled remote instance). Every route
 and event is compared with the original by the scenarios in `tools/compat`, on SQLite and on
 PostgreSQL.
@@ -228,10 +229,9 @@ directory for end-to-end encrypted DMs. They do not change existing routes: a cl
 does not know about them works as before. Their tables live in the same database under
 `bs_*` names; the original server ignores them.
 
-**Not there yet:** `user@domain` lookup, login from another instance and asking a replica's
-home for its profile, sync after downtime, cross-instance calls and typing. Events flow to and
-from peers, but without catching up after downtime and without lookup the server is not yet
-suitable for an instance that talks to peers, and it warns about it at startup. The server never sends telemetry. See
+**Not there yet:** sync after downtime, cross-instance calls and typing. Events flow to and
+from peers and `user@domain` lookup works, but without catching up after downtime the server
+is not yet suitable for an instance that talks to peers, and it warns about it at startup. The server never sends telemetry. See
 [ROADMAP.md](ROADMAP.md).
 
 **Small differences from the original:** thumbnails and stickers are encoded as lossless
@@ -365,6 +365,7 @@ tools/compat/fed_up.sh && python3 tools/compat/f_peering.py approvals
 tools/compat/fed_up.sh && python3 tools/compat/f_outbox.py delivery
 FEDERATION_BACKOFF_DIVISOR=100000 tools/compat/fed_up.sh && python3 tools/compat/f_outbox.py retries
 tools/compat/fed_up.sh && python3 tools/compat/f_inbound.py inbound relay_checks
+tools/compat/fed_up.sh && python3 tools/compat/f_lookup.py friends accounts
 ```
 
 ## Translations

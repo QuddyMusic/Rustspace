@@ -710,6 +710,9 @@ fn mark_stubs_offline(
 pub async fn run_effects(state: &AppState, effects: Effects) {
     let app = state.clone();
     let origin = effects.origin.clone();
+    let activated = effects.next == Some("active")
+        && effects.previous != Some("active")
+        && effects.activation.is_some();
     let done = state
         .run(move |tx, out| {
             let changed = json!({"type": "federation_peers_changed"});
@@ -761,6 +764,8 @@ pub async fn run_effects(state: &AppState, effects: Effects) {
             ?error,
             "последствия перехода пира не выполнены"
         );
+    } else if activated {
+        tokio::spawn(super::lookup::backfill_for_peer(state.clone(), origin));
     }
 }
 

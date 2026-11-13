@@ -422,6 +422,99 @@ pub async fn check_invite(
         .await
 }
 
+/// Проверяет пароль копии у её дома и при успехе записывает новый хеш
+/// (самовосстановление при входе оригинала).
+async fn self_heal(state: &AppState, row: &Row, password: &str) -> ApiResult<bool> {
+    let Some(home) = row.opt_text("home_instance")?.filter(|h| !h.is_empty()) else {
+        return Ok(false);
+    };
+    if row.opt_flag("federation_home_orphaned")? == Some(true) {
+        return Ok(false);
+    }
+    let username = row.text("username")?;
+    let local = username.split('@').next().unwrap_or(&username).to_owned();
+    let body = json!({"username": local, "password": password}).to_string();
+    let headers = [("Content-Type", "application/json".to_owned())];
+    let answer = crate::federation::fetch::request(
+        &state.config,
+        &format!("https://{home}"),
+        "/api/auth/login",
+        Some(body),
+        &headers,
+        crate::federation::fetch::Trust::Asserted,
+        std::time::Duration::from_secs(10),
+    )
+    .await;
+    let Ok(answer) = answer else {
+        return Ok(false);
+    };
+    if !answer.ok() {
+        return Ok(false);
+    }
+    let home_user = row.opt_text("home_user_id")?.filter(|id| !id.is_empty());
+    let account = answer.object().get("user").cloned();
+    let same = match (
+        &home_user,
+        account
+            .as_ref()
+            .filter(|a| crate::federation::inbound::truthy(a)),
+    ) {
+        (Some(id), Some(account)) => {
+            account.get("id").and_then(Value::as_str) == Some(id.as_str())
+                || account.get("homeUserId").and_then(Value::as_str) == Some(id.as_str())
+        }
+        _ => false,
+    };
+    if !same {
+        tracing::warn!(
+            username,
+            "самовосстановление отклонено: дом впустил другой аккаунт"
+        );
+        return Ok(false);
+    }
+    let domain = crate::federation::reset::domain_of(&home);
+    let peer = state
+        .run(move |tx, _| {
+            for origin in [
+                domain.clone(),
+                format!("https://{domain}"),
+                format!("http://{domain}"),
+            ] {
+                if let Some(peer) = crate::federation::peers::by_origin(tx, &origin)? {
+                    return Ok(Some(peer));
+                }
+            }
+            Ok(None)
+        })
+        .await?;
+    if let Some(peer) = peer
+        && let Some(baseline) = &peer.epoch
+    {
+        let current =
+            crate::federation::fetch::probe_epoch(&state.config, &peer.origin, &peer.secret).await;
+        if current != crate::federation::fetch::Epoch::Verified(baseline.clone()) {
+            tracing::warn!(
+                username,
+                "самовосстановление отклонено: эпоха дома изменилась"
+            );
+            return Ok(false);
+        }
+    }
+    let hash = hash_password(state, password.to_owned()).await?;
+    let id = row.text("id")?;
+    state
+        .run(move |tx, _| {
+            tx.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                params![hash, id],
+            )?;
+            Ok(())
+        })
+        .await?;
+    tracing::info!(username, home, "хеш пароля копии обновлён по ответу дома");
+    Ok(true)
+}
+
 /// `POST /api/auth/login`.
 pub async fn login(
     State(state): State<AppState>,
@@ -457,9 +550,11 @@ pub async fn login(
         return Err(ApiError::unauthorized("account_deleted"));
     }
     if !valid {
-        // Реплицированный аккаунт со сменённым дома паролем оригинал
-        // перепроверяет у домашнего инстанса; это часть федерации.
-        return Err(invalid());
+        // Аккаунт с другого инстанса, чей пароль сменили дома, проверяется
+        // у дома; при успехе хеш пароля обновляется (самовосстановление).
+        if !self_heal(&state, &row, password).await? {
+            return Err(invalid());
+        }
     }
     // Второй фактор спрашивается только после верного пароля: по ответу
     // нельзя узнать, включена ли защита, не зная пароля.

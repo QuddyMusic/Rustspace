@@ -180,6 +180,16 @@ pub fn app(state: AppState) -> Router {
                 .delete(routes::account::delete_me),
         )
         .route("/api/users/@me/verify-password", post(routes::account::verify_password))
+        .route("/api/users/@me/reattach", post(routes::federated::reattach))
+        .route(
+            "/api/users/@me/federation-credential",
+            post(routes::federated::federation_credential),
+        )
+        .route(
+            "/api/users/@me/federation-identity/delete",
+            post(routes::federated::federation_identity_delete),
+        )
+        .route("/api/auth/attach-proof", post(routes::federated::attach_proof))
         .route("/api/users/@me/change-password", post(routes::account::change_password))
         .route(
             "/api/users/@me/federation-registry",
@@ -355,6 +365,9 @@ pub fn app(state: AppState) -> Router {
         .route("/api/federation/peer/denied", post(routes::federation::denied))
         .route("/api/federation/epoch", post(routes::federation::epoch))
         .route("/api/federation/relay", post(routes::federation::relay))
+        .route("/api/federation/users/lookup", post(routes::federation::users_lookup))
+        .route("/api/federation/users/by-home-id", post(routes::federation::users_by_home_id))
+        .route("/api/federation/verify-attach-proof", post(routes::federation::verify_attach_proof))
         .route("/api/federation/identity", delete(routes::federation::delete_identity))
         .route("/api/federation/peers", get(routes::federation::list_peers))
         .route(

@@ -1082,6 +1082,79 @@ fn instance_origin(home: &str) -> String {
     }
 }
 
+/// Запрос дружбы пользователю другого инстанса после поиска на нём
+/// (`handleFederatedFriendRequest`). Возвращает идентификатор события.
+///
+/// # Errors
+/// Ошибка базы.
+pub fn remote_friend_request(
+    tx: &mut dyn Tx,
+    relay: Relay<'_>,
+    sender: &Row,
+    stub: &Row,
+    peer_origin: &str,
+    profile: &Value,
+    now: i64,
+) -> DbResult<String> {
+    let origin = relay.origin();
+    let from_id = sender
+        .opt_text("home_user_id")?
+        .filter(|id| !id.is_empty())
+        .map_or_else(|| sender.text("id"), Ok)?;
+    let to_id = stub.opt_text("home_user_id")?.unwrap_or_default();
+    let from_identity = json!({"homeUserId": from_id, "homeInstance": origin});
+    let to_identity = json!({"homeUserId": to_id, "homeInstance": peer_origin});
+    let (low, high) = if from_id <= to_id {
+        (&from_id, &to_id)
+    } else {
+        (&to_id, &from_id)
+    };
+    let context = format!("friend:{low}:{high}");
+    let entity = format!("friend_req:{low}:{high}:{now}");
+    let field = |key: &str| profile.get(key).cloned().unwrap_or(Value::Null);
+    let status = profile
+        .get("status")
+        .filter(|v| !v.is_null())
+        .cloned()
+        .unwrap_or(Value::Null);
+    let payload = json!({
+        "eventType": "friend_request_create",
+        "contextType": "friend",
+        "messageId": entity,
+        "encryptionVersion": 0,
+        "timestamp": now,
+        "friendship": {
+            "from": from_identity,
+            "to": to_identity,
+            "fromProfile": profile_snapshot(sender)?,
+            "toProfile": {
+                "username": stub.text("username")?,
+                "displayName": field("displayName"),
+                "avatar": field("avatar"),
+                "avatarColor": field("avatarColor"),
+                "banner": field("banner"),
+                "bio": field("bio"),
+                "status": status,
+            },
+            "status": "pending",
+            "createdAt": now,
+        },
+    });
+    record_friend_change(tx, relay.config, &from_identity, &to_identity, now)?;
+    let targets = [peer_origin.to_owned()];
+    relay.log_and_queue(
+        tx,
+        &entity,
+        &context,
+        "friend_request_create",
+        Some(&payload),
+        &payload,
+        Some(&targets),
+        "friend",
+    )?;
+    Ok(entity)
+}
+
 /// Событие дружбы между `from` и `to` (`routes/social.ts`). Возвращает
 /// идентификатор события запроса — под ним его знает получатель.
 ///

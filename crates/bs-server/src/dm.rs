@@ -121,6 +121,229 @@ pub fn set_closed(tx: &mut dyn Tx, channel: &str, user: &str, closed: bool) -> D
     )? > 0)
 }
 
+/// Переносит позицию чтения, оставляя более новую (`keepNewerReadPointer`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn keep_newer_read_pointer(
+    tx: &mut dyn Tx,
+    from: (&str, &str),
+    to: (&str, &str),
+) -> DbResult<()> {
+    if from == to {
+        return Ok(());
+    }
+    let read = |tx: &mut dyn Tx, (user, channel): (&str, &str)| {
+        tx.query_one(
+            "SELECT last_read_message_id, updated_at FROM read_states WHERE user_id = ? AND channel_id = ?",
+            params![user, channel],
+        )
+    };
+    let Some(moving) = read(tx, from)? else {
+        return Ok(());
+    };
+    tx.execute(
+        "DELETE FROM read_states WHERE user_id = ? AND channel_id = ?",
+        params![from.0, from.1],
+    )?;
+    let last = moving.text("last_read_message_id")?;
+    let updated = moving.opt_int("updated_at")?.unwrap_or(0);
+    let Some(held) = read(tx, to)? else {
+        tx.execute(
+            "INSERT INTO read_states (user_id, channel_id, last_read_message_id, updated_at) VALUES (?, ?, ?, ?)",
+            params![to.0, to.1, &last, updated],
+        )?;
+        return Ok(());
+    };
+    let held_last = held.text("last_read_message_id")?;
+    let newer = match (last.parse::<u128>(), held_last.parse::<u128>()) {
+        (Ok(a), Ok(b)) => a > b,
+        _ => last > held_last,
+    };
+    if newer {
+        tx.execute(
+            "UPDATE read_states SET last_read_message_id = ?, updated_at = ? WHERE user_id = ? AND channel_id = ?",
+            params![&last, updated.max(held.opt_int("updated_at")?.unwrap_or(0)), to.0, to.1],
+        )?;
+    }
+    Ok(())
+}
+
+/// Итог сверки ключа переписки (`DmReconcileResult`).
+#[derive(Debug, Clone)]
+pub struct Reconciled {
+    /// Слита в другую (`merged`), а не перезаписан ключ (`rekeyed`).
+    pub merged: bool,
+    /// Исходная переписка.
+    pub channel: String,
+    /// Переписка, которая осталась.
+    pub target: String,
+    /// Кого это касается.
+    pub affected: Vec<String>,
+}
+
+/// Может ли строка быть перепиской один на один (`mayBeOneOnOneRow`).
+fn may_be_one_on_one(owner: Option<&str>, federated: Option<&str>) -> bool {
+    owner.is_none()
+        && federated.is_none_or(|key| {
+            key.len() == 32
+                && key
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+}
+
+/// Сверяет ключ переписки один на один с её участниками
+/// (`reconcileDmChannelFederatedId`): перезаписывает ключ или сливает с
+/// перепиской, у которой он уже есть.
+///
+/// # Errors
+/// Ошибка базы.
+pub fn reconcile_federated_id(tx: &mut dyn Tx, channel: &str) -> DbResult<Option<Reconciled>> {
+    let Some(row) = tx.query_one(
+        "SELECT id, federated_id, owner_id FROM dm_channels WHERE id = ? AND deleted_at IS NULL",
+        params![channel],
+    )?
+    else {
+        return Ok(None);
+    };
+    let federated = row.opt_text("federated_id")?;
+    if !may_be_one_on_one(row.opt_text("owner_id")?.as_deref(), federated.as_deref()) {
+        return Ok(None);
+    }
+    let members_of = |tx: &mut dyn Tx, channel: &str| -> DbResult<Vec<(String, String, bool)>> {
+        tx.query(
+            "SELECT m.user_id, u.home_user_id, m.closed FROM dm_members m JOIN users u ON u.id = m.user_id \
+             WHERE m.dm_channel_id = ?",
+            params![channel],
+        )?
+        .iter()
+        .map(|row| {
+            let user = row.text("user_id")?;
+            let identity = row
+                .opt_text("home_user_id")?
+                .filter(|id| !id.is_empty())
+                .unwrap_or_else(|| user.clone());
+            Ok((user, identity, row.opt_flag("closed")? == Some(true)))
+        })
+        .collect()
+    };
+    let members = members_of(tx, channel)?;
+    if members.len() != 2 {
+        return Ok(None);
+    }
+    let expected = one_on_one_key(&members[0].1, &members[1].1);
+    if federated.as_deref() == Some(expected.as_str()) {
+        return Ok(None);
+    }
+    let target = tx.query_one(
+        "SELECT id FROM dm_channels WHERE federated_id = ? AND id <> ?",
+        params![&expected, channel],
+    )?;
+    let Some(target) = target else {
+        tx.execute(
+            "UPDATE dm_channels SET federated_id = ? WHERE id = ?",
+            params![&expected, channel],
+        )?;
+        return Ok(Some(Reconciled {
+            merged: false,
+            channel: channel.to_owned(),
+            target: channel.to_owned(),
+            affected: members.iter().map(|m| m.0.clone()).collect(),
+        }));
+    };
+    let target = target.text("id")?;
+    let target_members = members_of(tx, &target)?;
+    let mut affected: Vec<String> = Vec::new();
+    for user in members.iter().chain(target_members.iter()).map(|m| &m.0) {
+        if !affected.contains(user) {
+            affected.push(user.clone());
+        }
+    }
+    tx.execute(
+        "UPDATE dm_messages SET dm_channel_id = ? WHERE dm_channel_id = ?",
+        params![&target, channel],
+    )?;
+    let mut kept: Vec<(String, String)> = Vec::new();
+    for (user, identity, closed) in &members {
+        if let Some(held) = target_members.iter().find(|t| &t.1 == identity) {
+            if !closed && held.2 {
+                set_closed(tx, &target, &held.0, false)?;
+            }
+            tx.execute(
+                "DELETE FROM dm_members WHERE dm_channel_id = ? AND user_id = ?",
+                params![channel, user],
+            )?;
+            kept.push((user.clone(), held.0.clone()));
+        } else {
+            tx.execute(
+                "UPDATE dm_members SET dm_channel_id = ? WHERE dm_channel_id = ? AND user_id = ?",
+                params![&target, channel, user],
+            )?;
+        }
+    }
+    for row in tx.query(
+        "SELECT user_id FROM read_states WHERE channel_id = ?",
+        params![channel],
+    )? {
+        let user = row.text("user_id")?;
+        let to = kept
+            .iter()
+            .find(|(from, _)| *from == user)
+            .map_or_else(|| user.clone(), |(_, to)| to.clone());
+        keep_newer_read_pointer(tx, (&user, channel), (&to, &target))?;
+    }
+    tx.execute(
+        "UPDATE federation_mutation_log SET context_id = ? WHERE context_id = ? AND context_type = 'dm'",
+        params![&target, channel],
+    )?;
+    tx.execute(
+        "UPDATE federation_outbox SET context_id = ? WHERE context_id = ? AND context_type = 'dm'",
+        params![&target, channel],
+    )?;
+    tx.execute("DELETE FROM dm_channels WHERE id = ?", params![channel])?;
+    Ok(Some(Reconciled {
+        merged: true,
+        channel: channel.to_owned(),
+        target,
+        affected,
+    }))
+}
+
+/// Объявляет итоги сверки ключей (`announceDmReconcile`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn announce_reconciled(
+    tx: &mut dyn Tx,
+    out: &mut crate::hub::Outbox,
+    results: &[Reconciled],
+) -> DbResult<()> {
+    for result in results {
+        if result.merged {
+            for user in &result.affected {
+                crate::broadcast::to_user(
+                    tx,
+                    out,
+                    user,
+                    &serde_json::json!({"type": "dm_channel_closed", "dmChannelId": result.channel}),
+                )?;
+            }
+        }
+        let Some(wire) = channel_wire(tx, &result.target)? else {
+            continue;
+        };
+        let event = serde_json::json!({"type": "dm_channel_created", "dmChannel": wire});
+        for row in tx.query(
+            "SELECT user_id FROM dm_members WHERE dm_channel_id = ? AND closed = 0",
+            params![&result.target],
+        )? {
+            crate::broadcast::to_user(tx, out, &row.text("user_id")?, &event)?;
+        }
+    }
+    Ok(())
+}
+
 /// Ключ переписки один на один: одинаков на всех инстансах (`oneOnOneKey`).
 #[must_use]
 pub fn one_on_one_key(a: &str, b: &str) -> String {

@@ -250,8 +250,5 @@ if __name__ == '__main__':
     show = '-v' in sys.argv
     names = [a for a in sys.argv[1:] if not a.startswith('-')] or ['delivery']
     # Печатание уходит прямым запросом вместе со звонками (шаг 7 переноса).
-    # Время изменения профиля копии al на Y и лишний `user_updated` приходят
-    # из запроса Y к дому al (`lookupRemoteUserByHomeId`, шаг 5 переноса);
-    # профиль al на Y сверяется запросом в конце сценария.
-    sys.exit(1 if sum(run(globals()[n], show=show, ignore_events=('dm_typing_start', 'dm_typing_stop', 'user_updated'),
-                          ignore_keys=('profileUpdatedAt',)) for n in names) else 0)
+    sys.exit(1 if sum(run(globals()[n], show=show, ignore_events=('dm_typing_start', 'dm_typing_stop'))
+                      for n in names) else 0)

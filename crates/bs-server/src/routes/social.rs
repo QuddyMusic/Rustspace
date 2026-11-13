@@ -29,7 +29,7 @@ const DISCOVER_LIMIT: Limit = Limit {
     max: 30,
     window: Duration::from_mins(1),
 };
-const MAX_HOME_USER_ID_LENGTH: usize = 64;
+const MAX_HOME_USER_ID_LENGTH: usize = 128;
 
 /// Адрес инстанса для сравнения: без схемы и хвостовых `/`, строчными.
 fn host_of(value: &str) -> Option<String> {
@@ -105,61 +105,125 @@ pub async fn requests(State(state): State<AppState>, user: AuthUser) -> ApiResul
         .await
 }
 
+/// Куда идёт заявка в дружбу.
+enum Addressee {
+    /// Пользователь этого инстанса по идентификатору.
+    LocalId(String),
+    /// Пользователь этого инстанса по имени.
+    LocalName(String),
+    /// Пользователь другого инстанса.
+    Remote {
+        domain: String,
+        handle: String,
+        by_id: Option<String>,
+    },
+}
+
 /// `POST /api/social/requests`.
 pub async fn send_request(
     State(state): State<AppState>,
     user: AuthUser,
     JsonBody(body): JsonBody,
-) -> ApiResult<(StatusCode, Json<Value>)> {
+) -> ApiResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let username = str_field(&body, "username")
+        .map(js_trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned);
+    let by_identity = field(&body, "homeUserId").is_some_and(|v| !v.is_null())
+        || field(&body, "homeInstance").is_some_and(|v| !v.is_null());
+    let identity = if by_identity {
+        let home_user = str_field(&body, "homeUserId")
+            .map(js_trim)
+            .unwrap_or_default();
+        let home_instance = str_field(&body, "homeInstance").and_then(host_of);
+        let Some(home_instance) = home_instance.filter(|_| {
+            !home_user.is_empty() && home_user.encode_utf16().count() <= MAX_HOME_USER_ID_LENGTH
+        }) else {
+            return Err(ApiError::bad_request("validation_failed"));
+        };
+        Some((home_user.to_owned(), home_instance))
+    } else {
+        if username.is_none() {
+            return Err(ApiError::bad_request("username_required"));
+        }
+        None
+    };
+    let owner = user.id.clone();
+    let sender = state
+        .run(move |tx, _| Ok(user_row(tx, &owner)?))
+        .await?
+        .ok_or_else(|| ApiError::unauthorized("unauthorized"))?;
+    let ours = host_of(&federation::our_origin(&state.config));
+    let sender_home = sender
+        .opt_text("home_instance")?
+        .as_deref()
+        .and_then(host_of);
+    if sender_home.is_some() && sender_home != ours {
+        return Err(ApiError::forbidden("not_authoritative_for_sender"));
+    }
+    let addressee = match identity {
+        Some((home_user, home_instance)) => {
+            if Some(&home_instance) == ours.as_ref()
+                || federation::identity::is_own_domain(&state.config, &home_instance)
+            {
+                Addressee::LocalId(home_user)
+            } else {
+                let typed = username.as_deref().unwrap_or_default().to_lowercase();
+                let handle = match typed.rfind('@') {
+                    Some(at)
+                        if at > 0 && host_of(&typed[at + 1..]).as_ref() == Some(&home_instance) =>
+                    {
+                        typed[..at].to_owned()
+                    }
+                    _ => home_user.clone(),
+                };
+                Addressee::Remote {
+                    domain: home_instance,
+                    handle,
+                    by_id: Some(home_user),
+                }
+            }
+        }
+        None => {
+            let raw = username.unwrap_or_default();
+            match raw.rfind('@') {
+                Some(at) if at > 0 && at < raw.len() - 1 && host_of(&raw[at + 1..]) != ours => {
+                    Addressee::Remote {
+                        domain: raw[at + 1..].to_lowercase(),
+                        handle: raw[..at].to_lowercase(),
+                        by_id: None,
+                    }
+                }
+                Some(at) if at > 0 => Addressee::LocalName(raw[..at].to_owned()),
+                _ => Addressee::LocalName(raw),
+            }
+        }
+    };
+    if let Addressee::Remote {
+        domain,
+        handle,
+        by_id,
+    } = addressee
+    {
+        return remote_request(&state, sender, domain, handle, by_id).await;
+    }
     let app = state.clone();
     state
         .run(move |tx, out| {
-            let username = str_field(&body, "username").map(js_trim).filter(|name| !name.is_empty());
-            let by_identity = field(&body, "homeUserId").is_some_and(|v| !v.is_null())
-                || field(&body, "homeInstance").is_some_and(|v| !v.is_null());
-            let ours = host_of(&federation::our_origin(&app.config));
-            let sender = user_row(tx, &user.id)?.ok_or_else(|| ApiError::unauthorized("unauthorized"))?;
-            let sender_home = sender.opt_text("home_instance")?.as_deref().and_then(host_of);
-            let target = if by_identity {
-                let home_user = str_field(&body, "homeUserId").map(js_trim).unwrap_or_default();
-                let home_instance = str_field(&body, "homeInstance").and_then(host_of);
-                let Some(home_instance) = home_instance
-                    .filter(|_| !home_user.is_empty() && home_user.len() <= MAX_HOME_USER_ID_LENGTH)
-                else {
-                    return Err(ApiError::bad_request("validation_failed"));
-                };
-                if sender_home.is_some() && sender_home != ours {
-                    return Err(ApiError::forbidden("not_authoritative_for_sender"));
-                }
-                if Some(&home_instance) != ours.as_ref() {
-                    return Err(remote_unavailable());
-                }
-                tx.query_one(
+            let target = match &addressee {
+                Addressee::LocalId(home_user) => tx.query_one(
                     &format!(
                         "SELECT {USER_COLUMNS} FROM users WHERE is_deleted = 0 AND home_instance IS NULL \
                          AND (id = ? OR home_user_id = ?)"
                     ),
                     params![home_user, home_user],
-                )?
-            } else {
-                let raw = username.ok_or_else(|| ApiError::bad_request("username_required"))?;
-                if sender_home.is_some() && sender_home != ours {
-                    return Err(ApiError::forbidden("not_authoritative_for_sender"));
-                }
-                let local = match raw.rfind('@') {
-                    Some(at) if at > 0 && at < raw.len() - 1 => {
-                        if host_of(&raw[at + 1..]) != ours {
-                            return Err(remote_unavailable());
-                        }
-                        &raw[..at]
-                    }
-                    Some(at) if at > 0 => &raw[..at],
-                    _ => raw,
-                };
-                tx.query_one(
+                )?,
+                Addressee::LocalName(name) => tx.query_one(
                     &format!("SELECT {USER_COLUMNS} FROM users WHERE username = ?"),
-                    params![local.to_lowercase()],
-                )?
+                    params![name.to_lowercase()],
+                )?,
+                Addressee::Remote { .. } => None,
             };
             let target = target.ok_or_else(|| ApiError::not_found("user_not_found"))?;
             let target_id = target.text("id")?;
@@ -194,15 +258,226 @@ pub async fn send_request(
             out.to_user(&target_id, &json!({"type": "friend_request_received", "request": received}));
             out.to_user(&user.id, &json!({"type": "friend_request_sent", "request": sent}));
             relay_friend_event(tx, &app, federation::relay::Friendship::Request, &user.id, &target_id)?;
-            Ok((StatusCode::CREATED, Json(json!({"success": true, "requestId": id}))))
+            Ok((StatusCode::CREATED, Json(json!({"success": true, "requestId": id}))).into_response())
         })
         .await
 }
 
-/// Заявка человеку с другого инстанса требует запроса к тому инстансу; эта
-/// часть федерации ещё не перенесена.
-fn remote_unavailable() -> ApiError {
-    ApiError::new(StatusCode::BAD_GATEWAY, "peer_unreachable")
+/// Итог заявки пользователю другого инстанса.
+enum RemoteOutcome {
+    Sent(String),
+    AlreadySent(String),
+    Incoming(String),
+    AlreadyFriends,
+    NotFound,
+}
+
+/// Заявка пользователю другого инстанса (`handleFederatedFriendRequest`):
+/// пиринг, поиск на том инстансе, копия, событие.
+#[allow(clippy::too_many_lines, reason = "порядок шагов оригинала")]
+async fn remote_request(
+    state: &AppState,
+    sender: Row,
+    domain: String,
+    handle: String,
+    by_id: Option<String>,
+) -> ApiResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+    use federation::handshake::{Ensured, Intent};
+    use federation::lookup::{self, Lookup};
+    let (config, at) = (state.config.clone(), domain.clone());
+    let resolved = state
+        .run(move |tx, _| {
+            let Some(origin) = lookup::origin_from_hostname(tx, &config, &at)? else {
+                return Ok(None);
+            };
+            let reset = tx.query_one(
+                "SELECT origin FROM federation_reset_events WHERE origin = ? AND resolved_at IS NULL",
+                params![&origin],
+            )?;
+            Ok(Some((origin, reset.is_some())))
+        })
+        .await?;
+    let Some((peer_origin, reset)) = resolved else {
+        return Err(ApiError::bad_request("invalid_target_domain").detail("domain", domain));
+    };
+    if reset {
+        return Err(ApiError::conflict("peer_reset_pending"));
+    }
+    let sender_id = sender.text("id")?;
+    let ensured = federation::handshake::ensure_peered(
+        state,
+        &peer_origin,
+        Intent::User {
+            user_id: sender_id.clone(),
+            reason: "friend_add".to_owned(),
+            target: format!("{handle}@{domain}"),
+        },
+    )
+    .await;
+    match ensured {
+        Ensured::Active(_) => {}
+        Ensured::Rejected(_) => {
+            return Err(ApiError::forbidden("peer_rejected").detail("domain", domain));
+        }
+        Ensured::Failed(_) => {
+            return Err(
+                ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "peer_unreachable")
+                    .detail("domain", domain),
+            );
+        }
+        Ensured::Pending(_) => {
+            let at = peer_origin.clone();
+            let awaiting = state
+                .run(move |tx, _| Ok(federation::peers::by_origin(tx, &at)?))
+                .await?
+                .is_some_and(|peer| peer.status == "awaiting_approval");
+            let code = if awaiting {
+                "peer_pending_approval"
+            } else {
+                "peer_pending"
+            };
+            return Err(ApiError::conflict(code).detail("domain", domain));
+        }
+        Ensured::AdminRequired(_) => {
+            return Err(ApiError::conflict("peer_pending_local_admin").detail("domain", domain));
+        }
+    }
+    let found = match &by_id {
+        Some(id) => lookup::by_home_id(state, &peer_origin, id).await,
+        None => lookup::user(state, &peer_origin, &handle).await,
+    };
+    let (home_user_id, username, profile) = match found {
+        Lookup::Found {
+            home_user_id,
+            username,
+            profile,
+        } => (home_user_id, username, profile),
+        Lookup::NotFound => {
+            return Err(ApiError::not_found("user_not_found")
+                .detail("domain", domain)
+                .detail("handle", handle));
+        }
+        Lookup::Unreachable => {
+            return Err(
+                ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "peer_unreachable")
+                    .detail("domain", domain),
+            );
+        }
+        Lookup::RateLimited(seconds) => {
+            let mut response =
+                ApiError::new(StatusCode::TOO_MANY_REQUESTS, "lookup_rate_limited").into_response();
+            if seconds != 0.0
+                && !seconds.is_nan()
+                && let Ok(value) =
+                    axum::http::HeaderValue::from_str(&crate::jsjson::number(seconds))
+            {
+                response.headers_mut().insert("retry-after", value);
+            }
+            return Ok(response);
+        }
+    };
+    let canonical_sender = sender
+        .opt_text("home_user_id")?
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| sender_id.clone());
+    if home_user_id == canonical_sender
+        && federation_auth_normalize(&peer_origin)
+            == federation_auth_normalize(&federation::our_origin(&state.config))
+    {
+        return Err(ApiError::bad_request("cannot_friend_self"));
+    }
+    let source: std::sync::Arc<str> = peer_origin.as_str().into();
+    let (target_domain, origin) = (domain.clone(), peer_origin.clone());
+    let outcome = federation::inbound::with_assets(
+        state,
+        source.clone(),
+        source,
+        federation::inbound::Delivery::Live,
+        move |cx| {
+            let actor = federation::identity::Actor {
+                home_user_id: home_user_id.clone(),
+                home_instance: target_domain.clone(),
+            };
+            let hints = federation::identity::Hints {
+                username: username.as_str().map(str::to_owned),
+                status: profile.get("status").and_then(Value::as_str).map(str::to_owned),
+                deleted: false,
+                home_asked: false,
+            };
+            let Some(replica) = cx.replica(&actor, &hints)? else {
+                return Ok(RemoteOutcome::NotFound);
+            };
+            let stub = federation::inbound::profile::hydrate(cx, replica.user, &profile)?;
+            let (sender_id, stub_id) = (sender.text("id")?, stub.text("id")?);
+            let pending = cx.tx.query_one(
+                "SELECT id, from_id FROM friend_requests WHERE status = 'pending' AND \
+                 ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))",
+                params![&sender_id, &stub_id, &stub_id, &sender_id],
+            )?;
+            if let Some(pending) = pending {
+                let id = pending.text("id")?;
+                return Ok(if pending.text("from_id")? == sender_id {
+                    RemoteOutcome::AlreadySent(id)
+                } else {
+                    RemoteOutcome::Incoming(id)
+                });
+            }
+            if dm::are_friends(cx.tx, &sender_id, &stub_id)? {
+                return Ok(RemoteOutcome::AlreadyFriends);
+            }
+            let now = now_ms();
+            let request_id = cx.app.ids.next();
+            let relay = federation::relay::Relay {
+                config: &cx.app.config,
+                ids: &cx.app.ids,
+            };
+            let entity = federation::relay::remote_friend_request(
+                cx.tx, relay, &sender, &stub, &origin, &profile, now,
+            )?;
+            cx.tx.execute(
+                "INSERT INTO friend_requests (id, from_id, to_id, status, created_at, relay_message_id) \
+                 VALUES (?, ?, ?, 'pending', ?, ?)",
+                params![&request_id, &sender_id, &stub_id, now, &entity],
+            )?;
+            let request = json!({
+                "id": request_id,
+                "fromId": sender_id,
+                "toId": stub_id,
+                "status": "pending",
+                "createdAt": now,
+                "user": sanitize_user(&stub, false)?,
+            });
+            cx.to_user(&sender_id, &json!({"type": "friend_request_sent", "request": request}))?;
+            Ok(RemoteOutcome::Sent(request_id))
+        },
+    )
+    .await?;
+    Ok(match outcome {
+        RemoteOutcome::Sent(id) => (
+            StatusCode::CREATED,
+            Json(json!({"success": true, "requestId": id})),
+        )
+            .into_response(),
+        RemoteOutcome::AlreadySent(id) => (
+            StatusCode::OK,
+            Json(json!({"success": true, "requestId": id})),
+        )
+            .into_response(),
+        RemoteOutcome::Incoming(id) => {
+            return Err(ApiError::conflict("incoming_request_exists").detail("requestId", id));
+        }
+        RemoteOutcome::AlreadyFriends => return Err(ApiError::conflict("already_friends")),
+        RemoteOutcome::NotFound => {
+            return Err(ApiError::not_found("user_not_found")
+                .detail("domain", domain)
+                .detail("handle", handle));
+        }
+    })
+}
+
+fn federation_auth_normalize(origin: &str) -> Option<String> {
+    crate::federation_auth::normalize_origin(Some(origin))
 }
 
 /// Событие дружбы для инстансов участников, если кто-то из них не здешний.
@@ -241,6 +516,15 @@ pub fn exchange_friend_presence(
 ) -> DbResult<()> {
     presence_snapshot(tx, &app.hub, out, a, b)?;
     presence_snapshot(tx, &app.hub, out, b, a)?;
+    relay_friend_presence(tx, app, a, b)
+}
+
+/// Присутствие новых друзей их домам (`snapshotPresenceForFriend`). Оригинал
+/// ставит эти события в очередь после событий самой дружбы.
+///
+/// # Errors
+/// Ошибка базы.
+pub fn relay_friend_presence(tx: &mut dyn Tx, app: &AppState, a: &str, b: &str) -> DbResult<()> {
     let relay = federation::relay::Relay {
         config: &app.config,
         ids: &app.ids,
@@ -335,7 +619,8 @@ pub async fn answer_request(
                         }),
                     );
                 }
-                exchange_friend_presence(tx, &app, out, &from, &user.id)?;
+                presence_snapshot(tx, &app.hub, out, &from, &user.id)?;
+                presence_snapshot(tx, &app.hub, out, &user.id, &from)?;
                 let created = request.int("created_at")?;
                 relay_friend_event(
                     tx,
@@ -344,6 +629,7 @@ pub async fn answer_request(
                     &from,
                     &user.id,
                 )?;
+                relay_friend_presence(tx, &app, &from, &user.id)?;
             } else {
                 out.to_user(
                     &from,

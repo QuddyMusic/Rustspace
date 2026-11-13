@@ -62,8 +62,9 @@ pub enum Intent {
 pub struct Runtime {
     /// Статус копии пользователя, как его объявил дом (`projections`).
     pub projections: Mutex<HashMap<String, String>>,
-    /// Копии, о которых нужно спросить дом (`scheduleHomeRecordPull`).
-    home_pulls: Mutex<HashSet<String>>,
+    /// Запросы профиля копий у их домов.
+    pub pulls: super::lookup::Pulls,
+    windows: Mutex<HashMap<String, std::collections::VecDeque<i64>>>,
     admin: Mutex<HashSet<String>>,
     in_flight: Mutex<HashMap<String, Shared<BoxFuture<'static, Ensured>>>>,
     nonces: Mutex<HashMap<String, HashMap<String, i64>>>,
@@ -79,24 +80,22 @@ impl std::fmt::Debug for Runtime {
 const NONCE_MAX_AGE_MS: i64 = 15 * 60 * 1000;
 
 impl Runtime {
-    /// Просит спросить дом о копии в фоне (`scheduleHomeRecordPull`).
-    pub fn schedule_home_pull(&self, user_id: &str) {
-        self.home_pulls
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(user_id.to_owned());
-    }
-
-    /// Забирает накопленные просьбы спросить дом.
-    pub fn take_home_pulls(&self) -> Vec<String> {
-        std::mem::take(
-            &mut *self
-                .home_pulls
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        )
-        .into_iter()
-        .collect()
+    /// Скользящее окно частоты (`createLimiter`): `true` — предел исчерпан;
+    /// иначе запрос учитывается.
+    pub fn limited(&self, key: &str, max: usize, window_ms: i64, now: i64) -> bool {
+        let mut windows = self.windows.lock().unwrap_or_else(PoisonError::into_inner);
+        if windows.len() > 10_000 {
+            windows.retain(|_, stamps| stamps.back().is_some_and(|last| *last >= now - window_ms));
+        }
+        let stamps = windows.entry(key.to_owned()).or_default();
+        while stamps.front().is_some_and(|first| *first < now - window_ms) {
+            stamps.pop_front();
+        }
+        if stamps.len() >= max {
+            return true;
+        }
+        stamps.push_back(now);
+        false
     }
 
     /// Идёт ли рукопожатие с этим инстансом (`isHandshakeInFlight`).

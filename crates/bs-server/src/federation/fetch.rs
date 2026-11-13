@@ -142,6 +142,29 @@ pub async fn request(
     trust: Trust,
     timeout: Duration,
 ) -> Result<Answer, FetchError> {
+    let method = if body.is_some() {
+        reqwest::Method::POST
+    } else {
+        reqwest::Method::GET
+    };
+    request_with(config, method, origin, path, body, headers, trust, timeout).await
+}
+
+/// Как [`request`], с явным методом.
+///
+/// # Errors
+/// Как у [`request`].
+#[allow(clippy::too_many_arguments, reason = "поля запроса")]
+pub async fn request_with(
+    config: &Config,
+    method: reqwest::Method,
+    origin: &str,
+    path: &str,
+    body: Option<String>,
+    headers: &[(&'static str, String)],
+    trust: Trust,
+    timeout: Duration,
+) -> Result<Answer, FetchError> {
     let work = async {
         let (base, pinned) = checked(config, origin, trust).await?;
         let target = base.join(path).map_err(|error| error.to_string())?;
@@ -160,10 +183,7 @@ pub async fn request(
             }
         }
         let client = builder.build().map_err(|error| error.to_string())?;
-        let mut call = match &body {
-            Some(_) => client.post(target),
-            None => client.get(target),
-        };
+        let mut call = client.request(method, target);
         for (name, value) in headers {
             call = call.header(*name, value);
         }

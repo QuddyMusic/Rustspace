@@ -382,20 +382,30 @@ fn process(cx: &mut Ctx<'_>, event: &Value) -> Step {
     }
 }
 
-/// Применяет одно событие, скачивая нужные файлы между попытками.
-async fn apply_one(
+/// Выполняет работу в транзакции, скачивая нужные файлы между попытками:
+/// когда работе нужен файл, транзакция откатывается, файл скачивается вне
+/// неё, и работа выполняется заново.
+///
+/// # Errors
+/// Ошибка базы.
+pub async fn with_assets<T, F>(
     app: &AppState,
-    event: Arc<Value>,
     source: Arc<str>,
     peer: Arc<str>,
     delivery: Delivery,
-) -> Result<Verdict, DbError> {
+    work: F,
+) -> Result<T, DbError>
+where
+    T: Send + 'static,
+    F: Fn(&mut Ctx<'_>) -> Result<T, Stop> + Send + Sync + 'static,
+{
+    let work = Arc::new(work);
     let mut assets: HashMap<String, Option<String>> = HashMap::new();
     let mut downloaded: Vec<String> = Vec::new();
     let result = loop {
         let cache = Arc::new(assets.clone());
-        let (app_tx, event_tx, source_tx, peer_tx) =
-            (app.clone(), event.clone(), source.clone(), peer.clone());
+        let (app_tx, work_tx, source_tx, peer_tx) =
+            (app.clone(), work.clone(), source.clone(), peer.clone());
         let attempt = app
             .db
             .transaction(move |tx| {
@@ -411,19 +421,19 @@ async fn apply_one(
                     kept: Vec::new(),
                     stale: Vec::new(),
                 };
-                let verdict = process(&mut cx, &event_tx)?;
+                let value = work_tx(&mut cx)?;
                 let (kept, stale) = (cx.kept, cx.stale);
-                Ok::<_, Stop>((verdict, out, kept, stale))
+                Ok::<_, Stop>((value, out, kept, stale))
             })
             .await;
         match attempt {
-            Ok((verdict, out, kept, stale)) => {
+            Ok((value, out, kept, stale)) => {
                 app.hub.flush(out);
                 downloaded.retain(|file| !kept.contains(file));
                 for file in stale {
                     crate::files::delete_upload_file(&app.config, &file).await;
                 }
-                break Ok(verdict);
+                break Ok(value);
             }
             Err(Stop::Need(url, base)) => {
                 let key = format!("{base}\n{url}");
@@ -442,7 +452,18 @@ async fn apply_one(
     for file in downloaded {
         crate::files::delete_upload_file(&app.config, &file).await;
     }
+    crate::federation::lookup::start_home_pulls(app);
     result
+}
+
+async fn apply_one(
+    app: &AppState,
+    event: Arc<Value>,
+    source: Arc<str>,
+    peer: Arc<str>,
+    delivery: Delivery,
+) -> Result<Verdict, DbError> {
+    with_assets(app, source, peer, delivery, move |cx| process(cx, &event)).await
 }
 
 /// Обрабатывает пачку событий (`processRelayEvents`).

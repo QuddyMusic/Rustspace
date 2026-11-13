@@ -343,7 +343,7 @@ fn is_renameable_replica(user: &Row) -> DbResult<bool> {
 }
 
 /// Копия с именем-заглушкой (`isPlaceholderNamedStub`).
-fn is_placeholder_named(user: &Row) -> DbResult<bool> {
+pub fn is_placeholder_named(user: &Row) -> DbResult<bool> {
     if !is_renameable_replica(user)? {
         return Ok(false);
     }
@@ -462,6 +462,147 @@ pub fn announce_user_updated(tx: &mut dyn Tx, out: &mut Outbox, user: &Row) -> D
         out.to_user(&target, &event);
     }
     Ok(())
+}
+
+static LEGACY_SUFFIXED: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new("^[a-z0-9_]+_(?:[1-9]|10|[0-9a-f]{8})$").ok());
+
+/// Имя копии может нести старый суффикс `_N` (`mayCarryLegacySuffix`).
+///
+/// # Errors
+/// В строке нет нужных столбцов.
+pub fn may_carry_legacy_suffix(user: &Row) -> DbResult<bool> {
+    if user.opt_text("home_instance")?.is_none_or(|h| h.is_empty())
+        || user.opt_text("home_user_id")?.is_none_or(|h| h.is_empty())
+        || user.opt_flag("federation_home_orphaned")? == Some(true)
+    {
+        return Ok(false);
+    }
+    Ok(local_part_of(user)?.is_some_and(|local| {
+        LEGACY_SUFFIXED
+            .as_ref()
+            .is_some_and(|re| re.is_match(&local))
+    }))
+}
+
+fn same_identity(a: &Row, b: &Row) -> DbResult<bool> {
+    let pair = |row: &Row| -> DbResult<Option<(String, String)>> {
+        Ok(
+            match (
+                row.opt_text("home_user_id")?,
+                row.opt_text("home_instance")?,
+            ) {
+                (Some(id), Some(home)) if !id.is_empty() && !home.is_empty() => {
+                    Some((id, home.to_lowercase()))
+                }
+                _ => None,
+            },
+        )
+    };
+    Ok(match (pair(a)?, pair(b)?) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    })
+}
+
+/// Итог присвоения имени (`HandleClaim`).
+#[derive(Debug, Clone)]
+pub enum Claim {
+    /// Имя теперь у строки; `moved` — копия, уступившая имя.
+    Claimed(String, Option<Row>),
+    /// Имя занято аккаунтом, который входит под ним, или копией той же
+    /// идентичности.
+    Held(String),
+}
+
+/// Присваивает строке имя `handle@domain`, отодвигая копию, которая его
+/// занимала (`claimHandleName`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn claim_handle_name(
+    tx: &mut dyn Tx,
+    row: &Row,
+    handle: &str,
+    domain: &str,
+) -> DbResult<Claim> {
+    let username = format!("{handle}@{domain}").to_lowercase();
+    let id = row.text("id")?;
+    let mut moved = None;
+    if let Some(holder) =
+        tx.query_one("SELECT * FROM users WHERE username = ?", params![&username])?
+        && holder.text("id")? != id
+    {
+        if holder.opt_text("password_hash")?.as_deref() != Some(REPLICATED_PASSWORD_HASH)
+            || same_identity(&holder, row)?
+        {
+            return Ok(Claim::Held(holder.text("id")?));
+        }
+        let aside = first_free_username(tx, handle, domain, None)?;
+        let holder_id = holder.text("id")?;
+        tx.execute(
+            "UPDATE users SET username = ? WHERE id = ?",
+            params![&aside, &holder_id],
+        )?;
+        tracing::info!(user = holder_id, to = aside, "копия уступила имя");
+        moved = tx.query_one("SELECT * FROM users WHERE id = ?", params![&holder_id])?;
+    }
+    if row.text("username")? != username {
+        tx.execute(
+            "UPDATE users SET username = ? WHERE id = ?",
+            params![&username, &id],
+        )?;
+    }
+    Ok(Claim::Claimed(username, moved))
+}
+
+/// Имя, которое сообщил дом (`applyHomeHandle`): обновлённая строка и
+/// копия, уступившая имя.
+///
+/// # Errors
+/// Ошибка базы.
+pub fn apply_home_handle(
+    tx: &mut dyn Tx,
+    user: &Row,
+    home_username: Option<&str>,
+) -> DbResult<(Row, Option<Row>)> {
+    let unchanged = || Ok((user.clone(), None));
+    let Some(handle) = handle_from_hint(home_username) else {
+        return unchanged();
+    };
+    let (Some(home), Some(_)) = (
+        user.opt_text("home_instance")?.filter(|h| !h.is_empty()),
+        user.opt_text("home_user_id")?.filter(|h| !h.is_empty()),
+    ) else {
+        return unchanged();
+    };
+    if user.opt_flag("federation_home_orphaned")? == Some(true) {
+        return unchanged();
+    }
+    let id = user.text("id")?;
+    if is_renameable_replica(user)? {
+        let current = user.text("username")?;
+        let username = first_free_username(tx, &handle, &home, Some((&id, &current)))?;
+        if username == current {
+            return unchanged();
+        }
+        tx.execute(
+            "UPDATE users SET username = ? WHERE id = ?",
+            params![&username, &id],
+        )?;
+        let row = tx.query_one("SELECT * FROM users WHERE id = ?", params![&id])?;
+        return Ok((row.unwrap_or_else(|| user.clone()), None));
+    }
+    match claim_handle_name(tx, user, &handle, &home)? {
+        Claim::Held(holder) => {
+            tracing::warn!(user = id, holder, "аккаунт сохраняет имя: имя дома занято");
+            unchanged()
+        }
+        Claim::Claimed(_, moved) => {
+            let row = tx.query_one("SELECT * FROM users WHERE id = ?", params![&id])?;
+            Ok((row.unwrap_or_else(|| user.clone()), moved))
+        }
+    }
 }
 
 /// Подсказки о пользователе из события.
@@ -674,7 +815,7 @@ pub fn resolve_or_create(
     }
     tracing::info!(user = id, username, domain, "создана копия пользователя");
     if !hints.home_asked {
-        app.federation.schedule_home_pull(&id);
+        app.federation.pulls.schedule(&id);
     }
     let Some(user) = tx.query_one("SELECT * FROM users WHERE id = ?", params![&id])? else {
         return Ok(None);

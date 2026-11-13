@@ -10,6 +10,7 @@ pub mod fetch;
 pub mod handshake;
 pub mod identity;
 pub mod inbound;
+pub mod lookup;
 pub mod outbox;
 pub mod peers;
 pub mod presence;

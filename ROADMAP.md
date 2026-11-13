@@ -168,7 +168,18 @@ original server.
        it and the event is applied again. Checked on the stand (`f_inbound.py`: `inbound` and
        `relay_checks`, original ↔ original against `bs-server` ↔ original and `bs-server` ↔
        `bs-server`, on SQLite and on PostgreSQL), 48 steps with no differences.
-     - [ ] Account replicas and login from another instance, `user@domain` lookup.
+     - [x] Account replicas and login from another instance, `user@domain` lookup: the
+       `users/lookup`, `users/by-home-id` and `verify-attach-proof` peer routes (60 a minute
+       per peer, signed answers for the proof); friend requests to `user@domain` and by
+       identity (peering on demand, lookup, a replica with the home's profile, the event);
+       asking a new replica's home for its record and a pass over incomplete replicas when a
+       peer becomes active (names, the profile with its version); signing in to a replica with
+       the home password (the hash is refreshed after the home and its epoch confirm it); the
+       attach proof, re-attaching a detached account (merging its replica, reconciling
+       one-to-one conversation keys), credentials for other instances and deleting one's
+       replicas on them. Checked on the stand (`f_lookup.py`: `friends` and `accounts`, plus
+       `f_inbound.py` and `f_outbox.py` now without allowances for the missing lookup), on
+       SQLite and PostgreSQL, with `bs-server` on one and on both sides, with no differences.
      - [ ] Sync after downtime and state reconciliation.
      - [ ] Cross-instance calls.
      - [ ] Two-instance stand scenarios for delivery, inbound events, replicas and calls;
