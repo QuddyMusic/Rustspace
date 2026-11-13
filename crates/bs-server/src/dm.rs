@@ -155,6 +155,21 @@ pub fn find_or_create_one_on_one(
     caller: &str,
     target: &str,
 ) -> DbResult<(String, bool)> {
+    find_or_create_pair(tx, ids, caller, target, false)
+}
+
+/// Как [`find_or_create_one_on_one`]; `open_both` — оба участника видят
+/// переписку сразу (`open: 'both'`, переписка создаётся пришедшим сообщением).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn find_or_create_pair(
+    tx: &mut dyn Tx,
+    ids: &Snowflake,
+    caller: &str,
+    target: &str,
+    open_both: bool,
+) -> DbResult<(String, bool)> {
     let key = one_on_one_key(&home_identity(tx, caller)?, &home_identity(tx, target)?);
     let keyed = tx
         .query_one(
@@ -164,7 +179,7 @@ pub fn find_or_create_one_on_one(
         .map(|row| row.text("id"))
         .transpose()?;
     if let Some(channel) = keyed {
-        for (party, closed) in [(caller, false), (target, true)] {
+        for (party, closed) in [(caller, false), (target, !open_both)] {
             if !is_member(tx, &channel, party)? {
                 insert_member(tx, &channel, party, closed, now_ms())?;
             }
@@ -204,7 +219,7 @@ pub fn find_or_create_one_on_one(
         params![&channel, &key, now],
     )?;
     insert_member(tx, &channel, caller, false, now)?;
-    insert_member(tx, &channel, target, true, now)?;
+    insert_member(tx, &channel, target, !open_both, now)?;
     Ok((channel, true))
 }
 

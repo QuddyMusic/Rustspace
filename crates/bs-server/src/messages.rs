@@ -126,6 +126,8 @@ pub fn embeds(tx: &mut dyn Tx, column: &str, message_id: &str) -> DbResult<Vec<V
 }
 
 /// Реакции сообщения. `with_user` добавляет автора реакции (так отвечает REST).
+/// Порядок — как у SQLite оригинала, который читает их по уникальному индексу
+/// `(message_id, user_id, emoji)`.
 ///
 /// # Errors
 /// Ошибка базы.
@@ -137,9 +139,10 @@ pub fn reactions(
 ) -> DbResult<Vec<Value>> {
     let sql = if dm {
         "SELECT id, dm_message_id AS message_id, user_id, emoji, created_at FROM dm_reactions \
-         WHERE dm_message_id = ?"
+         WHERE dm_message_id = ? ORDER BY user_id, emoji"
     } else {
-        "SELECT id, message_id, user_id, emoji, created_at FROM reactions WHERE message_id = ?"
+        "SELECT id, message_id, user_id, emoji, created_at FROM reactions WHERE message_id = ? \
+         ORDER BY user_id, emoji"
     };
     let rows = tx.query(sql, params![message_id])?;
     let mut users: HashMap<String, Option<Value>> = HashMap::new();

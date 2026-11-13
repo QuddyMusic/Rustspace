@@ -118,25 +118,23 @@ pub fn to_profile_audience(
     Ok(())
 }
 
-/// Статус, который аккаунт публикует при подключении.
-fn connect_status(tx: &mut dyn Tx, user_id: &str) -> DbResult<String> {
+/// Статус, который аккаунт публикует при подключении (`statusOnConnect`).
+fn connect_status(tx: &mut dyn Tx, state: &AppState, user_id: &str) -> DbResult<String> {
+    if let Some(shown) =
+        crate::federation::presence::on_connect(tx, &state.federation.projections, user_id)?
+    {
+        return Ok(shown);
+    }
     let row = tx.query_one(
-        "SELECT home_instance, federation_home_orphaned, chosen_status FROM users WHERE id = ?",
+        "SELECT chosen_status FROM users WHERE id = ?",
         params![user_id],
     )?;
-    let mut status = "online".to_owned();
-    if let Some(row) = row {
-        let owns = row
-            .opt_text("home_instance")?
-            .is_none_or(|home| home.is_empty())
-            || row.opt_flag("federation_home_orphaned")? == Some(true);
-        if owns
-            && let Some(chosen) = row.opt_text("chosen_status")?
-            && matches!(chosen.as_str(), "online" | "idle" | "dnd")
-        {
-            status = chosen;
-        }
-    }
+    let status = row
+        .map(|row| row.opt_text("chosen_status"))
+        .transpose()?
+        .flatten()
+        .filter(|chosen| crate::federation::presence::is_chosen(chosen))
+        .unwrap_or_else(|| "online".to_owned());
     tx.execute(
         "UPDATE users SET status = ? WHERE id = ?",
         params![&status, user_id],
@@ -199,7 +197,7 @@ async fn authenticate(
         .transaction(move |tx| {
             let user = auth::verify_token(&state_for_tx, tx, &token)?;
             touch_activity(tx, &user.id, client)?;
-            let status = connect_status(tx, &user.id)?;
+            let status = connect_status(tx, &state_for_tx, &user.id)?;
             let mut payload = ready::build(tx, &hub, &user.id)?;
             payload.insert("type".into(), json!("ready"));
             let mut outbox = Outbox::new();
@@ -418,30 +416,46 @@ fn disconnected(state: &AppState, session: &Session) {
             .db
             .transaction(move |tx| {
                 let mut outbox = Outbox::new();
-                let row = tx.query_one(
-                    "SELECT home_instance, federation_home_orphaned, status FROM users WHERE id = ?",
+                if let Some((status, changed)) = crate::federation::presence::on_disconnect(
+                    tx,
+                    &app.federation.projections,
+                    &user_id,
+                )? {
+                    // Реплика возвращается к статусу, объявленному домом; дому
+                    // ничего не сообщается.
+                    let offline = status == "offline";
+                    if offline {
+                        app.hub.set_activities(&user_id, Vec::new());
+                    }
+                    if changed {
+                        let event =
+                            presence_update(tx, &user_id, &status, offline.then_some(&[][..]))?;
+                        to_profile_audience(tx, &mut outbox, &user_id, &event)?;
+                    }
+                    return Ok(outbox);
+                }
+                if tx
+                    .query_one("SELECT id FROM users WHERE id = ?", params![&user_id])?
+                    .is_none()
+                {
+                    return Ok::<_, ApiError>(outbox);
+                }
+                tx.execute(
+                    "UPDATE users SET status = 'offline' WHERE id = ?",
                     params![&user_id],
                 )?;
-                let Some(row) = row else { return Ok::<_, ApiError>(outbox) };
-                let owns = row.opt_text("home_instance")?.is_none_or(|home| home.is_empty())
-                    || row.opt_flag("federation_home_orphaned")? == Some(true);
-                let changed = row.opt_text("status")?.as_deref() != Some("offline");
-                tx.execute("UPDATE users SET status = 'offline' WHERE id = ?", params![&user_id])?;
-                // Реплика без известной проекции дома тоже возвращается в
-                // офлайн, но молчит, если её статус не изменился.
-                if owns || changed {
-                    let event = presence_update(tx, &user_id, "offline", Some(&[]))?;
-                    to_profile_audience(tx, &mut outbox, &user_id, &event)?;
-                }
-                if owns {
-                    crate::federation::relay::presence(
-                        tx,
-                        crate::federation::relay::Relay { config: &app.config, ids: &app.ids },
-                        &user_id,
-                        "offline",
-                        &[],
-                    )?;
-                }
+                let event = presence_update(tx, &user_id, "offline", Some(&[]))?;
+                to_profile_audience(tx, &mut outbox, &user_id, &event)?;
+                crate::federation::relay::presence(
+                    tx,
+                    crate::federation::relay::Relay {
+                        config: &app.config,
+                        ids: &app.ids,
+                    },
+                    &user_id,
+                    "offline",
+                    &[],
+                )?;
                 Ok(outbox)
             })
             .await;

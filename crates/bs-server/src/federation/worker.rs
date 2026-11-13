@@ -451,6 +451,29 @@ async fn health_tick(state: &AppState) {
     handshake::resolve_stale_parked(state).await;
 }
 
+/// Чистит журнал применённых событий, часы субъектов и очередь файлов
+/// (`sweepAppliedEvents`, `sweepSubjectClocks`, `cleanupFederationFileQueue`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn sweep_inbound(tx: &mut dyn crate::db::Tx, now: i64) -> crate::db::DbResult<u64> {
+    const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+    let mut total = super::inbound::sweep_applied(tx, now)?;
+    total += tx.execute(
+        "DELETE FROM federation_subject_clocks WHERE recorded_at < ?",
+        crate::params![now - 400 * DAY_MS],
+    )?;
+    total += tx.execute(
+        "DELETE FROM federation_file_queue WHERE status = 'completed' AND created_at < ?",
+        crate::params![now - 7 * DAY_MS],
+    )?;
+    total += tx.execute(
+        "DELETE FROM federation_file_queue WHERE expires_at < ?",
+        crate::params![now],
+    )?;
+    Ok(total)
+}
+
 /// Запускает фоновые задачи ведения пиров.
 pub fn spawn(state: &AppState) {
     if state.config.disable_federation_workers {
@@ -478,6 +501,14 @@ pub fn spawn(state: &AppState) {
     super::outbox::spawn(state);
     let app = state.clone();
     tokio::spawn(async move {
+        super::inbound::profile::backfill_assets(&app).await;
+        loop {
+            tokio::time::sleep(super::inbound::files::INTERVAL).await;
+            super::inbound::files::tick(&app).await;
+        }
+    });
+    let app = state.clone();
+    tokio::spawn(async move {
         let mut minute = tokio::time::interval(Duration::from_mins(1));
         let mut passed = 0_u32;
         loop {
@@ -494,6 +525,13 @@ pub fn spawn(state: &AppState) {
                     .unwrap_or(0);
                 if expired > 0 {
                     tracing::info!(expired, "из очереди исходящих удалены просроченные события");
+                }
+                let swept = app
+                    .run(|tx, _| Ok(sweep_inbound(tx, now_ms())?))
+                    .await
+                    .unwrap_or(0);
+                if swept > 0 {
+                    tracing::info!(swept, "удалены устаревшие записи приёма событий");
                 }
             }
         }

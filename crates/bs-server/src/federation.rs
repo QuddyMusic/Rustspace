@@ -8,8 +8,11 @@
 
 pub mod fetch;
 pub mod handshake;
+pub mod identity;
+pub mod inbound;
 pub mod outbox;
 pub mod peers;
+pub mod presence;
 pub mod relay;
 pub mod reset;
 pub mod worker;

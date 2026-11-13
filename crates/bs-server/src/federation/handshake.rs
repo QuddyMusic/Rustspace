@@ -62,6 +62,8 @@ pub enum Intent {
 pub struct Runtime {
     /// Статус копии пользователя, как его объявил дом (`projections`).
     pub projections: Mutex<HashMap<String, String>>,
+    /// Копии, о которых нужно спросить дом (`scheduleHomeRecordPull`).
+    home_pulls: Mutex<HashSet<String>>,
     admin: Mutex<HashSet<String>>,
     in_flight: Mutex<HashMap<String, Shared<BoxFuture<'static, Ensured>>>>,
     nonces: Mutex<HashMap<String, HashMap<String, i64>>>,
@@ -77,6 +79,26 @@ impl std::fmt::Debug for Runtime {
 const NONCE_MAX_AGE_MS: i64 = 15 * 60 * 1000;
 
 impl Runtime {
+    /// Просит спросить дом о копии в фоне (`scheduleHomeRecordPull`).
+    pub fn schedule_home_pull(&self, user_id: &str) {
+        self.home_pulls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(user_id.to_owned());
+    }
+
+    /// Забирает накопленные просьбы спросить дом.
+    pub fn take_home_pulls(&self) -> Vec<String> {
+        std::mem::take(
+            &mut *self
+                .home_pulls
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+        .into_iter()
+        .collect()
+    }
+
     /// Идёт ли рукопожатие с этим инстансом (`isHandshakeInFlight`).
     #[must_use]
     pub fn in_flight(&self, origin: &str) -> bool {

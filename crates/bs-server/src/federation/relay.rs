@@ -223,7 +223,7 @@ fn identity_part(origin: &str, config: &Config, actor: &Value) -> Option<(String
 }
 
 /// Сдвигает часы субъекта к `at` (`recordSubjectChange`).
-fn record_subject(tx: &mut dyn Tx, subject: &str, at: i64) -> DbResult<()> {
+pub fn record_subject(tx: &mut dyn Tx, subject: &str, at: i64) -> DbResult<()> {
     let now = now_ms();
     let current = tx
         .query_one(
@@ -247,6 +247,56 @@ fn record_subject(tx: &mut dyn Tx, subject: &str, at: i64) -> DbResult<()> {
         }
     }
     Ok(())
+}
+
+/// Ключ часов участника группы (`memberClockSubject`).
+#[must_use]
+pub fn member_subject(config: &Config, federated: Option<&str>, member: &Value) -> Option<String> {
+    let federated = federated.filter(|id| !id.is_empty())?;
+    let (user, home) = identity_part(&our_origin(config), config, member)?;
+    Some(js_array(&["member", federated, &user, &home]))
+}
+
+/// Ключ часов пары друзей (`friendPairClockSubject`).
+#[must_use]
+pub fn friend_subject(config: &Config, a: &Value, b: &Value) -> Option<String> {
+    let origin = our_origin(config);
+    let first = identity_part(&origin, config, a)?;
+    let second = identity_part(&origin, config, b)?;
+    let key = |side: &(String, String)| js_array(&[&side.0, &side.1]);
+    let (low, high) = if key(&first) <= key(&second) {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    Some(js_array(&["friend", &low.0, &low.1, &high.0, &high.1]))
+}
+
+/// Изменение `at` старше уже известного (`isSubjectChangeStale`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn subject_stale(tx: &mut dyn Tx, subject: &str, at: i64) -> DbResult<bool> {
+    Ok(tx
+        .query_one(
+            "SELECT changed_at FROM federation_subject_clocks WHERE subject_key = ?",
+            params![subject],
+        )?
+        .map(|row| row.int("changed_at"))
+        .transpose()?
+        .is_some_and(|changed| at < changed))
+}
+
+/// Принимает изменение, если оно не устарело (`claimSubjectChange`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn claim_subject(tx: &mut dyn Tx, subject: &str, at: i64) -> DbResult<bool> {
+    if subject_stale(tx, subject, at)? {
+        return Ok(false);
+    }
+    record_subject(tx, subject, at)?;
+    Ok(true)
 }
 
 fn js_array(items: &[&str]) -> String {
@@ -308,7 +358,7 @@ static MENTION_SCAN: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"(?s)(```.*?```|`[^`]+`)|<@([a-zA-Z0-9_-]+)>").ok());
 
 /// Идентификаторы упоминаний вне кода (`mentionTokenIds`).
-fn mention_ids(content: &str) -> Vec<String> {
+pub fn mention_ids(content: &str) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
     let Some(scan) = MENTION_SCAN.as_ref() else {
         return ids;

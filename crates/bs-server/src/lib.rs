@@ -354,6 +354,8 @@ pub fn app(state: AppState) -> Router {
         .route("/api/federation/peer/rotate", post(routes::federation::rotate_inbound))
         .route("/api/federation/peer/denied", post(routes::federation::denied))
         .route("/api/federation/epoch", post(routes::federation::epoch))
+        .route("/api/federation/relay", post(routes::federation::relay))
+        .route("/api/federation/identity", delete(routes::federation::delete_identity))
         .route("/api/federation/peers", get(routes::federation::list_peers))
         .route(
             "/api/federation/peers/{id}",

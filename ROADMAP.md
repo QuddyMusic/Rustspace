@@ -153,7 +153,21 @@ original server.
        the stand, federation addresses instances by https names through a TLS front, as the
        original does. A friend request to someone on another instance and typing arrive with
        the lookup and calls steps.
-     - [ ] Inbound events: messages, edits, reactions, conversations, profiles, presence.
+     - [x] Inbound events: `/api/federation/relay` (signature, replay protection, 90 batches
+       a minute per peer, the batch source bound to the signing peer) and
+       `DELETE /api/federation/identity`; messages (with mentions, replies, system space
+       invites and attachments queued for download), edits, deletions (with tombstones
+       against a late create), reactions, read positions, closing and reopening, groups
+       (bootstrap by the first `member_add`, members, owner, name and icon), friendship
+       (with the applied-event ledger and subject clocks), profile and presence of replicas.
+       Each event is checked for attribution: a peer speaks only for its own users, and for
+       ours only when the user holds an account there. Replicas are created and named as in
+       the original; profile pictures are downloaded through an SSRF-safe fetch (8 MB, images
+       only), attachments by a background queue. Each event is applied in its own transaction;
+       when files are needed the transaction is rolled back, the files are downloaded outside
+       it and the event is applied again. Checked on the stand (`f_inbound.py`: `inbound` and
+       `relay_checks`, original ↔ original against `bs-server` ↔ original and `bs-server` ↔
+       `bs-server`, on SQLite and on PostgreSQL), 48 steps with no differences.
      - [ ] Account replicas and login from another instance, `user@domain` lookup.
      - [ ] Sync after downtime and state reconciliation.
      - [ ] Cross-instance calls.

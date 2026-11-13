@@ -227,6 +227,30 @@ fn relay_friend_event(
 }
 
 /// Отправляет получателю текущее присутствие субъекта (`sendPresenceSnapshot`).
+/// Дружба только что возникла: каждый получает присутствие другого, а дом
+/// друга-копии — присутствие своего (`exchangeFriendPresence`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn exchange_friend_presence(
+    tx: &mut dyn Tx,
+    app: &AppState,
+    out: &mut Outbox,
+    a: &str,
+    b: &str,
+) -> DbResult<()> {
+    presence_snapshot(tx, &app.hub, out, a, b)?;
+    presence_snapshot(tx, &app.hub, out, b, a)?;
+    let relay = federation::relay::Relay {
+        config: &app.config,
+        ids: &app.ids,
+    };
+    let first = app.hub.activities(a);
+    let second = app.hub.activities(b);
+    federation::relay::presence_for_friend(tx, relay, a, b, &first)?;
+    federation::relay::presence_for_friend(tx, relay, b, a, &second)
+}
+
 fn presence_snapshot(
     tx: &mut dyn Tx,
     hub: &Hub,
@@ -311,16 +335,7 @@ pub async fn answer_request(
                         }),
                     );
                 }
-                presence_snapshot(tx, &app.hub, out, &from, &user.id)?;
-                presence_snapshot(tx, &app.hub, out, &user.id, &from)?;
-                let relay = federation::relay::Relay {
-                    config: &app.config,
-                    ids: &app.ids,
-                };
-                let theirs = app.hub.activities(&from);
-                let mine = app.hub.activities(&user.id);
-                federation::relay::presence_for_friend(tx, relay, &from, &user.id, &theirs)?;
-                federation::relay::presence_for_friend(tx, relay, &user.id, &from, &mine)?;
+                exchange_friend_presence(tx, &app, out, &from, &user.id)?;
                 let created = request.int("created_at")?;
                 relay_friend_event(
                     tx,

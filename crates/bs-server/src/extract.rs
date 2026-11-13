@@ -161,6 +161,8 @@ fn body_limit(path: &str) -> usize {
     match path {
         "/api/stickers" => crate::routes::stickers::UPLOAD_BODY_LIMIT,
         "/api/federation/epoch" => 4 * 1024,
+        "/api/federation/relay" => 10 * 1024 * 1024,
+        "/api/federation/sync" => 64 * 1024,
         _ => BODY_LIMIT,
     }
 }

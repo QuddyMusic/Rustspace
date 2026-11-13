@@ -637,6 +637,279 @@ pub async fn epoch(State(state): State<AppState>, request: Request) -> Outcome {
     ))
 }
 
+/// Проверка подписанного запроса пира (`authenticateS2SPeer`): заголовки,
+/// действующий пир, предел частоты (до проверки подписи), подпись,
+/// одноразовое число. Возвращает пира и одноразовое число запроса.
+fn authenticate_s2s(
+    state: &AppState,
+    headers: &HeaderMap,
+    body: &SignedBody,
+    peer: Option<Peer>,
+    signed: Option<&Signed>,
+    rate_limit: Option<(u32, Duration)>,
+) -> Result<(Peer, Option<String>), Response> {
+    let Some(signed) = signed else {
+        return Err(fail(401, "Missing or malformed federation headers"));
+    };
+    let _ = headers;
+    let Some(peer) = peer.filter(|peer| peer.status == "active") else {
+        return Err(fail(403, "Unknown or inactive peer"));
+    };
+    if let Some((max, window)) = rate_limit
+        && !state
+            .hub
+            .allow(&format!("federation-relay:{}", peer.origin), max, window)
+    {
+        return Err(fail(429, "Rate limit exceeded"));
+    }
+    if !verified(body.stringified(), signed, peer.secrets()) {
+        return Err(fail(401, "Invalid signature"));
+    }
+    match &signed.nonce {
+        Some(nonce) => {
+            if state.federation.nonce_seen(&peer.origin, nonce, now_ms()) {
+                return Err(fail(409, "Duplicate nonce — possible replay"));
+            }
+        }
+        None if peer.nonce_supported => {
+            return Err(fail(
+                401,
+                "Nonce required — peer previously supported nonces",
+            ));
+        }
+        None => {
+            tracing::warn!(
+                origin = peer.origin,
+                "пир не поддерживает защиту от повторов (нет nonce)"
+            );
+        }
+    }
+    let nonce = signed.nonce.clone();
+    Ok((peer, nonce))
+}
+
+async fn s2s_peer(state: &AppState, signed: Option<&Signed>) -> Result<Option<Peer>, ApiError> {
+    let Some(origin) = signed.map(|signed| signed.origin.clone()) else {
+        return Ok(None);
+    };
+    state
+        .run(move |tx, _| Ok(peers::by_origin(tx, &origin)?))
+        .await
+}
+
+/// `POST /api/federation/relay`: события от пира.
+pub async fn relay(State(state): State<AppState>, request: Request) -> Outcome {
+    let (headers, body) = match signed_body(request).await {
+        Ok(read) => read,
+        Err(refusal) => return Ok(refusal),
+    };
+    let signed = signed_headers(&headers);
+    let peer = s2s_peer(&state, signed.as_ref()).await?;
+    let (peer, nonce) = match authenticate_s2s(
+        &state,
+        &headers,
+        &body,
+        peer,
+        signed.as_ref(),
+        Some((90, Duration::from_mins(1))),
+    ) {
+        Ok(found) => found,
+        Err(refusal) => return Ok(refusal),
+    };
+    let claimed = body
+        .value
+        .get("sourceInstanceId")
+        .and_then(Value::as_str)
+        .filter(|epoch| !epoch.is_empty())
+        .map(str::to_owned);
+    if let Some(claimed) = claimed
+        && peer.epoch.is_none()
+    {
+        let id = peer.id.clone();
+        state
+            .run(move |tx, _| {
+                tx.execute(
+                    "UPDATE federation_peers SET peer_instance_id = ? WHERE id = ? AND peer_instance_id IS NULL",
+                    params![claimed, id],
+                )?;
+                Ok(())
+            })
+            .await?;
+    }
+    let events = body
+        .value
+        .get("version")
+        .filter(|version| version.as_f64() == Some(1.0))
+        .and_then(|_| body.value.get("events"))
+        .and_then(Value::as_array);
+    let Some(events) = events else {
+        return Ok(fail(400, "Invalid relay request format"));
+    };
+    if events.len() > 50 {
+        return Ok(fail(400, "Maximum 50 events per batch"));
+    }
+    let Some(source) = str_field(&body.value, "sourceInstance").filter(|s| !s.is_empty()) else {
+        return Ok(fail(400, "sourceInstance is required"));
+    };
+    if federation_auth::normalize_origin(Some(source))
+        != federation_auth::normalize_origin(Some(&peer.origin))
+    {
+        tracing::warn!(
+            peer = peer.origin,
+            source,
+            "источник пачки не совпадает с пиром"
+        );
+        return Ok(fail(
+            403,
+            "sourceInstance does not match the authenticated peer",
+        ));
+    }
+    let outcome = crate::federation::inbound::process_events(
+        &state,
+        events,
+        source,
+        &peer.origin,
+        crate::federation::inbound::Delivery::Live,
+    )
+    .await;
+    let (id, ratchet) = (peer.id.clone(), nonce.is_some() && !peer.nonce_supported);
+    let configured = i64::try_from(state.config.max_upload_size).unwrap_or(i64::MAX);
+    let max_upload = state
+        .run(move |tx, _| {
+            let mut sql =
+                "UPDATE federation_peers SET last_seen_at = ?, consecutive_failures = 0".to_owned();
+            if ratchet {
+                sql.push_str(", nonce_supported = 1");
+            }
+            sql.push_str(" WHERE id = ?");
+            tx.execute(&sql, params![now_ms(), id])?;
+            let row = tx.query_one(
+                "SELECT max_upload_size_bytes FROM instance_settings WHERE id = 1",
+                params![],
+            )?;
+            Ok(row
+                .map(|row| row.opt_int("max_upload_size_bytes"))
+                .transpose()?
+                .flatten()
+                .unwrap_or(configured))
+        })
+        .await?;
+    let mut response = json!({
+        "accepted": outcome.accepted,
+        "rejected": crate::federation::inbound::rejections_for_sender(
+            &outcome.rejected,
+            body.value.get("capabilities"),
+        ),
+        "maxUploadSize": max_upload,
+    });
+    if !outcome.undeliverable.is_empty() {
+        response["undeliverable"] = Value::Array(
+            outcome
+                .undeliverable
+                .iter()
+                .map(|(id, reason)| json!({"messageId": id, "reason": reason}))
+                .collect(),
+        );
+    }
+    Ok(send(200, response))
+}
+
+/// `DELETE /api/federation/identity`: дом удаляет своего пользователя здесь.
+pub async fn delete_identity(State(state): State<AppState>, request: Request) -> Outcome {
+    let (headers, body) = match signed_body(request).await {
+        Ok(read) => read,
+        Err(refusal) => return Ok(refusal),
+    };
+    let signed = signed_headers(&headers);
+    let peer = s2s_peer(&state, signed.as_ref()).await?;
+    let (peer, _) = match authenticate_s2s(&state, &headers, &body, peer, signed.as_ref(), None) {
+        Ok(found) => found,
+        Err(refusal) => return Ok(refusal),
+    };
+    let home_user = str_field(&body.value, "homeUserId").filter(|s| !s.is_empty());
+    let home = str_field(&body.value, "homeInstance").filter(|s| !s.is_empty());
+    let mode = str_field(&body.value, "mode").filter(|mode| matches!(*mode, "soft" | "full"));
+    let (Some(home_user), Some(_), Some(mode)) = (home_user, home, mode) else {
+        return Ok(fail(
+            400,
+            "Invalid request: homeUserId, homeInstance, and mode (soft|full) required",
+        ));
+    };
+    let (home_user, purge, origin) = (home_user.to_owned(), mode == "full", peer.origin.clone());
+    let app = state.clone();
+    let outcome = state
+        .run(move |tx, out| {
+            let Some(user) = tx.query_one(
+                "SELECT * FROM users WHERE home_user_id = ? AND is_deleted = 0",
+                params![&home_user],
+            )?
+            else {
+                return Ok(Ok(Vec::new()));
+            };
+            let home = user.opt_text("home_instance")?.unwrap_or_default();
+            if home.is_empty() || reset::domain_of(&home) != reset::domain_of(&origin) {
+                return Ok(Err(fail(
+                    403,
+                    "Attribution mismatch: you can only delete users from your own instance",
+                )));
+            }
+            if user.opt_flag("federation_home_orphaned")? == Some(true) {
+                return Ok(Ok(Vec::new()));
+            }
+            let id = user.text("id")?;
+            let owned = tx.query(
+                "SELECT id, name FROM spaces WHERE owner_id = ?",
+                params![&id],
+            )?;
+            if !owned.is_empty() {
+                let spaces = owned
+                    .iter()
+                    .map(|row| Ok(json!({"id": row.text("id")?, "name": row.text("name")?})))
+                    .collect::<DbResult<Vec<_>>>()?;
+                return Ok(Err(send(
+                    409,
+                    json!({"error": "owns_spaces", "ownedSpaces": spaces, "statusCode": 409}),
+                )));
+            }
+            let spaces: Vec<String> = tx
+                .query(
+                    "SELECT space_id FROM space_members WHERE user_id = ?",
+                    params![&id],
+                )?
+                .iter()
+                .map(|row| row.text("space_id"))
+                .collect::<DbResult<_>>()?;
+            let audience = crate::ws::profile_targets(tx, &id)?;
+            let stale = crate::routes::account::tombstone(tx, &id, purge)?;
+            crate::federation::presence::forget(&app.federation.projections, &id);
+            for space in &spaces {
+                out.to_space(
+                    space,
+                    &json!({"type": "member_left", "spaceId": space, "userId": id}),
+                );
+            }
+            if let Some(row) = crate::routes::users::user_row(tx, &id)? {
+                let event = json!({"type": "user_updated", "user": crate::routes::users::sanitize_user(&row, false)?});
+                for target in &audience {
+                    out.to_user(target, &event);
+                }
+            }
+            out.close_user(&id);
+            tracing::info!(user = id, origin, mode = if purge { "full" } else { "soft" }, "пользователь удалён по запросу дома");
+            Ok(Ok(stale))
+        })
+        .await?;
+    match outcome {
+        Ok(stale) => {
+            for file in stale.iter().filter(|file| !file.starts_with("http")) {
+                crate::files::delete_upload_file(&state.config, file).await;
+            }
+            Ok(send(200, json!({"success": true})))
+        }
+        Err(refusal) => Ok(refusal),
+    }
+}
+
 /// Ответ JSON, подписанный общим секретом (`sendSignedJson`).
 #[must_use]
 pub fn signed_json(state: &AppState, payload: &Value, secret: &str) -> Response {

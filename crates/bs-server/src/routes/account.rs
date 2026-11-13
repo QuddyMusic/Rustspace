@@ -135,6 +135,15 @@ pub async fn change_password(
 /// # Errors
 /// Ошибка базы.
 pub fn tombstone_user(tx: &mut dyn Tx, user_id: &str) -> DbResult<Vec<String>> {
+    tombstone(tx, user_id, true)
+}
+
+/// Как [`tombstone_user`]; без `purge` сообщения и реакции в пространствах
+/// остаются (удаление «мягкое», `purgeContent: false`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn tombstone(tx: &mut dyn Tx, user_id: &str, purge: bool) -> DbResult<Vec<String>> {
     let Some(user) = user_row(tx, user_id)? else {
         return Ok(Vec::new());
     };
@@ -169,8 +178,6 @@ pub fn tombstone_user(tx: &mut dyn Tx, user_id: &str) -> DbResult<Vec<String>> {
         "DELETE FROM space_members WHERE user_id = ?",
         "DELETE FROM member_roles WHERE user_id = ?",
         "DELETE FROM read_states WHERE user_id = ?",
-        "DELETE FROM reactions WHERE user_id = ?",
-        "DELETE FROM dm_reactions WHERE user_id = ?",
         "DELETE FROM user_federation_credentials WHERE user_id = ?",
         "DELETE FROM bans WHERE user_id = ?",
         "DELETE FROM join_requests WHERE user_id = ?",
@@ -184,6 +191,13 @@ pub fn tombstone_user(tx: &mut dyn Tx, user_id: &str) -> DbResult<Vec<String>> {
          (SELECT id FROM dm_channels WHERE owner_id IS NOT NULL)",
     ] {
         tx.execute(sql, params![user_id])?;
+    }
+    if purge {
+        tx.execute("DELETE FROM reactions WHERE user_id = ?", params![user_id])?;
+        tx.execute(
+            "DELETE FROM dm_reactions WHERE user_id = ?",
+            params![user_id],
+        )?;
     }
     tx.execute(
         "DELETE FROM friends WHERE user_id = ? OR friend_id = ?",
@@ -240,21 +254,23 @@ pub fn tombstone_user(tx: &mut dyn Tx, user_id: &str) -> DbResult<Vec<String>> {
         )?;
         tx.execute("DELETE FROM dm_channels WHERE id = ?", params![channel])?;
     }
-    for row in tx.query(
-        "SELECT a.filename FROM attachments a JOIN messages m ON m.id = a.message_id WHERE m.user_id = ?",
-        params![user_id],
-    )? {
-        stale.push(row.text("filename")?);
+    if purge {
+        for row in tx.query(
+            "SELECT a.filename FROM attachments a JOIN messages m ON m.id = a.message_id WHERE m.user_id = ?",
+            params![user_id],
+        )? {
+            stale.push(row.text("filename")?);
+        }
+        tx.execute(
+            "DELETE FROM attachments WHERE message_id IN (SELECT id FROM messages WHERE user_id = ?)",
+            params![user_id],
+        )?;
+        tx.execute(
+            "DELETE FROM embeds WHERE message_id IN (SELECT id FROM messages WHERE user_id = ?)",
+            params![user_id],
+        )?;
+        tx.execute("DELETE FROM messages WHERE user_id = ?", params![user_id])?;
     }
-    tx.execute(
-        "DELETE FROM attachments WHERE message_id IN (SELECT id FROM messages WHERE user_id = ?)",
-        params![user_id],
-    )?;
-    tx.execute(
-        "DELETE FROM embeds WHERE message_id IN (SELECT id FROM messages WHERE user_id = ?)",
-        params![user_id],
-    )?;
-    tx.execute("DELETE FROM messages WHERE user_id = ?", params![user_id])?;
     tx.execute(
         "UPDATE users SET username = ?, password_hash = ?, display_name = NULL, avatar = NULL, \
          banner = NULL, bio = NULL, custom_status = NULL, accent_color = NULL, avatar_color = NULL, \
