@@ -244,6 +244,27 @@ cargo build --release -p bs-server      # target/release/backspace-server
 
 Нужен только компилятор C (SQLite собирается вместе с сервером). Node.js не нужен.
 
+### Установка на сервер (один скрипт)
+
+`packaging/server/setup.sh` настраивает сервер с нуля на Debian, Ubuntu или Alpine (systemd
+или OpenRC), вместе с голосом, видео и стримами через LiveKit:
+
+```sh
+git clone <этот репозиторий> bs-rs && cd bs-rs
+sudo sh packaging/server/setup.sh --domain chat.example.org
+```
+
+Скрипт ставит пакеты (`ffmpeg`, компилятор C), собирает `backspace-server` (или берёт
+`--binary`), скачивает LiveKit и проверяет его хэш, пишет `/etc/backspace/backspace.env` и
+`/etc/backspace/livekit.yaml`, заводит службы `backspace` и `livekit` и проверяет, что обе
+отвечают. Сервер, запущенный вручную, подхватывается: его `JWT_SECRET`, настройки, база и
+файлы переезжают в `/var/lib/backspace` (прежние остаются на месте), а старый процесс
+останавливается. Повторный запуск (например, после `git pull`) сохраняет данные и секреты.
+Рассчитан на обратный прокси впереди (Nginx Proxy Manager, Caddy…): в конце печатает, что
+настроить в нём и на роутере — `https://ДОМЕН` → порт 3000, `https://lk.ДОМЕН` → порт 7880
+(оба с WebSocket), TCP 7881 и UDP 7882 — проброс на машину. Параметры — `--help`
+(`--no-livekit`, `--web-dist`, `--data-from`, `--port`, `--proxy-hops`…).
+
 ### Запуск
 
 ```sh
