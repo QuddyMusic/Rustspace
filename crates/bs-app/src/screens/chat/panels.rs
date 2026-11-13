@@ -861,10 +861,10 @@ impl ChatScreen {
                     .on_hover_text(tr("Сквозное шифрование этой переписки"))
                     .clicked()
                 {
-                    self.e2ee_dialog = Some(crate::screens::e2ee_dialog::E2eeDialog {
-                        origin: selected.origin,
-                        dm_id: selected.channel.clone(),
-                    });
+                    self.e2ee_dialog = Some(crate::screens::e2ee_dialog::E2eeDialog::new(
+                        selected.origin,
+                        selected.channel.clone(),
+                    ));
                 }
             }
             if self.voice.dm.is_none()

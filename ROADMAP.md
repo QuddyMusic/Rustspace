@@ -237,10 +237,17 @@ original server.
      session), encryption is turned on per conversation from its header, keys travel as a
      message in the conversation itself and through the directory, there is a safety number;
      when the peer's key changes, sending stops until it is accepted.
-   - [ ] A check with two real clients through the original server and through federation
-     (the logic is covered by tests without a network for now).
-   - [ ] Moving the key to a second device (each device has its own key for now, and the
-     peer sees that as a key change); keeping the key in the system secret store.
+   - [x] A check with two real clients on real servers (`e2ee_live` in `bs-app`, run with
+     server addresses): the client's own E2EE code exchanges keys, reads both ways, agrees
+     on the safety number, leaves only ciphertext on the servers and handles a key change;
+     passed through one original server, one `bs-server`, two originals over federation and
+     `bs-server` ↔ original over federation.
+   - [x] Moving the key to a second device: a record protected by a passphrase (Argon2id,
+     XChaCha20-Poly1305) exported in the encryption window and imported on the other
+     device; peers that know the key see no change. The account key is kept in the system
+     secret store (Secret Service, Keychain, Credential Manager), with the `0600` file as
+     the fallback; when the store is locked a temporary key is used and the saved one is not
+     overwritten.
    - Out of the first version: group conversations, attachments, forward secrecy, search
      over encrypted messages.
 

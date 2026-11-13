@@ -1192,5 +1192,17 @@
   "Ключ изменился": "Key changed",
   "Зашифровано": "Encrypted",
   "Шифрование": "Encryption",
-  "Сквозное шифрование этой переписки": "End-to-end encryption for this conversation"
+  "Сквозное шифрование этой переписки": "End-to-end encryption for this conversation",
+  "▸ Ключ на другом устройстве": "▸ Key on another device",
+  "▾ Ключ на другом устройстве": "▾ Key on another device",
+  "Чтобы читать зашифрованные переписки на другом устройстве, перенесите туда ключ: выгрузите его здесь под паролем и загрузите там с тем же паролем. Запись ключа и пароль передавайте разными путями.": "To read encrypted conversations on another device, move your key there: export it here under a passphrase and import it there with the same passphrase. Send the key record and the passphrase by different routes.",
+  "Выгрузить ключ": "Export key",
+  "Загрузить ключ с другого устройства (заменит ключ здесь):": "Import a key from another device (replaces the key here):",
+  "Загрузить ключ": "Import key",
+  "Ключ загружен": "Key imported",
+  "Войдите, чтобы работать с ключом шифрования": "Sign in to manage the encryption key",
+  "Ключ шифрования лежит в системном хранилище ключей, но сейчас оно недоступно: работает временный ключ, а сохранённый не тронут. Откройте хранилище (например, войдите в сеанс рабочего стола) и перезапустите приложение.": "The encryption key is kept in the system keyring, which is unavailable right now: a temporary key is in use and the saved one is untouched. Unlock the keyring (for example, sign in to a desktop session) and restart the app.",
+  "Пароль должен быть не короче 8 знаков": "The passphrase must be at least 8 characters",
+  "Это не запись ключа шифрования или она повреждена": "This is not an encryption key record, or it is damaged",
+  "Пароль не подходит к этой записи ключа": "The passphrase does not match this key record"
 }

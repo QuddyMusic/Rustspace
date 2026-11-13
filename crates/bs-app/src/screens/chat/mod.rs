@@ -568,7 +568,7 @@ impl ChatScreen {
         {
             self.group_dialog = None;
         }
-        if let Some(dialog) = self.e2ee_dialog.as_ref()
+        if let Some(dialog) = self.e2ee_dialog.as_mut()
             && !super::e2ee_dialog::show(ctx, dialog, bridge)
         {
             self.e2ee_dialog = None;

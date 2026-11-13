@@ -63,6 +63,108 @@ pub enum SealError {
     BadPeerKey,
 }
 
+/// Начало переносимой записи ключа, защищённой паролем.
+pub const EXPORT_PREFIX: &str = "bs-e2ee-key:1:";
+/// Самый короткий пароль для переноса ключа.
+pub const MIN_PASSPHRASE_CHARS: usize = 8;
+const SALT_BYTES: usize = 16;
+
+/// Почему ключ не выгрузился или не загрузился.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum TransferError {
+    /// Пароль короче [`MIN_PASSPHRASE_CHARS`].
+    #[error("пароль слишком короткий")]
+    WeakPassphrase,
+    /// Это не запись ключа этой версии или она повреждена.
+    #[error("запись ключа повреждена")]
+    Malformed,
+    /// Пароль не подходит или запись изменена.
+    #[error("пароль не подходит")]
+    Rejected,
+}
+
+/// Ключ шифрования записи из пароля: Argon2id (19 МиБ, 2 прохода).
+fn passphrase_key(
+    passphrase: &str,
+    salt: &[u8],
+) -> Result<zeroize::Zeroizing<[u8; 32]>, TransferError> {
+    let params =
+        argon2::Params::new(19 * 1024, 2, 1, Some(32)).map_err(|_| TransferError::Malformed)?;
+    let argon = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+    let mut key = zeroize::Zeroizing::new([0u8; 32]);
+    argon
+        .hash_password_into(passphrase.as_bytes(), salt, key.as_mut())
+        .map_err(|_| TransferError::Malformed)?;
+    Ok(key)
+}
+
+/// Запись секретного ключа для переноса на другое устройство, защищённая
+/// паролем: `bs-e2ee-key:1:` и base64url(соль, nonce, шифр).
+///
+/// # Errors
+/// Пароль слишком короткий.
+pub fn export_key(key: &SecretKey, passphrase: &str) -> Result<String, TransferError> {
+    if passphrase.chars().count() < MIN_PASSPHRASE_CHARS {
+        return Err(TransferError::WeakPassphrase);
+    }
+    let salt: [u8; SALT_BYTES] = rand::random();
+    let nonce: [u8; NONCE_BYTES] = rand::random();
+    let wrapping = passphrase_key(passphrase, &salt)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(wrapping.as_ref())
+        .map_err(|_| TransferError::Malformed)?;
+    let sealed = cipher
+        .encrypt(
+            XNonce::from_slice(&nonce),
+            Payload {
+                msg: &key.0,
+                aad: EXPORT_PREFIX.as_bytes(),
+            },
+        )
+        .map_err(|_| TransferError::Malformed)?;
+    let mut packet = Vec::with_capacity(SALT_BYTES + NONCE_BYTES + sealed.len());
+    packet.extend_from_slice(&salt);
+    packet.extend_from_slice(&nonce);
+    packet.extend_from_slice(&sealed);
+    Ok(format!("{EXPORT_PREFIX}{}", URL_SAFE_NO_PAD.encode(packet)))
+}
+
+/// Секретный ключ из записи [`export_key`].
+///
+/// # Errors
+/// Запись повреждена или пароль не подходит.
+pub fn import_key(text: &str, passphrase: &str) -> Result<SecretKey, TransferError> {
+    let body = text
+        .trim()
+        .strip_prefix(EXPORT_PREFIX)
+        .ok_or(TransferError::Malformed)?;
+    let packet = URL_SAFE_NO_PAD
+        .decode(body)
+        .map_err(|_| TransferError::Malformed)?;
+    let (salt, rest) = packet
+        .split_at_checked(SALT_BYTES)
+        .ok_or(TransferError::Malformed)?;
+    let (nonce, sealed) = rest
+        .split_at_checked(NONCE_BYTES)
+        .ok_or(TransferError::Malformed)?;
+    let wrapping = passphrase_key(passphrase, salt)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(wrapping.as_ref())
+        .map_err(|_| TransferError::Malformed)?;
+    let mut plain = cipher
+        .decrypt(
+            XNonce::from_slice(nonce),
+            Payload {
+                msg: sealed,
+                aad: EXPORT_PREFIX.as_bytes(),
+            },
+        )
+        .map_err(|_| TransferError::Rejected)?;
+    let key = <[u8; 32]>::try_from(plain.as_slice())
+        .map(SecretKey)
+        .map_err(|_| TransferError::Malformed);
+    plain.zeroize();
+    key
+}
+
 /// Открытый ключ пользователя.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PublicKey([u8; 32]);
@@ -251,6 +353,7 @@ pub fn safety_number(a: &PublicKey, b: &PublicKey) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, reason = "тесты")]
 mod tests {
     use super::*;
 
@@ -379,5 +482,32 @@ mod tests {
             alice.public().0,
             hex("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a")
         );
+    }
+
+    #[test]
+    fn key_transfer_with_passphrase() {
+        let key = SecretKey::generate();
+        let text = export_key(&key, "долгий пароль").expect("выгрузка");
+        assert!(text.starts_with(EXPORT_PREFIX));
+        let back = import_key(&text, "долгий пароль").expect("загрузка");
+        assert_eq!(back.public(), key.public());
+        assert_eq!(
+            import_key(&text, "не тот пароль").err(),
+            Some(TransferError::Rejected)
+        );
+        assert_eq!(
+            export_key(&key, "коротко").err(),
+            Some(TransferError::WeakPassphrase)
+        );
+        assert_eq!(
+            import_key("bs-e2ee-key:1:AAAA", "долгий пароль").err(),
+            Some(TransferError::Malformed)
+        );
+        assert_eq!(
+            import_key(&key.to_backup(), "долгий пароль").err(),
+            Some(TransferError::Malformed)
+        );
+        // Каждая выгрузка — со своей солью.
+        assert_ne!(text, export_key(&key, "долгий пароль").expect("выгрузка"));
     }
 }

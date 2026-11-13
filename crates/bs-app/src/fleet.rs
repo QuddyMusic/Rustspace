@@ -1219,6 +1219,44 @@ impl Bridge {
         }
     }
 
+    /// Ключ шифрования аккаунта из системного хранилища недоступен.
+    pub(crate) fn e2ee_locked(&self, origin: usize) -> bool {
+        self.slots
+            .get(origin)
+            .is_some_and(|slot| slot.session.e2ee_locked())
+    }
+
+    /// Запись ключа шифрования для другого устройства.
+    ///
+    /// # Errors
+    /// Текст для пользователя.
+    pub(crate) fn export_e2ee_key(
+        &self,
+        origin: usize,
+        passphrase: &str,
+    ) -> Result<String, String> {
+        self.slots.get(origin).map_or_else(
+            || Err(String::new()),
+            |slot| slot.session.export_e2ee_key(passphrase),
+        )
+    }
+
+    /// Ставит ключ шифрования с другого устройства.
+    ///
+    /// # Errors
+    /// Текст для пользователя.
+    pub(crate) fn import_e2ee_key(
+        &mut self,
+        origin: usize,
+        text: &str,
+        passphrase: &str,
+    ) -> Result<(), String> {
+        self.slots.get_mut(origin).map_or_else(
+            || Err(String::new()),
+            |slot| slot.session.import_e2ee_key(text, passphrase),
+        )
+    }
+
     /// Принимает новый ключ собеседника.
     pub(crate) fn accept_e2ee_key(&mut self, origin: usize, dm_id: &str) {
         if let Some(slot) = self.slots.get_mut(origin) {

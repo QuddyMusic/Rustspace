@@ -62,7 +62,7 @@ pub(crate) fn load(path: &Path) -> Option<SavedSession> {
     let token = match text("token") {
         Some(token) => token,
         None if in_keyring => {
-            from_keyring = keystore::get(path)?;
+            from_keyring = keystore::get(&session_account(path))?;
             from_keyring.as_str()
         }
         None => return None,
@@ -110,7 +110,7 @@ pub(crate) fn save(
         std::fs::create_dir_all(parent)?;
     }
     let insecure = transport == TransportPolicy::AllowInsecure;
-    let body = if keystore::set(path, token) {
+    let body = if keystore::set(&session_account(path), token) {
         serde_json::json!({ "base": base, "tokenInKeyring": true, "allowInsecure": insecure })
     } else {
         serde_json::json!({ "base": base, "token": token, "allowInsecure": insecure })
@@ -142,7 +142,7 @@ pub(crate) fn save(
 
 /// Стирает сохранённую сессию (выход, отказ токена, удаление аккаунта).
 pub(crate) fn clear(path: &Path) {
-    keystore::delete(path);
+    keystore::delete(&session_account(path));
     if let Err(err) = std::fs::remove_file(path)
         && err.kind() != std::io::ErrorKind::NotFound
     {
@@ -150,64 +150,68 @@ pub(crate) fn clear(path: &Path) {
     }
 }
 
-/// Системное хранилище ключей. В тестах отключено: они не должны трогать
-/// настоящий keyring пользователя, поэтому всегда идёт запасной путь — файл.
-mod keystore {
-    use std::path::Path;
+/// Запись сессии в системном хранилище: привязана к файлу сессии, чтобы
+/// разные каталоги настроек (профили, тесты) не затирали друг друга.
+fn session_account(path: &Path) -> String {
+    format!("session:{}", path.display())
+}
 
+/// Системное хранилище ключей (Secret Service, Keychain, Credential Manager).
+/// В тестах отключено: они не должны трогать настоящий keyring пользователя,
+/// поэтому всегда идёт запасной путь — файл.
+pub(crate) mod keystore {
     const SERVICE: &str = "backspace-rs";
 
-    /// Запись привязана к файлу сессии: разные каталоги настроек (профили,
-    /// тесты) не затирают друг друга.
     #[cfg(not(test))]
-    fn entry(path: &Path) -> Option<keyring::Entry> {
-        let account = format!("session:{}", path.display());
-        keyring::Entry::new(SERVICE, &account)
+    fn entry(account: &str) -> Option<keyring::Entry> {
+        keyring::Entry::new(SERVICE, account)
             .map_err(|err| tracing::debug!(%err, "keyring недоступен"))
             .ok()
     }
 
-    /// Сохраняет токен; `false` — хранилища нет, нужен запасной путь.
+    /// Сохраняет секрет; `false` — хранилища нет, нужен запасной путь.
     #[cfg(not(test))]
-    pub(super) fn set(path: &Path, token: &str) -> bool {
-        entry(path).is_some_and(|entry| match entry.set_password(token) {
+    pub(crate) fn set(account: &str, secret: &str) -> bool {
+        entry(account).is_some_and(|entry| match entry.set_password(secret) {
             Ok(()) => true,
             Err(err) => {
-                tracing::info!(%err, "keyring недоступен — токен сохранён в файл 0600");
+                tracing::info!(%err, "keyring недоступен — секрет сохранён в файл 0600");
                 false
             }
         })
     }
 
+    /// Читает секрет.
     #[cfg(not(test))]
-    pub(super) fn get(path: &Path) -> Option<zeroize::Zeroizing<String>> {
-        entry(path)?
+    pub(crate) fn get(account: &str) -> Option<zeroize::Zeroizing<String>> {
+        entry(account)?
             .get_password()
             .map(zeroize::Zeroizing::new)
-            .map_err(|err| tracing::warn!(%err, "токен в keyring не найден"))
+            .map_err(|err| tracing::warn!(%err, "секрет в keyring не найден"))
             .ok()
     }
 
+    /// Стирает секрет.
     #[cfg(not(test))]
-    pub(super) fn delete(path: &Path) {
-        if let Some(entry) = entry(path) {
+    pub(crate) fn delete(account: &str) {
+        if let Some(entry) = entry(account) {
             let _ = entry.delete_credential();
         }
     }
 
     #[cfg(test)]
-    pub(super) const fn set(_path: &Path, _token: &str) -> bool {
+    pub(crate) const fn set(_account: &str, _secret: &str) -> bool {
         let _ = SERVICE;
         false
     }
 
     #[cfg(test)]
-    pub(super) const fn get(_path: &Path) -> Option<zeroize::Zeroizing<String>> {
+    pub(crate) const fn get(_account: &str) -> Option<zeroize::Zeroizing<String>> {
         None
     }
 
     #[cfg(test)]
-    pub(super) const fn delete(_path: &Path) {}
+    pub(crate) const fn delete(_account: &str) {}
 }
 
 #[cfg(test)]

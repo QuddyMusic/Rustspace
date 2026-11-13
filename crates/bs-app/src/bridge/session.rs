@@ -230,6 +230,38 @@ impl Session {
         self.flush_e2ee();
     }
 
+    /// Ключ шифрования из системного хранилища сейчас недоступен.
+    pub(crate) fn e2ee_locked(&self) -> bool {
+        self.e2ee.borrow().as_ref().is_some_and(e2ee::E2ee::locked)
+    }
+
+    /// Запись ключа шифрования для другого устройства, защищённая паролем.
+    ///
+    /// # Errors
+    /// Текст для пользователя.
+    pub(crate) fn export_e2ee_key(&self, passphrase: &str) -> Result<String, String> {
+        self.e2ee.borrow().as_ref().map_or_else(
+            || Err(crate::i18n::tr("Войдите, чтобы работать с ключом шифрования").to_owned()),
+            |e2ee| e2ee.export_key(passphrase),
+        )
+    }
+
+    /// Ставит ключ шифрования с другого устройства; новый открытый ключ
+    /// уходит в справочник сервера и в включённые переписки.
+    ///
+    /// # Errors
+    /// Текст для пользователя.
+    pub(crate) fn import_e2ee_key(&mut self, text: &str, passphrase: &str) -> Result<(), String> {
+        let Some(e2ee) = self.e2ee.get_mut().as_mut() else {
+            return Err(crate::i18n::tr("Войдите, чтобы работать с ключом шифрования").to_owned());
+        };
+        e2ee.import_key(text, passphrase)?;
+        let key = e2ee.public_key();
+        self.request(BridgeRequest::E2eePublish(key));
+        self.flush_e2ee();
+        Ok(())
+    }
+
     /// Принимает новый ключ собеседника после сверки контрольного числа.
     pub(crate) fn accept_e2ee_key(&mut self, dm_channel_id: &str) {
         if let Some(e2ee) = self.e2ee.get_mut().as_mut() {

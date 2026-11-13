@@ -2,8 +2,10 @@
 //!
 //! Шифрует и расшифровывает [`bs_e2ee`]; здесь — что хранится на устройстве
 //! и как ключи собеседников попадают в клиент:
-//! - секретный ключ аккаунта и настройки переписок лежат в файле рядом с
-//!   сохранённой сессией (права `0600`);
+//! - секретный ключ аккаунта лежит в системном хранилище ключей (Secret
+//!   Service, Keychain, Credential Manager), а без него — в файле рядом с
+//!   сохранённой сессией (права `0600`), где всегда лежат настройки переписок;
+//! - ключ переносится на другое устройство записью, защищённой паролем;
 //! - открытый ключ собеседника приходит сообщением прямо в переписке или из
 //!   справочника сервера и запоминается при первом знакомстве; если позже
 //!   приходит другой ключ, шифрование этой переписки останавливается, пока
@@ -45,7 +47,10 @@ struct Chat {
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Stored {
+    /// Ключ, если он не в системном хранилище.
     secret_key: String,
+    /// Ключ лежит в системном хранилище.
+    key_in_keyring: bool,
     chats: HashMap<String, Chat>,
 }
 
@@ -70,6 +75,9 @@ pub(crate) struct E2ee {
     chats: HashMap<String, Chat>,
     /// Свои ключи, которые надо отправить в переписки: id переписки и текст.
     pub(crate) outbox: Vec<(String, String)>,
+    /// Ключ лежит в системном хранилище, но сейчас его оттуда не взять:
+    /// работает временный ключ, а сохранённое состояние не трогается.
+    locked: bool,
 }
 
 impl std::fmt::Debug for E2ee {
@@ -128,12 +136,24 @@ impl E2ee {
             .and_then(|path| std::fs::read(path).ok())
             .map(zeroize::Zeroizing::new)
             .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-        let restored = stored
-            .as_ref()
-            .and_then(|stored| SecretKey::from_backup(&stored.secret_key));
+        let in_keyring = stored.as_ref().is_some_and(|stored| stored.key_in_keyring);
+        let restored = match (&stored, &path) {
+            (Some(_), Some(path)) if in_keyring => {
+                crate::saved_session::keystore::get(&keyring_account(path))
+                    .and_then(|backup| SecretKey::from_backup(&backup))
+            }
+            (Some(stored), _) => SecretKey::from_backup(&stored.secret_key),
+            (None, _) => None,
+        };
+        // Ключ в хранилище есть, но хранилище недоступно: новый ключ здесь
+        // заменил бы ключ аккаунта у всех собеседников, поэтому он временный.
+        let locked = in_keyring && restored.is_none();
+        if locked {
+            tracing::warn!("ключ шифрования переписок в системном хранилище недоступен");
+        }
         let fresh = restored.is_none();
         let state = Self {
-            path,
+            path: if locked { None } else { path },
             me: me.to_owned(),
             key: restored.unwrap_or_else(SecretKey::generate),
             // С новым ключом прежние настройки переписок теряют смысл.
@@ -142,6 +162,7 @@ impl E2ee {
                 .map(|stored| stored.chats)
                 .unwrap_or_default(),
             outbox: Vec::new(),
+            locked,
         };
         if fresh {
             state.save();
@@ -149,12 +170,60 @@ impl E2ee {
         state
     }
 
+    /// Ключ из хранилища недоступен (работает временный).
+    pub(crate) const fn locked(&self) -> bool {
+        self.locked
+    }
+
+    /// Запись ключа для другого устройства, защищённая паролем.
+    ///
+    /// # Errors
+    /// Текст для пользователя.
+    pub(crate) fn export_key(&self, passphrase: &str) -> Result<String, String> {
+        bs_e2ee::export_key(&self.key, passphrase).map_err(transfer_error)
+    }
+
+    /// Ставит ключ с другого устройства вместо своего. Собеседники, которые
+    /// знают этот ключ, смены не увидят; включённые переписки получают его
+    /// объявление заново.
+    ///
+    /// # Errors
+    /// Текст для пользователя.
+    pub(crate) fn import_key(&mut self, text: &str, passphrase: &str) -> Result<(), String> {
+        let key = bs_e2ee::import_key(text, passphrase).map_err(transfer_error)?;
+        if key.public() == self.key.public() {
+            return Ok(());
+        }
+        self.key = key;
+        self.locked = false;
+        let mut enabled = Vec::new();
+        for (dm_id, chat) in &mut self.chats {
+            chat.announced = false;
+            if chat.enabled {
+                enabled.push(dm_id.clone());
+            }
+        }
+        enabled.sort();
+        for dm_id in enabled {
+            self.announce(&dm_id);
+        }
+        self.save();
+        Ok(())
+    }
+
     fn save(&self) {
         let Some(path) = self.path.as_deref() else {
             return;
         };
+        let backup = self.key.to_backup();
+        let in_keyring = crate::saved_session::keystore::set(&keyring_account(path), &backup);
         let stored = Stored {
-            secret_key: self.key.to_backup().to_string(),
+            secret_key: if in_keyring {
+                String::new()
+            } else {
+                backup.to_string()
+            },
+            key_in_keyring: in_keyring,
             chats: self.chats.clone(),
         };
         let body = serde_json::to_vec_pretty(&stored).map(zeroize::Zeroizing::new);
@@ -369,10 +438,30 @@ impl E2ee {
     }
 }
 
+/// Запись ключа в системном хранилище: по файлу состояния.
+fn keyring_account(path: &Path) -> String {
+    format!("e2ee:{}", path.display())
+}
+
+/// Ошибка переноса ключа для пользователя.
+fn transfer_error(error: bs_e2ee::TransferError) -> String {
+    tr(match error {
+        bs_e2ee::TransferError::WeakPassphrase => "Пароль должен быть не короче 8 знаков",
+        bs_e2ee::TransferError::Malformed => "Это не запись ключа шифрования или она повреждена",
+        bs_e2ee::TransferError::Rejected => "Пароль не подходит к этой записи ключа",
+    })
+    .to_owned()
+}
+
 /// Переписка один на один (не группа).
 pub(crate) fn is_direct(channel: &DmChannel) -> bool {
     channel.owner_id.is_none() && channel.members.len() == 2
 }
+
+#[cfg(test)]
+#[path = "e2ee_live.rs"]
+#[allow(clippy::expect_used, clippy::panic, reason = "тест на живых серверах")]
+mod live;
 
 #[cfg(test)]
 mod tests {
@@ -522,6 +611,55 @@ mod tests {
         assert_eq!(second.public_key(), key);
         assert!(second.status("dm").enabled);
         assert!(second.outbox.is_empty(), "ключ второй раз не объявляется");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn key_moves_to_a_second_device() {
+        let (mut ann, mut bob) = (E2ee::load(None, "ann"), E2ee::load(None, "bob"));
+        ann.set_enabled("dm", true);
+        deliver(&mut ann, &mut bob, 1);
+        deliver(&mut bob, &mut ann, 2);
+        let backup = ann.export_key("пароль для переноса").unwrap_or_default();
+        assert!(ann.export_key("коротко").is_err());
+        // Второе устройство: своё состояние, свой ключ, потом перенос.
+        let mut second = E2ee::load(None, "ann");
+        second.set_enabled("dm", true);
+        second.outbox.clear();
+        assert!(second.import_key(&backup, "не тот пароль").is_err());
+        assert!(second.import_key(&backup, "пароль для переноса").is_ok());
+        assert_eq!(second.public_key(), ann.public_key());
+        assert_eq!(
+            second.outbox.len(),
+            1,
+            "включённая переписка получает ключ заново"
+        );
+        // Собеседник уже знает этот ключ: смены нет.
+        deliver(&mut second, &mut bob, 3);
+        assert!(!bob.status("dm").key_changed);
+    }
+
+    #[test]
+    fn missing_keyring_key_is_not_replaced() {
+        let dir = std::env::temp_dir().join(format!(
+            "bs-e2ee-kr-{}-{}",
+            std::process::id(),
+            rand_suffix()
+        ));
+        let session = dir.join("session.json");
+        std::fs::create_dir_all(&dir).unwrap_or_default();
+        let file = dir.join("e2ee-ann.json");
+        let body = br#"{"secretKey":"","keyInKeyring":true,"chats":{"dm":{"enabled":true}}}"#;
+        std::fs::write(&file, body).unwrap_or_default();
+        // В тестах хранилища нет: ключ из него не достать.
+        let mut state = E2ee::load(Some(&session), "ann");
+        assert!(state.locked());
+        state.set_enabled("dm2", true);
+        assert_eq!(
+            std::fs::read(&file).unwrap_or_default(),
+            body,
+            "сохранённое не тронуто"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

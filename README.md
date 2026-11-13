@@ -29,8 +29,9 @@ every WebSocket frame and REST response the client receives.
   header; text is encrypted on the device (X25519, XChaCha20-Poly1305) and travels as an
   ordinary message, so it works through any server, the original included. Keys are exchanged
   in the conversation itself and verified with a safety number. Attachments and group
-  conversations are not encrypted; there is no forward secrecy; each device has its own key.
-  The other person needs this client: the original web client shows ciphertext.
+  conversations are not encrypted; there is no forward secrecy. The key lives in the system
+  keyring and moves to another device as a passphrase-protected record (the encryption
+  window). The other person needs this client: the original web client shows ciphertext.
 - **Spaces.** Channels and categories, roles and permissions, per-channel overrides, members,
   bans, invites, join requests, the instance directory, notification settings per space and
   per channel (including timed mute).
@@ -93,11 +94,11 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
 | `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, system audio, data-channel signals | 68 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 232 |
+| `bs-app` | The GUI and its entry point | 234 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 124 |
-| `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 6 |
+| `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 127 |
+| `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 7 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
 ## Building and running
@@ -350,6 +351,8 @@ python3 tools/compat/s_spaces.py      # and s_channels, s_messages, s_dm, s_soci
                                       # s_adminusers, s_bodies; cmp_ready.py
 python3 tools/compat/t_twofactor.py   # bs-server extensions: two-factor
 python3 tools/compat/t_e2ee.py        # and the key directory
+BS_E2EE_LIVE_A=https://x1.test BS_E2EE_LIVE_B=https://y1.test BS_E2EE_LIVE_CA=/tmp/fedca/ca.pem \
+  cargo test -p bs-app e2ee_live -- --ignored   # two clients over federation (fresh fed_up.sh stand)
 ```
 
 The checkout path is set by `ORIG` (see the top of `up.sh`). The same run with `bs-server` on
