@@ -600,6 +600,74 @@ pub fn dm_message(
     )
 }
 
+/// Сообщение из журнала мутаций для ответа на `/api/federation/sync`
+/// (`serializeMessageRow`); `None` — сообщения или автора уже нет.
+///
+/// # Errors
+/// Ошибка базы.
+pub fn sync_message(
+    tx: &mut dyn Tx,
+    config: &Config,
+    channel: &str,
+    message_id: &str,
+    update: bool,
+    timestamp: i64,
+) -> DbResult<Option<Value>> {
+    let origin = our_origin(config);
+    let Some(message) = tx.query_one(
+        "SELECT * FROM dm_messages WHERE id = ?",
+        params![message_id],
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(author) = user_row(tx, &message.text("user_id")?)? else {
+        return Ok(None);
+    };
+    let attachments = relay_attachments(tx, &origin, message_id)?;
+    let group = tx.query_one(
+        "SELECT federated_id, owner_id FROM dm_channels WHERE id = ?",
+        params![channel],
+    )?;
+    let target = if update {
+        super::mutation_target(tx, config, channel, message_id, &message.text("user_id")?)?
+    } else {
+        None
+    };
+    let mut payload = Map::new();
+    payload.insert(
+        "eventType".to_owned(),
+        json!(if update { "update" } else { "create" }),
+    );
+    if let Some(group) = group
+        && let (Some(federated), Some(_)) = (
+            group.opt_text("federated_id")?.filter(|id| !id.is_empty()),
+            group.opt_text("owner_id")?.filter(|id| !id.is_empty()),
+        )
+    {
+        payload.insert("federatedId".to_owned(), json!(federated));
+    }
+    payload.insert("dmChannelId".to_owned(), json!(channel));
+    payload.insert("messageId".to_owned(), json!(message.text("id")?));
+    payload.insert("encryptionVersion".to_owned(), json!(0));
+    payload.insert("timestamp".to_owned(), json!(timestamp));
+    payload.insert(
+        "participants".to_owned(),
+        Value::Array(participants(tx, &origin, channel)?),
+    );
+    if let Some(target) = target {
+        payload.insert("target".to_owned(), target);
+    }
+    let mut wire = relay_message(tx, config, &message, Some(&author))?;
+    if !attachments.is_empty()
+        && let Some(fields) = wire.as_object_mut()
+    {
+        fields.insert("attachments".to_owned(), Value::Array(attachments));
+    }
+    payload.insert("message".to_owned(), wire);
+    Ok(Some(Value::Object(payload)))
+}
+
 /// Удаление личного сообщения (`queueDmMessageDeleteRelay`).
 ///
 /// # Errors

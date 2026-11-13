@@ -214,4 +214,7 @@ if __name__ == '__main__':
     import sys
     show = '-v' in sys.argv
     names = [a for a in sys.argv[1:] if not a.startswith('-')] or ['peering', 'approvals']
-    sys.exit(1 if sum(run(globals()[n], show=show) for n in names) else 0)
+    # lastSyncedAt здесь зависит от гонки: первая догонялка идёт, пока вторая
+    # сторона ещё проверяет секрет, и получает 403 или нет. Её итог
+    # сравнивает f_sync.py.
+    sys.exit(1 if sum(run(globals()[n], show=show, ignore_keys=('lastSyncedAt',)) for n in names) else 0)

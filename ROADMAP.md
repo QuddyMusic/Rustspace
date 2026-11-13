@@ -141,7 +141,8 @@ original server.
        `secure-json-parse`: signatures are computed over the same text, and parse errors
        carry the V8 messages; the content type picks the parser (415), and the body is
        parsed before the auth check, as in Fastify (the `s_bodies` scenario). A peer's sync
-       time (`lastSyncedAt`) arrives with the sync step.
+       time (`lastSyncedAt`) is compared by the sync scenarios: here it depends on whether
+       the first pull meets the other side still checking the secret.
      - [x] Outbox and the delivery worker: conversation events (messages, edits, deletions,
        reactions, read positions, closing, groups: members, owner, name), friendship,
        profile and presence events are queued for peers in the same transaction as the
@@ -180,7 +181,21 @@ original server.
        replicas on them. Checked on the stand (`f_lookup.py`: `friends` and `accounts`, plus
        `f_inbound.py` and `f_outbox.py` now without allowances for the missing lookup), on
        SQLite and PostgreSQL, with `bs-server` on one and on both sides, with no differences.
-     - [ ] Sync after downtime and state reconciliation.
+     - [x] Sync after downtime: the `/api/federation/sync` route (a signed page of the
+       mutation log for the `dm`, `friend` and `profile` contexts, only what the asking peer
+       may see: shared conversations, friendships of its users, profiles of our own users;
+       64 KB bodies) and the puller: per-context cursors with the peer's epoch, a pass budget
+       (pages and time), events applied as relayed ones, deferred subjects (later events of
+       the same subject wait), a retry table with backoff and expiry, event fingerprints
+       against repeats, one pass per peer at a time, holding home pulls during a pass. A
+       pull runs on every peer activation (in the background, as in the original), at
+       startup for peers never synced, and periodically; `lastSyncedAt` is set when every
+       context completes. Test routes (`NODE_ENV=test` and `ENABLE_TEST_ROUTES=1`) seed a
+       peer and run a pull, as the original's. Checked on the stand (`f_sync.py`: `pull` —
+       catching up after the peer was unreachable and its outbox was lost; `serve` — what
+       is served to the original; `pages` — page boundaries, cursors and contexts), 54 steps
+       with no differences on SQLite and PostgreSQL, with `bs-server` on one and on both
+       sides.
      - [ ] Cross-instance calls.
      - [ ] Two-instance stand scenarios for delivery, inbound events, replicas and calls;
        the audit. The stand itself exists (`tools/compat/fed_up.sh`).

@@ -334,6 +334,7 @@ pub struct Pulls {
     answered_unversioned: Mutex<HashSet<String>>,
     passes: Mutex<HashSet<String>>,
     queued: Mutex<Vec<String>>,
+    held: std::sync::atomic::AtomicUsize,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -345,6 +346,17 @@ impl Pulls {
     /// уйдёт после фиксации транзакции.
     pub fn schedule(&self, user_id: &str) {
         lock(&self.queued).push(user_id.to_owned());
+    }
+
+    /// Пока идёт догонялка, запросы к домам ждут её конца: оригинал
+    /// обрабатывает страницу событий подряд, и ответ дома приходит после.
+    pub fn hold(&self) {
+        self.held.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Конец догонялки (см. [`Pulls::hold`]).
+    pub fn release_hold(&self) {
+        self.held.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn claim(&self, key: &str) -> bool {
@@ -485,6 +497,15 @@ async fn pull(app: AppState, user_id: String) {
 
 /// Отправляет накопленные запросы профиля новых копий.
 pub fn start_home_pulls(app: &AppState) {
+    if app
+        .federation
+        .pulls
+        .held
+        .load(std::sync::atomic::Ordering::SeqCst)
+        > 0
+    {
+        return;
+    }
     let queued = std::mem::take(&mut *lock(&app.federation.pulls.queued));
     for user_id in queued {
         tokio::spawn(pull(app.clone(), user_id));

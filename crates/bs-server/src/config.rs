@@ -57,6 +57,8 @@ pub struct Config {
     pub federation_allow_private_peers: bool,
     /// Не запускать фоновые задачи федерации (`DISABLE_FEDERATION_WORKERS`).
     pub disable_federation_workers: bool,
+    /// Служебные маршруты для стендов (`NODE_ENV=test` и `ENABLE_TEST_ROUTES=1`).
+    pub test_routes: bool,
     /// Дополнительные корневые сертификаты (PEM) для запросов к другим
     /// инстансам (`BS_EXTRA_CA_CERTS`, как `NODE_EXTRA_CA_CERTS` у Node.js).
     pub extra_ca_certs: Option<Vec<u8>>,
@@ -252,6 +254,8 @@ impl Config {
             public_origin,
             federation_allow_private_peers: env.flag("FEDERATION_ALLOW_PRIVATE_PEERS", false),
             disable_federation_workers: env.flag("DISABLE_FEDERATION_WORKERS", false),
+            test_routes: env.raw("NODE_ENV") == Some("test")
+                && env.raw("ENABLE_TEST_ROUTES") == Some("1"),
             federation_backoff_divisor,
             extra_ca_certs,
             version: COMPAT_VERSION.to_owned(),

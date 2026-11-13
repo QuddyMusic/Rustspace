@@ -499,6 +499,9 @@ pub fn spawn(state: &AppState) {
         }
     });
     super::outbox::spawn(state);
+    super::sync::spawn(state);
+    let app = state.clone();
+    tokio::spawn(async move { super::peers::startup_bootstrap(&app).await });
     let app = state.clone();
     tokio::spawn(async move {
         super::inbound::profile::backfill_assets(&app).await;

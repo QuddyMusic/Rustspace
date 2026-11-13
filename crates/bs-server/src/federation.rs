@@ -16,6 +16,8 @@ pub mod peers;
 pub mod presence;
 pub mod relay;
 pub mod reset;
+pub mod sync;
+pub mod syncpage;
 pub mod worker;
 
 use serde_json::{Value, json};

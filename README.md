@@ -96,7 +96,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-app` | The GUI and its entry point | 232 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 113 |
+| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 119 |
 | `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 6 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
@@ -229,9 +229,10 @@ directory for end-to-end encrypted DMs. They do not change existing routes: a cl
 does not know about them works as before. Their tables live in the same database under
 `bs_*` names; the original server ignores them.
 
-**Not there yet:** sync after downtime, cross-instance calls and typing. Events flow to and
-from peers and `user@domain` lookup works, but without catching up after downtime the server
-is not yet suitable for an instance that talks to peers, and it warns about it at startup. The server never sends telemetry. See
+**Not there yet:** cross-instance calls and typing. Events flow to and from peers,
+`user@domain` lookup works and peers catch up after downtime through the mutation log; until
+the federation audit is done the server warns at startup when it talks to peers. The server
+never sends telemetry. See
 [ROADMAP.md](ROADMAP.md).
 
 **Small differences from the original:** thumbnails and stickers are encoded as lossless
@@ -366,6 +367,7 @@ tools/compat/fed_up.sh && python3 tools/compat/f_outbox.py delivery
 FEDERATION_BACKOFF_DIVISOR=100000 tools/compat/fed_up.sh && python3 tools/compat/f_outbox.py retries
 tools/compat/fed_up.sh && python3 tools/compat/f_inbound.py inbound relay_checks
 tools/compat/fed_up.sh && python3 tools/compat/f_lookup.py friends accounts
+BS_FED_TEST_ROUTES=1 FEDERATION_BACKOFF_DIVISOR=1 tools/compat/fed_up.sh && python3 tools/compat/f_sync.py pull serve pages
 ```
 
 ## Translations

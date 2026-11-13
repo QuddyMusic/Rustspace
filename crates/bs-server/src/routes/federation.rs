@@ -1005,6 +1005,206 @@ pub async fn verify_attach_proof(State(state): State<AppState>, request: Request
     Ok(signed_json(&state, &answer, &secret))
 }
 
+/// `POST /api/federation/sync`: страница журнала мутаций для пира.
+pub async fn sync(State(state): State<AppState>, request: Request) -> Outcome {
+    let (headers, body) = match signed_body(request).await {
+        Ok(read) => read,
+        Err(refusal) => return Ok(refusal),
+    };
+    let signed = signed_headers(&headers);
+    let peer = s2s_peer(&state, signed.as_ref()).await?;
+    let (peer, nonce) = match authenticate_s2s(&state, &headers, &body, peer, signed.as_ref(), None)
+    {
+        Ok(found) => found,
+        Err(refusal) => return Ok(refusal),
+    };
+    if nonce.is_some() && !peer.nonce_supported {
+        let id = peer.id.clone();
+        state
+            .run(move |tx, _| {
+                tx.execute(
+                    "UPDATE federation_peers SET nonce_supported = 1 WHERE id = ?",
+                    params![id],
+                )?;
+                Ok(())
+            })
+            .await?;
+    }
+    let value = &body.value;
+    let since = value
+        .get("sinceTimestamp")
+        .and_then(Value::as_f64)
+        .filter(|since| *since >= 0.0 && value.is_object());
+    let Some(since) = since else {
+        return Ok(fail(400, "sinceTimestamp must be a non-negative number"));
+    };
+    let after_id = value
+        .get("afterId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned);
+    #[allow(clippy::cast_possible_truncation, reason = "время в миллисекундах")]
+    let after = crate::federation::syncpage::Position {
+        ts: since.floor() as i64,
+        id: after_id.filter(|_| since.fract() == 0.0),
+    };
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    let context = match value.get("contextType").and_then(Value::as_str) {
+        Some("friend") => "friend",
+        Some("profile") => "profile",
+        _ => "dm",
+    };
+    let scope = crate::federation::syncpage::Scope {
+        context: context.to_owned(),
+        dm_channel: text("dmChannelId"),
+        federated: text("federatedId"),
+    };
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "предел 1..=500"
+    )]
+    let limit = value
+        .get("limit")
+        .and_then(Value::as_f64)
+        .map_or(100.0, |limit| limit.floor().clamp(1.0, 500.0)) as usize;
+    let app = state.clone();
+    let response = state
+        .run(move |tx, _| {
+            crate::federation::outbox::mark_offered_for_peer(tx, &peer.id, now_ms(), context)?;
+            let response = crate::federation::syncpage::build(
+                tx,
+                &app.config,
+                &peer.origin,
+                &scope,
+                &after,
+                limit,
+            )?;
+            tx.execute(
+                "UPDATE federation_peers SET last_seen_at = ? WHERE id = ?",
+                params![now_ms(), &peer.id],
+            )?;
+            Ok(response)
+        })
+        .await?;
+    Ok(send(200, response))
+}
+
+const SEED_STATUSES: [&str; 8] = [
+    "active",
+    "pending",
+    "awaiting_approval",
+    "rejected",
+    "revoked",
+    "needs_attention",
+    "unreachable",
+    "accepted",
+];
+
+/// `POST /api/admin/test/seed-peer`: пир без рукопожатия (только для стендов).
+pub async fn test_seed_peer(State(state): State<AppState>, JsonBody(body): JsonBody) -> Outcome {
+    if !state.config.test_routes {
+        return Ok(fail(404, "Not Found"));
+    }
+    let origin = body
+        .get("origin")
+        .and_then(Value::as_str)
+        .filter(|o| o.starts_with("http"));
+    let Some(origin) = origin.map(str::to_owned) else {
+        return Ok(fail(400, "origin must be an http(s) URL"));
+    };
+    let secret = body
+        .get("hmacSecret")
+        .and_then(Value::as_str)
+        .filter(|s| s.encode_utf16().count() >= 32)
+        .map(str::to_owned);
+    let Some(secret) = secret else {
+        return Ok(fail(400, "hmacSecret must be a string ≥32 chars"));
+    };
+    let status = match body.get("status") {
+        None => "active".to_owned(),
+        Some(Value::String(status)) if SEED_STATUSES.contains(&status.as_str()) => status.clone(),
+        Some(_) => {
+            return Ok(fail(
+                400,
+                &format!("status must be one of {}", SEED_STATUSES.join(", ")),
+            ));
+        }
+    };
+    let name = body
+        .get("instanceName")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let id = uuid::Uuid::new_v4().to_string();
+    let answer_id = id.clone();
+    state
+        .run(move |tx, _| {
+            tx.execute(
+                "INSERT INTO federation_peers (id, origin, instance_name, hmac_secret, status, consecutive_failures, \
+                 consecutive_auth_failures, last_synced_at, nonce_supported, auto_rotate_interval_days, created_at) \
+                 VALUES (?, ?, ?, ?, ?, 0, 0, 0, 1, 90, ?) ON CONFLICT (origin) DO UPDATE SET \
+                 hmac_secret = excluded.hmac_secret, status = excluded.status, instance_name = excluded.instance_name",
+                params![&id, &origin, &name, &secret, &status, now_ms()],
+            )?;
+            Ok(())
+        })
+        .await?;
+    Ok(send(200, json!({"ok": true, "id": answer_id})))
+}
+
+/// `POST /api/admin/test/federation/resync`: догонялка сейчас (только для
+/// стендов).
+pub async fn test_resync(State(state): State<AppState>, JsonBody(body): JsonBody) -> Outcome {
+    if !state.config.test_routes {
+        return Ok(fail(404, "Not Found"));
+    }
+    let Some(origin) = body
+        .get("peerOrigin")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    else {
+        return Ok(fail(400, "peerOrigin is required"));
+    };
+    let wanted: Vec<&str> = match body.get("contexts").and_then(Value::as_array) {
+        Some(list) => crate::federation::sync::ALL_CONTEXTS
+            .iter()
+            .copied()
+            .filter(|context| list.iter().any(|item| item == context))
+            .collect(),
+        None => crate::federation::sync::ALL_CONTEXTS.to_vec(),
+    };
+    let peer = state
+        .run(move |tx, _| Ok(peers::by_origin(tx, &origin)?))
+        .await?;
+    let Some(peer) = peer else {
+        return Ok(fail(404, "No such peer"));
+    };
+    let result = crate::federation::sync::sync_peer(
+        &state,
+        &peer.id,
+        "manual",
+        &wanted,
+        crate::federation::sync::PASS_BUDGET,
+    )
+    .await;
+    #[allow(clippy::cast_possible_truncation, reason = "время в миллисекундах")]
+    let at = body
+        .get("retryAt")
+        .and_then(Value::as_f64)
+        .map_or_else(now_ms, |at| at as i64);
+    let retried = crate::federation::sync::retry_tick(&state, at).await;
+    Ok(send(
+        200,
+        json!({"result": result.map(|r| r.to_json()), "retried": retried}),
+    ))
+}
+
 /// `DELETE /api/federation/identity`: дом удаляет своего пользователя здесь.
 pub async fn delete_identity(State(state): State<AppState>, request: Request) -> Outcome {
     let (headers, body) = match signed_body(request).await {

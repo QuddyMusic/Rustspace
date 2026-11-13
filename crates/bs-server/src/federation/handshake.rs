@@ -64,6 +64,8 @@ pub struct Runtime {
     pub projections: Mutex<HashMap<String, String>>,
     /// Запросы профиля копий у их домов.
     pub pulls: super::lookup::Pulls,
+    /// Проходы догонялки по пирам.
+    pub sync_locks: super::sync::Locks,
     windows: Mutex<HashMap<String, std::collections::VecDeque<i64>>>,
     admin: Mutex<HashSet<String>>,
     in_flight: Mutex<HashMap<String, Shared<BoxFuture<'static, Ensured>>>>,

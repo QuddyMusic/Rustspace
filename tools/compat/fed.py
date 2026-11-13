@@ -22,6 +22,10 @@ class Side:
         if s == 409:
             s, b = http(self.port, 'POST', '/api/auth/login', {'username': full, 'password': 'password123'})
         assert s in (200, 201), (s, b)
+        if name == 'root' and not b['user'].get('isAdmin'):
+            # Администратор — первый зарегистрированный; сценарии идут не первыми.
+            self.exec('UPDATE users SET is_admin = 1 WHERE id = ?', (b['user']['id'],))
+            b['user']['isAdmin'] = True
         self.tok[name] = b['token']; self.uid[name] = b['user']['id']; self.pair.n.tok(b['user']['id'])
         if listen: self.ws[name] = Listener(self.port, b['token'])
         return b['user']
@@ -96,10 +100,8 @@ class Pair:
         s = re.sub(r'(?<![0-9])1[6-9][0-9]{11}(?![0-9])', '<ts>', s)
         return self.n.text(s)
     def val(self, v, key=''):
-        # Время последней синхронизации журнала мутаций ставит подтягивание
-        # через /api/federation/sync — это шаг 6 переноса; до него не сравнивается.
         # Цвет аватара выбирается при регистрации случайно.
-        if key in ('lastSyncedAt', 'avatarColor') or key in self.ignore_keys: return '<не сравнивается>'
+        if key == 'avatarColor' or key in self.ignore_keys: return '<не сравнивается>'
         if isinstance(v, dict): return {self.text(k): self.val(v[k], k) for k in sorted(v)}
         if isinstance(v, list): return [self.val(x, key) for x in v]
         if isinstance(v, str):
@@ -145,7 +147,7 @@ def run(scenario, pairs=((3111, 3112), (3113, 3114)), show=False, unordered_even
             from collections import Counter
             ca, cb = Counter(sa), Counter(sb)
             for k in sorted(set(ca) | set(cb)):
-                if ca[k] != cb[k]: print(f'     ориг ×{ca[k]}  rust ×{cb[k]}  {k[:220]}')
+                if ca[k] != cb[k]: print(f'     ориг ×{ca[k]}  rust ×{cb[k]}  {k if __import__("os").environ.get("FED_FULL") else k[:220]}')
         elif show: print(f'✓ события {name}: {[e.get("type") for e in a]}')
     print(f'{scenario.__name__}: шагов {len(la)}, расхождений {bad}')
     return bad

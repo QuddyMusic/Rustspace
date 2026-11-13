@@ -365,6 +365,12 @@ pub fn app(state: AppState) -> Router {
         .route("/api/federation/peer/denied", post(routes::federation::denied))
         .route("/api/federation/epoch", post(routes::federation::epoch))
         .route("/api/federation/relay", post(routes::federation::relay))
+        .route("/api/federation/sync", post(routes::federation::sync))
+        .route("/api/admin/test/seed-peer", post(routes::federation::test_seed_peer))
+        .route(
+            "/api/admin/test/federation/resync",
+            post(routes::federation::test_resync),
+        )
         .route("/api/federation/users/lookup", post(routes::federation::users_lookup))
         .route("/api/federation/users/by-home-id", post(routes::federation::users_by_home_id))
         .route("/api/federation/verify-attach-proof", post(routes::federation::verify_attach_proof))
@@ -406,8 +412,6 @@ pub fn app(state: AppState) -> Router {
             "/api/federation/peering-notifications/{id}/read",
             post(routes::federation::read_notification),
         )
-        .route("/api/admin/test/seed-peer", post(routes::admin::test_route))
-        .route("/api/admin/test/federation/resync", post(routes::admin::test_route))
         .route(
             "/api/admin/telemetry",
             get(routes::admin_status::telemetry).put(routes::admin_status::set_telemetry),

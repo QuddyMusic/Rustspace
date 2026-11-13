@@ -710,36 +710,19 @@ fn mark_stubs_offline(
 pub async fn run_effects(state: &AppState, effects: Effects) {
     let app = state.clone();
     let origin = effects.origin.clone();
-    let activated = effects.next == Some("active")
-        && effects.previous != Some("active")
-        && effects.activation.is_some();
+    let peer_id = effects.peer_id.clone();
+    let activation = (effects.next == Some("active") && effects.previous != Some("active"))
+        .then_some(effects.activation)
+        .flatten();
     let done = state
         .run(move |tx, out| {
             let changed = json!({"type": "federation_peers_changed"});
             to_admins(tx, &app.hub, out, &changed)?;
-            if effects.next == Some("active")
-                && effects.previous != Some("active")
-                && let Some(cause) = effects.activation
-            {
+            if activation.is_some() {
                 let event = json!({"type": "federation_peer_active", "peerOrigin": effects.origin});
                 for user in app.hub.online_users() {
                     out.to_user(&user, &event);
                 }
-                reset_outbox_backoff(tx, &effects.peer_id)?;
-                if let Some(epoch) = by_id(tx, &effects.peer_id)?.and_then(|peer| peer.epoch) {
-                    super::reset::heal(tx, &effects.origin, &epoch, cause)?;
-                }
-                fanout_outbound_subscribers(tx, &app.ids, out, &effects.origin)?;
-                super::relay::presence_for_peer(
-                    tx,
-                    super::relay::Relay {
-                        config: &app.config,
-                        ids: &app.ids,
-                    },
-                    &app.hub,
-                    &effects.origin,
-                )?;
-                to_admins(tx, &app.hub, out, &changed)?;
             }
             if effects.previous == Some("active")
                 && effects.next.is_some_and(|next| next != "active")
@@ -764,8 +747,101 @@ pub async fn run_effects(state: &AppState, effects: Effects) {
             ?error,
             "последствия перехода пира не выполнены"
         );
-    } else if activated {
-        tokio::spawn(super::lookup::backfill_for_peer(state.clone(), origin));
+    } else if let Some(cause) = activation {
+        // Как и в оригинале, переход не ждёт догонялки: ответ на рукопожатие
+        // уходит сразу, а `onPeerActivated` идёт следом.
+        let app = state.clone();
+        tokio::spawn(async move { on_activated(&app, &peer_id, cause).await });
+    }
+}
+
+/// Пир стал действующим (`onPeerActivated`): сброс пауз очереди, лечение
+/// после сброса пира, догонялка, рассылка подписчикам, проход по копиям,
+/// присутствие.
+pub async fn on_activated(state: &AppState, peer_id: &str, cause: &'static str) {
+    let (app, id) = (state.clone(), peer_id.to_owned());
+    let origin = state
+        .run(move |tx, _| {
+            reset_outbox_backoff(tx, &id)?;
+            let Some(peer) = by_id(tx, &id)? else {
+                return Ok(None);
+            };
+            if let Some(epoch) = &peer.epoch {
+                super::reset::heal(tx, &peer.origin, epoch, cause)?;
+            }
+            Ok(Some(peer.origin))
+        })
+        .await;
+    let origin = match origin {
+        Ok(Some(origin)) => origin,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::error!(peer = peer_id, ?error, "включение пира не выполнено");
+            return;
+        }
+    };
+    super::sync::sync_peer(
+        state,
+        peer_id,
+        cause,
+        &super::sync::ALL_CONTEXTS,
+        super::sync::PASS_BUDGET,
+    )
+    .await;
+    let at = origin.clone();
+    let done = state
+        .run(move |tx, out| {
+            fanout_outbound_subscribers(tx, &app.ids, out, &at)?;
+            super::relay::presence_for_peer(
+                tx,
+                super::relay::Relay {
+                    config: &app.config,
+                    ids: &app.ids,
+                },
+                &app.hub,
+                &at,
+            )?;
+            to_admins(
+                tx,
+                &app.hub,
+                out,
+                &json!({"type": "federation_peers_changed"}),
+            )?;
+            Ok(())
+        })
+        .await;
+    tokio::spawn(super::lookup::backfill_for_peer(
+        state.clone(),
+        origin.clone(),
+    ));
+    if let Err(error) = done {
+        tracing::error!(peer = origin, ?error, "включение пира не выполнено");
+    }
+}
+
+/// При запуске: пиры, с которыми догонялка ещё ни разу не прошла, включаются
+/// заново; по копиям всех действующих пиров — проход (`startupBootstrapSync`).
+pub async fn startup_bootstrap(state: &AppState) {
+    let rows = state
+        .run(|tx, _| {
+            Ok(tx.query(
+                "SELECT id, origin, last_synced_at FROM federation_peers WHERE status = 'active'",
+                params![],
+            )?)
+        })
+        .await
+        .unwrap_or_default();
+    for row in &rows {
+        if row.opt_int("last_synced_at").ok().flatten().unwrap_or(0) == 0
+            && let Ok(id) = row.text("id")
+        {
+            on_activated(state, &id, "startup_bootstrap").await;
+        }
+    }
+    for row in rows {
+        if let Ok(origin) = row.text("origin") {
+            tokio::spawn(super::lookup::backfill_for_peer(state.clone(), origin));
+        }
     }
 }
 

@@ -473,12 +473,3 @@ pub async fn delete_user(
         }
     }
 }
-
-/// Тестовые маршруты оригинала (`/api/admin/test/*`) здесь всегда выключены.
-pub async fn test_route() -> Response {
-    (
-        StatusCode::NOT_FOUND,
-        Json(json!({"error": "Not Found", "statusCode": 404})),
-    )
-        .into_response()
-}
