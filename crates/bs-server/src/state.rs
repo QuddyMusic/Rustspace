@@ -27,6 +27,8 @@ pub struct AppState {
     pub dummy_hash: Arc<str>,
     /// Политика содержимого для ответов без собственной.
     pub csp: Arc<str>,
+    /// Незавершённые рукопожатия и одноразовые числа пиров.
+    pub federation: Arc<crate::federation::handshake::Runtime>,
 }
 
 impl AppState {
@@ -55,6 +57,7 @@ impl AppState {
             db,
             ids: Arc::new(Snowflake::new(worker)),
             instance_id: instance_id.into(),
+            federation: Arc::default(),
         })
     }
 }

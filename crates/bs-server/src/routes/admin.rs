@@ -26,7 +26,8 @@ fn reply(value: Value) -> Response {
 }
 
 /// `Number(value)` для поля тела запроса.
-fn js_number(value: &Value) -> f64 {
+#[must_use]
+pub fn js_number(value: &Value) -> f64 {
     match value {
         Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
         Value::String(text) if js_trim(text).is_empty() => 0.0,

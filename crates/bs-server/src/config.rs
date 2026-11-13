@@ -52,6 +52,11 @@ pub struct Config {
     pub domain: Option<String>,
     /// Публичный адрес (`PUBLIC_ORIGIN`).
     pub public_origin: Option<String>,
+    /// Можно ли пирам, которых никто не одобрял, указывать частные адреса
+    /// (`FEDERATION_ALLOW_PRIVATE_PEERS`, по умолчанию нет).
+    pub federation_allow_private_peers: bool,
+    /// Не запускать фоновые задачи федерации (`DISABLE_FEDERATION_WORKERS`).
+    pub disable_federation_workers: bool,
     /// Версия для `/api/instance/info`.
     pub version: String,
     /// Где лежит исходный код этого сервера (`BACKSPACE_SOURCE_URL`).
@@ -226,6 +231,8 @@ impl Config {
             password_hash_cost,
             domain: env.optional("DOMAIN"),
             public_origin,
+            federation_allow_private_peers: env.flag("FEDERATION_ALLOW_PRIVATE_PEERS", false),
+            disable_federation_workers: env.flag("DISABLE_FEDERATION_WORKERS", false),
             version: COMPAT_VERSION.to_owned(),
             source_code_url,
             commit: env.optional("BACKSPACE_COMMIT"),

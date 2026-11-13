@@ -27,7 +27,8 @@ const MAX_PERSONAL_STICKERS: i64 = 200;
 const MAX_NAME_LENGTH: usize = 100;
 const UPLOADS_PER_MINUTE: u32 = 30;
 /// Картинка в base64 плюс остальное тело запроса.
-const UPLOAD_BODY_LIMIT: usize = MAX_STICKER_BYTES.div_ceil(3) * 4 + 4096;
+/// Предел тела загрузки стикера (`bodyLimit` маршрута у оригинала).
+pub const UPLOAD_BODY_LIMIT: usize = MAX_STICKER_BYTES.div_ceil(3) * 4 + 4096;
 
 fn token_for(state: &AppState, id: &str) -> String {
     format!(
@@ -176,7 +177,7 @@ pub async fn create(
     user: AuthUser,
     request: Request,
 ) -> Result<Json<Value>, Response> {
-    let body = read_json(request, UPLOAD_BODY_LIMIT).await?;
+    let body = read_json(request).await?;
     schema_object(&body, &["name", "image"])?;
     let raw_name = schema_string(&body, "name", 1, Some(MAX_NAME_LENGTH))?;
     let image = schema_string(&body, "image", 4, None)?;

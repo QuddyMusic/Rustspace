@@ -96,7 +96,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-app` | The GUI and its entry point | 232 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 80 |
+| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 96 |
 | `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 6 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
@@ -214,7 +214,8 @@ positions, pokes, search; direct and group conversations; friends and people sea
 notification settings; voice channels, calls, voice moderation, LiveKit tokens; file uploads
 (tus), downloads, thumbnails, storage cleanup; link previews; space directory and join
 requests; stickers and GIF; admin (users, storage, instance settings); serving the web
-client. Every route and event is compared with the original by the scenarios in
+client; from federation: request signatures, the handshake and peer management (approval,
+denial, secret rotation, detecting a reinstalled remote instance). Every route and event is compared with the original by the scenarios in
 `tools/compat`, on SQLite and on PostgreSQL.
 
 **Not in the original (extensions):** PostgreSQL storage, two-factor authentication, a key
@@ -222,9 +223,10 @@ directory for end-to-end encrypted DMs. They do not change existing routes: a cl
 does not know about them works as before. Their tables live in the same database under
 `bs_*` names; the original server ignores them.
 
-**Not there yet:** federation (delivering and receiving events between instances). The
-server is not suitable for an instance with federation peers yet and warns about it at
-startup. The server never sends telemetry. See [ROADMAP.md](ROADMAP.md).
+**Not there yet:** delivering and receiving federation events, account replicas, sync and
+cross-instance calls. Peering with other instances is set up and maintained, but events are
+not exchanged yet: the server is not suitable for an instance that talks to peers and warns
+about it at startup. The server never sends telemetry. See [ROADMAP.md](ROADMAP.md).
 
 **Small differences from the original:** thumbnails and stickers are encoded as lossless
 WebP (larger files); AVIF thumbnails are not made; video and audio need `ffmpeg` and
@@ -311,6 +313,8 @@ marked.
 | `BACKSPACE_UPDATE_CHECK` | `false` | Let the admin panel ask GitHub about a new release of the original (the original defaults to `true`) |
 | `BACKSPACE_INSTALL_CHANNEL` | none | `prebuilt` or `source`: what the update panel shows |
 | `DISABLE_RATE_LIMITS` | `false` | Turn rate limits off (tests only) |
+| `FEDERATION_ALLOW_PRIVATE_PEERS` | `false` | Let peers whose address was not given by an admin use private addresses (tests only) |
+| `DISABLE_FEDERATION_WORKERS` | `false` | Do not run background peer checks |
 | `BACKSPACE_SOURCE_URL`, `BACKSPACE_COMMIT` | none | Shown in instance info |
 | `BS_PASSWORD_HASH_COST` | `12` | *(bs-server)* bcrypt cost (4–16); change for tests only |
 | `RUST_LOG` | `info` | *(bs-server)* Log verbosity (`debug`, `bs_server=trace`) |
@@ -327,7 +331,7 @@ tools/compat/up.sh                    # needs a Backspace checkout with `pnpm in
 python3 tools/compat/s_spaces.py      # and s_channels, s_messages, s_dm, s_social, s_account,
                                       # s_voice, s_admin, s_search, s_files, s_embeds,
                                       # s_stickers, s_gif, s_explore, s_directory,
-                                      # s_adminusers; cmp_ready.py
+                                      # s_adminusers, s_bodies; cmp_ready.py
 python3 tools/compat/t_twofactor.py   # bs-server extensions: two-factor
 python3 tools/compat/t_e2ee.py        # and the key directory
 ```
@@ -335,6 +339,16 @@ python3 tools/compat/t_e2ee.py        # and the key directory
 The checkout path is set by `ORIG` (see the top of `up.sh`). The same run with `bs-server` on
 PostgreSQL: `BS_STAND_PG=postgres://user@host:port tools/compat/up.sh`; the `bs_stand`
 database is recreated and filled from the same SQLite copy.
+
+Federation is checked on a separate stand of two instance pairs: original ↔ original and
+`bs-server` ↔ original (with `BS_FED_RUST_Y=1`, `bs-server` on both sides). The same
+scenario runs on both pairs; responses, peer rows in the databases and events are compared:
+
+```sh
+tools/compat/fed_up.sh                # instances on ports 3111–3114, fresh databases
+python3 tools/compat/f_peering.py peering    # each scenario on a fresh stand
+tools/compat/fed_up.sh && python3 tools/compat/f_peering.py approvals
+```
 
 ## Translations
 

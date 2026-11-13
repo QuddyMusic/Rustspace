@@ -53,6 +53,7 @@ pub mod federation;
 pub mod federation_auth;
 pub mod files;
 pub mod hub;
+pub mod jsjson;
 pub mod media;
 pub mod mentions;
 pub mod messages;
@@ -347,6 +348,49 @@ pub fn app(state: AppState) -> Router {
         .route("/api/admin/users/{id}/role", patch(routes::admin::set_role))
         .route("/api/admin/users/{id}/reset-password", post(routes::admin::reset_password))
         .route("/api/admin/users/{id}", delete(routes::admin::delete_user))
+        .route("/api/federation/peer/initiate", post(routes::federation::initiate))
+        .route("/api/federation/peer/accept", post(routes::federation::accept))
+        .route("/api/federation/peer/ensure", post(routes::federation::ensure))
+        .route("/api/federation/peer/rotate", post(routes::federation::rotate_inbound))
+        .route("/api/federation/peer/denied", post(routes::federation::denied))
+        .route("/api/federation/epoch", post(routes::federation::epoch))
+        .route("/api/federation/peers", get(routes::federation::list_peers))
+        .route(
+            "/api/federation/peers/{id}",
+            delete(routes::federation::revoke_peer).patch(routes::federation::update_peer),
+        )
+        .route("/api/federation/peers/{id}/reset", post(routes::federation::reset_peer))
+        .route("/api/federation/peers/{id}/recheck", post(routes::federation::recheck_peer))
+        .route("/api/federation/peers/{id}/rotate", post(routes::federation::rotate_peer))
+        .route("/api/federation/peers/{id}/permanent", delete(routes::federation::delete_peer))
+        .route("/api/federation/reset-events", get(routes::federation::reset_events))
+        .route(
+            "/api/federation/reset-events/acknowledge",
+            post(routes::federation::acknowledge_reset),
+        )
+        .route("/api/federation/approval-requests", get(routes::federation::approval_requests))
+        .route(
+            "/api/federation/approval-requests/{id}/approve",
+            post(routes::federation::approve_request),
+        )
+        .route(
+            "/api/federation/approval-requests/{id}/deny",
+            post(routes::federation::deny_request),
+        )
+        .route("/api/federation/peering-subscriptions", get(routes::federation::subscriptions))
+        .route(
+            "/api/federation/peering-subscriptions/{id}",
+            delete(routes::federation::cancel_subscription),
+        )
+        .route("/api/federation/peering-notifications", get(routes::federation::notifications))
+        .route(
+            "/api/federation/peering-notifications/read-all",
+            post(routes::federation::read_all_notifications),
+        )
+        .route(
+            "/api/federation/peering-notifications/{id}/read",
+            post(routes::federation::read_notification),
+        )
         .route("/api/admin/test/seed-peer", post(routes::admin::test_route))
         .route("/api/admin/test/federation/resync", post(routes::admin::test_route))
         .route(
@@ -367,7 +411,10 @@ pub fn app(state: AppState) -> Router {
         .route("/api/e2ee/keys/{userId}", get(routes::e2ee::of_user))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
+        // Тело разбирается до обработчика (и до проверки входа), как у Fastify.
+        .route_layer(axum::middleware::from_fn(extract::body_stage))
         .fallback(web::fallback)
+        .method_not_allowed_fallback(web::fallback)
         .layer(axum::middleware::from_fn_with_state(state.clone(), global_limit))
         // Политика содержимого: маршрут, задавший свою (раздача загрузок), сохраняет её.
         .layer(axum::middleware::from_fn_with_state(state.clone(), content_policy))
@@ -395,6 +442,7 @@ pub fn app(state: AppState) -> Router {
 /// Запускает фоновые работы сервера: уборку незавершённых загрузок и хранилища, оповещение каталога.
 pub fn spawn_background(state: &AppState) {
     tokio::spawn(directory::run_pinger(state.clone()));
+    federation::worker::spawn(state);
     tokio::spawn(routes::livekit::run_evictions(state.clone()));
     let uploads = state.clone();
     tokio::spawn(async move {

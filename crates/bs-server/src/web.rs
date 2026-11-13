@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use axum::Json;
 use axum::extract::State;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
-use axum::http::{HeaderValue, Method, StatusCode, Uri};
+use axum::http::{HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 use url::Url;
@@ -132,7 +132,14 @@ async fn file_response(path: &Path, immutable: bool) -> Option<Response> {
 
 /// Всё, что не нашло маршрута: файлы веб-клиента и его страница для
 /// остальных адресов; для API — ответ «не найдено».
-pub async fn fallback(State(state): State<AppState>, method: Method, uri: Uri) -> Response {
+pub async fn fallback(State(state): State<AppState>, request: axum::extract::Request) -> Response {
+    // Тело разбирается и для ненайденного маршрута: JSON с ошибкой даёт 400.
+    let request = match crate::extract::parse_stage(request, false).await {
+        Ok(request) => request,
+        Err(refusal) => return refusal,
+    };
+    let method = request.method().clone();
+    let uri = request.uri().clone();
     let path = uri.path();
     let api = path.starts_with("/api/") || path.starts_with("/ws");
     let Some(root) = state.config.web_dist.as_deref().filter(|_| !api) else {

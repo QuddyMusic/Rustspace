@@ -124,22 +124,31 @@ original server.
      server sends nothing).
    - [x] Serving the web client (`BS_WEB_DIST`), content policy, CSP reports.
    - [x] Forced voice disconnect through the LiveKit API (finding S16).
-   - [x] Compatibility stand (`tools/compat`): 16 scenarios, responses and events compared
+   - [x] Compatibility stand (`tools/compat`): 17 scenarios, responses and events compared
      with the original on SQLite and on PostgreSQL.
-   - [ ] Federation. In the original this is about 36 thousand lines: more than everything
-     ported so far, and the part most sensitive to mistakes; it is ported in steps, each
+   - [ ] Federation. In the original this is about 16 thousand lines of code (about 36
+     thousand with tests), and the part most sensitive to mistakes; it is ported in steps, each
      compared with the original on a two-instance stand. Until then `bs-server` runs as a
      standalone instance. The mutation log is already written as in the original.
      - [x] Request signatures between instances (HMAC, freshness, secret rotation), checked
        against the original.
-     - [ ] Handshake and peer management: `/api/federation/*` for peering, secret rotation,
-       epochs and reset; replay protection.
+     - [x] Handshake and peer management: peering in both directions, approval and denial, user
+       requests and their notifications, secret rotation, epochs and reset detection,
+       background peer checks, replay protection. Checked on a stand of two instance pairs
+       (`tools/compat/fed_up.sh`, `f_peering.py`: original ↔ original against `bs-server` ↔
+       original and `bs-server` ↔ `bs-server`, on SQLite and on PostgreSQL), 194 steps with
+       no differences. Along the way request body parsing now repeats `JSON.parse` and
+       `secure-json-parse`: signatures are computed over the same text, and parse errors
+       carry the V8 messages; the content type picks the parser (415), and the body is
+       parsed before the auth check, as in Fastify (the `s_bodies` scenario). A peer's sync
+       time (`lastSyncedAt`) arrives with the sync step.
      - [ ] Outbox and the delivery worker: retries, ordering, rollback of rejected events.
      - [ ] Inbound events: messages, edits, reactions, conversations, profiles, presence.
      - [ ] Account replicas and login from another instance, `user@domain` lookup.
      - [ ] Sync after downtime and state reconciliation.
      - [ ] Cross-instance calls.
-     - [ ] A two-instance stand (original ↔ `bs-server`) in `tools/compat`, and the audit.
+     - [ ] Two-instance stand scenarios for delivery, inbound events, replicas and calls;
+       the audit. The stand itself exists (`tools/compat/fed_up.sh`).
    - [x] The `bs-contract` stand against `bs-server`: both tests pass (REST: 42 calls; the
      client scenario: no parse errors, no unknown events).
 3. **PostgreSQL** as a storage option: done. A backend behind the same interface

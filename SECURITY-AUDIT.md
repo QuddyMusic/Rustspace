@@ -75,6 +75,7 @@ sign-in, tokens):
 | S20 | Medium | The link-preview guard against requests into the internal network validated the address with a separate DNS lookup and then connected by name again (DNS answer swap between check and connect); only the first address was checked; IPv6 addresses embedding IPv4 (NAT64, 6to4) counted as public. | Fixed: the name is resolved once, every address is checked, the connection goes to the checked address, and each redirect hop is checked the same way. |
 | S21 | Low | Accepting a join request did not check a ban issued after it was filed; a request from someone who had already joined gave a 500. | Fixed. |
 | S22 | Info | The original has no two-factor authentication: a stolen password is enough to sign in. | Added to `bs-server` as an extension (TOTP and recovery codes); the secret is stored encrypted, a code is not accepted twice, wrong codes are limited per account. |
+| S23 | Medium | Federation: a peer address not given by an admin (an inbound peering request, a user's request) was checked against private networks with a separate DNS lookup, and the connection then resolved the name again: a DNS answer swapped between the check and the connection pointed the server's request into the internal network. | Fixed in `bs-server`: the name is resolved once and the connection goes to the checked address; redirects are not followed. |
 
 Kept exactly as in the original: bcrypt hashes (cost 12), HS256 tokens with the same fields
 (tokens and password hashes work on both servers with the same `JWT_SECRET`), revocation of

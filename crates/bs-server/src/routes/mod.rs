@@ -9,6 +9,7 @@ pub mod directory;
 pub mod dm;
 pub mod e2ee;
 pub mod explore;
+pub mod federation;
 pub mod files;
 pub mod gif;
 pub mod instance;
