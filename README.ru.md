@@ -259,8 +259,8 @@ target/release/backspace-server
 `backspace-server` с теми же `JWT_SECRET`, `DB_PATH` и `UPLOAD_DIR`. Вернуться — так же в
 обратную сторону.
 
-Чтобы сервер отдавал и веб-клиент оригинала, соберите его (`pnpm --filter client build`) и
-укажите каталог сборки: `BS_WEB_DIST=/путь/к/packages/client/dist`.
+Чтобы сервер отдавал и веб-клиент оригинала, соберите его (`pnpm --filter @backspace/web build`) и
+укажите каталог сборки: `BS_WEB_DIST=/путь/к/packages/web/dist`.
 
 ### PostgreSQL
 

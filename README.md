@@ -262,7 +262,7 @@ Moving from the original server: stop it, copy the database and start `backspace
 with the same `JWT_SECRET`, `DB_PATH` and `UPLOAD_DIR`. Going back works the same way.
 
 To have the server also serve the original web client, build it
-(`pnpm --filter client build`) and point at the build: `BS_WEB_DIST=/path/to/packages/client/dist`.
+(`pnpm --filter @backspace/web build`) and point at the build: `BS_WEB_DIST=/path/to/packages/web/dist`.
 
 ### PostgreSQL
 
