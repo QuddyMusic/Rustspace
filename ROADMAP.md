@@ -219,7 +219,9 @@ original server.
 3. **PostgreSQL** as a storage option: done. A backend behind the same interface
    (`DATABASE_URL`), the schema is derived from the original migrations and extends itself,
    row order in responses matches SQLite, data import: `backspace-server import-sqlite <file>`.
-   Left: TLS to the database (for now: trusted network or same host only).
+   TLS to the database with libpq's `sslmode` (`disable` … `verify-full`) and `sslrootcert`,
+   checked against a PostgreSQL with its own CA (an unknown authority and a wrong host name
+   are refused).
 4. **Two-factor authentication** (TOTP and recovery codes): done, server (`/api/auth/2fa`,
    code at login) and client (field at login, card in account settings). Old clients and the
    original server are unaffected.

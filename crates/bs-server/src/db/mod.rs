@@ -15,6 +15,7 @@ pub mod extensions;
 pub mod migrations;
 pub mod postgres;
 mod sqlite;
+pub mod tls;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -347,8 +348,7 @@ impl Db {
     /// Сервер недоступен или схему не удалось создать.
     pub fn open_postgres(url: &str) -> DbResult<Self> {
         let db = off_runtime(|| -> DbResult<Self> {
-            let mut client = ::postgres::Client::connect(url, ::postgres::NoTls)
-                .map_err(|error| DbError::Postgres(Box::new(error)))?;
+            let mut client = connect_postgres(url)?;
             postgres::sync_schema(&mut client)?;
             let state = Postgres {
                 client: Some(client),
@@ -470,4 +470,28 @@ impl Db {
             .await
             .map_err(|_| E::from(DbError::Cancelled))?
     }
+}
+
+/// Соединение с PostgreSQL с TLS по `sslmode` адреса (см. [`tls`]).
+fn connect_postgres(address: &str) -> DbResult<::postgres::Client> {
+    use std::str::FromStr;
+    let target = tls::parse(address).map_err(DbError::Corrupt)?;
+    let mut config = ::postgres::Config::from_str(&target.url)
+        .map_err(|error| DbError::Postgres(Box::new(error)))?;
+    let client = if target.mode == tls::Mode::Disable {
+        config
+            .ssl_mode(::postgres::config::SslMode::Disable)
+            .connect(::postgres::NoTls)
+    } else {
+        config.ssl_mode(if target.mode == tls::Mode::Prefer {
+            ::postgres::config::SslMode::Prefer
+        } else {
+            ::postgres::config::SslMode::Require
+        });
+        let tls = tokio_postgres_rustls::MakeRustlsConnect::new(
+            tls::client_config(&target).map_err(DbError::Corrupt)?,
+        );
+        config.connect(tls)
+    };
+    client.map_err(|error| DbError::Postgres(Box::new(error)))
 }

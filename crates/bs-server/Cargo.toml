@@ -44,6 +44,11 @@ reqwest = { workspace = true }
 url = { workspace = true }
 scraper = { version = "0.23", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "tiff"] }
+rustls-native-certs = "0.8"
+webpki-roots = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-postgres-rustls = "0.14"
+tokio-postgres = "0.7"
 
 [dev-dependencies]
 tempfile = "3"

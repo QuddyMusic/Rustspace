@@ -279,9 +279,18 @@ database:
 DATABASE_URL=postgres://… JWT_SECRET=… target/release/backspace-server import-sqlite data/backspace.db
 ```
 
-The import is one transaction: all or nothing. There is no import back. The PostgreSQL
-connection has no TLS yet: keep the database on the same host or a trusted network. The
-server uses one connection: transactions run one at a time, as with SQLite.
+The import is one transaction: all or nothing. There is no import back. TLS to PostgreSQL
+follows libpq's `sslmode` in the address: `disable`; `prefer` (the default: encrypted when the
+server offers it, the certificate not checked); `require` (encrypted only; the certificate is
+checked when `sslrootcert` is given); `verify-ca` (the chain up to a trusted authority);
+`verify-full` (the chain and the host name). `sslrootcert` is a PEM file of authorities or
+`system`; without it `verify-*` trust the system roots. Across a network use `verify-full`:
+
+```sh
+DATABASE_URL='postgres://user:password@db.example/backspace?sslmode=verify-full&sslrootcert=/etc/ssl/db-ca.pem'
+```
+
+The server uses one connection: transactions run one at a time, as with SQLite.
 
 ### Two-factor authentication
 
@@ -304,7 +313,7 @@ marked.
 | `JWT_EXPIRES_IN` | `30d` | Token lifetime (`30d`, `12h`, `3600`) |
 | `PORT`, `HOST` | `3000`, `0.0.0.0` | Where to listen |
 | `DB_PATH` | `data/backspace.db` | SQLite database file |
-| `DATABASE_URL` | none | *(bs-server)* PostgreSQL address `postgres://…`; when set, `DB_PATH` is not used |
+| `DATABASE_URL` | none | *(bs-server)* PostgreSQL address `postgres://…` (TLS: `sslmode`, `sslrootcert`); when set, `DB_PATH` is not used |
 | `UPLOAD_DIR` | `data/uploads` | Directory for uploaded files |
 | `MAX_UPLOAD_SIZE` | `104857600` | File size limit in bytes (the administrator can change it in settings) |
 | `TUS_EXPIRATION_HOURS` | `24` | How long an unfinished upload lives |

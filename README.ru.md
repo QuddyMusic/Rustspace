@@ -276,9 +276,19 @@ DATABASE_URL=postgres://user:password@127.0.0.1/backspace JWT_SECRET=… target/
 DATABASE_URL=postgres://… JWT_SECRET=… target/release/backspace-server import-sqlite data/backspace.db
 ```
 
-Перенос идёт одной транзакцией: либо всё, либо ничего. Обратного переноса нет. Соединение с
-PostgreSQL пока без TLS — держите базу на том же узле или в доверенной сети. Сервер работает
-с базой через одно соединение: транзакции идут по очереди, как у SQLite.
+Перенос идёт одной транзакцией: либо всё, либо ничего. Обратного переноса нет. TLS к
+PostgreSQL задаётся, как у libpq, параметром `sslmode` в адресе: `disable`; `prefer` (по
+умолчанию: шифрование, если сервер его предлагает, сертификат не проверяется); `require`
+(только с шифрованием; сертификат проверяется, если задан `sslrootcert`); `verify-ca` (цепочка
+до доверенного центра); `verify-full` (цепочка и имя узла). `sslrootcert` — файл PEM с
+центрами или `system`; без него `verify-*` доверяют системным корням. Через сеть —
+`verify-full`:
+
+```sh
+DATABASE_URL='postgres://user:password@db.example/backspace?sslmode=verify-full&sslrootcert=/etc/ssl/db-ca.pem'
+```
+
+Сервер работает с базой через одно соединение: транзакции идут по очереди, как у SQLite.
 
 ### Двухфакторная аутентификация
 
@@ -300,7 +310,7 @@ PostgreSQL пока без TLS — держите базу на том же уз
 | `JWT_EXPIRES_IN` | `30d` | Срок жизни токена (`30d`, `12h`, `3600`) |
 | `PORT`, `HOST` | `3000`, `0.0.0.0` | Где слушать |
 | `DB_PATH` | `data/backspace.db` | Файл базы SQLite |
-| `DATABASE_URL` | — | *(bs-server)* Адрес PostgreSQL `postgres://…`; если задан, `DB_PATH` не используется |
+| `DATABASE_URL` | — | *(bs-server)* Адрес PostgreSQL `postgres://…` (TLS: `sslmode`, `sslrootcert`); если задан, `DB_PATH` не используется |
 | `UPLOAD_DIR` | `data/uploads` | Каталог загруженных файлов |
 | `MAX_UPLOAD_SIZE` | `104857600` | Предел размера файла, байт (администратор меняет в настройках) |
 | `TUS_EXPIRATION_HOURS` | `24` | Сколько живёт незавершённая загрузка |
