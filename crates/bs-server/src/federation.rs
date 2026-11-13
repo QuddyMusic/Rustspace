@@ -6,6 +6,7 @@
 //! в работе; пока их нет, события для удалённых участников только отмечаются
 //! в журнале.
 
+pub mod calls;
 pub mod fetch;
 pub mod handshake;
 pub mod identity;
@@ -167,19 +168,6 @@ pub fn dm_target_origins(
         }
     }
     Ok(origins)
-}
-
-/// Событие звонка для других инстансов. Звонки между инстансами уходят не
-/// через очередь, а прямым запросом (`sendCallRelay`); он ещё не перенесён.
-pub fn call_relay_pending(context_id: &str, event_type: &str, targets: &[String]) {
-    if !targets.is_empty() {
-        tracing::warn!(
-            context = context_id,
-            event = event_type,
-            targets = targets.len(),
-            "событие звонка для других инстансов не отправлено: звонки между инстансами ещё не перенесены"
-        );
-    }
 }
 
 /// Ссылка на личное сообщение для других инстансов (`dmMessageFederationRef`).

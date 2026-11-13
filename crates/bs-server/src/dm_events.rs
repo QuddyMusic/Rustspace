@@ -142,6 +142,11 @@ pub fn handle(
                 }),
                 Some(&cx.user_id),
             )?;
+            out.call(crate::voice::CallTask::Typing {
+                dm_channel: channel.to_owned(),
+                stop: false,
+                user: cx.user_id.clone(),
+            });
         }
         _ => return Ok(false),
     }

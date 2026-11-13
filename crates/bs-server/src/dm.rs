@@ -183,7 +183,7 @@ pub struct Reconciled {
 }
 
 /// Может ли строка быть перепиской один на один (`mayBeOneOnOneRow`).
-fn may_be_one_on_one(owner: Option<&str>, federated: Option<&str>) -> bool {
+pub fn may_be_one_on_one(owner: Option<&str>, federated: Option<&str>) -> bool {
     owner.is_none()
         && federated.is_none_or(|key| {
             key.len() == 32
@@ -630,6 +630,11 @@ pub fn broadcast_message(
             );
         }
     }
+    out.call(crate::voice::CallTask::Typing {
+        dm_channel: channel.to_owned(),
+        stop: true,
+        user: author.to_owned(),
+    });
     reopen_closed_with(tx, out, channel, Some(message))?;
     let event = json!({"type": "dm_message_created", "message": message});
     for member in &members {

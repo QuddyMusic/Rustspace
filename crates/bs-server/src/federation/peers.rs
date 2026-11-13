@@ -728,8 +728,24 @@ pub async fn run_effects(state: &AppState, effects: Effects) {
                 && effects.next.is_some_and(|next| next != "active")
                 && effects.exit.is_some()
             {
-                // Звонки с участниками пира закрываются вместе с переносом
-                // звонков между инстансами.
+                // Звонки, которые ведёт пир, забываются, а его участники
+                // выходят из звонков отсюда (`onPeerDeactivated`).
+                let label = tx
+                    .query_one(
+                        "SELECT instance_name FROM federation_peers WHERE origin = ?",
+                        crate::params![&effects.origin],
+                    )?
+                    .map(|row| row.opt_text("instance_name"))
+                    .transpose()?
+                    .flatten();
+                super::calls::peer_deactivated(
+                    tx,
+                    &app,
+                    out,
+                    &effects.origin,
+                    effects.next,
+                    label.as_deref(),
+                )?;
                 mark_stubs_offline(tx, &app, out, &effects.origin)?;
                 to_admins(tx, &app.hub, out, &changed)?;
             }

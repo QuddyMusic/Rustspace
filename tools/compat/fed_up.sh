@@ -11,6 +11,8 @@
 # (база bsfed<порт> создаётся заново).
 # BS_FED_TEST_ROUTES=1 — служебные маршруты /api/admin/test/* (NODE_ENV=test,
 # ENABLE_TEST_ROUTES=1): догонялка запускается сценарием, а не по таймеру.
+# BS_FED_LIVEKIT=1 — у инстансов настроен медиасервер (ключи без самого сервера):
+# звонки между инстансами выдают токены.
 ORIG=${ORIG:-/home/claude/work/backspace-orig}
 REPO=${REPO:-$(cd "$(dirname "$0")/../.." && pwd)}
 pkill -f 'tsx/esm src/index.ts' 2>/dev/null; pkill -f backspace-server 2>/dev/null; pkill -f tls_front.py 2>/dev/null; sleep 1
@@ -21,6 +23,9 @@ export NO_PROXY="x1.test,y1.test,x2.test,y2.test,localhost,127.0.0.1${NO_PROXY:+
 name() { case $1 in 3111) echo x1.test;; 3112) echo y1.test;; 3113) echo x2.test;; 3114) echo y2.test;; esac; }
 SECRET=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
 if [ -n "$BS_FED_TEST_ROUTES" ]; then NODEENV=test; TESTROUTES=1; else NODEENV=development; TESTROUTES=; fi
+if [ -n "$BS_FED_LIVEKIT" ]; then
+  export LIVEKIT_URL=wss://livekit.test LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=0123456789abcdef0123456789abcdef
+fi
 orig() {
   rm -rf /tmp/bsfed$1; mkdir -p /tmp/bsfed$1/uploads
   (cd "$ORIG/packages/server" && PORT=$1 HOST=127.0.0.1 PUBLIC_ORIGIN=https://$(name $1) NODE_EXTRA_CA_CERTS=/tmp/fedca/ca.pem FEDERATION_BACKOFF_DIVISOR=${FEDERATION_BACKOFF_DIVISOR:-1000} JWT_SECRET=$SECRET DB_PATH=/tmp/bsfed$1/bs.db UPLOAD_DIR=/tmp/bsfed$1/uploads REGISTRATION_OPEN=true DIRECTORY_ENDPOINT= BACKSPACE_UPDATE_CHECK=false BACKUP_DISABLED=true DISABLE_RATE_LIMITS=true FEDERATION_ALLOW_PRIVATE_PEERS=true NODE_ENV=$NODEENV ENABLE_TEST_ROUTES=$TESTROUTES setsid nohup node --import tsx/esm src/index.ts > /tmp/bsfed$1/log 2>&1 < /dev/null &)

@@ -537,6 +537,10 @@ pub fn create(cx: &mut Ctx<'_>, event: &Value) -> Step {
         let (channel, created) =
             crate::dm::find_or_create_pair(cx.tx, &cx.app.ids, &pair[0].id, &pair[1].id, true)?;
         created_copy = created;
+        // Вызов, пришедший раньше этой копии, привязывается к ней.
+        if let Some(key) = crate::federation::dm_federated_id(cx.tx, &channel)? {
+            crate::voice::late_bind(&cx.app.hub, &key, &channel);
+        }
         channel
     };
     let reply_to = reply_target(cx.tx, &ours, message.get("replyTo"), cx.source, &channel_id)?;

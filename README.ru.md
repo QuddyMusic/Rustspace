@@ -94,7 +94,7 @@ WebSocket и каждый REST-ответ, который получает кл�
 | `bs-app` | GUI и точка входа | 232 |
 | `bs-tui` | Терминальный клиент (`ratatui`), один инстанс | 35 |
 | `bs-contract` | Контрактные тесты против настоящего сервера Backspace | 2 |
-| `bs-server` | Сервер на Rust (в работе): REST и шлюз WebSocket оригинала поверх той же базы — см. раздел «Сервер» | 119 |
+| `bs-server` | Сервер на Rust (в работе): REST и шлюз WebSocket оригинала поверх той же базы — см. раздел «Сервер» | 123 |
 | `bs-e2ee` | Сквозное шифрование ЛС: X25519, HKDF-SHA256, XChaCha20-Poly1305, контрольное число | 6 |
 | `xtask` | `cargo xtask contract`: поднимает оригинальный сервер и гоняет контрактные тесты | — |
 
@@ -227,10 +227,10 @@ cargo xtask contract --url http://127.0.0.1:3000    # против запуще�
 маршруты: клиент, который о них не знает, работает как раньше. Их таблицы лежат в той же
 базе под именами `bs_*`, оригинальный сервер их не замечает.
 
-**Чего пока нет:** звонки и «печатает» между инстансами. События с пирами ходят в обе
+**Чего пока нет:** аудита федерации. События, звонки и «печатает» с пирами ходят в обе
 стороны, поиск `user@домен` работает, после простоя пиры догоняют друг друга по журналу
-мутаций; пока не закончен аудит федерации, сервер предупреждает при запуске, если общается с
-пирами. Телеметрию сервер не отправляет никогда. См. [ROADMAP.ru.md](ROADMAP.ru.md).
+мутаций; пока аудит не закончен, сервер предупреждает при запуске, если общается с пирами.
+Телеметрию сервер не отправляет никогда. См. [ROADMAP.ru.md](ROADMAP.ru.md).
 
 **Отличия от оригинала в мелочах:** миниатюры и стикеры кодируются в WebP без потерь (файлы
 крупнее); миниатюры AVIF не делаются; для видео и звука нужны `ffmpeg` и `ffprobe` в `PATH`
@@ -363,6 +363,7 @@ FEDERATION_BACKOFF_DIVISOR=100000 tools/compat/fed_up.sh && python3 tools/compat
 tools/compat/fed_up.sh && python3 tools/compat/f_inbound.py inbound relay_checks
 tools/compat/fed_up.sh && python3 tools/compat/f_lookup.py friends accounts
 BS_FED_TEST_ROUTES=1 FEDERATION_BACKOFF_DIVISOR=1 tools/compat/fed_up.sh && python3 tools/compat/f_sync.py pull serve pages
+BS_FED_LIVEKIT=1 tools/compat/fed_up.sh && python3 tools/compat/f_calls.py one_on_one group
 ```
 
 ## Переводы

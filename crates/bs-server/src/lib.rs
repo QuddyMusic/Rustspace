@@ -462,6 +462,7 @@ pub fn app(state: AppState) -> Router {
 pub fn spawn_background(state: &AppState) {
     tokio::spawn(directory::run_pinger(state.clone()));
     federation::worker::spawn(state);
+    federation::calls::spawn(state);
     tokio::spawn(routes::livekit::run_evictions(state.clone()));
     let uploads = state.clone();
     tokio::spawn(async move {

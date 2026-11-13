@@ -6,6 +6,7 @@
 //! откатывается, файлы скачиваются вне её, и событие применяется заново —
 //! уже со скачанными файлами.
 
+pub mod calls;
 pub mod files;
 pub mod friends;
 pub mod membership;
@@ -32,6 +33,8 @@ pub enum Verdict {
     Accepted,
     /// Отклонено с причиной.
     Rejected(String),
+    /// Обработано, но доставить было некому (`undeliverable`).
+    Undeliverable(String),
 }
 
 /// Почему обработка события прервалась.
@@ -371,13 +374,12 @@ fn process(cx: &mut Ctx<'_>, event: &Value) -> Step {
         "dm_close" => state::close(cx, event, true),
         "dm_reopen" => state::close(cx, event, false),
         "profile_update" => profile::update(cx, event),
-        // Звонки и «печатает» между инстансами ещё не перенесены: событие
-        // принимается и ничего не меняет.
-        "dm_call_start" | "dm_call_accept" | "dm_call_reject" | "dm_call_end"
-        | "dm_typing_start" | "dm_typing_stop" => {
-            tracing::debug!(kind = ?text(event, "eventType"), "событие звонка или набора текста от пира пропущено");
-            accept()
-        }
+        "dm_call_start" => calls::start(cx, event),
+        "dm_call_accept" => calls::answer(cx, event),
+        "dm_call_reject" => calls::leave(cx, event, true),
+        "dm_call_end" => calls::leave(cx, event, false),
+        "dm_typing_start" => calls::typing(cx, event, false),
+        "dm_typing_stop" => calls::typing(cx, event, true),
         _ => reject("unknown_event_type"),
     }
 }
@@ -520,6 +522,10 @@ pub async fn process_events(
             }
             Ok(Verdict::Rejected(reason)) => {
                 outcome.rejected.push((id.clone(), reason));
+                false
+            }
+            Ok(Verdict::Undeliverable(reason)) => {
+                outcome.undeliverable.push((id.clone(), reason));
                 false
             }
             Err(error) => {

@@ -196,9 +196,21 @@ original server.
        is served to the original; `pages` — page boundaries, cursors and contexts), 54 steps
        with no differences on SQLite and PostgreSQL, with `bs-server` on one and on both
        sides.
-     - [ ] Cross-instance calls.
-     - [ ] Two-instance stand scenarios for delivery, inbound events, replicas and calls;
-       the audit. The stand itself exists (`tools/compat/fed_up.sh`).
+     - [x] Cross-instance calls and typing: direct signed requests to peers past the
+       outbox (`sendCallRelay`: a 3 s on-demand handshake for calls, a background one for
+       typing), a call started here rings members on other instances with LiveKit tokens
+       minted only for the members each peer homes; accept, decline and hang-up in both
+       directions, group calls with per-member rules (`perMember`, seats of remote members,
+       a decline or leave ends the call only when nobody is left), calls hosted by a peer
+       kept in memory with their 60 s ring, a reconnect grace and the `ready` snapshot,
+       `dm_call_undeliverable` for peers that cannot be reached or have nobody to ring,
+       a peer that stops being active loses its calls and its members leave ours, a
+       30 s check of call hosts. Checked on the stand (`f_calls.py`: `one_on_one` and
+       `group`, with LiveKit keys: `BS_FED_LIVEKIT=1`), 22 steps and both sides' events
+       with no differences on SQLite and PostgreSQL, with `bs-server` on one and on both
+       sides; the other federation scenarios now compare typing too.
+     - [ ] The federation audit (the stand scenarios for delivery, inbound events,
+       replicas, sync and calls are in place: `tools/compat/f_*.py`).
    - [x] The `bs-contract` stand against `bs-server`: both tests pass (REST: 42 calls; the
      client scenario: no parse errors, no unknown events).
 3. **PostgreSQL** as a storage option: done. A backend behind the same interface

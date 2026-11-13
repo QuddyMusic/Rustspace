@@ -50,6 +50,101 @@ enum Kind {
         ringing: bool,
         group: bool,
         declined: HashSet<String>,
+        /// Участники с других инстансов, усаженные по их принятию: пользователь
+        /// → инстанс, который о нём сообщил (`remoteParticipants`).
+        remote: HashMap<String, String>,
+    },
+}
+
+/// Звонок, который ведёт другой инстанс, с участниками отсюда
+/// (`FederatedCallEntry`).
+#[derive(Debug, Clone)]
+pub struct FedCall {
+    /// Переписка здесь, если она уже есть.
+    pub dm_channel: Option<String>,
+    /// Ключ звонка (ключ переписки).
+    pub federated_id: String,
+    /// Копия звонящего.
+    pub caller: String,
+    /// Инстанс, ведущий звонок.
+    pub host: String,
+    /// Адрес медиасервера ведущего.
+    pub livekit_url: String,
+    /// Токены участников отсюда.
+    pub tokens: HashMap<String, String>,
+    /// Кому звонили отсюда.
+    pub ringed: Vec<String>,
+    /// Кто вошёл отсюда.
+    pub joined: Vec<String>,
+    /// Групповой звонок с правилами для каждого участника.
+    pub group: bool,
+    /// Ответили.
+    pub active: bool,
+    /// Начало.
+    pub started_at: i64,
+}
+
+/// Что делать, если ведущий не принял событие участника.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnFail {
+    /// Только записать.
+    Log,
+    /// Сообщить участнику (`dm_call_undeliverable`, не окончательное).
+    Report(&'static str),
+    /// Забыть звонок и сообщить участнику окончательно.
+    Drop(&'static str),
+}
+
+/// Работа со звонком для других инстансов; выполняется после фиксации.
+#[derive(Debug, Clone)]
+pub enum CallTask {
+    /// Вызов начат здесь (`sendFederatedCallStart`).
+    Start {
+        /// Переписка.
+        dm_channel: String,
+        /// Звонящий.
+        caller: String,
+        /// Его имя для вызова.
+        caller_name: String,
+    },
+    /// Принятие или завершение звонка, который ведёт этот инстанс, всем
+    /// инстансам участников (`fanOutCallEvent`).
+    FanOut {
+        /// Переписка.
+        dm_channel: String,
+        /// `dm_call_accept` или `dm_call_end`.
+        kind: &'static str,
+        /// От чьего имени, по порядку предпочтения.
+        actors: Vec<String>,
+        /// Кроме этого инстанса.
+        exclude: Option<String>,
+        /// Кто ответил (для принятия).
+        answered_by: Option<Value>,
+        /// Кому сообщить о неудачах и на каком шаге.
+        report: Option<(String, &'static str)>,
+    },
+    /// Действие участника отсюда в звонке, который ведёт другой инстанс
+    /// (`relayToCallHost`).
+    ToHost {
+        /// Звонок, каким он был в момент действия.
+        call: Box<FedCall>,
+        /// Участник.
+        user: String,
+        /// `dm_call_accept`, `dm_call_reject` или `dm_call_end`.
+        kind: &'static str,
+        /// Кто ответил (для принятия).
+        answered_by: Option<Value>,
+        /// Что делать при неудаче.
+        on_fail: OnFail,
+    },
+    /// «Печатает» для других инстансов (`sendTypingRelay`).
+    Typing {
+        /// Переписка.
+        dm_channel: String,
+        /// Перестал печатать.
+        stop: bool,
+        /// Кто печатает.
+        user: String,
     },
 }
 
@@ -79,8 +174,13 @@ struct Inner {
     permission_muted: HashSet<(String, String)>,
     /// Поколения таймеров вызова по комнатам.
     ring: HashMap<String, u64>,
-    /// Поколения отсрочек после обрыва: пользователь → (поколение, комната).
-    reconnect: HashMap<String, (u64, Option<String>)>,
+    /// Поколения отсрочек после обрыва: пользователь → (поколение, комната,
+    /// звонок другого инстанса).
+    reconnect: HashMap<String, (u64, Option<String>, Option<String>)>,
+    /// Звонки, которые ведут другие инстансы.
+    federated: HashMap<String, FedCall>,
+    /// Поколения таймеров таких звонков.
+    federated_timer: HashMap<String, u64>,
     next: u64,
 }
 
@@ -163,6 +263,62 @@ impl Inner {
         }
         self.ring.remove(room_id);
         room.participants
+    }
+}
+
+impl Inner {
+    /// Звонок другого инстанса, в который пользователь вошёл отсюда
+    /// (`getJoinedFederatedCall`).
+    fn joined_federated(&self, user: &str) -> Option<String> {
+        self.federated
+            .values()
+            .find(|call| call.joined.iter().any(|id| id == user))
+            .map(|call| call.federated_id.clone())
+    }
+
+    /// Звонок другого инстанса в переписке (`getFederatedCallByDmChannel`).
+    fn federated_by_dm(&self, dm_channel: &str) -> Option<String> {
+        self.federated
+            .values()
+            .find(|call| call.dm_channel.as_deref() == Some(dm_channel))
+            .map(|call| call.federated_id.clone())
+    }
+
+    /// Забывает звонок другого инстанса (`clearFederatedCall`).
+    fn clear_federated(&mut self, federated: &str) {
+        let joined = self
+            .federated
+            .get(federated)
+            .map(|call| call.joined.clone())
+            .unwrap_or_default();
+        for user in joined {
+            if !self.user_room.contains_key(&user) {
+                self.clear_voice_connection(&user);
+            }
+        }
+        self.federated.remove(federated);
+        self.federated_timer.remove(federated);
+    }
+
+    /// Забывает отвеченный звонок, в котором никого отсюда не осталось
+    /// (`dropFederatedCallIfIdle`).
+    fn drop_federated_if_idle(&mut self, federated: &str) {
+        let idle = self
+            .federated
+            .get(federated)
+            .is_some_and(|call| call.active && call.joined.is_empty());
+        if idle && !self.federated_timer.contains_key(federated) {
+            self.clear_federated(federated);
+        }
+    }
+
+    /// Участник выходит из звонка другого инстанса (`leaveFederatedCallEntry`).
+    fn leave_federated_entry(&mut self, federated: &str, user: &str) {
+        let Some(call) = self.federated.get_mut(federated) else {
+            return;
+        };
+        call.joined.retain(|id| id != user);
+        self.drop_federated_if_idle(federated);
     }
 }
 
@@ -300,7 +456,16 @@ fn after_dm_leave(
     out: &mut Outbox,
     dm_channel: &str,
     user: &str,
-) -> DbResult<()> {
+) -> DbResult<bool> {
+    if let Some(Kind::Dm { remote, .. }) = hub
+        .voice
+        .lock()
+        .rooms
+        .get_mut(dm_channel)
+        .map(|room| &mut room.kind)
+    {
+        remote.remove(user);
+    }
     broadcast::to_dm_members(
         tx,
         out,
@@ -314,16 +479,34 @@ fn after_dm_leave(
     if empty_active {
         end_dm_room(tx, hub, out, dm_channel, false)?;
     }
-    Ok(())
+    Ok(empty_active)
+}
+
+/// Конец звонка, который вёл этот инстанс, — инстансам участников
+/// (`fanOutCallEnd`, `sendFederatedCallEnd`).
+fn fan_out_end(out: &mut Outbox, dm_channel: &str, actors: Vec<String>) {
+    out.call(CallTask::FanOut {
+        dm_channel: dm_channel.to_owned(),
+        kind: "dm_call_end",
+        actors,
+        exclude: None,
+        answered_by: None,
+        report: None,
+    });
 }
 
 /// Объявляет выход из комнаты (`broadcastRoomLeave`).
+///
+/// Звонок, который выход опустошил, завершается и у других инстансов; конец
+/// называет участника (`broadcastRoomLeave`) или звонящего
+/// (`leaveCurrentRoomAnnounced`).
 fn announce_leave(
     tx: &mut dyn Tx,
     hub: &Hub,
     out: &mut Outbox,
     left: &Left,
     user: &str,
+    name_user: bool,
 ) -> DbResult<()> {
     match &left.room.kind {
         Kind::Space { space_id } => to_channel_viewers(
@@ -334,7 +517,16 @@ fn announce_leave(
             &left.room_id,
             &state_update(&left.room_id, user, false),
         ),
-        Kind::Dm { .. } => after_dm_leave(tx, hub, out, &left.room_id, user),
+        Kind::Dm { caller, .. } => {
+            if after_dm_leave(tx, hub, out, &left.room_id, user)? {
+                let mut actors = vec![caller.clone()];
+                if name_user {
+                    actors.insert(0, user.to_owned());
+                }
+                fan_out_end(out, &left.room_id, actors);
+            }
+            Ok(())
+        }
     }
 }
 
@@ -344,11 +536,12 @@ fn leave_announced(
     hub: &Hub,
     out: &mut Outbox,
     user: &str,
+    name_user: bool,
 ) -> DbResult<Option<String>> {
     let left = hub.voice.lock().leave_current(user);
     match left {
         Some(left) => {
-            announce_leave(tx, hub, out, &left, user)?;
+            announce_leave(tx, hub, out, &left, user, name_user)?;
             Ok(Some(left.room_id))
         }
         None => Ok(None),
@@ -376,6 +569,7 @@ fn end_ringing_placed_by(
         .collect();
     for room in rooms {
         end_dm_room(tx, hub, out, &room, false)?;
+        fan_out_end(out, &room, vec![user.to_owned()]);
     }
     Ok(())
 }
@@ -532,7 +726,8 @@ pub fn join(
         }
         return apply_restrictions(tx, hub, out, &space, channel, user, false);
     }
-    if let Some(left) = leave_announced(tx, hub, out, user)? {
+    leave_joined_federated(hub, out, user);
+    if let Some(left) = leave_announced(tx, hub, out, user, true)? {
         out.to_user(
             user,
             &json!({"type": "voice_disconnected", "userId": user, "channelId": left, "reason": "displaced"}),
@@ -577,8 +772,9 @@ pub fn join(
 /// # Errors
 /// Ошибка базы.
 pub fn leave(tx: &mut dyn Tx, hub: &Hub, out: &mut Outbox, user: &str) -> DbResult<()> {
+    leave_joined_federated(hub, out, user);
     hub.voice.lock().clear_voice_connection(user);
-    leave_announced(tx, hub, out, user)?;
+    leave_announced(tx, hub, out, user, true)?;
     hub.voice.lock().status.remove(user);
     Ok(())
 }
@@ -599,6 +795,11 @@ pub fn status(
     let (room_id, kind, effective) = {
         let mut inner = hub.voice.lock();
         let Some(room_id) = inner.user_room.get(user).cloned() else {
+            // Звонок другого инстанса комнаты здесь не имеет, но состояние —
+            // знак, что сеанс вернулся после обрыва.
+            if inner.joined_federated(user).is_some() {
+                inner.set_voice_connection(user, connection);
+            }
             return Ok(());
         };
         let Some(room) = inner.rooms.get(&room_id) else {
@@ -996,7 +1197,7 @@ fn join_hosted_call(
             left
         };
         if let Some(left) = left {
-            announce_leave(tx, hub, out, &left, &caller)?;
+            announce_leave(tx, hub, out, &left, &caller, true)?;
         }
         broadcast::to_dm_members(
             tx,
@@ -1015,9 +1216,10 @@ fn join_hosted_call(
     if !in_it {
         let left = hub.voice.lock().leave_current(user);
         if let Some(left) = left {
-            announce_leave(tx, hub, out, &left, user)?;
+            announce_leave(tx, hub, out, &left, user, true)?;
         }
     }
+    leave_joined_federated(hub, out, user);
     {
         let mut inner = hub.voice.lock();
         if let Some(Kind::Dm { declined, .. }) =
@@ -1028,15 +1230,27 @@ fn join_hosted_call(
         inner.join(dm_channel, user);
         inner.set_voice_connection(user, connection);
     }
-    let (home_user, home_instance) = federation::identity(tx, &app.config, user)?;
+    let answered_by = relay_identity(tx, app, user)?;
     let mut accepted = json!({
         "type": "dm_call_accepted",
         "dmChannelId": dm_channel,
-        "answeredBy": {"homeUserId": home_user, "homeInstance": home_instance},
     });
     if let Some(federated) = federation::dm_federated_id(tx, dm_channel)? {
         accepted["federatedCallId"] = json!(federated);
     }
+    if let Some(answered_by) = &answered_by {
+        accepted["answeredBy"] = answered_by.clone();
+    }
+    let caller = match hub
+        .voice
+        .lock()
+        .rooms
+        .get(dm_channel)
+        .map(|room| &room.kind)
+    {
+        Some(Kind::Dm { caller, .. }) => caller.clone(),
+        _ => String::new(),
+    };
     broadcast::to_dm_members(tx, out, dm_channel, &accepted, None)?;
     broadcast::to_dm_members(
         tx,
@@ -1045,12 +1259,25 @@ fn join_hosted_call(
         &state_update(dm_channel, user, true),
         None,
     )?;
-    federation::call_relay_pending(
-        dm_channel,
-        "dm_call_accept",
-        &federation::dm_target_origins(tx, &app.config, dm_channel)?,
-    );
+    out.call(CallTask::FanOut {
+        dm_channel: dm_channel.to_owned(),
+        kind: "dm_call_accept",
+        actors: vec![user.to_owned(), caller],
+        exclude: None,
+        answered_by,
+        report: Some((user.to_owned(), "accept")),
+    });
     Ok(())
+}
+
+/// Идентичность пользователя для событий звонка (`userRelayIdentity`).
+fn relay_identity(tx: &mut dyn Tx, app: &AppState, user: &str) -> DbResult<Option<Value>> {
+    let Some(row) = tx.query_one("SELECT * FROM users WHERE id = ?", params![user])? else {
+        return Ok(None);
+    };
+    Ok(federation::identity::actor_of_user(&app.config, &row)?.map(
+        |actor| json!({"homeUserId": actor.home_user_id, "homeInstance": actor.home_instance}),
+    ))
 }
 
 /// Запускает таймер вызова: если за минуту никто не ответил, звонок завершается.
@@ -1071,14 +1298,22 @@ fn start_ring_timer(app: &AppState, dm_channel: &str) {
             .run(move |tx, out| {
                 let still = {
                     let inner = state.hub.voice.lock();
-                    inner.ring.get(&dm_channel) == Some(&generation)
-                        && inner
-                            .rooms
-                            .get(&dm_channel)
-                            .is_some_and(|room| matches!(room.kind, Kind::Dm { ringing: true, .. }))
+                    if inner.ring.get(&dm_channel) == Some(&generation) {
+                        match inner.rooms.get(&dm_channel).map(|room| &room.kind) {
+                            Some(Kind::Dm {
+                                caller,
+                                ringing: true,
+                                ..
+                            }) => Some(caller.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
                 };
-                if still {
+                if let Some(caller) = still {
                     end_dm_room(tx, &state.hub, out, &dm_channel, false)?;
+                    fan_out_end(out, &dm_channel, vec![caller]);
                 }
                 Ok(())
             })
@@ -1130,17 +1365,30 @@ pub fn call_start(
         }
         return join_hosted_call(app, tx, out, dm_channel, user, connection);
     }
+    // Звонок в этой переписке ведёт другой инстанс: пока он идёт, второй
+    // звонок здесь разделил бы переписку на две комнаты.
+    let federated = hub.voice.lock().federated_by_dm(dm_channel);
+    if let Some(federated) = federated {
+        if federated_call_still_live(hub, out, &federated, user, connection) {
+            refuse_call(out, connection, "dm_call_in_progress", Some(dm_channel));
+            return Ok(());
+        }
+        hub.voice.lock().clear_federated(&federated);
+    }
     let left = hub.voice.lock().leave_current(user);
     if let Some(left) = left {
-        announce_leave(tx, hub, out, &left, user)?;
+        announce_leave(tx, hub, out, &left, user, true)?;
     }
+    leave_joined_federated(hub, out, user);
     hub.voice.lock().status.remove(user);
     end_ringing_placed_by(tx, hub, out, user, Some(dm_channel))?;
-    let group = dm::channel_row(tx, dm_channel)?
-        .map(|row| row.opt_text("owner_id"))
-        .transpose()?
-        .flatten()
-        .is_some();
+    let group = match dm::channel_row(tx, dm_channel)? {
+        Some(row) => !dm::may_be_one_on_one(
+            row.opt_text("owner_id")?.as_deref(),
+            row.opt_text("federated_id")?.as_deref(),
+        ),
+        None => false,
+    };
     {
         let mut inner = hub.voice.lock();
         inner.rooms.insert(
@@ -1151,6 +1399,7 @@ pub fn call_start(
                     ringing: true,
                     group,
                     declined: HashSet::new(),
+                    remote: HashMap::new(),
                 },
                 participants: Vec::new(),
                 started_at: now_ms(),
@@ -1172,11 +1421,11 @@ pub fn call_start(
         }),
         Some(user),
     )?;
-    federation::call_relay_pending(
-        dm_channel,
-        "dm_call_start",
-        &federation::dm_target_origins(tx, &app.config, dm_channel)?,
-    );
+    out.call(CallTask::Start {
+        dm_channel: dm_channel.to_owned(),
+        caller: user.to_owned(),
+        caller_name: username.to_owned(),
+    });
     Ok(())
 }
 
@@ -1192,6 +1441,7 @@ pub fn call_accept(
     connection: u64,
     event: &Map<String, Value>,
 ) -> DbResult<()> {
+    let hub = &app.hub;
     let (channel, federated) = call_channel(tx, event)?;
     let named = event
         .get("dmChannelId")
@@ -1208,8 +1458,7 @@ pub fn call_accept(
             refuse_call(out, connection, "not_dm_member", label.as_deref());
             return Ok(());
         }
-        let hosted = app
-            .hub
+        let hosted = hub
             .voice
             .lock()
             .rooms
@@ -1219,8 +1468,145 @@ pub fn call_accept(
             return join_hosted_call(app, tx, out, channel, user, connection);
         }
     }
-    refuse_call(out, connection, "dm_call_not_found", label.as_deref());
+    let call = find_federated(hub, federated.as_deref(), channel.as_deref());
+    let Some(call) = call else {
+        refuse_call(out, connection, "dm_call_not_found", label.as_deref());
+        return Ok(());
+    };
+    // Комната здесь, где бы она ни была, покидается и объявляется; звонок
+    // другого инстанса, в котором участник уже был, — тоже.
+    leave_announced(tx, hub, out, user, false)?;
+    let other = hub.voice.lock().joined_federated(user);
+    if other.is_some_and(|other| other != call.federated_id) {
+        leave_joined_federated(hub, out, user);
+    }
+    let call = {
+        let mut inner = hub.voice.lock();
+        if let Some(entry) = inner.federated.get_mut(&call.federated_id) {
+            entry.active = true;
+            if !entry.joined.iter().any(|id| id == user) {
+                entry.joined.push(user.to_owned());
+            }
+        }
+        inner.set_voice_connection(user, connection);
+        inner
+            .federated
+            .get(&call.federated_id)
+            .cloned()
+            .unwrap_or(call)
+    };
+    let answered_by = relay_identity(tx, app, user)?;
+    let mut accepted = json!({
+        "type": "dm_call_accepted",
+        "dmChannelId": call.dm_channel,
+        "federatedCallId": call.federated_id,
+    });
+    if let Some(answered_by) = &answered_by {
+        accepted["answeredBy"] = answered_by.clone();
+    }
+    to_federated_users(out, &call, &accepted, None);
+    out.call(CallTask::ToHost {
+        call: Box::new(call),
+        user: user.to_owned(),
+        kind: "dm_call_accept",
+        answered_by,
+        on_fail: OnFail::Drop("accept"),
+    });
     Ok(())
+}
+
+/// Исход выхода из группового звонка или отказа от него.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupOutcome {
+    /// Ничего не изменилось.
+    Ignored,
+    /// Участник вышел (отказался), звонок идёт.
+    Left,
+    /// Звонок закончился.
+    Ended,
+}
+
+/// Участник выходит из группового звонка (`leaveGroupDmCall`).
+fn leave_group_call(
+    tx: &mut dyn Tx,
+    hub: &Hub,
+    out: &mut Outbox,
+    channel: &str,
+    user: &str,
+) -> DbResult<GroupOutcome> {
+    let Some(Room {
+        kind: Kind::Dm {
+            caller, ringing, ..
+        },
+        participants,
+        ..
+    }) = hub.voice.lock().rooms.get(channel).cloned()
+    else {
+        return Ok(GroupOutcome::Ignored);
+    };
+    if ringing && caller == user {
+        end_dm_room(tx, hub, out, channel, false)?;
+        return Ok(GroupOutcome::Ended);
+    }
+    if !participants.iter().any(|id| id == user) {
+        return Ok(GroupOutcome::Ignored);
+    }
+    {
+        let mut inner = hub.voice.lock();
+        inner.leave_room(channel, user);
+        inner.status.remove(user);
+        inner.clear_voice_connection(user);
+    }
+    Ok(if after_dm_leave(tx, hub, out, channel, user)? {
+        GroupOutcome::Ended
+    } else {
+        GroupOutcome::Left
+    })
+}
+
+/// Участник отказывается от группового звонка (`declineGroupDmCall`).
+fn decline_group_call(
+    tx: &mut dyn Tx,
+    hub: &Hub,
+    out: &mut Outbox,
+    channel: &str,
+    user: &str,
+) -> DbResult<GroupOutcome> {
+    let (caller, ringing, declined) = {
+        let mut inner = hub.voice.lock();
+        let Some(room) = inner.rooms.get_mut(channel) else {
+            return Ok(GroupOutcome::Ignored);
+        };
+        let seated = room.participants.iter().any(|id| id == user);
+        let Kind::Dm {
+            caller,
+            ringing,
+            declined,
+            ..
+        } = &mut room.kind
+        else {
+            return Ok(GroupOutcome::Ignored);
+        };
+        if caller == user || seated {
+            return Ok(GroupOutcome::Ignored);
+        }
+        declined.insert(user.to_owned());
+        (caller.clone(), *ringing, declined.clone())
+    };
+    if !ringing {
+        return Ok(GroupOutcome::Left);
+    }
+    for row in tx.query(
+        "SELECT user_id FROM dm_members WHERE dm_channel_id = ?",
+        params![channel],
+    )? {
+        let member = row.text("user_id")?;
+        if member != caller && !declined.contains(&member) {
+            return Ok(GroupOutcome::Left);
+        }
+    }
+    end_dm_room(tx, hub, out, channel, true)?;
+    Ok(GroupOutcome::Ended)
 }
 
 /// `dm_call_reject` и `dm_call_end`.
@@ -1236,88 +1622,96 @@ pub fn call_stop(
     reject: bool,
 ) -> DbResult<()> {
     let hub = &app.hub;
-    let (Some(channel), _) = call_channel(tx, event)? else {
-        return Ok(());
-    };
-    if !dm::is_member(tx, &channel, user)? {
+    let (channel, federated) = call_channel(tx, event)?;
+    if channel.is_none() && federated.is_none() {
         return Ok(());
     }
-    let Some(Room {
-        kind:
-            Kind::Dm {
-                caller,
-                ringing,
-                group,
-                ..
-            },
-        participants,
-        ..
-    }) = hub.voice.lock().rooms.get(&channel).cloned()
-    else {
-        return Ok(());
-    };
-    if !group {
-        end_dm_room(tx, hub, out, &channel, reject)?;
-    } else if reject {
-        if caller == user || participants.iter().any(|id| id == user) {
+    let phase = if reject { "reject" } else { "end" };
+    if let Some(channel) = &channel {
+        if !dm::is_member(tx, channel, user)? {
             return Ok(());
         }
-        if let Some(Kind::Dm { declined, .. }) = hub
-            .voice
-            .lock()
-            .rooms
-            .get_mut(&channel)
-            .map(|room| &mut room.kind)
-        {
-            declined.insert(user.to_owned());
-        }
-        let mut everyone_declined = false;
-        if ringing {
-            let declined = match hub.voice.lock().rooms.get(&channel).map(|room| &room.kind) {
-                Some(Kind::Dm { declined, .. }) => declined.clone(),
-                _ => HashSet::new(),
-            };
-            everyone_declined = true;
-            for row in tx.query(
-                "SELECT user_id FROM dm_members WHERE dm_channel_id = ?",
-                params![&channel],
-            )? {
-                let member = row.text("user_id")?;
-                if member != caller && !declined.contains(&member) {
-                    everyone_declined = false;
+        let hosted = match hub.voice.lock().rooms.get(channel).map(|room| &room.kind) {
+            Some(Kind::Dm { caller, group, .. }) => Some((caller.clone(), *group)),
+            _ => None,
+        };
+        if let Some((caller, group)) = hosted {
+            if group {
+                let outcome = if reject {
+                    let outcome = decline_group_call(tx, hub, out, channel, user)?;
+                    if outcome == GroupOutcome::Left {
+                        out.to_user(
+                            user,
+                            &json!({"type": "dm_call_rejected", "dmChannelId": channel}),
+                        );
+                    }
+                    outcome
+                } else {
+                    leave_group_call(tx, hub, out, channel, user)?
+                };
+                if outcome != GroupOutcome::Ended {
+                    return Ok(());
                 }
+            } else {
+                end_dm_room(tx, hub, out, channel, reject)?;
             }
-        }
-        if !everyone_declined {
-            out.to_user(
-                user,
-                &json!({"type": "dm_call_rejected", "dmChannelId": channel}),
-            );
-            return Ok(());
-        }
-        end_dm_room(tx, hub, out, &channel, true)?;
-    } else if ringing && caller == user {
-        end_dm_room(tx, hub, out, &channel, false)?;
-    } else {
-        if !participants.iter().any(|id| id == user) {
-            return Ok(());
-        }
-        {
-            let mut inner = hub.voice.lock();
-            inner.leave_room(&channel, user);
-            inner.status.remove(user);
-            inner.clear_voice_connection(user);
-        }
-        after_dm_leave(tx, hub, out, &channel, user)?;
-        if hub.voice.lock().rooms.contains_key(&channel) {
+            out.call(CallTask::FanOut {
+                dm_channel: channel.clone(),
+                kind: "dm_call_end",
+                actors: vec![user.to_owned(), caller],
+                exclude: None,
+                answered_by: None,
+                report: Some((user.to_owned(), phase)),
+            });
             return Ok(());
         }
     }
-    federation::call_relay_pending(
-        &channel,
-        "dm_call_end",
-        &federation::dm_target_origins(tx, &app.config, &channel)?,
-    );
+    let Some(call) = find_federated(hub, federated.as_deref(), channel.as_deref()) else {
+        return Ok(());
+    };
+    let kind = if reject {
+        "dm_call_rejected"
+    } else {
+        "dm_call_ended"
+    };
+    let wire = json!({
+        "type": kind,
+        "dmChannelId": call.dm_channel,
+        "federatedCallId": call.federated_id,
+    });
+    if call.group {
+        let joined = call.joined.iter().any(|id| id == user);
+        if reject == joined {
+            // Отказ — только пока не вошёл; выход — только вошедшему.
+            return Ok(());
+        }
+        let mut inner = hub.voice.lock();
+        if let Some(entry) = inner.federated.get_mut(&call.federated_id) {
+            entry.ringed.retain(|id| id != user);
+        }
+        if reject {
+            out.to_user(user, &wire);
+        } else {
+            if !inner.user_room.contains_key(user) {
+                inner.clear_voice_connection(user);
+            }
+            inner.leave_federated_entry(&call.federated_id, user);
+        }
+    } else {
+        to_federated_users(out, &call, &wire, Some(user));
+        hub.voice.lock().clear_federated(&call.federated_id);
+    }
+    out.call(CallTask::ToHost {
+        call: Box::new(call),
+        user: user.to_owned(),
+        kind: if reject {
+            "dm_call_reject"
+        } else {
+            "dm_call_end"
+        },
+        answered_by: None,
+        on_fail: OnFail::Report(phase),
+    });
     Ok(())
 }
 
@@ -1470,6 +1864,40 @@ pub fn dm_calls(
                 }
             }
         }
+    }
+    // Звонки, которые ведут другие инстансы.
+    let mut federated: Vec<&FedCall> = inner.federated.values().collect();
+    federated.sort_by(|a, b| {
+        a.started_at
+            .cmp(&b.started_at)
+            .then(a.federated_id.cmp(&b.federated_id))
+    });
+    for call in federated {
+        let ringed = call.ringed.iter().any(|id| id == user);
+        let member = call
+            .dm_channel
+            .as_ref()
+            .is_some_and(|channel| dm_channels.contains(channel));
+        // Отказавшийся от группового вызова выпал из `ringed`: пока звонят,
+        // ему не звонят снова.
+        let declined = call.group && !call.active && !ringed;
+        if !(ringed || member) || declined {
+            continue;
+        }
+        let mut entry = json!({
+            "dmChannelId": call.dm_channel,
+            "federatedCallId": call.federated_id,
+            "callerId": call.caller,
+            "participants": [],
+            "startedAt": call.started_at,
+            "state": if call.active { "active" } else { "ringing" },
+            "federatedCallHost": call.host,
+            "livekitUrl": call.livekit_url,
+        });
+        if let Some(token) = call.tokens.get(user) {
+            entry["livekitToken"] = json!(token);
+        }
+        calls.push(entry);
     }
     (calls, states, users)
 }
@@ -1690,7 +2118,8 @@ pub fn user_removed(tx: &mut dyn Tx, hub: &Hub, out: &mut Outbox, user_id: &str)
         inner.status.remove(user_id);
         inner.clear_voice_connection(user_id);
     }
-    leave_announced(tx, hub, out, user_id)?;
+    leave_announced(tx, hub, out, user_id, false)?;
+    leave_joined_federated(hub, out, user_id);
     end_ringing_placed_by(tx, hub, out, user_id, None)
 }
 
@@ -1710,14 +2139,19 @@ pub fn connection_closed(app: &AppState, user_id: &str, connection: u64) {
                 .find(|(_, room)| matches!(&room.kind, Kind::Dm { caller, ringing: true, .. } if caller == user_id))
                 .map(|(id, _)| id.clone())
         });
-        if room.is_none() {
+        let federated = if room.is_none() {
+            inner.joined_federated(user_id)
+        } else {
+            None
+        };
+        if room.is_none() && federated.is_none() {
             return;
         }
         inner.next += 1;
         let generation = inner.next;
         inner
             .reconnect
-            .insert(user_id.to_owned(), (generation, room));
+            .insert(user_id.to_owned(), (generation, room, federated));
         generation
     };
     let app = app.clone();
@@ -1727,22 +2161,40 @@ pub fn connection_closed(app: &AppState, user_id: &str, connection: u64) {
         let state = app.clone();
         let result = app
             .run(move |tx, out| {
-                let expected = {
+                let (expected, federated) = {
                     let mut inner = state.hub.voice.lock();
                     match inner.reconnect.get(&user_id) {
-                        Some((current, _)) if *current == generation => {}
+                        Some((current, ..)) if *current == generation => {}
                         _ => return Ok(()),
                     }
-                    let expected = inner.reconnect.remove(&user_id).and_then(|(_, room)| room);
+                    let (expected, federated) = inner
+                        .reconnect
+                        .remove(&user_id)
+                        .map_or((None, None), |(_, room, federated)| (room, federated));
                     if inner.voice_connection.contains_key(&user_id) {
                         return Ok(());
                     }
                     inner.status.remove(&user_id);
-                    expected
+                    (expected, federated)
                 };
+                // Сеанс держал звонок другого инстанса: участник выходит из
+                // него, как если бы положил трубку.
+                if let Some(federated) = federated {
+                    let joined = state
+                        .hub
+                        .voice
+                        .lock()
+                        .federated
+                        .get(&federated)
+                        .is_some_and(|call| call.joined.contains(&user_id));
+                    if joined {
+                        leave_joined_federated(&state.hub, out, &user_id);
+                    }
+                    return Ok(());
+                }
                 let current = state.hub.voice.lock().user_room.get(&user_id).cloned();
                 if expected.is_none() || current == expected {
-                    leave_announced(tx, &state.hub, out, &user_id)?;
+                    leave_announced(tx, &state.hub, out, &user_id, false)?;
                 }
                 let ringing: Vec<String> = state
                     .hub
@@ -1758,6 +2210,7 @@ pub fn connection_closed(app: &AppState, user_id: &str, connection: u64) {
                     .collect();
                 for room in ringing {
                     end_dm_room(tx, &state.hub, out, &room, false)?;
+                    fan_out_end(out, &room, vec![user_id.clone()]);
                 }
                 Ok(())
             })
@@ -1768,9 +2221,621 @@ pub fn connection_closed(app: &AppState, user_id: &str, connection: u64) {
     });
 }
 
+// ─── Звонки между инстансами ────────────────────────────────────────────────
+
+/// Как долго звонят по вызову с другого инстанса.
+const FEDERATED_RING_TIMEOUT: Duration = Duration::from_mins(1);
+
+/// Звонок другого инстанса по ключу, а без ключа — по переписке.
+fn find_federated(hub: &Hub, federated: Option<&str>, channel: Option<&str>) -> Option<FedCall> {
+    let inner = hub.voice.lock();
+    match (federated, channel) {
+        (Some(federated), _) => inner.federated.get(federated).cloned(),
+        (None, Some(channel)) => inner
+            .federated_by_dm(channel)
+            .and_then(|id| inner.federated.get(&id).cloned()),
+        (None, None) => None,
+    }
+}
+
+/// Тем, кому звонили отсюда (`sendToFederatedCallUsers`): не участникам
+/// переписки, среди которых и копия звонящего.
+fn to_federated_users(out: &mut Outbox, call: &FedCall, event: &Value, except: Option<&str>) {
+    for user in &call.ringed {
+        if except != Some(user.as_str()) {
+            out.to_user(user, event);
+        }
+    }
+}
+
+/// Участник выходит из звонка другого инстанса, в который вошёл отсюда, без
+/// своего «положить трубку» (`leaveJoinedFederatedCall`). В групповом звонке
+/// это и есть его выход, и ведущий о нём узнаёт.
+fn leave_joined_federated(hub: &Hub, out: &mut Outbox, user: &str) {
+    let call = {
+        let mut inner = hub.voice.lock();
+        let Some(id) = inner.joined_federated(user) else {
+            return;
+        };
+        let mut snapshot = inner.federated.get(&id).cloned();
+        inner.leave_federated_entry(&id, user);
+        if let Some(call) = inner.federated.get_mut(&id)
+            && call.group
+        {
+            call.ringed.retain(|id| id != user);
+        }
+        if let Some(call) = &mut snapshot {
+            call.joined.retain(|id| id != user);
+            call.ringed.retain(|id| id != user);
+        }
+        snapshot
+    };
+    if let Some(call) = call.filter(|call| call.group) {
+        out.call(CallTask::ToHost {
+            call: Box::new(call),
+            user: user.to_owned(),
+            kind: "dm_call_end",
+            answered_by: None,
+            on_fail: OnFail::Log,
+        });
+    }
+}
+
+/// Идёт ли ещё звонок другого инстанса в переписке (`federatedCallStillLive`).
+fn federated_call_still_live(
+    hub: &Hub,
+    out: &mut Outbox,
+    federated: &str,
+    user: &str,
+    connection: u64,
+) -> bool {
+    let (joined, session) = {
+        let inner = hub.voice.lock();
+        let joined = inner
+            .federated
+            .get(federated)
+            .is_some_and(|call| call.joined.iter().any(|id| id == user));
+        (joined, inner.voice_connection.get(user).copied())
+    };
+    if joined && session.is_none_or(|session| session == connection) {
+        leave_joined_federated(hub, out, user);
+    }
+    hub.voice
+        .lock()
+        .federated
+        .get(federated)
+        .is_some_and(|call| !call.active || !call.joined.is_empty())
+}
+
+/// Запоминает вызов с другого инстанса и через минуту без ответа сообщает,
+/// что он закончился (`createFederatedCall`).
+pub fn create_federated(app: &AppState, call: FedCall) {
+    let federated = call.federated_id.clone();
+    let generation = {
+        let mut inner = app.hub.voice.lock();
+        inner.clear_federated(&federated);
+        inner.federated.insert(federated.clone(), call);
+        inner.next += 1;
+        let generation = inner.next;
+        inner.federated_timer.insert(federated.clone(), generation);
+        generation
+    };
+    let app = app.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(FEDERATED_RING_TIMEOUT).await;
+        let ended = {
+            let mut inner = app.hub.voice.lock();
+            if inner.federated_timer.get(&federated) != Some(&generation) {
+                return;
+            }
+            inner.federated_timer.remove(&federated);
+            match inner.federated.get(&federated).map(|call| call.active) {
+                Some(true) => {
+                    inner.drop_federated_if_idle(&federated);
+                    None
+                }
+                Some(false) => inner.federated.remove(&federated),
+                None => None,
+            }
+        };
+        if let Some(call) = ended {
+            let event = json!({
+                "type": "dm_call_ended",
+                "dmChannelId": call.dm_channel,
+                "federatedCallId": call.federated_id,
+            });
+            for user in &call.ringed {
+                app.hub.send_to_user(user, &event);
+            }
+        }
+    });
+}
+
+/// Звонок, который ведёт этот инстанс: `(звонящий, звонят ли ещё, групповой)`.
+#[must_use]
+pub fn hosted_call(hub: &Hub, dm_channel: &str) -> Option<(String, bool, bool)> {
+    match hub
+        .voice
+        .lock()
+        .rooms
+        .get(dm_channel)
+        .map(|room| &room.kind)
+    {
+        Some(Kind::Dm {
+            caller,
+            ringing,
+            group,
+            ..
+        }) => Some((caller.clone(), *ringing, *group)),
+        _ => None,
+    }
+}
+
+/// Пользователь покидает свою комнату, если это не `keep`, и это объявляется
+/// (`leaveCurrentRoomAnnounced`).
+fn leave_announced_except(
+    tx: &mut dyn Tx,
+    hub: &Hub,
+    out: &mut Outbox,
+    user: &str,
+    keep: &str,
+) -> DbResult<()> {
+    if hub.voice.lock().user_room.get(user).map(String::as_str) == Some(keep) {
+        return Ok(());
+    }
+    leave_announced(tx, hub, out, user, false)?;
+    Ok(())
+}
+
+/// Принятие с другого инстанса звонка, который ведёт этот
+/// (`processDmCallAcceptEvent`, ведущий): звонящий входит, принявший из
+/// группового звонка садится, и принятие уходит остальным инстансам.
+///
+/// `seat` — принявший и инстанс, сообщивший о нём; `actor` — он же здесь
+/// (или пусто); `source` — инстанс события.
+///
+/// # Errors
+/// Ошибка базы.
+#[allow(clippy::too_many_arguments, reason = "всё, что даёт событие")]
+pub fn relayed_accept_hosted(
+    tx: &mut dyn Tx,
+    hub: &Hub,
+    out: &mut Outbox,
+    dm_channel: &str,
+    federated: &str,
+    seat: Option<(String, String)>,
+    actor: String,
+    answered_by: Option<Value>,
+    source: &str,
+) -> DbResult<()> {
+    let Some((caller, ringing, _)) = hosted_call(hub, dm_channel) else {
+        return Ok(());
+    };
+    if ringing {
+        {
+            let mut inner = hub.voice.lock();
+            if let Some(Kind::Dm { ringing, .. }) =
+                inner.rooms.get_mut(dm_channel).map(|room| &mut room.kind)
+            {
+                *ringing = false;
+            }
+            inner.ring.remove(dm_channel);
+        }
+        leave_announced_except(tx, hub, out, &caller, dm_channel)?;
+        hub.voice.lock().join(dm_channel, &caller);
+        broadcast::to_dm_members(
+            tx,
+            out,
+            dm_channel,
+            &state_update(dm_channel, &caller, true),
+            None,
+        )?;
+    }
+    if let Some((user, origin)) = seat {
+        leave_announced_except(tx, hub, out, &user, dm_channel)?;
+        {
+            let mut inner = hub.voice.lock();
+            inner.join(dm_channel, &user);
+            if let Some(Kind::Dm {
+                remote, declined, ..
+            }) = inner.rooms.get_mut(dm_channel).map(|room| &mut room.kind)
+            {
+                remote.insert(user.clone(), origin);
+                declined.remove(&user);
+            }
+        }
+        broadcast::to_dm_members(
+            tx,
+            out,
+            dm_channel,
+            &state_update(dm_channel, &user, true),
+            None,
+        )?;
+    }
+    let mut accepted = json!({
+        "type": "dm_call_accepted",
+        "dmChannelId": dm_channel,
+        "federatedCallId": federated,
+    });
+    if let Some(answered_by) = &answered_by {
+        accepted["answeredBy"] = answered_by.clone();
+    }
+    broadcast::to_dm_members(tx, out, dm_channel, &accepted, None)?;
+    out.call(CallTask::FanOut {
+        dm_channel: dm_channel.to_owned(),
+        kind: "dm_call_accept",
+        actors: vec![actor, caller.clone()],
+        exclude: Some(source.to_owned()),
+        answered_by,
+        report: Some((caller, "accept")),
+    });
+    Ok(())
+}
+
+/// Отказ или конец с другого инстанса для звонка, который ведёт этот
+/// (`processDmCallRejectEvent`, `processDmCallEndEvent`, ведущий).
+///
+/// `member` — участник здесь, если он есть и состоит в переписке; `actor` —
+/// он же для имени события (или пусто).
+///
+/// # Errors
+/// Ошибка базы.
+#[allow(clippy::too_many_arguments, reason = "всё, что даёт событие")]
+pub fn relayed_leave_hosted(
+    tx: &mut dyn Tx,
+    hub: &Hub,
+    out: &mut Outbox,
+    dm_channel: &str,
+    decline: bool,
+    member: Option<String>,
+    actor: String,
+    per_member: bool,
+    source: &str,
+) -> DbResult<()> {
+    let Some((caller, _, group)) = hosted_call(hub, dm_channel) else {
+        return Ok(());
+    };
+    if group {
+        // Отказ или выход убирает только этого участника. Когда отвечать
+        // больше некому, звонок кончается у всех, и у отправителя тоже;
+        // конец называет звонящего.
+        let mut ended = !per_member && leave_peer_participants(tx, hub, out, dm_channel, source)?.1;
+        if !ended && let Some(member) = member {
+            let outcome = if decline {
+                decline_group_call(tx, hub, out, dm_channel, &member)?
+            } else {
+                leave_group_call(tx, hub, out, dm_channel, &member)?
+            };
+            ended = outcome == GroupOutcome::Ended;
+        }
+        if ended {
+            fan_out_end(out, dm_channel, vec![caller]);
+        }
+        return Ok(());
+    }
+    end_dm_room(tx, hub, out, dm_channel, decline)?;
+    out.call(CallTask::FanOut {
+        dm_channel: dm_channel.to_owned(),
+        kind: "dm_call_end",
+        actors: vec![actor, caller.clone()],
+        exclude: Some(source.to_owned()),
+        answered_by: None,
+        report: Some((caller, if decline { "reject" } else { "end" })),
+    });
+    Ok(())
+}
+
+/// Событие ведущего для звонка, который ведёт другой инстанс
+/// (`processDmCall*Event`, не ведущий): `kind` — `dm_call_accept`,
+/// `dm_call_reject` или `dm_call_end`.
+pub fn relayed_to_federated(
+    hub: &Hub,
+    out: &mut Outbox,
+    federated: &str,
+    kind: &str,
+    answered_by: Option<Value>,
+) {
+    let Some(call) = hub.voice.lock().federated.get(federated).cloned() else {
+        return;
+    };
+    if kind == "dm_call_accept" {
+        // Уже отвеченный (например, принятие отсюда, которое ведущий
+        // разослал обратно) не объявляется второй раз.
+        if call.active {
+            return;
+        }
+        if let Some(entry) = hub.voice.lock().federated.get_mut(federated) {
+            entry.active = true;
+        }
+        let mut accepted = json!({
+            "type": "dm_call_accepted",
+            "dmChannelId": call.dm_channel,
+            "federatedCallId": federated,
+        });
+        if let Some(answered_by) = answered_by {
+            accepted["answeredBy"] = answered_by;
+        }
+        to_federated_users(out, &call, &accepted, None);
+        return;
+    }
+    let wire = if kind == "dm_call_reject" {
+        "dm_call_rejected"
+    } else {
+        "dm_call_ended"
+    };
+    to_federated_users(
+        out,
+        &call,
+        &json!({"type": wire, "dmChannelId": call.dm_channel, "federatedCallId": federated}),
+        None,
+    );
+    hub.voice.lock().clear_federated(federated);
+}
+
+/// Участники звонка с инстанса `origin` выходят из него
+/// (`leavePeerParticipants`): `(сколько вышло, закончился ли звонок)`.
+fn leave_peer_participants(
+    tx: &mut dyn Tx,
+    hub: &Hub,
+    out: &mut Outbox,
+    dm_channel: &str,
+    origin: &str,
+) -> DbResult<(usize, bool)> {
+    let Some(key) = crate::federation_auth::normalize_origin(Some(origin)) else {
+        return Ok((0, false));
+    };
+    let seated: Vec<String> = match hub
+        .voice
+        .lock()
+        .rooms
+        .get(dm_channel)
+        .map(|room| &room.kind)
+    {
+        Some(Kind::Dm { remote, .. }) => {
+            let mut seated: Vec<(String, String)> =
+                remote.iter().map(|(u, o)| (u.clone(), o.clone())).collect();
+            seated.sort();
+            seated
+                .into_iter()
+                .filter(|(_, o)| {
+                    crate::federation_auth::normalize_origin(Some(o)).as_deref()
+                        == Some(key.as_str())
+                })
+                .map(|(user, _)| user)
+                .collect()
+        }
+        _ => return Ok((0, false)),
+    };
+    let mut removed = 0;
+    for user in seated {
+        hub.voice.lock().leave_room(dm_channel, &user);
+        removed += 1;
+        if after_dm_leave(tx, hub, out, dm_channel, &user)? {
+            return Ok((removed, true));
+        }
+    }
+    Ok((removed, false))
+}
+
+/// Пир перестал быть действующим: участники звонков, которые ведёт этот
+/// инстанс, с его дома выходят (`dropRemoteCallParticipants`).
+///
+/// # Errors
+/// Ошибка базы.
+pub fn drop_remote_participants(
+    tx: &mut dyn Tx,
+    hub: &Hub,
+    out: &mut Outbox,
+    origin: &str,
+) -> DbResult<usize> {
+    let rooms: Vec<(String, String)> = hub
+        .voice
+        .lock()
+        .rooms
+        .iter()
+        .filter_map(|(id, room)| match &room.kind {
+            Kind::Dm { caller, .. } => Some((id.clone(), caller.clone())),
+            Kind::Space { .. } => None,
+        })
+        .collect();
+    let mut removed = 0;
+    for (room, caller) in rooms {
+        let (count, ended) = leave_peer_participants(tx, hub, out, &room, origin)?;
+        removed += count;
+        if ended {
+            fan_out_end(out, &room, vec![caller]);
+        }
+    }
+    Ok(removed)
+}
+
+/// Ведущий звонков недоступен: звонки, которые он ведёт, забываются, а
+/// тем, кому звонили, уходит окончательное `dm_call_undeliverable`
+/// (`evictFederatedCallsForHost`).
+pub fn evict_for_host(
+    hub: &Hub,
+    out: &mut Outbox,
+    host: &str,
+    reason: &str,
+    label: Option<&str>,
+) -> usize {
+    let calls: Vec<FedCall> = hub
+        .voice
+        .lock()
+        .federated
+        .values()
+        .filter(|call| call.host == host)
+        .cloned()
+        .collect();
+    let mut evicted = 0;
+    for call in calls {
+        let mut failure = json!({"reason": reason, "peerOrigin": host});
+        if let Some(label) = label {
+            failure["peerLabel"] = json!(label);
+        }
+        let event = json!({
+            "type": "dm_call_undeliverable",
+            "dmChannelId": call.dm_channel,
+            "federatedCallId": call.federated_id,
+            "terminal": true,
+            "phase": "host_unreachable",
+            "failures": [failure],
+        });
+        for user in &call.ringed {
+            out.to_user(user, &event);
+        }
+        hub.voice.lock().clear_federated(&call.federated_id);
+        evicted += 1;
+    }
+    evicted
+}
+
+/// Ведущие звонков, в которых участвуют отсюда.
+#[must_use]
+pub fn federated_hosts(hub: &Hub) -> Vec<String> {
+    let mut hosts: Vec<String> = hub
+        .voice
+        .lock()
+        .federated
+        .values()
+        .map(|call| call.host.clone())
+        .collect();
+    hosts.sort();
+    hosts.dedup();
+    hosts
+}
+
+/// Переписка появилась здесь после вызова (`lateBindFederatedCall`).
+pub fn late_bind(hub: &Hub, federated: &str, dm_channel: &str) {
+    if let Some(call) = hub.voice.lock().federated.get_mut(federated)
+        && call.dm_channel.is_none()
+    {
+        call.dm_channel = Some(dm_channel.to_owned());
+    }
+}
+
+/// Забывает звонок другого инстанса (`clearFederatedCall`).
+pub fn forget_federated(hub: &Hub, federated: &str) {
+    hub.voice.lock().clear_federated(federated);
+}
+
+/// Вызов никуда не дошёл (`emitUndeliverableAndMaybeDestroy`): звонящему
+/// сообщается, а если отвечать некому — звонок здесь заканчивается.
+///
+/// # Errors
+/// Ошибка базы.
+#[allow(clippy::too_many_arguments, reason = "всё, что нужно сообщению")]
+pub fn start_undeliverable(
+    tx: &mut dyn Tx,
+    hub: &Hub,
+    out: &mut Outbox,
+    caller: &str,
+    dm_channel: &str,
+    federated: &str,
+    terminal: bool,
+    failures: Value,
+) -> DbResult<()> {
+    if !hub.voice.lock().rooms.contains_key(dm_channel) {
+        return Ok(());
+    }
+    if terminal {
+        {
+            let mut inner = hub.voice.lock();
+            inner.clear_voice_connection(caller);
+            inner.destroy(dm_channel);
+        }
+        broadcast::to_dm_members(
+            tx,
+            out,
+            dm_channel,
+            &json!({"type": "dm_call_ended", "dmChannelId": dm_channel}),
+            Some(caller),
+        )?;
+    }
+    out.to_user(
+        caller,
+        &json!({
+            "type": "dm_call_undeliverable",
+            "dmChannelId": dm_channel,
+            "federatedCallId": federated,
+            "terminal": terminal,
+            "phase": "start",
+            "failures": failures,
+        }),
+    );
+    Ok(())
+}
+
+/// Групповой ли звонок, который ведёт этот инстанс в переписке.
+#[must_use]
+pub fn hosted_group(hub: &Hub, dm_channel: &str) -> bool {
+    hosted_call(hub, dm_channel).is_some_and(|(_, _, group)| group)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn federated(id: &str, active: bool, joined: &[&str]) -> FedCall {
+        FedCall {
+            dm_channel: Some(format!("dm-{id}")),
+            federated_id: id.to_owned(),
+            caller: "caller".to_owned(),
+            host: "https://y.test".to_owned(),
+            livekit_url: "wss://lk".to_owned(),
+            tokens: HashMap::new(),
+            ringed: joined.iter().map(|u| (*u).to_owned()).collect(),
+            joined: joined.iter().map(|u| (*u).to_owned()).collect(),
+            group: true,
+            active,
+            started_at: 0,
+        }
+    }
+
+    #[test]
+    fn federated_call_lookup_and_idle_drop() {
+        let mut inner = Inner::default();
+        inner
+            .federated
+            .insert("f".into(), federated("f", true, &["u", "v"]));
+        inner.voice_connection.insert("u".into(), 1);
+        assert_eq!(inner.joined_federated("u").as_deref(), Some("f"));
+        assert_eq!(inner.federated_by_dm("dm-f").as_deref(), Some("f"));
+        inner.leave_federated_entry("f", "u");
+        assert!(inner.federated.contains_key("f"), "в звонке ещё есть v");
+        assert!(inner.joined_federated("u").is_none());
+        // Пока идёт таймер вызова, отвеченный звонок без участников держится.
+        inner.federated_timer.insert("f".into(), 1);
+        inner.leave_federated_entry("f", "v");
+        assert!(inner.federated.contains_key("f"));
+        inner.federated_timer.clear();
+        inner.drop_federated_if_idle("f");
+        assert!(!inner.federated.contains_key("f"));
+    }
+
+    #[test]
+    fn clearing_a_federated_call_frees_its_sessions() {
+        let mut inner = Inner::default();
+        inner
+            .federated
+            .insert("f".into(), federated("f", true, &["u", "w"]));
+        inner.voice_connection.insert("u".into(), 1);
+        inner.voice_connection.insert("w".into(), 2);
+        inner.rooms.insert("room".into(), space_room("s"));
+        inner.join("room", "w");
+        inner.clear_federated("f");
+        assert!(!inner.voice_connection.contains_key("u"));
+        assert!(
+            inner.voice_connection.contains_key("w"),
+            "сеанс того, кто сидит в комнате здесь, остаётся"
+        );
+        // Неотвеченный звонок не считается простаивающим.
+        inner
+            .federated
+            .insert("g".into(), federated("g", false, &[]));
+        inner.drop_federated_if_idle("g");
+        assert!(inner.federated.contains_key("g"));
+    }
 
     fn space_room(space: &str) -> Room {
         Room {
@@ -1819,6 +2884,7 @@ mod tests {
                     ringing: false,
                     group: false,
                     declined: HashSet::new(),
+                    remote: HashMap::new(),
                 },
                 participants: Vec::new(),
                 started_at: 0,

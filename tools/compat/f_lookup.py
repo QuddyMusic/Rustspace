@@ -131,5 +131,5 @@ if __name__ == '__main__':
     show = '-v' in sys.argv
     names = [a for a in sys.argv[1:] if not a.startswith('-')] or ['friends', 'accounts']
     # Печатание и звонки между инстансами — шаг 7 переноса.
-    sys.exit(1 if sum(run(globals()[n], show=show, ignore_events=('dm_typing_start', 'dm_typing_stop'),
+    sys.exit(1 if sum(run(globals()[n], show=show,
                           ignore_keys=('secret', 'token')) for n in names) else 0)

@@ -59,6 +59,8 @@ struct Inner {
     windows: HashMap<String, (Instant, u32)>,
     /// Кого надо отключить от медиасервера: комната и участник.
     evictions: Vec<(String, String)>,
+    /// Работа со звонками для других инстансов, ждущая своего исполнителя.
+    calls: Vec<crate::voice::CallTask>,
 }
 
 /// Концентратор соединений.
@@ -69,6 +71,7 @@ pub struct Hub {
     inner: Arc<Mutex<Inner>>,
     next_id: Arc<AtomicU64>,
     evicted: Arc<tokio::sync::Notify>,
+    calls_ready: Arc<tokio::sync::Notify>,
 }
 
 /// Кому адресовано событие.
@@ -90,6 +93,7 @@ enum Item {
     DropSpace(String),
     CloseUser(String),
     Evict { room: String, user: String },
+    Call(Box<crate::voice::CallTask>),
 }
 
 /// События и изменения подписок, ждущие завершения транзакции. Выполняются
@@ -178,6 +182,12 @@ impl Outbox {
         });
     }
 
+    /// Работа со звонком для других инстансов: выполняется после фиксации
+    /// исполнителем звонков федерации.
+    pub fn call(&mut self, task: crate::voice::CallTask) {
+        self.items.push(Item::Call(Box::new(task)));
+    }
+
     /// Переносит всё из другого набора в конец этого.
     pub fn append(&mut self, mut other: Self) {
         self.items.append(&mut other.items);
@@ -191,6 +201,17 @@ impl Outbox {
 }
 
 impl Hub {
+    /// Ждёт и забирает накопившуюся работу со звонками для других инстансов.
+    pub async fn next_call_tasks(&self) -> Vec<crate::voice::CallTask> {
+        loop {
+            let pending = std::mem::take(&mut self.lock().calls);
+            if !pending.is_empty() {
+                return pending;
+            }
+            self.calls_ready.notified().await;
+        }
+    }
+
     /// Ждёт и забирает накопившиеся отключения от медиасервера.
     pub async fn next_evictions(&self) -> Vec<(String, String)> {
         loop {
@@ -465,6 +486,11 @@ impl Hub {
                 Item::Evict { room, user } => {
                     inner.evictions.push((room, user));
                     self.evicted.notify_one();
+                    continue;
+                }
+                Item::Call(task) => {
+                    inner.calls.push(*task);
+                    self.calls_ready.notify_one();
                     continue;
                 }
                 Item::CloseUser(user) => {
