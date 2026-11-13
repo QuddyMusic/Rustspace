@@ -17,7 +17,8 @@ original server.
 - Multiple instances at once; federated instances signed in through the home account.
 
 ### GUI client
-- Sign-in, registration, session restore with the token in the system keyring.
+- Sign-in, registration, session restore with the token in the system keyring; switching
+  instance from settings and recent instances on the login form.
 - Spaces, channels, categories, roles, overrides, members, bans, invites, join requests,
   directory, notification settings; DMs and group DMs, friends, profiles.
 - Messages: edit, delete, replies, reactions, mentions, markdown, read state, history,

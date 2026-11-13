@@ -1204,5 +1204,9 @@
   "Ключ шифрования лежит в системном хранилище ключей, но сейчас оно недоступно: работает временный ключ, а сохранённый не тронут. Откройте хранилище (например, войдите в сеанс рабочего стола) и перезапустите приложение.": "The encryption key is kept in the system keyring, which is unavailable right now: a temporary key is in use and the saved one is untouched. Unlock the keyring (for example, sign in to a desktop session) and restart the app.",
   "Пароль должен быть не короче 8 знаков": "The passphrase must be at least 8 characters",
   "Это не запись ключа шифрования или она повреждена": "This is not an encryption key record, or it is damaged",
-  "Пароль не подходит к этой записи ключа": "The passphrase does not match this key record"
+  "Пароль не подходит к этой записи ключа": "The passphrase does not match this key record",
+  "Сменить инстанс": "Switch instance",
+  "Выйти и войти в другой инстанс Backspace": "Sign out and sign in to another Backspace instance",
+  "Недавние:": "Recent:",
+  "Забыть этот инстанс": "Forget this instance"
 }

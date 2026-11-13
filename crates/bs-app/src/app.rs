@@ -314,7 +314,17 @@ impl BackspaceApp {
             // Кэш и каналы мост уже сбросил сам, когда сессия закрылась.
             self.chat.reset();
         }
+        let entering = matches!(self.screen, Screen::Login);
         self.screen = next_screen(self.screen, ready, lost);
+        // Вошли: инстанс — в недавние на экране входа.
+        if entering
+            && matches!(self.screen, Screen::Chat)
+            && let Some((base, insecure)) = self.bridge.home()
+        {
+            crate::prefs::update(|prefs| {
+                crate::prefs::push_recent(&mut prefs.recent_instances, &base, insecure);
+            });
+        }
 
         // Только что открытый личный канал — сразу переключаемся в чат.
         if let Some((origin, channel)) = self.bridge.take_opened_dm() {
@@ -335,8 +345,13 @@ impl BackspaceApp {
             Screen::Chat => {
                 update_strip(ui, &prefs.updates);
                 self.notice_strip(ui);
-                if self.chat.show(ui, &mut self.bridge) == ChatAction::Logout {
-                    self.bridge.logout();
+                match self.chat.show(ui, &mut self.bridge) {
+                    ChatAction::None => {}
+                    ChatAction::Logout => self.bridge.logout(),
+                    ChatAction::SwitchInstance => {
+                        self.bridge.logout();
+                        self.login.switch_instance();
+                    }
                 }
             }
         }

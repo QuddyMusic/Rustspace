@@ -319,6 +319,12 @@ impl Bridge {
         Some(base)
     }
 
+    /// Адрес домашнего инстанса и разрешён ли для него `http://`.
+    pub(crate) fn home(&self) -> Option<(String, bool)> {
+        let base = self.slots.first()?.base.clone()?;
+        Some((base, self.transport == TransportPolicy::AllowInsecure))
+    }
+
     /// Выход: закрывает все сессии и забывает сохранённый вход.
     pub(crate) fn logout(&mut self) {
         self.slots[0].session.forget_saved();

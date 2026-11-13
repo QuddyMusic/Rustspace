@@ -188,6 +188,40 @@ pub(crate) struct Prefs {
     /// Какую версию домашнего инстанса видел пользователь на странице
     /// «Backspace»: ключ — `id@адрес`.
     pub(crate) hub_seen: std::collections::BTreeMap<String, String>,
+    /// Инстансы, в которые входили, — сначала последний.
+    pub(crate) recent_instances: Vec<RecentInstance>,
+}
+
+/// Инстанс, в который входили с этого устройства.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RecentInstance {
+    /// Адрес.
+    pub(crate) base: String,
+    /// Вход шёл по открытому `http://` с разрешения пользователя.
+    #[serde(default)]
+    pub(crate) insecure: bool,
+}
+
+/// Сколько недавних инстансов помнить.
+pub(crate) const RECENT_INSTANCES: usize = 6;
+
+/// Ставит инстанс первым в списке недавних (без повторов, не длиннее
+/// [`RECENT_INSTANCES`]).
+pub(crate) fn push_recent(list: &mut Vec<RecentInstance>, base: &str, insecure: bool) {
+    let base = base.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return;
+    }
+    list.retain(|item| !item.base.eq_ignore_ascii_case(base));
+    list.insert(
+        0,
+        RecentInstance {
+            base: base.to_owned(),
+            insecure,
+        },
+    );
+    list.truncate(RECENT_INSTANCES);
 }
 
 impl Default for Prefs {
@@ -202,6 +236,7 @@ impl Default for Prefs {
             language: "ru".to_owned(),
             updates: crate::updates::UpdatePrefs::default(),
             hub_seen: std::collections::BTreeMap::new(),
+            recent_instances: Vec::new(),
         }
     }
 }
@@ -216,6 +251,7 @@ impl Prefs {
         self.sounds.volume = self.sounds.volume.min(200);
         self.appearance.radius = self.appearance.radius.min(20);
         self.voice.sanitize();
+        self.recent_instances.truncate(RECENT_INSTANCES);
         self
     }
 }
@@ -317,8 +353,38 @@ fn write(path: &std::path::Path, prefs: &Prefs) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, Keybind, Prefs, write};
+    use super::{Action, Keybind, Prefs, RECENT_INSTANCES, push_recent, write};
     use crate::theme::Preset;
+
+    #[test]
+    fn recent_instances_keep_order_without_repeats() {
+        let mut list = Vec::new();
+        push_recent(&mut list, "https://a.example/", false);
+        push_recent(&mut list, "https://b.example", true);
+        push_recent(&mut list, "https://A.example", false);
+        push_recent(&mut list, "   ", false);
+        let bases: Vec<&str> = list.iter().map(|item| item.base.as_str()).collect();
+        assert_eq!(bases, ["https://A.example", "https://b.example"]);
+        assert!(list[1].insecure);
+        for n in 0..10 {
+            push_recent(&mut list, &format!("https://{n}.example"), false);
+        }
+        assert_eq!(list.len(), RECENT_INSTANCES);
+        assert_eq!(list[0].base, "https://9.example");
+    }
+
+    #[test]
+    fn recent_instances_round_trip_and_old_files_load() {
+        let mut prefs = Prefs::default();
+        push_recent(&mut prefs.recent_instances, "https://chat.example", false);
+        let text = serde_json::to_string(&prefs).unwrap();
+        assert!(text.contains("recentInstances"));
+        let back: Prefs = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.recent_instances, prefs.recent_instances);
+        // Файл прежней версии, без списка.
+        let old: Prefs = serde_json::from_str(r#"{"scale":1.0}"#).unwrap();
+        assert!(old.recent_instances.is_empty());
+    }
 
     #[test]
     fn roundtrip_keeps_every_section() {

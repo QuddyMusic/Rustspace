@@ -608,6 +608,10 @@ impl ChatScreen {
                     self.settings = None;
                     action = ChatAction::Logout;
                 }
+                SettingsAction::SwitchInstance => {
+                    self.settings = None;
+                    action = ChatAction::SwitchInstance;
+                }
                 SettingsAction::Connections(chosen) => route_connection(bridge, chosen),
             }
             self.show_toast(&ctx, now);

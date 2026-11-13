@@ -11,6 +11,8 @@ pub(crate) enum ChatAction {
     None,
     /// Выйти из инстанса.
     Logout,
+    /// Выйти и войти в другой инстанс.
+    SwitchInstance,
 }
 
 /// Выбранный канал.

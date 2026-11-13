@@ -23,6 +23,8 @@ pub(crate) struct LoginScreen {
     registering: bool,
     /// Состояние формы регистрации.
     register: super::register::RegisterForm,
+    /// Поставить курсор в поле адреса (после «Сменить инстанс»).
+    focus_base: bool,
 }
 
 impl std::fmt::Debug for LoginScreen {
@@ -45,6 +47,18 @@ impl Drop for LoginScreen {
 }
 
 impl LoginScreen {
+    /// Чистая форма для входа в другой инстанс: адрес, логин и пароль
+    /// пусты, курсор в поле адреса.
+    pub(crate) fn switch_instance(&mut self) {
+        self.base.clear();
+        self.username.clear();
+        self.password.zeroize();
+        self.second_factor.zeroize();
+        self.allow_insecure = false;
+        self.registering = false;
+        self.focus_base = true;
+    }
+
     /// Рисует экран и по нажатию кнопки (или Enter) запускает логин.
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) {
         egui::CentralPanel::default()
@@ -100,6 +114,61 @@ impl LoginScreen {
     }
 
     /// Содержимое карточки входа.
+    /// Поле адреса инстанса и недавние инстансы под ним.
+    fn address_field(&mut self, ui: &mut egui::Ui, width: f32) -> egui::Response {
+        ui.label(theme::section_title(tr("Адрес инстанса")));
+        let base = ui.add(
+            egui::TextEdit::singleline(&mut self.base)
+                .hint_text("example.com")
+                .desired_width(width)
+                .margin(egui::vec2(10.0, 8.0)),
+        );
+        if std::mem::take(&mut self.focus_base) {
+            base.request_focus();
+        }
+        self.recent(ui);
+        base
+    }
+
+    /// Недавние инстансы: щелчок подставляет адрес, ✕ забывает его.
+    fn recent(&mut self, ui: &mut egui::Ui) {
+        let recent = crate::prefs::get().recent_instances;
+        if recent.is_empty() {
+            return;
+        }
+        ui.add_space(6.0);
+        let mut forget = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+            ui.label(theme::muted(tr("Недавние:")).size(12.5));
+            for item in &recent {
+                let shown = item
+                    .base
+                    .trim_start_matches("https://")
+                    .trim_start_matches("http://");
+                let chosen = self.base.trim().trim_end_matches('/') == item.base;
+                if ui
+                    .selectable_label(chosen, egui::RichText::new(shown).size(12.5))
+                    .on_hover_text(&item.base)
+                    .clicked()
+                {
+                    self.base.clone_from(&item.base);
+                    self.allow_insecure = item.insecure;
+                }
+                if ui
+                    .small_button("✕")
+                    .on_hover_text(tr("Забыть этот инстанс"))
+                    .clicked()
+                {
+                    forget = Some(item.base.clone());
+                }
+            }
+        });
+        if let Some(base) = forget {
+            crate::prefs::update(|prefs| prefs.recent_instances.retain(|item| item.base != base));
+        }
+    }
+
     fn card(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) {
         ui.vertical_centered(|ui| {
             ui.label(
@@ -118,13 +187,7 @@ impl LoginScreen {
 
         ui.add_enabled_ui(!busy, |ui| {
             let width = ui.available_width();
-            ui.label(theme::section_title(tr("Адрес инстанса")));
-            let base = ui.add(
-                egui::TextEdit::singleline(&mut self.base)
-                    .hint_text("example.com")
-                    .desired_width(width)
-                    .margin(egui::vec2(10.0, 8.0)),
-            );
+            let base = self.address_field(ui, width);
             ui.add_space(8.0);
             ui.label(theme::section_title(tr("Логин")));
             let username = ui.add(
@@ -207,5 +270,23 @@ impl LoginScreen {
                 self.registering = true;
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn switching_instance_clears_the_form() {
+        let mut login = LoginScreen::default();
+        login.base = "https://old.example".to_owned();
+        login.username = "ann".to_owned();
+        login.password = "secret".to_owned();
+        login.allow_insecure = true;
+        login.switch_instance();
+        assert!(login.base.is_empty() && login.username.is_empty() && login.password.is_empty());
+        assert!(!login.allow_insecure);
+        assert!(login.focus_base, "курсор встанет в поле адреса");
     }
 }

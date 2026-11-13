@@ -22,7 +22,8 @@ every WebSocket frame and REST response the client receives.
 - **Sign-in.** Login and registration (with invite code and live username check). Plain `http`
   outside loopback only with explicit consent. The session survives restarts: the token lives
   in the system keyring (Secret Service, Keychain, Credential Manager), with a `0600` file as a
-  fallback.
+  fallback. "Switch instance" in settings signs out and opens a clean login form; the login
+  form lists recent instances (one click fills the address).
 - **Two-factor authentication** (on a server that supports it, that is `bs-server`): a code at
   login; turning on, recovery codes and turning off in account settings.
 - **End-to-end encryption for one-to-one conversations.** Turned on from the conversation
@@ -94,7 +95,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
 | `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, system audio, data-channel signals | 68 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 234 |
+| `bs-app` | The GUI and its entry point | 237 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
 | `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 127 |

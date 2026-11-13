@@ -292,6 +292,8 @@ pub(crate) enum SettingsAction {
     Close,
     /// Выйти из всех инстансов.
     Logout,
+    /// Выйти и войти в другой инстанс.
+    SwitchInstance,
     /// Действие в панели «Подключения».
     Connections(super::connections::ConnAction),
 }
@@ -663,23 +665,13 @@ fn settings_nav(
                 );
             }
             ui.add_space(6.0);
-            let (rect, response) =
-                ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), Sense::click());
-            if response.hovered() {
-                ui.painter().rect_filled(
-                    rect.shrink2(egui::vec2(8.0, 1.0)),
-                    crate::theme::rounded(8),
-                    theme::bg_hover(),
-                );
+            if sidebar_item(ui, tr("Сменить инстанс"), theme::text())
+                .on_hover_text(tr("Выйти и войти в другой инстанс Backspace"))
+                .clicked()
+            {
+                *action = SettingsAction::SwitchInstance;
             }
-            ui.painter().text(
-                egui::pos2(rect.left() + 18.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                tr("Выйти"),
-                egui::FontId::proportional(15.0),
-                theme::rose(),
-            );
-            if response.clicked() {
+            if sidebar_item(ui, tr("Выйти"), theme::rose()).clicked() {
                 *action = SettingsAction::Logout;
             }
             ui.add_space(6.0);
@@ -688,6 +680,27 @@ fn settings_nav(
                 ui.label(theme::muted("Backspace RS · AGPL-3.0").size(11.5));
             });
         });
+}
+
+/// Строка-действие внизу боковой панели настроек.
+fn sidebar_item(ui: &mut egui::Ui, label: &str, color: egui::Color32) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(
+            rect.shrink2(egui::vec2(8.0, 1.0)),
+            crate::theme::rounded(8),
+            theme::bg_hover(),
+        );
+    }
+    ui.painter().text(
+        egui::pos2(rect.left() + 18.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(15.0),
+        color,
+    );
+    response
 }
 
 /// Карточка раздела: подложка с тонкой рамкой.
