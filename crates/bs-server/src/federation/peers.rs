@@ -664,6 +664,47 @@ fn push_rejected(
     Ok(())
 }
 
+/// Копии пользователей пира показываются не в сети (`markPeerStubsOffline`):
+/// дом, объявлявший их статус, больше не отвечает.
+fn mark_stubs_offline(
+    tx: &mut dyn Tx,
+    app: &AppState,
+    out: &mut Outbox,
+    origin: &str,
+) -> DbResult<()> {
+    let domain = super::reset::domain_of(origin);
+    let stubs = tx.query(
+        "SELECT id, federation_home_orphaned FROM users WHERE home_instance = ? AND is_deleted = 0",
+        params![&domain],
+    )?;
+    for stub in stubs {
+        if stub.opt_flag("federation_home_orphaned")? == Some(true) {
+            continue;
+        }
+        let id = stub.text("id")?;
+        app.federation
+            .projections
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+        let connected = app.hub.is_online(&id);
+        let shown = if connected { "online" } else { "offline" };
+        tx.execute(
+            "UPDATE users SET status = ? WHERE id = ?",
+            params![shown, &id],
+        )?;
+        if connected {
+            app.hub.set_status(&id, shown);
+        }
+        app.hub.set_activities(&id, Vec::new());
+        let event = crate::ws::presence_update(tx, &id, shown, Some(&[]))?;
+        for user in crate::ws::profile_targets(tx, &id)? {
+            out.to_user(&user, &event);
+        }
+    }
+    Ok(())
+}
+
 /// Выполняет последствия перехода (`runPeerTransitionEffects`). Ошибка
 /// только записывается в журнал: сам переход уже состоялся.
 pub async fn run_effects(state: &AppState, effects: Effects) {
@@ -686,14 +727,24 @@ pub async fn run_effects(state: &AppState, effects: Effects) {
                     super::reset::heal(tx, &effects.origin, &epoch, cause)?;
                 }
                 fanout_outbound_subscribers(tx, &app.ids, out, &effects.origin)?;
+                super::relay::presence_for_peer(
+                    tx,
+                    super::relay::Relay {
+                        config: &app.config,
+                        ids: &app.ids,
+                    },
+                    &app.hub,
+                    &effects.origin,
+                )?;
                 to_admins(tx, &app.hub, out, &changed)?;
             }
             if effects.previous == Some("active")
                 && effects.next.is_some_and(|next| next != "active")
                 && effects.exit.is_some()
             {
-                // Звонки и присутствие удалённых участников появятся вместе
-                // с приёмом событий; пока уходит только уведомление.
+                // Звонки с участниками пира закрываются вместе с переносом
+                // звонков между инстансами.
+                mark_stubs_offline(tx, &app, out, &effects.origin)?;
                 to_admins(tx, &app.hub, out, &changed)?;
             }
             if let (Some(contexts), Some(reason)) = (&effects.refused, effects.reason)

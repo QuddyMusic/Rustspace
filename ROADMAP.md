@@ -142,7 +142,17 @@ original server.
        carry the V8 messages; the content type picks the parser (415), and the body is
        parsed before the auth check, as in Fastify (the `s_bodies` scenario). A peer's sync
        time (`lastSyncedAt`) arrives with the sync step.
-     - [ ] Outbox and the delivery worker: retries, ordering, rollback of rejected events.
+     - [x] Outbox and the delivery worker: conversation events (messages, edits, deletions,
+       reactions, read positions, closing, groups: members, owner, name), friendship,
+       profile and presence events are queued for peers in the same transaction as the
+       change, with the mutation log and subject clocks; queue folding, batched delivery to
+       `/api/federation/relay`, retries with backoff, unreachable peers and their recovery,
+       refusals by the receiver (with the friend request rollback), placeholder peers and
+       handshakes for queued mail, event expiry. Checked on the stand with the original as
+       the receiver (`f_outbox.py`: delivery and retries, on SQLite and on PostgreSQL). For
+       the stand, federation addresses instances by https names through a TLS front, as the
+       original does. A friend request to someone on another instance and typing arrive with
+       the lookup and calls steps.
      - [ ] Inbound events: messages, edits, reactions, conversations, profiles, presence.
      - [ ] Account replicas and login from another instance, `user@domain` lookup.
      - [ ] Sync after downtime and state reconciliation.

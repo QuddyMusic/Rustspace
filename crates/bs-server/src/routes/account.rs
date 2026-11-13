@@ -633,17 +633,15 @@ pub async fn update_me(
                 )?;
             }
             if !new_origins.is_empty() && federation::relay_enabled(tx)? {
-                let payload = federation::profile_payload(&app.config, &before)?;
-                federation::append_mutation_log_in(
+                federation::relay::profile_update(
                     tx,
-                    &app.ids,
-                    &user.id,
-                    &user.id,
-                    "profile",
-                    "profile_update",
-                    Some(&payload),
+                    federation::relay::Relay {
+                        config: &app.config,
+                        ids: &app.ids,
+                    },
+                    &before,
+                    Some(&new_origins),
                 )?;
-                federation::queue_outbox(&user.id, "profile_update", &new_origins);
             }
             if let Some(status) = &chosen {
                 events::apply_chosen_status(&app, tx, out, &user.id, status)?;
@@ -665,6 +663,16 @@ pub async fn update_me(
                     }
                     ws::to_profile_audience(tx, out, &user.id, &payload)?;
                     out.to_user(&user.id, &payload);
+                    federation::relay::presence(
+                        tx,
+                        federation::relay::Relay {
+                            config: &app.config,
+                            ids: &app.ids,
+                        },
+                        &user.id,
+                        status.as_deref().unwrap_or("online"),
+                        &[],
+                    )?;
                 }
             }
             let mut stale = Vec::new();
@@ -711,17 +719,15 @@ pub async fn update_me(
                         && before.opt_text(column).ok() != updated.opt_text(column).ok()
                 });
                 if changed {
-                    let payload = federation::profile_payload(&app.config, &updated)?;
-                    federation::append_mutation_log_in(
+                    federation::relay::profile_update(
                         tx,
-                        &app.ids,
-                        &user.id,
-                        &user.id,
-                        "profile",
-                        "profile_update",
-                        Some(&payload),
+                        federation::relay::Relay {
+                            config: &app.config,
+                            ids: &app.ids,
+                        },
+                        &updated,
+                        None,
                     )?;
-                    federation::broadcast_outbox(tx, &user.id, "profile_update")?;
                 }
             }
             Ok((sanitized, stale, resize))

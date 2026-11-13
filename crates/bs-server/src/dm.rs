@@ -850,6 +850,20 @@ pub fn transfer_ownership(
     new_owner: &str,
 ) -> DbResult<()> {
     let relay = federation::relay_enabled(tx)?;
+    let federated = if relay {
+        federation::dm_federated_id(tx, channel)?
+    } else {
+        None
+    };
+    let targets = match &federated {
+        Some(_) => federation::relay::dm_targets(tx, &federation::our_origin(config), channel)?,
+        None => Vec::new(),
+    };
+    let previous_owner = channel_row(tx, channel)?
+        .map(|row| row.opt_text("owner_id"))
+        .transpose()?
+        .flatten()
+        .unwrap_or_default();
     let new_row = tx.query_one(
         "SELECT home_user_id, home_instance FROM users WHERE id = ?",
         params![new_owner],
@@ -884,7 +898,41 @@ pub fn transfer_ownership(
         ("newOwnerId", json!(new_owner)),
         ("newOwnerDisplayName", json!(display_name(tx, new_owner)?)),
     ]);
-    let message = system_message(tx, ids, channel, actor, &content, None, now_ms())?;
+    let at = now_ms();
+    let message = system_message(tx, ids, channel, actor, &content, None, at)?;
+    if let Some(federated) = &federated {
+        let origin = federation::our_origin(config);
+        let previous = tx.query_one(
+            "SELECT home_user_id, home_instance FROM users WHERE id = ?",
+            params![&previous_owner],
+        )?;
+        let (previous_user, previous_home) = match previous {
+            Some(row) => (
+                row.opt_text("home_user_id")?.filter(|id| !id.is_empty()),
+                row.opt_text("home_instance")?
+                    .filter(|home| !home.is_empty()),
+            ),
+            None => (None, None),
+        };
+        let previous_home = crate::federation_auth::canonical_home_instance(Some(
+            previous_home.as_deref().unwrap_or(&origin),
+        ))
+        .unwrap_or_default();
+        federation::relay::ownership_transfer(
+            tx,
+            federation::relay::Relay { config, ids },
+            channel,
+            federated,
+            new_owner,
+            &json!({"homeUserId": home_user, "homeInstance": home_instance.clone().unwrap_or_default()}),
+            &json!({
+                "homeUserId": previous_user.unwrap_or_else(|| previous_owner.clone()),
+                "homeInstance": previous_home,
+            }),
+            at,
+            &targets,
+        )?;
+    }
     broadcast::to_dm_members(
         tx,
         out,
@@ -905,13 +953,6 @@ pub fn transfer_ownership(
         &json!({"type": "dm_message_created", "message": message}),
         None,
     )?;
-    if relay && federation::dm_federated_id(tx, channel)?.is_some() {
-        federation::queue_outbox(
-            channel,
-            "ownership_transfer",
-            &federation::dm_target_origins(tx, config, channel)?,
-        );
-    }
     Ok(())
 }
 
@@ -933,6 +974,13 @@ pub fn remove_member(
         return Ok(());
     };
     let owner = row.opt_text("owner_id")?;
+    let federated = row
+        .opt_text("federated_id")?
+        .filter(|id| !id.is_empty() && federation::relay_enabled(tx).unwrap_or(false));
+    let targets = match &federated {
+        Some(_) => federation::relay::dm_targets(tx, &federation::our_origin(config), channel)?,
+        None => Vec::new(),
+    };
     let content = system_content(&[
         ("event", json!("member_removed")),
         ("targetUserId", json!(target)),
@@ -955,12 +1003,25 @@ pub fn remove_member(
         "DELETE FROM read_states WHERE user_id = ? AND channel_id = ?",
         params![target, channel],
     )?;
-    if federation::relay_enabled(tx)? && federation::dm_federated_id(tx, channel)?.is_some() {
-        federation::queue_outbox(
+    let removed_at = now_ms();
+    let removed = federation::relay::identity_value(tx, config, target)?;
+    if let Some(federated) = &row.opt_text("federated_id")?.filter(|id| !id.is_empty()) {
+        federation::relay::record_member_change(tx, config, federated, &removed, removed_at)?;
+    }
+    if let Some(federated) = &federated {
+        let actor = federation::relay::identity_value(tx, config, actor)?;
+        federation::relay::member_remove(
+            tx,
+            federation::relay::Relay { config, ids },
             channel,
-            "member_remove",
-            &federation::dm_target_origins(tx, config, channel)?,
-        );
+            federated,
+            &removed,
+            target,
+            &actor,
+            if kicked { "kick" } else { "leave" },
+            removed_at,
+            &targets,
+        )?;
     }
     let remaining: Vec<String> = tx
         .query(

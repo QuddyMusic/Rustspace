@@ -57,6 +57,12 @@ pub struct Config {
     pub federation_allow_private_peers: bool,
     /// Не запускать фоновые задачи федерации (`DISABLE_FEDERATION_WORKERS`).
     pub disable_federation_workers: bool,
+    /// Дополнительные корневые сертификаты (PEM) для запросов к другим
+    /// инстансам (`BS_EXTRA_CA_CERTS`, как `NODE_EXTRA_CA_CERTS` у Node.js).
+    pub extra_ca_certs: Option<Vec<u8>>,
+    /// Во сколько раз сократить паузы между попытками доставки
+    /// (`FEDERATION_BACKOFF_DIVISOR`, только для тестов; по умолчанию 1).
+    pub federation_backoff_divisor: u32,
     /// Версия для `/api/instance/info`.
     pub version: String,
     /// Где лежит исходный код этого сервера (`BACKSPACE_SOURCE_URL`).
@@ -208,6 +214,19 @@ impl Config {
             .optional("BACKSPACE_SOURCE_URL")
             .unwrap_or_else(|| UPSTREAM_SOURCE_URL.to_owned());
         check_http("BACKSPACE_SOURCE_URL", &source_code_url)?;
+        let extra_ca_certs = match env.optional("BS_EXTRA_CA_CERTS") {
+            Some(path) => Some(std::fs::read(&path).map_err(|error| {
+                ConfigError::Invalid(format!("BS_EXTRA_CA_CERTS: cannot read {path}: {error}"))
+            })?),
+            None => None,
+        };
+        let federation_backoff_divisor: u32 = env.int("FEDERATION_BACKOFF_DIVISOR", 1)?;
+        if federation_backoff_divisor < 1 {
+            return Err(ConfigError::Invalid(
+                "Environment variable FEDERATION_BACKOFF_DIVISOR must be at least 1, got: 0"
+                    .to_owned(),
+            ));
+        }
         let trusted_proxy_hops: u32 = env.int("TRUSTED_PROXY_HOPS", 1)?;
         if trusted_proxy_hops > MAX_TRUSTED_PROXY_HOPS {
             return Err(ConfigError::Invalid(format!(
@@ -233,6 +252,8 @@ impl Config {
             public_origin,
             federation_allow_private_peers: env.flag("FEDERATION_ALLOW_PRIVATE_PEERS", false),
             disable_federation_workers: env.flag("DISABLE_FEDERATION_WORKERS", false),
+            federation_backoff_divisor,
+            extra_ca_certs,
             version: COMPAT_VERSION.to_owned(),
             source_code_url,
             commit: env.optional("BACKSPACE_COMMIT"),

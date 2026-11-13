@@ -1045,7 +1045,7 @@ fn join_hosted_call(
         &state_update(dm_channel, user, true),
         None,
     )?;
-    federation::queue_outbox(
+    federation::call_relay_pending(
         dm_channel,
         "dm_call_accept",
         &federation::dm_target_origins(tx, &app.config, dm_channel)?,
@@ -1172,7 +1172,7 @@ pub fn call_start(
         }),
         Some(user),
     )?;
-    federation::queue_outbox(
+    federation::call_relay_pending(
         dm_channel,
         "dm_call_start",
         &federation::dm_target_origins(tx, &app.config, dm_channel)?,
@@ -1313,7 +1313,7 @@ pub fn call_stop(
             return Ok(());
         }
     }
-    federation::queue_outbox(
+    federation::call_relay_pending(
         &channel,
         "dm_call_end",
         &federation::dm_target_origins(tx, &app.config, &channel)?,

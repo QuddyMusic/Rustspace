@@ -60,6 +60,8 @@ pub enum Intent {
 /// Незавершённые рукопожатия и защита от повторов между инстансами.
 #[derive(Default)]
 pub struct Runtime {
+    /// Статус копии пользователя, как его объявил дом (`projections`).
+    pub projections: Mutex<HashMap<String, String>>,
     admin: Mutex<HashSet<String>>,
     in_flight: Mutex<HashMap<String, Shared<BoxFuture<'static, Ensured>>>>,
     nonces: Mutex<HashMap<String, HashMap<String, i64>>>,

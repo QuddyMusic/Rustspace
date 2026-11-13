@@ -96,7 +96,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-app` | The GUI and its entry point | 232 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 96 |
+| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 103 |
 | `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 6 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
@@ -214,19 +214,23 @@ positions, pokes, search; direct and group conversations; friends and people sea
 notification settings; voice channels, calls, voice moderation, LiveKit tokens; file uploads
 (tus), downloads, thumbnails, storage cleanup; link previews; space directory and join
 requests; stickers and GIF; admin (users, storage, instance settings); serving the web
-client; from federation: request signatures, the handshake and peer management (approval,
-denial, secret rotation, detecting a reinstalled remote instance). Every route and event is compared with the original by the scenarios in
-`tools/compat`, on SQLite and on PostgreSQL.
+client; from federation: request signatures, the outbox and delivery to peers (messages,
+edits, reactions, read positions, groups, friendships, profile, presence; retries with
+backoff, unreachable peers, refusals by the receiver), the handshake and peer management
+(approval, denial, secret rotation, detecting a reinstalled remote instance). Every route
+and event is compared with the original by the scenarios in `tools/compat`, on SQLite and on
+PostgreSQL.
 
 **Not in the original (extensions):** PostgreSQL storage, two-factor authentication, a key
 directory for end-to-end encrypted DMs. They do not change existing routes: a client that
 does not know about them works as before. Their tables live in the same database under
 `bs_*` names; the original server ignores them.
 
-**Not there yet:** delivering and receiving federation events, account replicas, sync and
-cross-instance calls. Peering with other instances is set up and maintained, but events are
-not exchanged yet: the server is not suitable for an instance that talks to peers and warns
-about it at startup. The server never sends telemetry. See [ROADMAP.md](ROADMAP.md).
+**Not there yet:** receiving events from other instances, `user@domain` lookup and account
+replicas, sync after downtime, cross-instance calls and typing. Events already go out to
+peers, but the server cannot take them in yet: it is not suitable for an instance that talks
+to peers and warns about it at startup. The server never sends telemetry. See
+[ROADMAP.md](ROADMAP.md).
 
 **Small differences from the original:** thumbnails and stickers are encoded as lossless
 WebP (larger files); AVIF thumbnails are not made; video and audio need `ffmpeg` and
@@ -313,6 +317,8 @@ marked.
 | `BACKSPACE_UPDATE_CHECK` | `false` | Let the admin panel ask GitHub about a new release of the original (the original defaults to `true`) |
 | `BACKSPACE_INSTALL_CHANNEL` | none | `prebuilt` or `source`: what the update panel shows |
 | `DISABLE_RATE_LIMITS` | `false` | Turn rate limits off (tests only) |
+| `BS_EXTRA_CA_CERTS` | none | *(bs-server)* PEM file with extra root certificates for requests to other instances (like the original's `NODE_EXTRA_CA_CERTS`) |
+| `FEDERATION_BACKOFF_DIVISOR` | `1` | Divide the waits between delivery attempts (tests only) |
 | `FEDERATION_ALLOW_PRIVATE_PEERS` | `false` | Let peers whose address was not given by an admin use private addresses (tests only) |
 | `DISABLE_FEDERATION_WORKERS` | `false` | Do not run background peer checks |
 | `BACKSPACE_SOURCE_URL`, `BACKSPACE_COMMIT` | none | Shown in instance info |
@@ -341,13 +347,20 @@ PostgreSQL: `BS_STAND_PG=postgres://user@host:port tools/compat/up.sh`; the `bs_
 database is recreated and filled from the same SQLite copy.
 
 Federation is checked on a separate stand of two instance pairs: original ↔ original and
-`bs-server` ↔ original (with `BS_FED_RUST_Y=1`, `bs-server` on both sides). The same
-scenario runs on both pairs; responses, peer rows in the databases and events are compared:
+`bs-server` ↔ original (with `BS_FED_RUST_Y=1`, `bs-server` on both sides; with
+`BS_FED_PG=postgres://…`, `bs-server` on PostgreSQL). The same scenario runs on both pairs;
+responses, database rows (peers, the outbox, the mutation log), what the second instance
+received, and events are compared. The original's federation addresses an instance by its
+host name without a port, so the instances reach each other over https as `x1.test`,
+`y1.test`, `x2.test`, `y2.test`: `fed_up.sh` adds them to `/etc/hosts`, issues a test CA and
+starts the `tls_front.py` TLS front on port 443 (root is needed).
 
 ```sh
 tools/compat/fed_up.sh                # instances on ports 3111–3114, fresh databases
 python3 tools/compat/f_peering.py peering    # each scenario on a fresh stand
 tools/compat/fed_up.sh && python3 tools/compat/f_peering.py approvals
+tools/compat/fed_up.sh && python3 tools/compat/f_outbox.py delivery
+FEDERATION_BACKOFF_DIVISOR=100000 tools/compat/fed_up.sh && python3 tools/compat/f_outbox.py retries
 ```
 
 ## Translations

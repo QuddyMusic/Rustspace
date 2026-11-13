@@ -170,7 +170,6 @@ pub fn reaction(
     {
         return Ok(());
     }
-    let (home_user, home_instance) = federation::identity(tx, &app.config, &cx.user_id)?;
     if add {
         let reaction_id = app.ids.next();
         let now = now_ms();
@@ -199,25 +198,18 @@ pub fn reaction(
             &json!({"type": "reaction_added", "messageId": message_id, "reaction": reaction}),
             None,
         )?;
-        federation::append_mutation_log(
+        federation::relay::reaction(
             tx,
-            &app.ids,
+            federation::relay::Relay {
+                config: &app.config,
+                ids: &app.ids,
+            },
+            &channel,
             message_id,
-            &channel,
-            "reaction_add",
-            Some(&json!({
-                "userId": cx.user_id,
-                "homeUserId": home_user,
-                "homeInstance": home_instance,
-                "emoji": emoji,
-                "createdAt": now,
-            })),
+            &cx.user_id,
+            emoji,
+            Some((&reaction_id, now)),
         )?;
-        federation::queue_outbox(
-            &channel,
-            "reaction_add",
-            &federation::dm_target_origins(tx, &app.config, &channel)?,
-        );
         return Ok(());
     }
     let removed = tx.execute(
@@ -239,23 +231,16 @@ pub fn reaction(
         }),
         None,
     )?;
-    federation::append_mutation_log(
+    federation::relay::reaction(
         tx,
-        &app.ids,
+        federation::relay::Relay {
+            config: &app.config,
+            ids: &app.ids,
+        },
+        &channel,
         message_id,
-        &channel,
-        "reaction_remove",
-        Some(&json!({
-            "userId": cx.user_id,
-            "homeUserId": home_user,
-            "homeInstance": home_instance,
-            "emoji": emoji,
-        })),
-    )?;
-    federation::queue_outbox(
-        &channel,
-        "reaction_remove",
-        &federation::dm_target_origins(tx, &app.config, &channel)?,
-    );
-    Ok(())
+        &cx.user_id,
+        emoji,
+        None,
+    )
 }

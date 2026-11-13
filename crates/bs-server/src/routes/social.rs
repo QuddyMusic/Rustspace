@@ -193,7 +193,7 @@ pub async fn send_request(
             sent["user"] = sanitize_user(&target, false)?;
             out.to_user(&target_id, &json!({"type": "friend_request_received", "request": received}));
             out.to_user(&user.id, &json!({"type": "friend_request_sent", "request": sent}));
-            relay_friend_event(tx, &app, "friend_request_create", &user.id, &target_id)?;
+            relay_friend_event(tx, &app, federation::relay::Friendship::Request, &user.id, &target_id)?;
             Ok((StatusCode::CREATED, Json(json!({"success": true, "requestId": id}))))
         })
         .await
@@ -209,25 +209,21 @@ fn remote_unavailable() -> ApiError {
 fn relay_friend_event(
     tx: &mut dyn Tx,
     app: &AppState,
-    kind: &str,
-    a: &str,
-    b: &str,
+    kind: federation::relay::Friendship<'_>,
+    from: &str,
+    to: &str,
 ) -> DbResult<()> {
-    let ours = federation::our_origin(&app.config);
-    let mut targets = Vec::new();
-    for user in [a, b] {
-        let (_, home) = federation::identity(tx, &app.config, user)?;
-        let origin = if home.starts_with("http") {
-            home
-        } else {
-            format!("https://{home}")
-        };
-        if origin != ours && !targets.contains(&origin) {
-            targets.push(origin);
-        }
-    }
-    federation::queue_outbox(&format!("friend:{a}:{b}"), kind, &targets);
-    Ok(())
+    federation::relay::friendship(
+        tx,
+        federation::relay::Relay {
+            config: &app.config,
+            ids: &app.ids,
+        },
+        kind,
+        from,
+        to,
+    )
+    .map(|_| ())
 }
 
 /// Отправляет получателю текущее присутствие субъекта (`sendPresenceSnapshot`).
@@ -263,7 +259,7 @@ fn presence_snapshot(
 
 fn request_row(tx: &mut dyn Tx, id: &str) -> ApiResult<Row> {
     tx.query_one(
-        "SELECT id, from_id, to_id, status FROM friend_requests WHERE id = ?",
+        "SELECT id, from_id, to_id, status, created_at FROM friend_requests WHERE id = ?",
         params![id],
     )?
     .ok_or_else(|| ApiError::not_found("friend_request_not_found"))
@@ -317,13 +313,35 @@ pub async fn answer_request(
                 }
                 presence_snapshot(tx, &app.hub, out, &from, &user.id)?;
                 presence_snapshot(tx, &app.hub, out, &user.id, &from)?;
-                relay_friend_event(tx, &app, "friend_request_accept", &from, &user.id)?;
+                let relay = federation::relay::Relay {
+                    config: &app.config,
+                    ids: &app.ids,
+                };
+                let theirs = app.hub.activities(&from);
+                let mine = app.hub.activities(&user.id);
+                federation::relay::presence_for_friend(tx, relay, &from, &user.id, &theirs)?;
+                federation::relay::presence_for_friend(tx, relay, &user.id, &from, &mine)?;
+                let created = request.int("created_at")?;
+                relay_friend_event(
+                    tx,
+                    &app,
+                    federation::relay::Friendship::Answer("accepted", created),
+                    &from,
+                    &user.id,
+                )?;
             } else {
                 out.to_user(
                     &from,
                     &json!({"type": "friend_request_declined", "requestId": id, "userId": user.id}),
                 );
-                relay_friend_event(tx, &app, "friend_request_decline", &from, &user.id)?;
+                let created = request.int("created_at")?;
+                relay_friend_event(
+                    tx,
+                    &app,
+                    federation::relay::Friendship::Answer("declined", created),
+                    &from,
+                    &user.id,
+                )?;
             }
             Ok(Json(json!({"success": true})))
         })
@@ -352,7 +370,14 @@ pub async fn cancel_request(
                 &to,
                 &json!({"type": "friend_request_cancelled", "requestId": id, "userId": user.id}),
             );
-            relay_friend_event(tx, &app, "friend_request_cancel", &user.id, &to)?;
+            let created = request.int("created_at")?;
+            relay_friend_event(
+                tx,
+                &app,
+                federation::relay::Friendship::Cancel(created),
+                &user.id,
+                &to,
+            )?;
             Ok(Json(json!({"success": true})))
         })
         .await
@@ -375,7 +400,7 @@ pub async fn remove_friend(
                 return Err(ApiError::not_found("not_friends"));
             }
             out.to_user(&id, &json!({"type": "friend_removed", "userId": user.id}));
-            relay_friend_event(tx, &app, "friend_remove", &user.id, &id)?;
+            relay_friend_event(tx, &app, federation::relay::Friendship::Remove, &user.id, &id)?;
             Ok(Json(json!({"success": true})))
         })
         .await

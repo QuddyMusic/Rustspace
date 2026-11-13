@@ -7,11 +7,14 @@ from lib import http, diff
 from scn import Norm, Listener, TS_KEYS
 import sqlite3
 
+HOSTS = {3111: 'x1.test', 3112: 'y1.test', 3113: 'x2.test', 3114: 'y2.test'}
+
 class Side:
     """Один инстанс пары."""
     def __init__(self, pair, role, port):
         self.pair, self.role, self.port = pair, role, port
-        self.origin = f'http://localhost:{port}'
+        self.host = HOSTS[port]
+        self.origin = f'https://{self.host}'
         self.tok = {}; self.uid = {}; self.ws = {}
     def user(self, name, listen=True):
         full = f'{name}{self.pair.tag}'
@@ -53,6 +56,15 @@ class Side:
         c = sqlite3.connect(f'/tmp/bsfed{self.port}/bs.db', timeout=10)
         try: return c.execute(sql, args).fetchall()
         finally: c.close()
+    def exec(self, sql, args=()):
+        """Запись в базу инстанса (заготовки сценария)."""
+        pg = __import__('os').environ.get('BS_FED_PG')
+        if pg and self.port in self.pair.rust_ports:
+            return self.pg(pg, sql, args)
+        c = sqlite3.connect(f'/tmp/bsfed{self.port}/bs.db', timeout=10)
+        try:
+            c.execute(sql, args); c.commit()
+        finally: c.close()
     def pg(self, url, sql, args):
         """Тот же запрос к базе PostgreSQL инстанса на Rust (через psql)."""
         import subprocess
@@ -62,32 +74,38 @@ class Side:
         out = subprocess.run(['psql', f'{url}/bsfed{self.port}', '-AtF', '\x1f', '-c', sql], capture_output=True, text=True, check=True).stdout
         rows = []
         for line in out.splitlines():
-            rows.append(tuple(None if v == '' else int(v) if re.fullmatch(r'-?\d+', v) else v for v in line.split('\x1f')))
+            # Короткие числа — числа (счётчики), длинные — идентификаторы; t/f — логические.
+            rows.append(tuple(None if v == '' else 1 if v == 't' else 0 if v == 'f' else int(v) if re.fullmatch(r'-?\d{1,12}', v) else v for v in line.split('\x1f')))
         return rows
     def note(self, label, value):
         """Произвольное наблюдение (например, строка базы) в журнал сравнения."""
         self.pair.log.append((f'{self.role}:{label}', 0, self.pair.val(value)))
 
 class Pair:
-    def __init__(self, xport, yport, tag):
-        self.tag = tag; self.n = Norm(); self.log = []
+    def __init__(self, xport, yport, tag, ignore_keys=()):
+        self.tag = tag; self.n = Norm(); self.log = []; self.ignore_keys = set(ignore_keys)
         self.x = Side(self, 'X', xport); self.y = Side(self, 'Y', yport)
         self.roles = {str(xport): 'X', str(yport): 'Y'}
         rust_y = bool(__import__('os').environ.get('BS_FED_RUST_Y'))
         self.rust_ports = {3113} | ({3114} if rust_y else set())
     def text(self, s):
         s = re.sub(r'(?:localhost|127\.0\.0\.1):(31\d\d)', lambda m: 'host-' + self.roles.get(m.group(1), m.group(1)), s)
+        s = re.sub(r'\b([xy])[12]\.test\b', lambda m: 'host-' + m.group(1).upper(), s)
+        # Ключи переписок (32 знака) и отметки времени внутри идентификаторов.
+        s = re.sub(r'\b[0-9a-f]{32}\b', lambda m: self.n.tok(m.group(0)), s)
+        s = re.sub(r'(?<![0-9])1[6-9][0-9]{11}(?![0-9])', '<ts>', s)
         return self.n.text(s)
     def val(self, v, key=''):
         # Время последней синхронизации журнала мутаций ставит подтягивание
         # через /api/federation/sync — это шаг 6 переноса; до него не сравнивается.
-        if key == 'lastSyncedAt': return '<sync>'
+        # Цвет аватара выбирается при регистрации случайно.
+        if key in ('lastSyncedAt', 'avatarColor') or key in self.ignore_keys: return '<не сравнивается>'
         if isinstance(v, dict): return {self.text(k): self.val(v[k], k) for k in sorted(v)}
         if isinstance(v, list): return [self.val(x, key) for x in v]
         if isinstance(v, str):
             if key in ('instanceId', 'deadEpoch', 'newEpoch', 'approvalToken', 'hmacSecret') and v: return self.n.tok(v)
             return self.text(v)
-        if isinstance(v, (int, float)) and not isinstance(v, bool) and TS_KEYS.search(key) and v > 1_600_000_000_000: return '<ts>'
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and 1_600_000_000_000 < v < 2_100_000_000_000: return '<ts>'
         return v
     def settle(self, t=0.6): time.sleep(t)
     def events(self):
@@ -100,11 +118,11 @@ class Pair:
         for side in (self.x, self.y):
             for l in side.ws.values(): l.stop = True
 
-def run(scenario, pairs=((3111, 3112), (3113, 3114)), show=False, unordered_events=True):
+def run(scenario, pairs=((3111, 3112), (3113, 3114)), show=False, unordered_events=True, ignore_events=(), ignore_keys=()):
     tag = ''.join(random.choice(string.ascii_lowercase) for _ in range(5))
     res = []
     for xp, yp in pairs:
-        p = Pair(xp, yp, tag); scenario(p); p.settle(1.0); res.append((p.log, p.events())); p.close()
+        p = Pair(xp, yp, tag, ignore_keys); scenario(p); p.settle(1.0); res.append((p.log, p.events())); p.close()
     (la, ea), (lb, eb) = res
     bad = 0
     if len(la) != len(lb):
@@ -116,7 +134,8 @@ def run(scenario, pairs=((3111, 3112), (3113, 3114)), show=False, unordered_even
             bad += 1; print(f'✗ [{i}] {x[0]}'); [print('    ', l) for l in d[:12]]
         elif show: print(f'✓ [{i}] {x[0]} → {x[1]}  {json.dumps(x[2], ensure_ascii=False)[:160]}')
     for name in ea:
-        a, b = ea[name], eb.get(name, [])
+        a = [e for e in ea[name] if e.get('type') not in ignore_events]
+        b = [e for e in eb.get(name, []) if e.get('type') not in ignore_events]
         key = lambda e: json.dumps(e, sort_keys=True, ensure_ascii=False)
         # Последствия переходов оригинал выполняет в фоне: порядок событий
         # разных переходов не определён, сравниваются наборы.

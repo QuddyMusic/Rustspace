@@ -30,10 +30,10 @@ const HANDSHAKE_CAUSES: [&str; 9] = [
 /// Имя узла из адреса (`extractDomain`): у полного адреса — без порта.
 #[must_use]
 pub fn domain_of(origin: &str) -> String {
-    if let Ok(url) = url::Url::parse(origin)
-        && let Some(host) = url.host_str()
-    {
-        return host.to_owned();
+    // `new URL(…).hostname`: у разобранного адреса без узла (`localhost:3000`
+    // разбирается как схема `localhost:`) имя пустое.
+    if let Ok(url) = url::Url::parse(origin) {
+        return url.host_str().unwrap_or_default().to_owned();
     }
     let rest = origin
         .strip_prefix("https://")
@@ -243,6 +243,7 @@ mod tests {
     fn domain_drops_scheme_and_slashes() {
         assert_eq!(domain_of("https://a.example//"), "a.example");
         assert_eq!(domain_of("http://localhost:3000"), "localhost");
+        assert_eq!(domain_of("localhost:3000"), "");
         assert_eq!(domain_of("a.example"), "a.example");
         assert_eq!(domain_of("a.example/x"), "a.example");
     }

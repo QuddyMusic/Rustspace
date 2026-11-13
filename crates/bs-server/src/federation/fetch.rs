@@ -152,6 +152,13 @@ pub async fn request(
         if let Some((name, address)) = pinned {
             builder = builder.resolve(&name, address);
         }
+        if let Some(pem) = &config.extra_ca_certs {
+            for certificate in
+                reqwest::Certificate::from_pem_bundle(pem).map_err(|error| error.to_string())?
+            {
+                builder = builder.add_root_certificate(certificate);
+            }
+        }
         let client = builder.build().map_err(|error| error.to_string())?;
         let mut call = match &body {
             Some(_) => client.post(target),

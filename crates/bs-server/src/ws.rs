@@ -205,6 +205,18 @@ async fn authenticate(
             let mut outbox = Outbox::new();
             let presence = presence_update(tx, &user.id, &status, None)?;
             to_profile_audience(tx, &mut outbox, &user.id, &presence)?;
+            // Другим инстансам — полный снимок, с занятиями других сеансов.
+            let activities = hub.activities(&user.id);
+            crate::federation::relay::presence(
+                tx,
+                crate::federation::relay::Relay {
+                    config: &state_for_tx.config,
+                    ids: &state_for_tx.ids,
+                },
+                &user.id,
+                &status,
+                &activities,
+            )?;
             let text: Arc<str> = Value::Object(payload).to_string().into();
             hub.add_connection(&user.id, connection, sender, closer, Some(text));
             Ok::<_, ApiError>((user, outbox))
@@ -401,6 +413,7 @@ fn disconnected(state: &AppState, session: &Session) {
             return;
         }
         let hub = state.hub.clone();
+        let app = state.clone();
         let result = state
             .db
             .transaction(move |tx| {
@@ -419,6 +432,15 @@ fn disconnected(state: &AppState, session: &Session) {
                 if owns || changed {
                     let event = presence_update(tx, &user_id, "offline", Some(&[]))?;
                     to_profile_audience(tx, &mut outbox, &user_id, &event)?;
+                }
+                if owns {
+                    crate::federation::relay::presence(
+                        tx,
+                        crate::federation::relay::Relay { config: &app.config, ids: &app.ids },
+                        &user_id,
+                        "offline",
+                        &[],
+                    )?;
                 }
                 Ok(outbox)
             })

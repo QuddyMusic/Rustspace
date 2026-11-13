@@ -28,7 +28,7 @@ const NOTIFICATION_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 /// Пора ли снова пробовать связаться с пиром (`isPeerAttemptDue`).
 #[must_use]
-pub fn attempt_due(peer: &Peer, has_queue: bool, now: i64) -> bool {
+pub fn attempt_due(peer: &Peer, has_queue: bool, now: i64, divisor: u32) -> bool {
     let Some(last) = peer.last_probe_at else {
         return true;
     };
@@ -36,7 +36,9 @@ pub fn attempt_due(peer: &Peer, has_queue: bool, now: i64) -> bool {
         let step = usize::try_from((peer.probe_attempts - 1).max(0))
             .unwrap_or(0)
             .min(RECOVERY_BACKOFF_MS.len() - 1);
-        RECOVERY_BACKOFF_MS[step]
+        // `retryWait`: паузы с очередью сокращаются делителем для тестов.
+        let divisor = i64::from(divisor.max(1));
+        (RECOVERY_BACKOFF_MS[step] + divisor - 1) / divisor
     } else {
         i64::try_from(HEALTH_INTERVAL.as_millis()).unwrap_or(i64::MAX)
     };
@@ -79,6 +81,7 @@ pub async fn recover_or_detect_reset(
 /// Проверка недоступных пиров (`processRecoveryTick`).
 async fn recovery_tick(state: &AppState) {
     let now = now_ms();
+    let divisor = state.config.federation_backoff_divisor;
     let due = state
         .run(move |tx, _| {
             let mut due = Vec::new();
@@ -89,7 +92,7 @@ async fn recovery_tick(state: &AppState) {
                         params![&peer.id],
                     )?
                     .is_some();
-                if attempt_due(&peer, queued, now) {
+                if attempt_due(&peer, queued, now, divisor) {
                     due.push(peer);
                 }
             }
@@ -472,6 +475,7 @@ pub fn spawn(state: &AppState) {
             recovery_tick(&app).await;
         }
     });
+    super::outbox::spawn(state);
     let app = state.clone();
     tokio::spawn(async move {
         let mut minute = tokio::time::interval(Duration::from_mins(1));
@@ -484,6 +488,13 @@ pub fn spawn(state: &AppState) {
                 passed = 0;
                 cleanup_unused_pending(&app).await;
                 expire_approvals(&app).await;
+                let expired = app
+                    .run(|tx, _| Ok(super::outbox::expire(tx, now_ms())?))
+                    .await
+                    .unwrap_or(0);
+                if expired > 0 {
+                    tracing::info!(expired, "из очереди исходящих удалены просроченные события");
+                }
             }
         }
     });
@@ -516,16 +527,19 @@ mod tests {
     #[test]
     fn attempts_back_off_only_when_mail_is_queued() {
         let now = 10_000_000;
-        assert!(attempt_due(&peer(0, None), false, now));
+        assert!(attempt_due(&peer(0, None), false, now, 1));
         // Есть что отправить: 30 с, 60 с, 5 мин, 15 мин.
-        assert!(!attempt_due(&peer(1, Some(now - 29_000)), true, now));
-        assert!(attempt_due(&peer(1, Some(now - 30_000)), true, now));
-        assert!(!attempt_due(&peer(2, Some(now - 59_000)), true, now));
-        assert!(attempt_due(&peer(3, Some(now - 300_000)), true, now));
-        assert!(!attempt_due(&peer(9, Some(now - 899_000)), true, now));
-        assert!(attempt_due(&peer(9, Some(now - 900_000)), true, now));
+        assert!(!attempt_due(&peer(1, Some(now - 29_000)), true, now, 1));
+        assert!(attempt_due(&peer(1, Some(now - 30_000)), true, now, 1));
+        assert!(!attempt_due(&peer(2, Some(now - 59_000)), true, now, 1));
+        assert!(attempt_due(&peer(3, Some(now - 300_000)), true, now, 1));
+        assert!(!attempt_due(&peer(9, Some(now - 899_000)), true, now, 1));
+        assert!(attempt_due(&peer(9, Some(now - 900_000)), true, now, 1));
         // Очередь пуста: раз в 15 минут.
-        assert!(!attempt_due(&peer(1, Some(now - 600_000)), false, now));
-        assert!(attempt_due(&peer(1, Some(now - 900_000)), false, now));
+        assert!(!attempt_due(&peer(1, Some(now - 600_000)), false, now, 1));
+        assert!(attempt_due(&peer(1, Some(now - 900_000)), false, now, 1));
+        // Делитель для тестов сокращает только паузы с очередью.
+        assert!(attempt_due(&peer(1, Some(now - 30)), true, now, 1000));
+        assert!(!attempt_due(&peer(1, Some(now - 30)), false, now, 1000));
     }
 }

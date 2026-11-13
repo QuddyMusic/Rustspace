@@ -8,7 +8,9 @@
 
 pub mod fetch;
 pub mod handshake;
+pub mod outbox;
 pub mod peers;
+pub mod relay;
 pub mod reset;
 pub mod worker;
 
@@ -161,16 +163,15 @@ pub fn dm_target_origins(
     Ok(origins)
 }
 
-/// Событие для удалённых участников. Пока доставка не перенесена, событие
-/// остаётся только в журнале мутаций, откуда пир заберёт его при
-/// синхронизации.
-pub fn queue_outbox(context_id: &str, event_type: &str, targets: &[String]) {
+/// Событие звонка для других инстансов. Звонки между инстансами уходят не
+/// через очередь, а прямым запросом (`sendCallRelay`); он ещё не перенесён.
+pub fn call_relay_pending(context_id: &str, event_type: &str, targets: &[String]) {
     if !targets.is_empty() {
         tracing::warn!(
             context = context_id,
             event = event_type,
             targets = targets.len(),
-            "событие для других инстансов не отправлено: доставка федерации ещё не перенесена"
+            "событие звонка для других инстансов не отправлено: звонки между инстансами ещё не перенесены"
         );
     }
 }
@@ -209,36 +210,13 @@ pub fn queue_read_state(
     message_id: &str,
     user_id: &str,
 ) -> DbResult<()> {
-    if !relay_enabled(tx)? {
-        return Ok(());
-    }
-    let Some(federated) = dm_federated_id(tx, channel_id)? else {
-        return Ok(());
-    };
-    let (home_user, home_instance) = identity(tx, config, user_id)?;
-    let reference = message_ref(tx, config, message_id)?;
-    let payload = json!({
-        "user": {"homeUserId": home_user, "homeInstance": home_instance},
-        "messageRef": {
-            "sourceInstance": reference["messageHomeInstance"],
-            "sourceMessageId": reference["messageId"],
-        },
-    });
-    let entity = format!("read_state:{federated}:{user_id}");
-    append_mutation_log(
+    relay::read_state(
         tx,
-        ids,
-        &entity,
+        relay::Relay { config, ids },
         channel_id,
-        "read_state_update",
-        Some(&payload),
-    )?;
-    queue_outbox(
-        channel_id,
-        "read_state_update",
-        &dm_target_origins(tx, config, channel_id)?,
-    );
-    Ok(())
+        message_id,
+        user_id,
+    )
 }
 
 /// Ключ переписки, общий для всех инстансов.
@@ -269,28 +247,13 @@ pub fn queue_dm_close(
     user_id: &str,
     reopen: bool,
 ) -> DbResult<()> {
-    if !relay_enabled(tx)? {
-        return Ok(());
-    }
-    let Some(federated) = dm_federated_id(tx, dm_channel_id)? else {
-        return Ok(());
-    };
-    let (home_user, home_instance) = identity(tx, config, user_id)?;
-    let kind = if reopen { "dm_reopen" } else { "dm_close" };
-    append_mutation_log(
+    relay::dm_close(
         tx,
-        ids,
-        &format!("{kind}:{federated}:{user_id}"),
+        relay::Relay { config, ids },
         dm_channel_id,
-        kind,
-        Some(&json!({"homeUserId": home_user, "homeInstance": home_instance})),
-    )?;
-    queue_outbox(
-        dm_channel_id,
-        kind,
-        &dm_target_origins(tx, config, dm_channel_id)?,
-    );
-    Ok(())
+        user_id,
+        reopen,
+    )
 }
 
 /// Пересылка создания или правки личного сообщения (`queueDmRelay`).
@@ -305,14 +268,13 @@ pub fn queue_dm_message(
     message_id: &str,
     update: bool,
 ) -> DbResult<()> {
-    let kind = if update { "update" } else { "create" };
-    append_mutation_log(tx, ids, message_id, dm_channel_id, kind, None)?;
-    queue_outbox(
+    relay::dm_message(
+        tx,
+        relay::Relay { config, ids },
         dm_channel_id,
-        kind,
-        &dm_target_origins(tx, config, dm_channel_id)?,
-    );
-    Ok(())
+        message_id,
+        update,
+    )
 }
 
 /// На что указывает изменение личного сообщения (`dmMessageMutationTarget`).
@@ -364,21 +326,13 @@ pub fn queue_dm_delete(
     message_id: &str,
     target: Option<Value>,
 ) -> DbResult<()> {
-    let payload = target.map(|target| json!({"target": target}));
-    append_mutation_log(
+    relay::dm_delete(
         tx,
-        ids,
+        relay::Relay { config, ids },
+        dm_channel_id,
         message_id,
-        dm_channel_id,
-        "delete",
-        payload.as_ref(),
-    )?;
-    queue_outbox(
-        dm_channel_id,
-        "delete",
-        &dm_target_origins(tx, config, dm_channel_id)?,
-    );
-    Ok(())
+        target,
+    )
 }
 
 /// Профиль пользователя для других инстансов (`FederationProfileUpdatePayload`).
@@ -408,27 +362,4 @@ pub fn profile_payload(config: &Config, user: &crate::db::Row) -> DbResult<Value
         "avatarColor": user.opt_text("avatar_color")?,
         "bio": user.opt_text("bio")?,
     }}))
-}
-
-/// Событие для всех установленных пиров (профиль, присутствие). Пока
-/// доставка не перенесена, отмечается только предупреждением, если пиры есть.
-///
-/// # Errors
-/// Ошибка базы.
-pub fn broadcast_outbox(tx: &mut dyn Tx, context_id: &str, event_type: &str) -> DbResult<()> {
-    let peers = tx
-        .query_one(
-            "SELECT count(*) AS n FROM federation_peers WHERE status IN ('active', 'unreachable')",
-            params![],
-        )?
-        .map_or(Ok(0), |row| row.int("n"))?;
-    if peers > 0 {
-        tracing::warn!(
-            context = context_id,
-            event = event_type,
-            peers,
-            "событие для других инстансов не отправлено: доставка федерации ещё не перенесена"
-        );
-    }
-    Ok(())
 }

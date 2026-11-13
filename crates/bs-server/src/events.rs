@@ -606,7 +606,16 @@ pub fn apply_chosen_status(
     )?;
     ws::to_profile_audience(tx, out, user_id, &payload)?;
     out.to_user(user_id, &payload);
-    Ok(())
+    crate::federation::relay::presence(
+        tx,
+        crate::federation::relay::Relay {
+            config: &app.config,
+            ids: &app.ids,
+        },
+        user_id,
+        status,
+        &activities,
+    )
 }
 
 fn presence_update(
@@ -739,7 +748,16 @@ fn activity_update(
     let payload = ws::presence_update(tx, &cx.user_id, &status, Some(&activities))?;
     ws::to_profile_audience(tx, out, &cx.user_id, &payload)?;
     out.to_user(&cx.user_id, &payload);
-    Ok(())
+    crate::federation::relay::presence(
+        tx,
+        crate::federation::relay::Relay {
+            config: &app.config,
+            ids: &app.ids,
+        },
+        &cx.user_id,
+        &status,
+        &activities,
+    )
 }
 
 fn reaction_add(

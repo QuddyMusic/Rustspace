@@ -183,13 +183,21 @@ pub async fn create_group(
             let has_remote = targets.iter().any(|row| {
                 row.opt_text("home_instance").ok().flatten().is_some_and(|home| !home.is_empty())
             });
+            let mut federated = None;
             if has_remote && federation::relay_enabled(tx)? {
                 let (home_user, home_instance) = federation::identity(tx, &app.config, &user.id)?;
+                let key = uuid::Uuid::new_v4().to_string();
                 tx.execute(
                     "UPDATE dm_channels SET federated_id = ?, owner_home_user_id = ?, owner_home_instance = ? \
                      WHERE id = ?",
-                    params![uuid::Uuid::new_v4().to_string(), home_user, home_instance, &channel],
+                    params![&key, home_user, crate::federation_auth::canonical_home_instance(Some(&home_instance)), &channel],
                 )?;
+                // Часы каждого участника начинаются с создания группы.
+                for id in std::iter::once(&user.id).chain(&target_ids) {
+                    let member = federation::relay::identity_value(tx, &app.config, id)?;
+                    federation::relay::record_member_change(tx, &app.config, &key, &member, now)?;
+                }
+                federated = Some(key);
             }
             let wire = dm::channel_wire(tx, &channel)?.ok_or_else(internal)?;
             let created = json!({"type": "dm_channel_created", "dmChannel": wire});
@@ -213,12 +221,24 @@ pub async fn create_group(
                     broadcast::to_user(tx, out, member, &event)?;
                 }
             }
-            if has_remote {
-                federation::queue_outbox(
-                    &channel,
-                    "member_add",
-                    &federation::dm_target_origins(tx, &app.config, &channel)?,
-                );
+            if federated.is_some() {
+                let caller = federation::relay::identity_value(tx, &app.config, &user.id)?;
+                let ours = federation::our_origin(&app.config);
+                for (target, id) in targets.iter().zip(&target_ids) {
+                    let home = target.opt_text("home_instance")?.filter(|home| !home.is_empty());
+                    if home.is_none_or(|home| home == ours) {
+                        continue;
+                    }
+                    federation::relay::member_add(
+                        tx,
+                        federation::relay::Relay { config: &app.config, ids: &app.ids },
+                        &channel,
+                        id,
+                        &caller,
+                        &caller,
+                        now,
+                    )?;
+                }
             }
             Ok((StatusCode::CREATED, Json(wire)))
         })
@@ -353,13 +373,15 @@ pub async fn update(
                     None,
                 )?;
             }
-            if federation::relay_enabled(tx)? && federation::dm_federated_id(tx, &id)?.is_some() {
-                federation::queue_outbox(
-                    &id,
-                    "group_metadata",
-                    &federation::dm_target_origins(tx, &app.config, &id)?,
-                );
-            }
+            federation::relay::group_metadata(
+                tx,
+                federation::relay::Relay { config: &app.config, ids: &app.ids },
+                &id,
+                &user.id,
+                name.as_deref(),
+                icon.as_deref(),
+                at,
+            )?;
             let mut stale = Vec::new();
             if icon_changed {
                 if let Some(old) = old_icon.filter(|icon| !icon.starts_with("http")) {
@@ -446,7 +468,12 @@ pub async fn add_member(
                 tx.execute(
                     "UPDATE dm_channels SET federated_id = ?, owner_home_user_id = ?, owner_home_instance = ? \
                      WHERE id = ?",
-                    params![uuid::Uuid::new_v4().to_string(), home_user, home_instance, &id],
+                    params![
+                        uuid::Uuid::new_v4().to_string(),
+                        home_user,
+                        crate::federation_auth::canonical_home_instance(Some(&home_instance)),
+                        &id
+                    ],
                 )?;
             }
             let wire = dm::channel_wire(tx, &id)?.ok_or_else(|| ApiError::not_found("dm_not_found"))?;
@@ -468,12 +495,36 @@ pub async fn add_member(
                 &json!({"type": "dm_message_created", "message": message}),
                 None,
             )?;
-            if federation::dm_federated_id(tx, &id)?.is_some() {
-                federation::queue_outbox(
-                    &id,
-                    "member_add",
-                    &federation::dm_target_origins(tx, &app.config, &id)?,
-                );
+            let added_at = now_ms();
+            if let Some(federated) = federation::dm_federated_id(tx, &id)? {
+                let added = federation::relay::identity_value(tx, &app.config, &target_id)?;
+                federation::relay::record_member_change(tx, &app.config, &federated, &added, added_at)?;
+                if federation::relay_enabled(tx)? {
+                    let adder = federation::relay::identity_value(tx, &app.config, &user.id)?;
+                    let ours = federation::our_origin(&app.config);
+                    let channel = dm::channel_row(tx, &id)?;
+                    let owner_field = |column: &str| -> DbResult<Option<String>> {
+                        Ok(channel
+                            .as_ref()
+                            .map(|row| row.opt_text(column))
+                            .transpose()?
+                            .flatten()
+                            .filter(|value| !value.is_empty()))
+                    };
+                    let owner = json!({
+                        "homeUserId": owner_field("owner_home_user_id")?.unwrap_or_else(|| user.id.clone()),
+                        "homeInstance": owner_field("owner_home_instance")?.unwrap_or(ours),
+                    });
+                    federation::relay::member_add(
+                        tx,
+                        federation::relay::Relay { config: &app.config, ids: &app.ids },
+                        &id,
+                        &target_id,
+                        &adder,
+                        &owner,
+                        added_at,
+                    )?;
+                }
             }
             voice::dm_member_added(tx, &app.hub, out, &id, &target_id)?;
             Ok(Json(wire))
