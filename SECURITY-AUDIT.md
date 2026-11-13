@@ -79,6 +79,18 @@ sign-in, tokens):
 | S24 | Medium | Federation: profile pictures, group icons and attachments from a peer are fetched by `safeFetch`, which checks the address with one DNS lookup and lets `fetch` resolve the name again (the original notes this window itself). | Fixed in `bs-server`: the name is resolved once, the connection goes to the checked address, each redirect hop is checked the same way; the host must still be the peer's, pictures are capped at 8 MB and must be images. |
 | S25 | Low | Federation: an inbound event is applied by several separate writes; an error halfway (answered `processing_error`, which the sender retries) leaves part of the event applied. | Fixed in `bs-server`: each event is applied in one transaction and rolled back whole on error. |
 | S26 | Medium | Login to a replica with a password the replica does not know sends that password to `https://<home_instance>/api/auth/login` with a plain `fetch`; `home_instance` comes from the registration request, so anyone can register a replica whose "home" is an address in the server's internal network and make the server post there. | Fixed in `bs-server`: the request goes through the federation fetch for an address named by a stranger (public addresses only, the name resolved once, no redirects). |
+| S27 | Low | Federation: a `dm_call_start` for a conversation not yet copied here rings every online local user the peer lists as a participant, whatever their relation to the caller: a peer can ring anyone here, and answering connects the client to a media server the peer chose. | Fixed in `bs-server`: without a local copy of the conversation only friends of the caller are rung, as a one-to-one conversation here can only be started with a friend. |
+| S28 | Low | Federation: the media server address in a relayed call (`livekitUrl`) reaches clients as any string. | Fixed in `bs-server`: only a `ws://` or `wss://` address with a host is accepted; otherwise the call is refused as malformed. |
+
+Federation as ported (the audit of step 8): an active peer is trusted to speak for its own
+users only (every inbound event is checked for attribution, and a batch's source must be the
+peer that signed it); server-to-server requests are signed with HMAC-SHA256 over the exact body,
+with freshness and one-time nonces; inbound routes are limited per peer (relay 90 batches a
+minute, lookups 60) and by body size (relay 10 MB, sync 64 KB); every fetch to an address a
+stranger named goes through the SSRF-safe client (S23, S24, S26); the sync route serves a peer
+only what it may see (shared conversations, its users' friendships, our users' profiles); call
+tokens are minted per peer only for the members it homes, with a 5-minute lifetime. Findings
+S24–S28 are the ones this port changed.
 
 Kept exactly as in the original: bcrypt hashes (cost 12), HS256 tokens with the same fields
 (tokens and password hashes work on both servers with the same `JWT_SECRET`), revocation of

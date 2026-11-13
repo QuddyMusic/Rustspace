@@ -96,7 +96,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-app` | The GUI and its entry point | 232 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 123 |
+| `bs-server` | The Rust server (in progress): the original's REST API and WebSocket gateway over the same database, see "Server" | 124 |
 | `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 6 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
@@ -229,11 +229,9 @@ directory for end-to-end encrypted DMs. They do not change existing routes: a cl
 does not know about them works as before. Their tables live in the same database under
 `bs_*` names; the original server ignores them.
 
-**Not there yet:** the federation audit. Events, calls and typing flow to and from peers,
-`user@domain` lookup works and peers catch up after downtime through the mutation log; until
-the audit is done the server warns at startup when it talks to peers. The server never sends
-telemetry. See
-[ROADMAP.md](ROADMAP.md).
+**Federation** is ported and audited: events, calls and typing flow to and from peers,
+`user@domain` lookup works and peers catch up after downtime through the mutation log. The
+server never sends telemetry. See [ROADMAP.md](ROADMAP.md).
 
 **Small differences from the original:** thumbnails and stickers are encoded as lossless
 WebP (larger files); AVIF thumbnails are not made; video and audio need `ffmpeg` and

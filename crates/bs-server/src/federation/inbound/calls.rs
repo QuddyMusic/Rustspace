@@ -10,6 +10,13 @@ use crate::federation::identity::{Actor, Hints, Resolved};
 use crate::params;
 use crate::voice::{self, FedCall};
 
+/// Годится ли адрес медиасервера: `ws://` или `wss://` с узлом.
+fn media_url(value: &str) -> bool {
+    url::Url::parse(value).is_ok_and(|url| {
+        matches!(url.scheme(), "ws" | "wss") && url.host_str().is_some_and(|host| !host.is_empty())
+    })
+}
+
 /// Источник со схемой.
 fn with_scheme(source: &str) -> String {
     if source.starts_with("http") {
@@ -114,6 +121,11 @@ pub fn start(cx: &mut Ctx<'_>, event: &Value) -> Step {
     if !call.get("tokens").is_some_and(truthy) {
         return reject("missing_call_payload");
     }
+    // Адрес медиасервера уходит клиентам как есть: только WebSocket
+    // (находка S28; оригинал передаёт любую строку).
+    if !media_url(livekit_url) {
+        return reject("missing_call_payload");
+    }
     if let Some(refusal) = cx.refusal(Some(caller_value))? {
         tracing::warn!(
             caller = raw_domain(text(caller_value, "homeInstance").unwrap_or_default()),
@@ -189,8 +201,14 @@ pub fn start(cx: &mut Ctx<'_>, event: &Value) -> Step {
                     params![home_user],
                 )?;
             }
+            // Переписки здесь ещё нет: звонят только друзьям звонящего, как
+            // и переписку один на один здесь начинают только с другом
+            // (находка S27; оригинал звонит любому названному пользователю).
             if let Some(row) = row {
-                found.push(row.text("id")?);
+                let id = row.text("id")?;
+                if crate::dm::are_friends(cx.tx, &id, &caller_id)? {
+                    found.push(id);
+                }
             }
         }
         found
@@ -396,4 +414,19 @@ pub fn typing(cx: &mut Ctx<'_>, event: &Value, stop: bool) -> Step {
         }
     }
     accept()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn media_urls() {
+        assert!(media_url("wss://lk.example/livekit"));
+        assert!(media_url("ws://10.0.0.1:7880"));
+        assert!(!media_url("https://lk.example"));
+        assert!(!media_url("javascript:alert(1)"));
+        assert!(!media_url("wss://"));
+        assert!(!media_url("lk.example"));
+    }
 }

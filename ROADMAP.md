@@ -126,10 +126,9 @@ original server.
    - [x] Forced voice disconnect through the LiveKit API (finding S16).
    - [x] Compatibility stand (`tools/compat`): 17 scenarios, responses and events compared
      with the original on SQLite and on PostgreSQL.
-   - [ ] Federation. In the original this is about 16 thousand lines of code (about 36
-     thousand with tests), and the part most sensitive to mistakes; it is ported in steps, each
-     compared with the original on a two-instance stand. Until then `bs-server` runs as a
-     standalone instance. The mutation log is already written as in the original.
+   - [x] Federation. In the original this is about 16 thousand lines of code (about 36
+     thousand with tests), and the part most sensitive to mistakes; it was ported in steps, each
+     compared with the original on a two-instance stand.
      - [x] Request signatures between instances (HMAC, freshness, secret rotation), checked
        against the original.
      - [x] Handshake and peer management: peering in both directions, approval and denial, user
@@ -209,8 +208,12 @@ original server.
        `group`, with LiveKit keys: `BS_FED_LIVEKIT=1`), 22 steps and both sides' events
        with no differences on SQLite and PostgreSQL, with `bs-server` on one and on both
        sides; the other federation scenarios now compare typing too.
-     - [ ] The federation audit (the stand scenarios for delivery, inbound events,
-       replicas, sync and calls are in place: `tools/compat/f_*.py`).
+     - [x] The federation audit: the trust model, signatures, limits, outbound fetches,
+       what sync serves and call tokens reviewed against the original (SECURITY-AUDIT,
+       "Federation as ported"); two findings fixed (S27: a call for a conversation not yet
+       copied here rings only the caller's friends; S28: the media server address must be a
+       WebSocket URL). Every step has its stand scenarios (`tools/compat/f_*.py`: peering,
+       outbox, inbound, lookup, sync, calls).
    - [x] The `bs-contract` stand against `bs-server`: both tests pass (REST: 42 calls; the
      client scenario: no parse errors, no unknown events).
 3. **PostgreSQL** as a storage option: done. A backend behind the same interface
