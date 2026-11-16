@@ -1,0 +1,91 @@
+Rustspace (backspace-rs)
+Copyright (c) 2026 Rustspace contributors
+https://github.com/QuddyMusic/backspace-rs
+
+Rustspace is free software under the GNU Affero General Public License v3.0
+only (AGPL-3.0-only); see the LICENSE file.
+
+================================================================================
+Relationship to Backspace
+================================================================================
+
+Rustspace is an unofficial, independent client and server written in Rust that
+is compatible with Backspace.
+
+  Backspace
+  Copyright (c) 2026 Jannis Braun
+  Official repository: https://github.com/TheZwiss/backspace
+  License: AGPL-3.0-only
+
+Parts of Rustspace are derived from Backspace: the network protocol, data model,
+federation logic and server behaviour are ported from its TypeScript sources,
+and some assets are taken from it unchanged (see below). Those parts remain
+covered by Backspace's copyright and are used under the AGPL-3.0-only. In the
+sense of section 5(a) of the AGPL, Rustspace is a modified version: it is a
+rewrite in Rust with its own desktop client (egui), its own server
+implementation and the changes recorded in this repository's git history.
+
+Rustspace is not affiliated with, endorsed by or supported by Jannis Braun or
+the Backspace project. Please report problems with Rustspace to the Rustspace
+repository, not to Backspace.
+
+"Backspace", the Backspace logo and the Backspace app icons are trademarks of
+Jannis Braun. Rustspace does not use the Backspace logo or icons and does not
+claim any rights to the Backspace name; it is mentioned only to describe
+compatibility. The Rustspace "R" mark (packaging/brand/rustspace/,
+packaging/linux/backspace-rs.*) is an original work of this project. The
+program and package names "backspace-rs" and "backspace-server" are technical
+identifiers kept for compatibility with existing installations.
+
+The commercial license offered for Backspace (LICENSE-COMMERCIAL.md in the
+original repository) does not apply to Rustspace.
+
+================================================================================
+Fonts
+================================================================================
+
+Inter
+  Files:    crates/bs-app/assets/fonts/Inter-Regular.ttf
+            crates/bs-app/assets/fonts/Inter-SemiBold.ttf
+  License:  SIL Open Font License, Version 1.1
+  Notice:   Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+  The full license text is at crates/bs-app/assets/fonts/OFL.txt.
+
+================================================================================
+Sound effects
+================================================================================
+
+Interface sounds (crates/bs-app/assets/sounds/*.ogg) are taken unchanged from
+Backspace (Copyright (c) 2026 Jannis Braun) and are covered by its
+AGPL-3.0-only license.
+
+================================================================================
+Emoji
+================================================================================
+
+Twemoji
+  Files:    crates/bs-app/assets/emoji/*.png
+  License:  Creative Commons Attribution 4.0 International (CC-BY 4.0),
+            https://creativecommons.org/licenses/by/4.0/
+  Notice:   Copyright Twitter, Inc and other contributors (the Twemoji
+            project); graphics taken unchanged, via the "twemoji-assets"
+            crate.
+
+================================================================================
+Syntax highlighting
+================================================================================
+
+Syntax grammars and colour themes come from bat
+(https://github.com/sharkdp/bat) through the "two-face" crate; each grammar and
+theme remains under its own license, listed in that crate.
+
+================================================================================
+Rust dependencies
+================================================================================
+
+Rustspace depends on open-source crates from crates.io under their own licenses
+(predominantly MIT, Apache-2.0 and BSD variants). LiveKit's client SDK and its
+bundled WebRTC (libwebrtc, BSD-3-Clause) are linked into the desktop client.
+To list the current dependency licenses, run for example:
+
+  cargo install cargo-license && cargo license

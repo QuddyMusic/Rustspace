@@ -1,14 +1,38 @@
-# backspace-rs
+<div align="center">
+
+<img src="packaging/brand/rustspace/icon.svg" width="112" alt="Rustspace logo">
+
+# Rustspace
+
+**An unofficial Rust client and server compatible with [Backspace](https://github.com/TheZwiss/backspace)**
+
+[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-b7410e)](LICENSE)
+[![Written in Rust](https://img.shields.io/badge/written%20in-Rust-b7410e?logo=rust)](https://www.rust-lang.org)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20%C2%B7%20Windows%20%C2%B7%20macOS-555)
 
 *English · [Русский](README.ru.md)*
 
-A cross-platform client for [Backspace](https://github.com/TheZwiss/backspace), written entirely
-in Rust. The main client is graphical (`egui`/`eframe`, crate `bs-app`, binary `backspace-rs`);
-a terminal client, `bs-tui`, sits next to it as a protocol testbed.
+[Features](#what-the-gui-does) · [Build](#building-and-running) · [Server](#server-bs-server) ·
+[Install on a server](#installing-on-a-server-one-script) · [Roadmap](ROADMAP.md) · [License](#license)
+
+</div>
+
+> [!IMPORTANT]
+> **Rustspace is an independent, unofficial project.** It is not affiliated with, endorsed by or
+> supported by the authors of Backspace. The **official Backspace repository is
+> [TheZwiss/backspace](https://github.com/TheZwiss/backspace)**. "Backspace" and its logo are
+> trademarks of Jannis Braun; Rustspace uses the name only to say what it is compatible with.
+> Please report Rustspace problems [here](https://github.com/QuddyMusic/backspace-rs/issues),
+> not to Backspace.
+
+Rustspace is written entirely in Rust. The desktop client is graphical (`egui`/`eframe`, crate
+`bs-app`, binary `backspace-rs`); a terminal client, `bs-tui`, sits next to it as a protocol
+testbed. The server, `bs-server` (binary `backspace-server`), is a port of the original server.
 
 The goal is full compatibility with the original: the client talks to unmodified Backspace
 instances (including federated ones) and supports everything the original web and desktop
-clients do. What is still missing is listed in the [roadmap](ROADMAP.md).
+clients do, and `bs-server` serves the original clients too. What is still missing is listed in
+the [roadmap](ROADMAP.md).
 
 ## Status
 
@@ -32,7 +56,9 @@ every WebSocket frame and REST response the client receives.
   in the conversation itself and verified with a safety number. Attachments and group
   conversations are not encrypted; there is no forward secrecy. The key lives in the system
   keyring and moves to another device as a passphrase-protected record (the encryption
-  window). The other person needs this client: the original web client shows ciphertext.
+  window). The other person needs this client: the original web client shows ciphertext. While a
+  one-to-one conversation is not encrypted, a thin bar above it says so (and whether the other
+  person has a key at all); it closes with one click and stays closed for that conversation.
 - **Spaces.** Channels and categories, roles and permissions, per-channel overrides, members,
   bans, invites, join requests, the instance directory, notification settings per space and
   per channel (including timed mute).
@@ -95,7 +121,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
 | `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, system audio, data-channel signals | 68 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 237 |
+| `bs-app` | The GUI and its entry point | 238 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
 | `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 128 |
@@ -287,8 +313,8 @@ with the same `JWT_SECRET`, `DB_PATH` and `UPLOAD_DIR`. Going back works the sam
 To have the server also serve the original web client, build it
 (`pnpm --filter @backspace/web build`) and point at the build: `BS_WEB_DIST=/path/to/packages/web/dist`.
 Without it, `/` shows a short page saying the instance is reached with the Rustspace desktop
-client, with its address to copy; set `BACKSPACE_SOURCE_URL` to your repository so the page
-links to the client (the original's repository has no Rust client). The icon on that page is
+client, with its address to copy and a link to the source and builds (`BACKSPACE_SOURCE_URL`,
+by default this repository; set your own if you changed the server). The icon on that page is
 `packaging/brand/rustspace/icon.svg`; the other variants and their generator are next to it.
 
 ### PostgreSQL
@@ -359,7 +385,8 @@ marked.
 | `FEDERATION_BACKOFF_DIVISOR` | `1` | Divide the waits between delivery attempts (tests only) |
 | `FEDERATION_ALLOW_PRIVATE_PEERS` | `false` | Let peers whose address was not given by an admin use private addresses (tests only) |
 | `DISABLE_FEDERATION_WORKERS` | `false` | Do not run background peer checks |
-| `BACKSPACE_SOURCE_URL`, `BACKSPACE_COMMIT` | none | Shown in instance info |
+| `BACKSPACE_SOURCE_URL` | this repository | Source of the running server (AGPL §13): instance info and `/` |
+| `BACKSPACE_COMMIT` | none | Shown in instance info |
 | `BS_PASSWORD_HASH_COST` | `12` | *(bs-server)* bcrypt cost (4–16); change for tests only |
 | `RUST_LOG` | `info` | *(bs-server)* Log verbosity (`debug`, `bs_server=trace`) |
 
@@ -426,9 +453,20 @@ translation, and placeholders (`{name}`) must match. To add a language, copy `en
 
 ## License
 
-AGPL-3.0-only, like the original Backspace.
+Rustspace is licensed under the [GNU AGPL-3.0-only](LICENSE), the same license as the original
+Backspace, from which its protocol, data model and server logic are ported. Copyright notices,
+the relationship to Backspace and third-party licenses are listed in [NOTICE](NOTICE). Security
+reports: [SECURITY.md](SECURITY.md).
+
+If you run a modified `bs-server` for other people, the AGPL requires you to offer them its
+source: set `BACKSPACE_SOURCE_URL` to your repository (by default it points here).
+
+The Rustspace "R" mark is this project's own; the Backspace name and logo belong to their owner
+and are not used here.
 
 Third-party assets: the [Inter](https://rsms.me/inter/) font (`crates/bs-app/assets/fonts/`,
 SIL Open Font License 1.1); interface sounds from the original Backspace
 (`crates/bs-app/assets/sounds`, AGPL-3.0-only); syntax grammars and colour themes from
-[bat](https://github.com/sharkdp/bat) via `two-face` (each under its own licence, see that crate).
+[bat](https://github.com/sharkdp/bat) via `two-face` (each under its own licence, see that crate);
+[Twemoji](https://github.com/twitter/twemoji) emoji images (`crates/bs-app/assets/emoji`,
+CC-BY 4.0, © Twitter, Inc and other contributors).
