@@ -97,7 +97,7 @@ WebSocket и каждый REST-ответ, который получает кл�
 | `bs-app` | GUI и точка входа | 237 |
 | `bs-tui` | Терминальный клиент (`ratatui`), один инстанс | 35 |
 | `bs-contract` | Контрактные тесты против настоящего сервера Backspace | 2 |
-| `bs-server` | Сервер на Rust: REST и шлюз WebSocket оригинала поверх той же базы — см. раздел «Сервер» | 127 |
+| `bs-server` | Сервер на Rust: REST и шлюз WebSocket оригинала поверх той же базы — см. раздел «Сервер» | 128 |
 | `bs-e2ee` | Сквозное шифрование ЛС: X25519, HKDF-SHA256, XChaCha20-Poly1305, контрольное число | 7 |
 | `xtask` | `cargo xtask contract`: поднимает оригинальный сервер и гоняет контрактные тесты | — |
 
@@ -265,7 +265,7 @@ sudo sh packaging/server/setup.sh --domain chat.example.org
 Рассчитан на обратный прокси впереди (Nginx Proxy Manager, Caddy…): в конце печатает, что
 настроить в нём и на роутере — `https://ДОМЕН` → порт 3000, `https://lk.ДОМЕН` → порт 7880
 (оба с WebSocket), TCP 7881 и UDP 7882 — проброс на машину. Параметры — `--help`
-(`--no-livekit`, `--web-dist`, `--data-from`, `--port`, `--proxy-hops`…).
+(`--no-livekit`, `--web-dist`, `--source-url`, `--data-from`, `--port`, `--proxy-hops`…).
 
 ### Запуск
 
@@ -283,7 +283,11 @@ target/release/backspace-server
 обратную сторону.
 
 Чтобы сервер отдавал и веб-клиент оригинала, соберите его (`pnpm --filter @backspace/web build`) и
-укажите каталог сборки: `BS_WEB_DIST=/путь/к/packages/web/dist`.
+укажите каталог сборки: `BS_WEB_DIST=/путь/к/packages/web/dist`. Без него на `/` открывается
+короткая страница: подключаться к инстансу нужно десктоп-клиентом Rustspace, вот адрес для
+копирования. Задайте `BACKSPACE_SOURCE_URL` — ссылку на ваш репозиторий, — чтобы страница
+вела к клиенту (в репозитории оригинала клиента на Rust нет). Значок на ней —
+`packaging/brand/rustspace/icon.svg`; остальные варианты и их генератор лежат рядом.
 
 ### PostgreSQL
 
@@ -338,7 +342,7 @@ DATABASE_URL='postgres://user:password@db.example/backspace?sslmode=verify-full&
 | `UPLOAD_DIR` | `data/uploads` | Каталог загруженных файлов |
 | `MAX_UPLOAD_SIZE` | `104857600` | Предел размера файла, байт (администратор меняет в настройках) |
 | `TUS_EXPIRATION_HOURS` | `24` | Сколько живёт незавершённая загрузка |
-| `BS_WEB_DIST` | — | *(bs-server)* Каталог собранного веб-клиента; без него отдаётся только API |
+| `BS_WEB_DIST` | — | *(bs-server)* Каталог собранного веб-клиента; без него на `/` — страница «подключайтесь клиентом», остальное — только API |
 | `DOMAIN` | — | Домен инстанса (ссылки приглашений, имена `user@domain`) |
 | `PUBLIC_ORIGIN` | — | Полный внешний адрес, если он не `https://DOMAIN` |
 | `TRUSTED_PROXY_HOPS` | `1` | Сколько прокси перед сервером пишут `X-Forwarded-For` (0–4). От этого зависят ограничения частоты: за одним nginx — `1`, без прокси — `0` |

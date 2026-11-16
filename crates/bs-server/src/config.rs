@@ -9,7 +9,7 @@ use std::path::PathBuf;
 /// в `/api/instance/info`: по нему клиенты и пиры судят о возможностях).
 pub const COMPAT_VERSION: &str = "1.11.0";
 /// Репозиторий оригинала: значение `sourceCodeUrl` по умолчанию.
-const UPSTREAM_SOURCE_URL: &str = "https://github.com/TheZwiss/backspace";
+pub const UPSTREAM_SOURCE_URL: &str = "https://github.com/TheZwiss/backspace";
 /// Сколько прокси перед сервером можно доверять самое большее.
 const MAX_TRUSTED_PROXY_HOPS: u32 = 4;
 

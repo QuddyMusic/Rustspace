@@ -29,6 +29,7 @@ BINARY=""
 PORT=3000
 PROXY_HOPS=1
 WEB_DIST=""
+SOURCE_URL=""
 DATA_FROM=""
 ASSUME_YES=0
 JOBS=""
@@ -75,6 +76,8 @@ usage() {
   --port ПОРТ            порт сервера (3000)
   --proxy-hops N         сколько прокси перед сервером (1; без прокси — 0)
   --web-dist КАТАЛОГ     собранный веб-клиент оригинала (packages/web/dist)
+  --source-url URL       ваш репозиторий bs-rs: ссылка на исходный код и клиент
+                         на главной странице (BACKSPACE_SOURCE_URL)
   --data-from КАТАЛОГ    перенести данные из каталога (backspace.db и uploads/)
   --livekit-version В    версия LiveKit (1.13.11)
   --jobs N               потоков сборки (меньше — меньше памяти)
@@ -92,6 +95,7 @@ while [ $# -gt 0 ]; do
         --port) PORT="${2:-}"; shift 2 ;;
         --proxy-hops) PROXY_HOPS="${2:-}"; shift 2 ;;
         --web-dist) WEB_DIST="${2:-}"; shift 2 ;;
+        --source-url) SOURCE_URL="${2:-}"; shift 2 ;;
         --data-from) DATA_FROM="${2:-}"; shift 2 ;;
         --livekit-version) LIVEKIT_VERSION="${2:-}"; shift 2 ;;
         --jobs) JOBS="${2:-}"; shift 2 ;;
@@ -402,6 +406,11 @@ fi
 
 # ─── Настройки ──────────────────────────────────────────────────────────────
 
+if [ -n "$SOURCE_URL" ]; then
+    case "$SOURCE_URL" in http://*|https://*) ;; *) die "--source-url должен начинаться с https://" ;; esac
+    printf 'BACKSPACE_SOURCE_URL=%s\n' "$SOURCE_URL" >> "$CARRY"
+fi
+
 # Веб-клиент копируется к данным: служба не видит домашние каталоги.
 if [ -n "$WEB_DIST" ]; then
     say "Копирую веб-клиент из $WEB_DIST"
@@ -678,5 +687,6 @@ if [ "$INIT" = systemd ]; then
 elif [ "$INIT" = openrc ]; then
     echo "Управление: rc-service backspace {status|restart|stop}; журнал: $LOG_DIR/backspace.log"
 fi
-[ -z "$WEB_DIST" ] && echo "Веб-клиента нет: на https://$DOMAIN/ будет 404, десктоп-клиенту он не нужен (см. --web-dist)."
+[ -z "$WEB_DIST" ] && echo "Веб-клиента нет: https://$DOMAIN/ показывает страницу «подключайтесь клиентом Rustspace» (свой веб-клиент — --web-dist)."
+[ -z "$(carried BACKSPACE_SOURCE_URL)" ] && echo "Ссылка на ваш репозиторий для этой страницы: --source-url https://… (иначе ссылки на клиент там не будет)."
 echo "Обновление: git pull и тот же запуск скрипта — данные и секреты сохранятся."

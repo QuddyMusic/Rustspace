@@ -130,6 +130,87 @@ async fn file_response(path: &Path, immutable: bool) -> Option<Response> {
     Some(response)
 }
 
+/// Страница «здесь нет веб-версии» для `/`, когда веб-клиент не подключён.
+const LANDING: &str = include_str!("landing.html");
+/// Значок Rustspace (`packaging/brand/rustspace/icon.svg`).
+const ICON: &str = include_str!("../../../packaging/brand/rustspace/icon.svg");
+
+/// Текст, безопасный внутри HTML и его атрибутов.
+fn escape_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Заглушка на `/`: инстанс принимает только десктоп-клиент на Rust.
+fn landing_page(config: &crate::config::Config) -> String {
+    use base64::Engine as _;
+    let origin = crate::federation::our_origin(config);
+    let host = origin
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .to_owned();
+    LANDING
+        .replace(
+            "{{ICON_B64}}",
+            &base64::engine::general_purpose::STANDARD.encode(ICON),
+        )
+        .replace("{{ICON_SVG}}", ICON.trim())
+        .replace("{{HOST}}", &escape_html(&host))
+        .replace("{{ORIGIN}}", &escape_html(&origin))
+        .replace(
+            "{{CLIENT_LINK_RU}}",
+            &client_link(
+                config,
+                "исходный код и сборки",
+                "ссылку на сборки даст администратор инстанса",
+            ),
+        )
+        .replace(
+            "{{CLIENT_LINK_EN}}",
+            &client_link(
+                config,
+                "source and builds",
+                "ask the instance admin for a build",
+            ),
+        )
+        .replace("{{SOURCE}}", &escape_html(&config.source_code_url))
+        .replace("{{VERSION}}", &escape_html(&config.version))
+}
+
+/// Ссылка на клиент: на свой репозиторий, если он задан
+/// (`BACKSPACE_SOURCE_URL`), — в репозитории оригинала клиента на Rust нет.
+fn client_link(config: &crate::config::Config, linked: &str, otherwise: &str) -> String {
+    if config.source_code_url == crate::config::UPSTREAM_SOURCE_URL {
+        otherwise.to_owned()
+    } else {
+        format!(
+            r#"<a href="{}" rel="noopener">{linked}</a>"#,
+            escape_html(&config.source_code_url)
+        )
+    }
+}
+
+fn landing(config: &crate::config::Config) -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "no-cache"),
+        ],
+        landing_page(config),
+    )
+        .into_response()
+}
+
 /// Всё, что не нашло маршрута: файлы веб-клиента и его страница для
 /// остальных адресов; для API — ответ «не найдено».
 pub async fn fallback(State(state): State<AppState>, request: axum::extract::Request) -> Response {
@@ -142,6 +223,13 @@ pub async fn fallback(State(state): State<AppState>, request: axum::extract::Req
     let uri = request.uri().clone();
     let path = uri.path();
     let api = path.starts_with("/api/") || path.starts_with("/ws");
+    // Без веб-клиента главная страница объясняет, чем подключаться.
+    if state.config.web_dist.is_none()
+        && path == "/"
+        && (method == Method::GET || method == Method::HEAD)
+    {
+        return landing(&state.config);
+    }
     let Some(root) = state.config.web_dist.as_deref().filter(|_| !api) else {
         let shown = uri
             .path_and_query()
@@ -177,7 +265,38 @@ pub async fn fallback(State(state): State<AppState>, request: axum::extract::Req
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, reason = "тесты")]
 mod tests {
+    #[test]
+    fn landing_names_the_instance_and_escapes() {
+        let vars = [
+            ("JWT_SECRET", "s".repeat(40)),
+            ("DOMAIN", "chat.example".to_owned()),
+            (
+                "BACKSPACE_SOURCE_URL",
+                "https://example.org/src?a=1&b=2".to_owned(),
+            ),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v))
+        .collect();
+        let config = crate::config::Config::from_map(&vars).expect("конфигурация");
+        let page = landing_page(&config);
+        assert!(!page.contains("{{"), "все подстановки сделаны");
+        assert!(page.contains("https://chat.example"));
+        assert!(page.contains(r#"<a href="https://example.org/src?a=1&amp;b=2" rel="noopener">исходный код и сборки</a>"#));
+        // Без своего репозитория ссылки на клиент нет: у оригинала его нет.
+        let plain = std::iter::once(("JWT_SECRET".to_owned(), "s".repeat(40))).collect();
+        let page = landing_page(&crate::config::Config::from_map(&plain).expect("конфигурация"));
+        assert!(page.contains("ссылку на сборки даст администратор"));
+        assert!(!page.contains("исходный код и сборки"));
+        assert!(page.contains("<svg"));
+        assert_eq!(
+            escape_html(r#"<a href="x">'&'</a>"#),
+            "&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;"
+        );
+    }
+
     use super::*;
 
     #[test]

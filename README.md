@@ -98,7 +98,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-app` | The GUI and its entry point | 237 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 127 |
+| `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 128 |
 | `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 7 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
@@ -267,7 +267,7 @@ the old process is stopped. Running the script again (after `git pull`, say) kee
 and secrets. It is meant for a reverse proxy in front (Nginx Proxy Manager, Caddy…): at
 the end it prints what to set there and on the router — `https://DOMAIN` → port 3000,
 `https://lk.DOMAIN` → port 7880 (both with WebSockets), TCP 7881 and UDP 7882 forwarded to
-the machine. `--help` lists the options (`--no-livekit`, `--web-dist`, `--data-from`,
+the machine. `--help` lists the options (`--no-livekit`, `--web-dist`, `--source-url`, `--data-from`,
 `--port`, `--proxy-hops`…).
 
 ### Run
@@ -286,6 +286,10 @@ with the same `JWT_SECRET`, `DB_PATH` and `UPLOAD_DIR`. Going back works the sam
 
 To have the server also serve the original web client, build it
 (`pnpm --filter @backspace/web build`) and point at the build: `BS_WEB_DIST=/path/to/packages/web/dist`.
+Without it, `/` shows a short page saying the instance is reached with the Rustspace desktop
+client, with its address to copy; set `BACKSPACE_SOURCE_URL` to your repository so the page
+links to the client (the original's repository has no Rust client). The icon on that page is
+`packaging/brand/rustspace/icon.svg`; the other variants and their generator are next to it.
 
 ### PostgreSQL
 
@@ -341,7 +345,7 @@ marked.
 | `UPLOAD_DIR` | `data/uploads` | Directory for uploaded files |
 | `MAX_UPLOAD_SIZE` | `104857600` | File size limit in bytes (the administrator can change it in settings) |
 | `TUS_EXPIRATION_HOURS` | `24` | How long an unfinished upload lives |
-| `BS_WEB_DIST` | none | *(bs-server)* Directory of the built web client; without it only the API is served |
+| `BS_WEB_DIST` | none | *(bs-server)* Directory of the built web client; without it `/` shows a "use the desktop client" page and the rest is API only |
 | `DOMAIN` | none | Instance domain (invite links, `user@domain` names) |
 | `PUBLIC_ORIGIN` | none | Full external address when it is not `https://DOMAIN` |
 | `TRUSTED_PROXY_HOPS` | `1` | How many proxies in front write `X-Forwarded-For` (0–4). Rate limits depend on it: behind one nginx `1`, without a proxy `0` |

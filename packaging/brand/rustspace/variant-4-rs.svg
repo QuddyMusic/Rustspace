@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="256" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#28243d"/><stop offset="1" stop-color="#110f1b"/>
+  </linearGradient>
+  <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="256" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#fff" stop-opacity="0.09"/><stop offset="0.42" stop-color="#fff" stop-opacity="0"/>
+  </linearGradient>
+  <linearGradient id="rim" x1="0" y1="0" x2="0" y2="256" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#fff" stop-opacity="0.5"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.15"/><stop offset="1" stop-color="#fff" stop-opacity="0.05"/>
+  </linearGradient>
+  <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+    <feColorMatrix values="0 0 0 0 0.05  0 0 0 0 0  0 0 0 0 0.14  0 0 0 0.35 0"/>
+    <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <linearGradient id="g" x1="70" y1="50" x2="190" y2="215" gradientUnits="userSpaceOnUse"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#7c6cf6"/></linearGradient>
+</defs>
+<rect width="256" height="256" rx="57" fill="url(#bg)"/>
+<rect width="256" height="256" rx="57" fill="url(#sheen)"/>
+<rect x="0.75" y="0.75" width="254.5" height="254.5" rx="56.3" fill="none" stroke="url(#rim)" stroke-width="1.5"/>
+<g filter="url(#glow)" transform="translate(-3 -8)"><path d="M78 180 V108 M78 136 C78 114 94 104 116 107" stroke="url(#g)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M184 116 C176 106 162 102 149 104 C130 107 127 130 146 137 L164 143 C186 151 185 176 162 180 C146 183 132 178 126 168" stroke="url(#g)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" fill="none"/><rect x="68" y="200" width="124" height="18" rx="9" fill="#e8743b"/></g>
+</svg>
