@@ -190,6 +190,8 @@ pub(crate) struct Prefs {
     pub(crate) hub_seen: std::collections::BTreeMap<String, String>,
     /// Инстансы, в которые входили, — сначала последний.
     pub(crate) recent_instances: Vec<RecentInstance>,
+    /// Личные переписки, где закрыли предупреждение «не зашифровано».
+    pub(crate) plaintext_dismissed: std::collections::BTreeSet<String>,
 }
 
 /// Инстанс, в который входили с этого устройства.
@@ -236,6 +238,7 @@ impl Default for Prefs {
             language: "ru".to_owned(),
             updates: crate::updates::UpdatePrefs::default(),
             hub_seen: std::collections::BTreeMap::new(),
+            plaintext_dismissed: std::collections::BTreeSet::new(),
             recent_instances: Vec::new(),
         }
     }

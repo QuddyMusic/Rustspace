@@ -285,12 +285,25 @@ mod tests {
         assert!(!page.contains("{{"), "все подстановки сделаны");
         assert!(page.contains("https://chat.example"));
         assert!(page.contains(r#"<a href="https://example.org/src?a=1&amp;b=2" rel="noopener">исходный код и сборки</a>"#));
-        // Без своего репозитория ссылки на клиент нет: у оригинала его нет.
+        // По умолчанию ссылка ведёт в репозиторий Rustspace.
         let plain = std::iter::once(("JWT_SECRET".to_owned(), "s".repeat(40))).collect();
         let page = landing_page(&crate::config::Config::from_map(&plain).expect("конфигурация"));
+        assert!(page.contains(crate::config::SOURCE_URL));
+        assert!(page.contains("<svg"));
+        // Ссылка на оригинал клиента на Rust не даёт — её не показываем.
+        let upstream = [
+            ("JWT_SECRET", "s".repeat(40)),
+            (
+                "BACKSPACE_SOURCE_URL",
+                crate::config::UPSTREAM_SOURCE_URL.to_owned(),
+            ),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v))
+        .collect();
+        let page = landing_page(&crate::config::Config::from_map(&upstream).expect("конфигурация"));
         assert!(page.contains("ссылку на сборки даст администратор"));
         assert!(!page.contains("исходный код и сборки"));
-        assert!(page.contains("<svg"));
         assert_eq!(
             escape_html(r#"<a href="x">'&'</a>"#),
             "&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;"

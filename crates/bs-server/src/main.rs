@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState::new(config, db)?;
     bs_server::spawn_background(&state);
     let listener = tokio::net::TcpListener::bind(&address).await?;
-    tracing::info!("Backspace server running at http://{address}");
+    tracing::info!("Rustspace server (bs-server) running at http://{address}");
     axum::serve(
         listener,
         bs_server::app(state).into_make_service_with_connect_info::<SocketAddr>(),

@@ -666,7 +666,7 @@ fn settings_nav(
             }
             ui.add_space(6.0);
             if sidebar_item(ui, tr("Сменить инстанс"), theme::text())
-                .on_hover_text(tr("Выйти и войти в другой инстанс Backspace"))
+                .on_hover_text(tr("Выйти и войти в другой инстанс"))
                 .clicked()
             {
                 *action = SettingsAction::SwitchInstance;
@@ -677,7 +677,7 @@ fn settings_nav(
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.add_space(8.0);
-                ui.label(theme::muted("Backspace RS · AGPL-3.0").size(11.5));
+                ui.label(theme::muted("Rustspace · AGPL-3.0").size(11.5));
             });
         });
 }

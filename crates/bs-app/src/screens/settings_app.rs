@@ -53,7 +53,7 @@ pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
             setting_row(
                 ui,
                 tr("Работают вне окна"),
-                tr("Сочетания срабатывают, даже когда Backspace свёрнут или в трее."),
+                tr("Сочетания срабатывают, даже когда Rustspace свёрнут или в трее."),
                 &mut global,
             );
             if global != crate::prefs::get().desktop.global_hotkeys {
@@ -62,7 +62,7 @@ pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
         } else {
             ui.label(
                 theme::muted(tr(
-                    "Сочетания работают, пока окно Backspace в фокусе. В поле ввода срабатывают \
+                    "Сочетания работают, пока окно Rustspace в фокусе. В поле ввода срабатывают \
                      только сочетания с Ctrl или Alt.",
                 ))
                 .size(12.5),
@@ -161,14 +161,14 @@ pub(crate) fn about(ui: &mut egui::Ui, bridge: &crate::fleet::Bridge) {
     card(ui, |ui| {
         ui.label(
             RichText::new(crate::tf!(
-                "Backspace RS {version}",
+                "Rustspace {version}",
                 version = updates::CURRENT
             ))
             .size(16.0)
             .color(theme::text_bright()),
         );
         ui.label(theme::muted(tr(
-            "Нативный клиент Backspace на Rust: egui, свой звук и видео через LiveKit.",
+            "Неофициальный клиент на Rust, совместимый с Backspace: egui, свой звук и видео через LiveKit.",
         )));
     });
     ui.add_space(12.0);
@@ -274,13 +274,13 @@ pub(crate) fn notifications(ui: &mut egui::Ui) {
             setting_row(
                 ui,
                 tr("Только когда окно не в фокусе"),
-                tr("Не беспокоить, пока вы и так смотрите на Backspace."),
+                tr("Не беспокоить, пока вы и так смотрите на Rustspace."),
                 &mut desktop.only_unfocused,
             );
         });
         if ui.button(tr("Проверить уведомление")).clicked() {
             crate::notify::show(crate::notify::Toast {
-                title: "Backspace".to_owned(),
+                title: crate::brand::NAME.to_owned(),
                 body: tr("Так будут выглядеть уведомления о сообщениях.").to_owned(),
             });
         }
@@ -291,11 +291,11 @@ pub(crate) fn notifications(ui: &mut egui::Ui) {
                 tr("Сворачивать в трей"),
                 if crate::desktop::is_wayland() {
                     tr(
-                        "Закрытие окна сворачивает Backspace (спрятать окно Wayland не позволяет); \
+                        "Закрытие окна сворачивает Rustspace (спрятать окно Wayland не позволяет); \
                         выйти — через меню значка в трее.",
                     )
                 } else {
-                    tr("Закрытие окна прячет Backspace в трей; выйти — через меню значка.")
+                    tr("Закрытие окна прячет Rustspace в трей; выйти — через меню значка.")
                 },
                 &mut desktop.close_to_tray,
             );

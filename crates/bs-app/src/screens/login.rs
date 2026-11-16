@@ -177,7 +177,7 @@ impl LoginScreen {
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
             );
-            ui.label(theme::muted(tr("Войдите в свой инстанс Backspace")));
+            ui.label(theme::muted(tr("Войдите в свой инстанс")));
         });
         ui.add_space(18.0);
 

@@ -490,6 +490,7 @@ impl ChatScreen {
                 }
                 main_module(ui, |ui| {
                     self.show_header(ui, bridge);
+                    self.show_plaintext_notice(ui, bridge);
                     self.show_composer(ui, bridge);
                     self.show_messages(ui, bridge);
                 });

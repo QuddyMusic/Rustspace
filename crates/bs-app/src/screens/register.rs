@@ -158,7 +158,7 @@ impl RegisterForm {
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
             );
-            ui.label(theme::muted(tr("Новый аккаунт на инстансе Backspace")));
+            ui.label(theme::muted(tr("Новый аккаунт на инстансе")));
         });
         ui.add_space(14.0);
 

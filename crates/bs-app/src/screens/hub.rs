@@ -1,6 +1,6 @@
-//! Страница «Backspace» — проектный хаб оригинала (`ProjectHubPage`):
-//! что нового в домашнем инстансе, ссылки проекта, сообщить об ошибке,
-//! развернуть свой сервер и сведения об этом сервере.
+//! Страница «Rustspace» — о проекте (по образцу `ProjectHubPage` оригинала):
+//! что нового, ссылки Rustspace, сообщить об ошибке, развернуть свой сервер,
+//! оригинальный проект и сведения об этом сервере.
 //!
 //! Точка «обновлено» в боковой панели горит, пока пользователь не открыл
 //! страницу после смены версии домашнего инстанса; видённая версия хранится
@@ -13,9 +13,7 @@ use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::theme;
 
-const REPOSITORY: &str = "https://github.com/TheZwiss/backspace";
-const INSIGHTS: &str = "https://backspacechat.com/insights/";
-const FUNDING: &str = "https://ko-fi.com/backspacechat";
+use crate::brand::{NAME, REPOSITORY, UPSTREAM};
 
 /// Как версия домашнего инстанса относится к видённой (`HubUpdateState`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,29 +100,24 @@ impl HubPage {
     }
 }
 
-/// Ссылка на заметки к выпуску версии (или на список выпусков).
-fn release_notes(version: Option<&str>) -> String {
-    match version {
-        Some(v) if semver::Version::parse(v).is_ok() && !v.contains('-') => {
-            format!("{REPOSITORY}/releases/tag/v{v}")
-        }
-        _ => format!("{REPOSITORY}/releases"),
-    }
+/// Выпуски Rustspace (номера версий сервера — от оригинала, поэтому на
+/// выпуск по номеру ссылки нет).
+fn release_notes() -> String {
+    format!("{REPOSITORY}/releases")
 }
 
-/// Ссылка «Сообщить об ошибке» с версией и окружением.
+/// Ссылка «Сообщить об ошибке»: в задачу Rustspace сразу попадают версии
+/// клиента и сервера и система.
 fn bug_report(version: Option<&str>) -> String {
-    let environment = format!(
-        "Backspace RS {} ({})",
+    let body = format!(
+        "**Что случилось**\n\n\n**Как повторить**\n\n\n---\nКлиент: {NAME} {} ({})\nСервер: {}\n",
         crate::updates::CURRENT,
-        std::env::consts::OS
+        std::env::consts::OS,
+        version.unwrap_or("?"),
     );
     let mut query = url::form_urlencoded::Serializer::new(String::new());
-    query.append_pair("template", "bug_report.yml");
-    if let Some(version) = version {
-        query.append_pair("version", version);
-    }
-    query.append_pair("environment", &environment);
+    query.append_pair("labels", "bug");
+    query.append_pair("body", &body);
     format!("{REPOSITORY}/issues/new?{}", query.finish())
 }
 
@@ -212,7 +205,7 @@ pub(crate) fn show(ui: &mut egui::Ui, state: &mut HubPage, bridge: &Bridge) {
                 let (mark, _) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), Sense::hover());
                 crate::brand::paint(ui.painter(), mark.center(), 16.0, theme::text_faint());
                 ui.label(
-                    RichText::new("Backspace")
+                    RichText::new(NAME)
                         .family(theme::bold_family())
                         .color(theme::text_bright()),
                 );
@@ -226,7 +219,7 @@ pub(crate) fn show(ui: &mut egui::Ui, state: &mut HubPage, bridge: &Bridge) {
                 .show(ui, |ui| {
                     header(ui);
                     ui.add_space(20.0);
-                    card_grid(ui, &cards(update, version.as_deref(), info.as_deref()));
+                    card_grid(ui, &cards(update, version.as_deref()));
                     ui.add_space(24.0);
                     instance_section(ui, bridge, info.as_deref());
                     ui.add_space(16.0);
@@ -244,23 +237,19 @@ fn header(ui: &mut egui::Ui) {
         ui.add_space(10.0);
         ui.vertical(|ui| {
             ui.label(
-                RichText::new("Backspace")
+                RichText::new(NAME)
                     .size(24.0)
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
             );
             ui.label(theme::muted(tr(
-                "Чат с открытым исходным кодом, который можно развернуть на своём сервере.",
+                "Неофициальный клиент и сервер на Rust, совместимые с Backspace.",
             )));
         });
     });
 }
 
-fn cards(
-    update: HubUpdate,
-    version: Option<&str>,
-    info: Option<&bs_api::InstanceInfo>,
-) -> Vec<Card> {
+fn cards(update: HubUpdate, version: Option<&str>) -> Vec<Card> {
     let card = |tint, icon, title: &str, body: &str, links: Vec<(&str, String)>| Card {
         tint,
         icon,
@@ -281,28 +270,8 @@ fn cards(
         Icon::Check,
         tr("Что нового"),
         &whats_new,
-        vec![(tr("Читать примечания к выпуску"), release_notes(version))],
+        vec![(tr("Выпуски Rustspace"), release_notes())],
     )];
-    // Карточка поддержки — только если администратор её не выключил.
-    if info.is_some_and(|info| info.support_card_enabled) {
-        out.push(card(
-            theme::amber(),
-            Icon::Smile,
-            tr("Поддержать проект"),
-            tr(
-                "Помогает оплатить лицензии разработчика для публикации Backspace в магазинах \
-                приложений и покрыть прочие расходы проекта.",
-            ),
-            vec![(tr("Поддержать на Ko-fi"), FUNDING.to_owned())],
-        ));
-    }
-    out.push(card(
-        theme::sky(),
-        Icon::Compass,
-        "Insights",
-        tr("Открытая статистика загрузок, серверов и активности."),
-        vec![(tr("Открыть Insights"), INSIGHTS.to_owned())],
-    ));
     out.push(card(
         theme::amber(),
         Icon::Chat,
@@ -312,7 +281,7 @@ fn cards(
             (tr("Сообщить об ошибке"), bug_report(version)),
             (
                 tr("Предложить функцию"),
-                format!("{REPOSITORY}/issues/new?template=feature_request.yml"),
+                format!("{REPOSITORY}/issues/new?labels=enhancement"),
             ),
         ],
     ));
@@ -320,11 +289,21 @@ fn cards(
         theme::rose(),
         Icon::Download,
         tr("Развернуть свой сервер"),
-        tr("Запустите Backspace на своём сервере и приглашайте кого хотите."),
+        tr("Поставьте bs-server одним скриптом и приглашайте кого хотите."),
         vec![(
             tr("Читать инструкцию по установке"),
-            format!("{REPOSITORY}#installation"),
+            format!("{REPOSITORY}#installing-on-a-server-one-script"),
         )],
+    ));
+    out.push(card(
+        theme::sky(),
+        Icon::Compass,
+        tr("Оригинальный проект"),
+        tr(
+            "Rustspace основан на Backspace (Jannis Braun) и совместим с его серверами. \
+            Это независимый проект, не связанный с авторами Backspace.",
+        ),
+        vec![(tr("Репозиторий Backspace"), UPSTREAM.to_owned())],
     ));
     out
 }
@@ -399,11 +378,11 @@ mod tests {
     }
 
     #[test]
-    fn links_carry_version() {
-        assert!(release_notes(Some("1.2.3")).ends_with("/releases/tag/v1.2.3"));
-        assert!(release_notes(Some("dev")).ends_with("/releases"));
+    fn links_lead_to_rustspace() {
+        assert!(release_notes().starts_with(REPOSITORY));
         let bug = bug_report(Some("1.2.3"));
-        assert!(bug.contains("version=1.2.3"));
-        assert!(bug.contains("environment=Backspace+RS"));
+        assert!(bug.starts_with(&format!("{REPOSITORY}/issues/new?")));
+        assert!(bug.contains("1.2.3") && bug.contains("Rustspace"));
+        assert!(!bug.contains("TheZwiss"));
     }
 }

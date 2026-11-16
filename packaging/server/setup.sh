@@ -1,5 +1,5 @@
 #!/bin/sh
-# Установка и настройка сервера Backspace на Rust (bs-server) с нуля:
+# Установка и настройка сервера Rustspace (bs-server, совместим с Backspace) с нуля:
 # Debian, Ubuntu или Alpine; systemd или OpenRC; голос и стримы через LiveKit.
 #
 #   sudo sh packaging/server/setup.sh --domain rustspace.duckdns.org
@@ -76,8 +76,9 @@ usage() {
   --port ПОРТ            порт сервера (3000)
   --proxy-hops N         сколько прокси перед сервером (1; без прокси — 0)
   --web-dist КАТАЛОГ     собранный веб-клиент оригинала (packages/web/dist)
-  --source-url URL       ваш репозиторий bs-rs: ссылка на исходный код и клиент
-                         на главной странице (BACKSPACE_SOURCE_URL)
+  --source-url URL       репозиторий с исходниками запущенного сервера, если вы
+                         его меняли (BACKSPACE_SOURCE_URL; по умолчанию —
+                         https://github.com/QuddyMusic/backspace-rs)
   --data-from КАТАЛОГ    перенести данные из каталога (backspace.db и uploads/)
   --livekit-version В    версия LiveKit (1.13.11)
   --jobs N               потоков сборки (меньше — меньше памяти)
@@ -459,7 +460,7 @@ if [ "$WITH_LIVEKIT" = 1 ]; then
     fi
     NEW_LK=$(mktemp)
     cat > "$NEW_LK" <<EOF
-# LiveKit для Backspace. Записан packaging/server/setup.sh.
+# LiveKit для Rustspace. Записан packaging/server/setup.sh.
 # Подключение клиентов: порт 7880 за обратным прокси (wss://$LIVEKIT_HOST).
 # Медиа: TCP 7881 и UDP 7882 пробрасываются на эту машину напрямую.
 port: 7880
@@ -492,7 +493,7 @@ say "Настраиваю службы ($INIT)"
 if [ "$INIT" = systemd ]; then
     cat > /etc/systemd/system/backspace.service <<EOF
 [Unit]
-Description=Backspace server (bs-server)
+Description=Rustspace server (bs-server)
 After=network-online.target
 Wants=network-online.target
 
@@ -515,7 +516,7 @@ EOF
     if [ "$WITH_LIVEKIT" = 1 ]; then
         cat > /etc/systemd/system/livekit.service <<EOF
 [Unit]
-Description=LiveKit (voice and video for Backspace)
+Description=LiveKit (voice and video for Rustspace)
 After=network-online.target
 Wants=network-online.target
 
@@ -546,7 +547,7 @@ elif [ "$INIT" = openrc ]; then
     cat > /etc/init.d/backspace <<EOF
 #!/sbin/openrc-run
 name="backspace"
-description="Backspace server (bs-server)"
+description="Rustspace server (bs-server)"
 command="$BIN"
 command_user="backspace:backspace"
 directory="$DATA"
@@ -571,7 +572,7 @@ EOF
         cat > /etc/init.d/livekit <<EOF
 #!/sbin/openrc-run
 name="livekit"
-description="LiveKit (voice and video for Backspace)"
+description="LiveKit (voice and video for Rustspace)"
 command="$LK_BIN"
 command_args="--config $LK_FILE"
 command_user="livekit:livekit"
@@ -688,5 +689,5 @@ elif [ "$INIT" = openrc ]; then
     echo "Управление: rc-service backspace {status|restart|stop}; журнал: $LOG_DIR/backspace.log"
 fi
 [ -z "$WEB_DIST" ] && echo "Веб-клиента нет: https://$DOMAIN/ показывает страницу «подключайтесь клиентом Rustspace» (свой веб-клиент — --web-dist)."
-[ -z "$(carried BACKSPACE_SOURCE_URL)" ] && echo "Ссылка на ваш репозиторий для этой страницы: --source-url https://… (иначе ссылки на клиент там не будет)."
+[ -z "$(carried BACKSPACE_SOURCE_URL)" ] && echo "Если вы меняли код сервера, укажите свой репозиторий: --source-url https://… (AGPL требует давать исходники запущенной версии)."
 echo "Обновление: git pull и тот же запуск скрипта — данные и секреты сохранятся."

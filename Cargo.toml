@@ -23,8 +23,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "AGPL-3.0-only"
-repository = "https://github.com/TheZwiss/backspace"
-authors = ["Backspace RS contributors"]
+repository = "https://github.com/QuddyMusic/backspace-rs"
+authors = ["Rustspace contributors"]
 
 [workspace.dependencies]
 # внутренние крейты

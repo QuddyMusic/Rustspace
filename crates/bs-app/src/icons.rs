@@ -21,6 +21,8 @@ pub(crate) enum Icon {
     Close,
     /// Галочка.
     Check,
+    /// Замок.
+    Lock,
     /// Плюс.
     Plus,
     /// Шестерёнка.
@@ -99,6 +101,7 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
         | Icon::Speaker
         | Icon::Smile
         | Icon::File
+        | Icon::Lock
         | Icon::Image
         | Icon::Sticker
         | Icon::Send => paint_objects(painter, center, size, icon, color),
@@ -230,6 +233,19 @@ fn paint_objects(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: 
                 p(6.0, 20.5),
             ]);
             line(vec![p(14.0, 3.5), p(14.0, 8.5), p(19.0, 8.5)]);
+        }
+        Icon::Lock => {
+            ring(vec![
+                p(5.0, 10.5),
+                p(19.0, 10.5),
+                p(19.0, 20.5),
+                p(5.0, 20.5),
+            ]);
+            let mut shackle = vec![p(8.0, 10.5)];
+            shackle.extend(arc(p(12.0, 7.5), unit * 4.0, 180.0, 360.0, 10));
+            shackle.push(p(16.0, 10.5));
+            line(shackle);
+            painter.circle_filled(p(12.0, 15.5), unit * 1.6, color);
         }
         Icon::Image => {
             ring(vec![p(3.5, 5.0), p(20.5, 5.0), p(20.5, 19.0), p(3.5, 19.0)]);

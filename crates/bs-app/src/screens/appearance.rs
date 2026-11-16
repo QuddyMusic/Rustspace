@@ -309,7 +309,7 @@ fn import_export(ui: &mut egui::Ui, state: &mut AppearanceState, appearance: &mu
 fn export(palette: &Palette) -> (bool, String) {
     let Some(path) = rfd::FileDialog::new()
         .set_file_name("backspace-theme.json")
-        .add_filter(tr("Тема Backspace"), &["json"])
+        .add_filter(tr("Тема (JSON)"), &["json"])
         .save_file()
     else {
         return (true, String::new());
@@ -326,7 +326,7 @@ fn export(palette: &Palette) -> (bool, String) {
 /// `None` — пользователь закрыл диалог.
 fn import() -> Option<Result<Palette, String>> {
     let path = rfd::FileDialog::new()
-        .add_filter(tr("Тема Backspace"), &["json"])
+        .add_filter(tr("Тема (JSON)"), &["json"])
         .pick_file()?;
     Some(parse_theme(
         &std::fs::read(&path).map_err(|err| err.to_string()).ok()?,

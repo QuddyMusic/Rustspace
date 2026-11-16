@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Нативный клиент Backspace на Rust (GUI)"
-homepage = "https://github.com/TheZwiss/backspace"
+description = "Rustspace — неофициальный клиент на Rust, совместимый с Backspace (GUI)"
+homepage = "https://github.com/QuddyMusic/backspace-rs"
 
 [lints]
 workspace = true
@@ -17,11 +17,11 @@ path = "src/main.rs"
 # Упаковка: `cargo packager --release -p bs-app --formats deb,appimage`
 # (Linux), `--formats dmg` (macOS), `--formats nsis` (Windows).
 [package.metadata.packager]
-product-name = "Backspace RS"
-authors = ["Backspace RS contributors"]
-identifier = "io.github.thezwiss.backspace-rs"
+product-name = "Rustspace"
+authors = ["Rustspace contributors"]
+identifier = "io.github.quddymusic.backspace-rs"
 category = "SocialNetworking"
-description = "Нативный клиент Backspace: чат, ЛС, пространства и голос"
+description = "Rustspace: неофициальный клиент, совместимый с Backspace (чат, ЛС, пространства и голос)"
 icons = ["../../packaging/linux/backspace-rs.png"]
 before-packaging-command = "cargo build --release -p bs-app --features voice"
 out-dir = "../../target/packages"

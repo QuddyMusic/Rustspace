@@ -1,4 +1,4 @@
-//! Точка входа GUI-приложения Backspace RS.
+//! Точка входа GUI-приложения Rustspace.
 //!
 //! Этап 14: egui/eframe поверх `bs-core`.
 //! Архитектура: tokio-runtime живёт в фоне, GUI-поток владеет кэшем
@@ -80,7 +80,7 @@ fn main() -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1100.0, 720.0])
         .with_min_inner_size([720.0, 480.0])
-        .with_title("Backspace RS")
+        .with_title(crate::brand::NAME)
         // Совпадает с StartupWMClass в .desktop: окно получает иконку панели.
         .with_app_id(APP_ID);
     match eframe::icon_data::from_png_bytes(include_bytes!(
@@ -96,7 +96,7 @@ fn main() -> eframe::Result {
 
     let handle = runtime.handle().clone();
     let result = eframe::run_native(
-        "Backspace RS",
+        crate::brand::NAME,
         options,
         Box::new(move |cc| {
             theme::install(&cc.egui_ctx);

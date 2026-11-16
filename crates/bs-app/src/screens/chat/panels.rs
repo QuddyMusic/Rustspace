@@ -541,13 +541,18 @@ impl ChatScreen {
         {
             *nav = Some(Nav::Explore);
         }
-        if widgets::brand_row(ui, "Backspace", self.view == View::Backspace, hub_dot)
-            .on_hover_text(if hub_dot {
-                tr("Backspace обновлён")
-            } else {
-                tr("О проекте Backspace")
-            })
-            .clicked()
+        if widgets::brand_row(
+            ui,
+            crate::brand::NAME,
+            self.view == View::Backspace,
+            hub_dot,
+        )
+        .on_hover_text(if hub_dot {
+            tr("Сервер обновлён")
+        } else {
+            tr("О проекте Rustspace")
+        })
+        .clicked()
         {
             *nav = Some(Nav::Backspace);
         }
@@ -895,6 +900,88 @@ impl ChatScreen {
     }
 
     /// Шапка ленты: название канала, тема, переключатель участников.
+    /// Полоса над личной перепиской, пока она не зашифрована: сообщения
+    /// хранятся на серверах открытым текстом. Закрывается крестиком —
+    /// для этой переписки навсегда.
+    pub(super) fn show_plaintext_notice(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
+        let Some(selected) = self.selected_channel.as_ref() else {
+            return;
+        };
+        if selected.kind != ChannelKind::Dm
+            || crate::prefs::get()
+                .plaintext_dismissed
+                .contains(&selected.channel)
+        {
+            return;
+        }
+        let Some(dm) = bridge
+            .cache_at(selected.origin)
+            .and_then(|c| c.dm_channel(&selected.channel))
+        else {
+            return;
+        };
+        if !crate::bridge::e2ee::is_direct(dm) {
+            return;
+        }
+        let me = bridge.cache_at(selected.origin).map(|c| c.me().id.clone());
+        let remote = dm
+            .members
+            .iter()
+            .any(|m| Some(&m.id) != me.as_ref() && m.home_instance.is_some());
+        let status = bridge.e2ee_status(selected.origin, &selected.channel);
+        let Some(text) = plaintext_notice(&status, remote) else {
+            return;
+        };
+        let (origin, channel) = (selected.origin, selected.channel.clone());
+        let amber = theme::amber();
+        egui::Panel::top("plaintext_notice")
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(amber.gamma_multiply(0.14))
+                    .inner_margin(Margin::symmetric(20, 6)),
+            )
+            .show(ui, |ui| {
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    let (mark, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), Sense::hover());
+                    crate::icons::paint(ui.painter(), mark.center(), 15.0, Icon::Lock, amber);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add(widgets::flat_icon(Icon::Close, 14.0, theme::text_faint()))
+                            .on_hover_text(tr("Больше не показывать в этой переписке"))
+                            .clicked()
+                        {
+                            crate::prefs::update(|prefs| {
+                                prefs.plaintext_dismissed.insert(channel.clone());
+                            });
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new(tr("Подробнее")).size(12.5).color(amber),
+                                )
+                                .frame(false),
+                            )
+                            .clicked()
+                        {
+                            self.e2ee_dialog = Some(crate::screens::e2ee_dialog::E2eeDialog::new(
+                                origin,
+                                channel.clone(),
+                            ));
+                        }
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(text).size(12.5).color(theme::text_bright()),
+                                )
+                                .wrap(),
+                            );
+                        });
+                    });
+                });
+            });
+    }
+
     pub(super) fn show_header(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
         let (prefix, title, topic) = self.selected_channel.as_ref().map_or_else(
             || ("", String::new(), None),
@@ -937,5 +1024,52 @@ impl ChatScreen {
                     });
                 });
             });
+    }
+}
+
+/// Текст предупреждения о незашифрованной переписке; `None` — шифрование
+/// включено и предупреждать не о чем.
+fn plaintext_notice(
+    status: &crate::bridge::e2ee::ChatStatus,
+    federated: bool,
+) -> Option<&'static str> {
+    if status.enabled {
+        return None;
+    }
+    Some(if status.has_peer_key {
+        tr(
+            "Переписка не зашифрована: её может прочитать администратор сервера. \
+            Шифрование можно включить.",
+        )
+    } else if federated {
+        tr(
+            "Переписка не зашифрована: у собеседника с другого инстанса нет ключа — его сервер \
+            или клиент, похоже, не поддерживает шифрование.",
+        )
+    } else {
+        tr("Переписка не зашифрована: собеседник ещё не опубликовал ключ шифрования.")
+    })
+}
+
+#[cfg(test)]
+mod plaintext_tests {
+    use super::plaintext_notice;
+    use crate::bridge::e2ee::ChatStatus;
+
+    #[test]
+    fn notice_only_while_unencrypted() {
+        let on = ChatStatus {
+            enabled: true,
+            ..ChatStatus::default()
+        };
+        assert!(plaintext_notice(&on, true).is_none());
+        let none = ChatStatus::default();
+        assert!(plaintext_notice(&none, true).is_some_and(|t| t.contains("другого инстанса")));
+        assert!(plaintext_notice(&none, false).is_some_and(|t| !t.contains("другого инстанса")));
+        let keyed = ChatStatus {
+            has_peer_key: true,
+            ..ChatStatus::default()
+        };
+        assert!(plaintext_notice(&keyed, false).is_some_and(|t| t.contains("можно включить")));
     }
 }

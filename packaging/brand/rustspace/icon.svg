@@ -14,10 +14,10 @@
     <feColorMatrix values="0 0 0 0 0.05  0 0 0 0 0  0 0 0 0 0.14  0 0 0 0.35 0"/>
     <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
   </filter>
-  <linearGradient id="g" x1="70" y1="50" x2="190" y2="215" gradientUnits="userSpaceOnUse"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#7c6cf6"/></linearGradient>
+  <linearGradient id="g" x1="70" y1="50" x2="190" y2="215" gradientUnits="userSpaceOnUse"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e8743b"/></linearGradient>
 </defs>
 <rect width="256" height="256" rx="57" fill="url(#bg)"/>
 <rect width="256" height="256" rx="57" fill="url(#sheen)"/>
 <rect x="0.75" y="0.75" width="254.5" height="254.5" rx="56.3" fill="none" stroke="url(#rim)" stroke-width="1.5"/>
-<g filter="url(#glow)"><path d="M98 62 V194 M98 62 H138 A37 37 0 0 1 138 136 H98" stroke="url(#g)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M134 136 L170 194" stroke="#e8743b" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" fill="none"/></g>
+<g filter="url(#glow)"><path d="M98 62 V194 M98 62 H138 A37 37 0 0 1 138 136 H98 M134 136 L170 194" stroke="url(#g)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" fill="none"/></g>
 </svg>

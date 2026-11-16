@@ -203,7 +203,7 @@ fn update_strip(ui: &mut egui::Ui, prefs: &crate::updates::UpdatePrefs) {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(crate::tf!(
-                        "Доступна новая версия Backspace RS: {version} (у вас {current})",
+                        "Доступна новая версия Rustspace: {version} (у вас {current})",
                         version = release.version,
                         current = crate::updates::CURRENT
                     ))

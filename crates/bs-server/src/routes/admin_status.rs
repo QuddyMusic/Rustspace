@@ -24,8 +24,10 @@ use crate::util::field;
 
 type Outcome = Result<Response, ApiError>;
 
+/// Выпуски оригинального Backspace: сервер объявляет совместимую с ним
+/// версию протокола, поэтому «есть обновление» сверяется с оригиналом.
 const RELEASES_API: &str = "https://api.github.com/repos/TheZwiss/backspace/releases/latest";
-const UPSTREAM_SOURCE: &str = "https://github.com/TheZwiss/backspace";
+const UPSTREAM_SOURCE: &str = crate::config::UPSTREAM_SOURCE_URL;
 const CACHE_TTL_MS: i64 = 6 * 3_600_000;
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 

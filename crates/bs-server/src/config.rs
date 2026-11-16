@@ -8,8 +8,12 @@ use std::path::PathBuf;
 /// Версия оригинального сервера, с которой совместим этот (поле `version`
 /// в `/api/instance/info`: по нему клиенты и пиры судят о возможностях).
 pub const COMPAT_VERSION: &str = "1.11.0";
-/// Репозиторий оригинала: значение `sourceCodeUrl` по умолчанию.
+/// Официальный репозиторий оригинального Backspace.
 pub const UPSTREAM_SOURCE_URL: &str = "https://github.com/TheZwiss/backspace";
+/// Репозиторий этого сервера (Rustspace): значение `sourceCodeUrl` по
+/// умолчанию — AGPL §13 требует давать пользователям исходники того кода,
+/// который действительно запущен.
+pub const SOURCE_URL: &str = "https://github.com/QuddyMusic/backspace-rs";
 /// Сколько прокси перед сервером можно доверять самое большее.
 const MAX_TRUSTED_PROXY_HOPS: u32 = 4;
 
@@ -214,7 +218,7 @@ impl Config {
         }
         let source_code_url = env
             .optional("BACKSPACE_SOURCE_URL")
-            .unwrap_or_else(|| UPSTREAM_SOURCE_URL.to_owned());
+            .unwrap_or_else(|| SOURCE_URL.to_owned());
         check_http("BACKSPACE_SOURCE_URL", &source_code_url)?;
         let extra_ca_certs = match env.optional("BS_EXTRA_CA_CERTS") {
             Some(path) => Some(std::fs::read(&path).map_err(|error| {

@@ -58,7 +58,7 @@ pub(crate) fn show(toast: Toast) {
         .name("notify".to_owned())
         .spawn(move || {
             let result = notify_rust::Notification::new()
-                .appname("Backspace")
+                .appname(crate::brand::NAME)
                 .summary(&toast.title)
                 .body(&toast.body)
                 .show();
@@ -78,7 +78,7 @@ fn author_name(cache: &Cache, user_id: &str) -> String {
         .chain(cache.dm_channels().flat_map(|dm| dm.members.iter()))
         .find(|user| user.id == user_id);
     user.map_or_else(
-        || "Backspace".to_owned(),
+        || crate::brand::NAME.to_owned(),
         |user| {
             user.display_name
                 .as_deref()

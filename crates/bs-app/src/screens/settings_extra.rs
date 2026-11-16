@@ -757,7 +757,7 @@ fn general_settings(
     ui.add_space(6.0);
     card(ui, |ui| {
         widgets::field_label(ui, tr("Название инстанса"));
-        widgets::text_field(ui, &mut edit.instance_name, "Backspace", 32);
+        widgets::text_field(ui, &mut edit.instance_name, "Rustspace", 32);
         ui.add_space(10.0);
         setting_row(
             ui,

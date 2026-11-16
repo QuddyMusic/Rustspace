@@ -388,7 +388,7 @@ mod tray {
         menu.append(&quit).map_err(|err| err.to_string())?;
         TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip("Backspace")
+            .with_tooltip(crate::brand::NAME)
             .with_icon(icon)
             .build()
             .map_err(|err| err.to_string())

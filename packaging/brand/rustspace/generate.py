@@ -66,7 +66,7 @@ variants["5-patina"] = svg(tile("#3a2c55", "#3b1d12",
     f'<g filter="url(#glow)"><path d="{R_STEM} {R_BOWL} {R_LEG}" stroke="url(#g)" {S}/></g>\n')
 
 # Запуск из этого каталога: python3 generate.py; icon.svg — выбранный вариант.
-CHOSEN = "2-bimetal"
+CHOSEN = "1-oxide"
 for name, data in variants.items():
     open(f"variant-{name}.svg", "w").write(data)
 open("icon.svg", "w").write(variants[CHOSEN])

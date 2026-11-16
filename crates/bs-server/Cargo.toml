@@ -3,7 +3,7 @@ name = "bs-server"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "Сервер Backspace на Rust, совместимый с оригинальным (клиенты, база, федерация)"
+description = "Сервер Rustspace на Rust, совместимый с оригинальным Backspace (клиенты, база, федерация)"
 
 [lints]
 workspace = true
