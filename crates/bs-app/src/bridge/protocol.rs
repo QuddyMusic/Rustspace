@@ -349,7 +349,11 @@ pub(crate) enum BridgeRequest {
         name: String,
         /// Файл.
         bytes: std::sync::Arc<Vec<u8>>,
+        /// Сразу положить в этот свой пак.
+        pack: Option<String>,
     },
+    /// Стикерпаки Rustspace.
+    StickerPacks(PackOp),
     /// Удалить личный стикер.
     DeleteSticker(String),
     /// «Избранное», закрепы, закладки.
@@ -922,6 +926,41 @@ pub(crate) struct ProfileEvent {
     pub(crate) mutuals: Option<bs_api::Mutuals>,
 }
 
+/// Действие со стикерпаками; после любого, кроме [`PackOp::With`], приходит
+/// свежий список паков.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PackOp {
+    /// Только список.
+    List,
+    /// Новый пак.
+    Create(String),
+    /// Переименовать.
+    Rename { pack: String, name: String },
+    /// Открыть или закрыть для других.
+    Share { pack: String, shared: bool },
+    /// Удалить свой пак.
+    Delete(String),
+    /// Положить стикер в пак.
+    Put { pack: String, sticker: String },
+    /// Убрать стикер из пака.
+    Remove { pack: String, sticker: String },
+    /// Новый порядок стикеров.
+    Reorder { pack: String, order: Vec<String> },
+    /// Добавить чужой пак к себе или убрать.
+    Added { pack: String, added: bool },
+    /// Найти открытые паки с этим стикером.
+    With(String),
+}
+
+/// Ошибка стикерпаков.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PackError {
+    /// Сервер не знает паков (не Rustspace или старая сборка).
+    Unsupported,
+    /// Действие не удалось.
+    Failed(String),
+}
+
 /// Что пришло для композера; GUI забирает через [`Session::take_compose_events`].
 #[derive(Debug)]
 pub(crate) enum ComposeEvent {
@@ -956,6 +995,10 @@ pub(crate) enum ComposeEvent {
     Stickers(Result<Vec<bs_api::PersonalSticker>, String>),
     /// Итог загрузки или удаления стикера.
     StickerChanged(Result<(), String>),
+    /// Свои и добавленные стикерпаки после действия (или ошибка действия).
+    StickerPacks(Result<bs_api::StickerPacks, PackError>),
+    /// Открытые паки со стикером из сообщения.
+    PacksWith(Result<Vec<bs_api::StickerPack>, String>),
     /// Не удалось отправить сообщение.
     SendFailed(String),
 }

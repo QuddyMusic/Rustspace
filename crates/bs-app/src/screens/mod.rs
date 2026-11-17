@@ -27,4 +27,5 @@ pub(crate) mod settings_invites;
 pub(crate) mod settings_more;
 pub(crate) mod space_dialogs;
 pub(crate) mod space_settings;
+pub(crate) mod sticker_packs;
 pub(crate) mod translate_settings;

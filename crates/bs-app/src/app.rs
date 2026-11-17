@@ -134,6 +134,7 @@ impl BackspaceApp {
                         .request(crate::bridge::BridgeRequest::UploadSticker {
                             name,
                             bytes: bytes.into(),
+                            pack: None,
                         });
                     self.bridge.set_info(tr("Стикер сохраняется…").to_owned());
                 }

@@ -93,7 +93,8 @@ every WebSocket frame and REST response the client receives.
   the break is closed with ` ``` ` and reopened with the same fence (and language) in the
   next message.
 - **Files and media.** Uploads with progress, image viewer, downloading attachments (one or
-  all), avatars, banners, stickers, GIFs (Klipy search, favourites). An attachment can be
+  all), avatars, banners, stickers and sticker packs (make your own, fill and reorder them, add
+  someone's open pack from a sticker in chat), GIFs (Klipy search, favourites). An attachment can be
   hidden under a **spoiler** (the eye on the staged file): the picture is blurred until
   clicked. The mark travels as Discord's `SPOILER_` file-name prefix, so it works on any
   server and through the bridges.

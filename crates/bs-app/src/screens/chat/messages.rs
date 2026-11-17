@@ -775,6 +775,12 @@ impl ChatScreen {
                 );
                 ui.separator();
             }
+            if let Some(sticker) = media::sticker_of(&row.body)
+                && ui.button(tr("Стикерпак этого стикера…")).clicked()
+            {
+                choice.sticker_pack = Some(sticker.to_owned());
+                ui.close();
+            }
             if ui.button(tr("Ответить")).clicked() {
                 choice.reply = true;
                 ui.close();
@@ -818,6 +824,18 @@ impl ChatScreen {
                 ui.close();
             }
         });
+        self.apply_choice(ui, bridge, row, choice, gif_url.as_deref());
+    }
+
+    /// Выполняет выбранное в меню сообщения.
+    fn apply_choice(
+        &mut self,
+        ui: &egui::Ui,
+        bridge: &Bridge,
+        row: &MessageRow,
+        mut choice: MenuChoice,
+        gif_url: Option<&str>,
+    ) {
         if choice.reply {
             self.reply = Some(ReplyTarget {
                 message_id: row.id.clone(),
@@ -829,11 +847,14 @@ impl ChatScreen {
         if choice.react {
             self.react_picker = Some((row.id.clone(), 0));
         }
+        if let Some(token) = choice.sticker_pack.take() {
+            self.composer.find_sticker_packs(bridge, &token);
+        }
         if choice.extras.is_some() {
-            self.extras_action = choice.extras.take();
+            self.extras_action = choice.extras;
         }
         if choice.favorite
-            && let Some(url) = &gif_url
+            && let Some(url) = gif_url
         {
             let size = crate::images::ImageHub::of(ui.ctx())
                 .and_then(|hub| match hub.state(url) {
@@ -881,6 +902,7 @@ struct MenuChoice {
     favorite: bool,
     save: Option<crate::download::Click>,
     extras: Option<super::saved::ExtrasAction>,
+    sticker_pack: Option<String>,
 }
 
 /// Пункты меню для картинки: копировать, сохранить, избранное, стикеры.

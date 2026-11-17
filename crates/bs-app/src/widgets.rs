@@ -284,7 +284,11 @@ pub(crate) fn dm_entry(ui: &mut egui::Ui, dm: &DmEntry<'_>) -> egui::Response {
         ui.painter().with_clip_rect(clip).text(
             egui::pos2(text_left, row.top() + 33.0),
             Align2::LEFT_CENTER,
-            preview.replace('\n', " "),
+            if crate::media::sticker_of(preview).is_some() {
+                crate::i18n::tr("Стикер").to_owned()
+            } else {
+                preview.replace('\n', " ")
+            },
             FontId::proportional(12.0),
             text_faint(),
         );

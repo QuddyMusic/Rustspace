@@ -39,6 +39,7 @@ pub mod read;
 pub mod registry;
 pub mod saved;
 pub mod space_manage;
+pub mod sticker_packs;
 pub mod twofactor;
 pub mod webhooks;
 pub mod write;
@@ -88,6 +89,7 @@ pub use space_manage::{
     Ban, ChannelUpdate, JoinRequest, NewChannel, NewRole, OverrideScope, PermissionOverride,
     RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input,
 };
+pub use sticker_packs::{StickerPack, StickerPacks};
 pub use twofactor::{E2eeKey, TwoFactorSetup, TwoFactorStatus};
 pub use webhooks::{
     CardDraft, CardImage, InstanceVoiceBitrate, VoiceBitrate, Webhook, card_as_markdown,

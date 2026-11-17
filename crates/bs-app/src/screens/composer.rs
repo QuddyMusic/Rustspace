@@ -17,9 +17,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 use bs_api::{GifItem, PersonalSticker};
-use egui::{
-    Align2, Color32, CornerRadius, Id, Key, Margin, Modifiers, Pos2, Rect, RichText, Sense, Vec2,
-};
+use egui::{Align2, Color32, Id, Key, Margin, Modifiers, Pos2, Rect, RichText, Sense, Vec2};
 
 use crate::bridge::{BridgeRequest, ComposeEvent};
 use crate::emoji_data::{CATEGORIES, Entry};
@@ -119,6 +117,9 @@ struct Stickers {
     items: Option<Vec<PersonalSticker>>,
     asked: bool,
     error: Option<String>,
+    packs: crate::screens::sticker_packs::Packs,
+    /// Загружаемая картинка сразу ляжет в этот пак.
+    upload_into: Option<String>,
 }
 
 /// Состояние поля ввода.
@@ -568,9 +569,12 @@ impl Composer {
                     Ok(()) => {
                         self.stickers.error = None;
                         bridge.request(BridgeRequest::Stickers);
+                        bridge.request(BridgeRequest::StickerPacks(crate::bridge::PackOp::List));
                     }
                     Err(message) => self.stickers.error = Some(message),
                 },
+                ComposeEvent::StickerPacks(result) => self.stickers.packs.apply(result),
+                ComposeEvent::PacksWith(result) => self.stickers.packs.apply_found(result),
                 ComposeEvent::SendFailed(message) => self.note = Some(message),
             }
         }
@@ -602,6 +606,7 @@ impl Composer {
                 bridge.request(BridgeRequest::UploadSticker {
                     name,
                     bytes: Arc::new(bytes),
+                    pack: self.stickers.upload_into.take(),
                 });
             }
             (Ok(bytes), _) => {
@@ -758,6 +763,12 @@ impl Composer {
         }
     }
 
+    /// Найти стикерпаки со стикером из сообщения и показать окно.
+    pub(crate) fn find_sticker_packs(&mut self, bridge: &Bridge, token: &str) {
+        self.reset_for(bridge.focus_index());
+        self.stickers.packs.find(bridge, token);
+    }
+
     /// Этот GIF из ленты уже в избранном?
     pub(crate) fn is_favorite_gif(&mut self, bridge: &Bridge, url: &str) -> bool {
         if let Some(key) = favorite_key(bridge, self.origin) {
@@ -823,6 +834,7 @@ impl Composer {
                 }
                 anchors = self.input_row(ui, draft, hint, &row, &mut outgoing);
             });
+        self.stickers.packs.found_window(&ctx, bridge);
         if let Some(form) = &mut self.card {
             match crate::screens::format_bar::card_window(&ctx, form) {
                 crate::screens::format_bar::CardResult::Open => {}
@@ -1334,6 +1346,26 @@ impl Composer {
         if !self.stickers.asked {
             self.stickers.asked = bridge.request(BridgeRequest::Stickers);
         }
+        self.stickers.packs.tabs(ui, bridge);
+        let chosen = if self.stickers.packs.on_mine() {
+            self.mine_tab(ui, bridge)
+        } else {
+            let out = self.stickers.packs.view(ui, bridge);
+            if let Some(pack) = out.upload_into {
+                self.stickers.upload_into = Some(pack);
+                self.start_pick(ui.ctx(), PickMode::Sticker);
+            }
+            out.chosen
+        };
+        chosen.map(|token| Outgoing {
+            card: None,
+            content: token,
+            attachments: Vec::new(),
+            keep_draft: true,
+        })
+    }
+
+    fn mine_tab(&mut self, ui: &mut egui::Ui, bridge: &Bridge) -> Option<String> {
         let mut chosen = None;
         let mut delete = None;
         let mut add = false;
@@ -1349,6 +1381,7 @@ impl Composer {
             ui.label(RichText::new(error).color(theme::rose()).size(12.5));
         }
         ui.add_space(4.0);
+        let packs = &self.stickers.packs;
         match &self.stickers.items {
             None => theme::empty_state(ui, tr("Загрузка…")),
             Some(items) if items.is_empty() => {
@@ -1358,61 +1391,33 @@ impl Composer {
                 );
             }
             Some(items) => {
-                egui::ScrollArea::vertical()
-                    .id_salt("sticker_scroll")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let cell = 88.0;
-                        let columns = ((ui.available_width() / cell).floor() as usize).max(1);
-                        for row in items.chunks(columns) {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing = Vec2::ZERO;
-                                for sticker in row {
-                                    let (rect, response) =
-                                        ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
-                                    if response.hovered() {
-                                        ui.painter().rect_filled(
-                                            rect,
-                                            crate::theme::rounded(10),
-                                            theme::bg_active(),
-                                        );
-                                    }
-                                    images::paint_value(
-                                        ui.painter(),
-                                        rect.shrink(6.0),
-                                        &sticker.token,
-                                        CornerRadius::ZERO,
-                                        true,
-                                        Color32::WHITE,
-                                    );
-                                    let response = response.on_hover_text(&sticker.name);
-                                    if response.clicked() {
-                                        chosen = Some(sticker.token.clone());
-                                    }
-                                    response.context_menu(|ui| {
-                                        if ui.button(tr("Удалить стикер")).clicked() {
-                                            delete = Some(sticker.id.clone());
-                                            ui.close();
-                                        }
-                                    });
-                                }
-                            });
+                crate::screens::sticker_packs::grid(
+                    ui,
+                    "sticker_scroll",
+                    items,
+                    |response, sticker, _| {
+                        if response.clicked() {
+                            chosen = Some(sticker.token.clone());
                         }
-                    });
+                        response.context_menu(|ui| {
+                            packs.mine_menu(ui, bridge, sticker);
+                            if ui.button(tr("Удалить стикер")).clicked() {
+                                delete = Some(sticker.id.clone());
+                                ui.close();
+                            }
+                        });
+                    },
+                );
             }
         }
         if add {
+            self.stickers.upload_into = None;
             self.start_pick(ui.ctx(), PickMode::Sticker);
         }
         if let Some(id) = delete {
             bridge.request(BridgeRequest::DeleteSticker(id));
         }
-        chosen.map(|token| Outgoing {
-            card: None,
-            content: token,
-            attachments: Vec::new(),
-            keep_draft: true,
-        })
+        chosen
     }
 }
 

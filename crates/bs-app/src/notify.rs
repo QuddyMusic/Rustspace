@@ -95,6 +95,9 @@ fn preview(content: &str) -> String {
     if flat.is_empty() {
         return tr("Вложение").to_owned();
     }
+    if crate::media::sticker_of(&flat).is_some() {
+        return tr("Стикер").to_owned();
+    }
     crate::theme::truncate_chars(&flat, PREVIEW_CHARS)
 }
 

@@ -914,23 +914,10 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
                 .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
                 .map_err(|e| text(&e)),
         ),
-        AdminRequest::LoadUpdates(refresh) => AdminEvent::Updates(
-            client
-                .update_status(refresh)
-                .await
-                .map(Box::new)
-                .map_err(|e| text(&e)),
-        ),
-        AdminRequest::UpdateServer => match client.request_server_update(None).await {
-            Ok(_) => AdminEvent::Updates(
-                client
-                    .update_status(false)
-                    .await
-                    .map(Box::new)
-                    .map_err(|e| text(&e)),
-            ),
-            Err(e) => AdminEvent::Updates(Err(text(&e))),
-        },
+        AdminRequest::LoadUpdates(refresh) => {
+            AdminEvent::Updates(updates(client, refresh, false).await)
+        }
+        AdminRequest::UpdateServer => AdminEvent::Updates(updates(client, false, true).await),
         AdminRequest::LoadSettings => {
             AdminEvent::Settings(client.instance_settings().await.map_err(|e| text(&e)))
         }
@@ -961,6 +948,25 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
             Ok(event) | Err(event) => event,
         },
     }
+}
+
+/// Состояние обновлений; `start` — сначала попросить сервер обновиться.
+async fn updates(
+    client: &bs_api::ApiClient,
+    refresh: bool,
+    start: bool,
+) -> Result<Box<bs_api::UpdateStatus>, String> {
+    if start {
+        client
+            .request_server_update(None)
+            .await
+            .map_err(|e| upload_message(&e))?;
+    }
+    client
+        .update_status(refresh)
+        .await
+        .map(Box::new)
+        .map_err(|e| upload_message(&e))
 }
 
 /// Учётные записи: роли, сброс и смена пароля, удаление.
@@ -1030,6 +1036,88 @@ async fn account_admin(
 }
 
 /// Понятный текст отказа сервера для композера.
+/// Личные стикеры и стикерпаки.
+async fn sticker_request(client: &bs_api::ApiClient, request: BridgeRequest) -> BridgeResponse {
+    match request {
+        BridgeRequest::Stickers => BridgeResponse::Compose(ComposeEvent::Stickers(
+            client.stickers().await.map_err(|err| upload_message(&err)),
+        )),
+        BridgeRequest::UploadSticker { name, bytes, pack } => {
+            let result = match client.upload_sticker(&name, &bytes).await {
+                Ok(sticker) => match pack {
+                    Some(pack) => client
+                        .put_pack_sticker(&pack, &sticker.id)
+                        .await
+                        .map(|_| ())
+                        .map_err(|err| upload_message(&err)),
+                    None => Ok(()),
+                },
+                Err(err) => Err(upload_message(&err)),
+            };
+            BridgeResponse::Compose(ComposeEvent::StickerChanged(result))
+        }
+        BridgeRequest::StickerPacks(op) => sticker_pack_op(client, op).await,
+        BridgeRequest::DeleteSticker(id) => BridgeResponse::Compose(ComposeEvent::StickerChanged(
+            client
+                .delete_sticker(&id)
+                .await
+                .map(|_| ())
+                .map_err(|err| upload_message(&err)),
+        )),
+        _ => BridgeResponse::Compose(ComposeEvent::StickerChanged(Ok(()))),
+    }
+}
+
+/// Действие со стикерпаками, затем свежий список.
+async fn sticker_pack_op(
+    client: &bs_api::ApiClient,
+    op: super::protocol::PackOp,
+) -> BridgeResponse {
+    use super::protocol::{PackError, PackOp};
+    let done = match op {
+        PackOp::With(sticker) => {
+            return BridgeResponse::Compose(ComposeEvent::PacksWith(
+                client
+                    .sticker_packs_with(&sticker)
+                    .await
+                    .map_err(|err| upload_message(&err)),
+            ));
+        }
+        PackOp::List => Ok(()),
+        PackOp::Create(name) => client.create_sticker_pack(&name).await.map(drop),
+        PackOp::Rename { pack, name } => client
+            .update_sticker_pack(&pack, Some(&name), None)
+            .await
+            .map(drop),
+        PackOp::Share { pack, shared } => client
+            .update_sticker_pack(&pack, None, Some(shared))
+            .await
+            .map(drop),
+        PackOp::Delete(pack) => client.delete_sticker_pack(&pack).await.map(drop),
+        PackOp::Put { pack, sticker } => client.put_pack_sticker(&pack, &sticker).await.map(drop),
+        PackOp::Remove { pack, sticker } => {
+            client.remove_pack_sticker(&pack, &sticker).await.map(drop)
+        }
+        PackOp::Reorder { pack, order } => {
+            client.reorder_sticker_pack(&pack, &order).await.map(drop)
+        }
+        PackOp::Added { pack, added } => {
+            client.set_sticker_pack_added(&pack, added).await.map(drop)
+        }
+    };
+    let result = match done {
+        Err(err) => Err(PackError::Failed(upload_message(&err))),
+        Ok(()) => client.sticker_packs().await.map_err(|err| {
+            if err.status() == Some(reqwest::StatusCode::NOT_FOUND) {
+                PackError::Unsupported
+            } else {
+                PackError::Failed(upload_message(&err))
+            }
+        }),
+    };
+    BridgeResponse::Compose(ComposeEvent::StickerPacks(result))
+}
+
 pub(super) fn upload_message(err: &bs_api::ApiError) -> String {
     use bs_api::ApiError;
     match err {
@@ -1251,25 +1339,10 @@ pub(super) async fn handle_request(
                 .map_err(|err| err.to_string());
             BridgeResponse::Compose(ComposeEvent::Gifs { query, pos, result })
         }
-        BridgeRequest::Stickers => BridgeResponse::Compose(ComposeEvent::Stickers(
-            client.stickers().await.map_err(|err| upload_message(&err)),
-        )),
-        BridgeRequest::UploadSticker { name, bytes } => {
-            BridgeResponse::Compose(ComposeEvent::StickerChanged(
-                client
-                    .upload_sticker(&name, &bytes)
-                    .await
-                    .map(|_| ())
-                    .map_err(|err| upload_message(&err)),
-            ))
-        }
-        BridgeRequest::DeleteSticker(id) => BridgeResponse::Compose(ComposeEvent::StickerChanged(
-            client
-                .delete_sticker(&id)
-                .await
-                .map(|_| ())
-                .map_err(|err| upload_message(&err)),
-        )),
+        request @ (BridgeRequest::Stickers
+        | BridgeRequest::UploadSticker { .. }
+        | BridgeRequest::DeleteSticker(_)
+        | BridgeRequest::StickerPacks(_)) => sticker_request(client, request).await,
         BridgeRequest::SendCards {
             channel_id,
             content,
