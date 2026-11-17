@@ -201,6 +201,9 @@ pub(crate) struct Prefs {
     /// Активность: игры, музыка, Rich Presence.
     #[serde(default)]
     pub(crate) activity: crate::presence::ActivityPrefs,
+    /// Ширина левой и правой колонок.
+    #[serde(default)]
+    pub(crate) columns: crate::columns::Widths,
 }
 
 /// Инстанс, в который входили с этого устройства.
@@ -251,6 +254,7 @@ impl Default for Prefs {
             nsfw_allowed: std::collections::BTreeSet::new(),
             translate: crate::translate::TranslatePrefs::default(),
             activity: crate::presence::ActivityPrefs::default(),
+            columns: crate::columns::Widths::default(),
             recent_instances: Vec::new(),
         }
     }

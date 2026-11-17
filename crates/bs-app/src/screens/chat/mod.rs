@@ -614,7 +614,12 @@ impl ChatScreen {
                 .cache()
                 .map(|cache| cache.me().id.clone())
                 .unwrap_or_default();
-            let right_edge = ctx.content_rect().right() - if panel_open { 236.0 } else { 0.0 };
+            let right_edge = ctx.content_rect().right()
+                - if panel_open {
+                    crate::columns::width(ctx, crate::columns::Side::Right)
+                } else {
+                    0.0
+                };
             if super::profile::show(ctx, state, bridge, &me, right_edge)
                 == super::profile::ProfileAction::Close
             {

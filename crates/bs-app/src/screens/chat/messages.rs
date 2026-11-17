@@ -469,11 +469,13 @@ impl ChatScreen {
         if bridge.is_detached(&selected.channel) {
             // Середина ленты: слева колонка каналов, справа панель участников.
             let right = if self.show_members && self.active_space.is_some() {
-                236.0
+                crate::columns::width(ctx, crate::columns::Side::Right)
             } else {
                 0.0
             };
-            let shift = (322.0 - right) / 2.0;
+            // Рельс 72 точки плюс левая колонка.
+            let left = 72.0 + crate::columns::width(ctx, crate::columns::Side::Left);
+            let shift = (left - right) / 2.0;
             egui::Area::new(egui::Id::unique("detached_bar"))
                 .anchor(egui::Align2::CENTER_BOTTOM, [shift, -96.0])
                 .order(egui::Order::Foreground)

@@ -18,6 +18,7 @@ mod app;
 mod brand;
 mod bridge;
 mod clipboard;
+mod columns;
 mod desktop;
 #[cfg(target_os = "linux")]
 mod desktop_entry;

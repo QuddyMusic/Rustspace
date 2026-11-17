@@ -382,10 +382,10 @@ impl ChatScreen {
         dms: &[SidebarDm],
         nav: &mut Option<Nav>,
     ) {
-        egui::Panel::left("channels")
-            .resizable(true)
-            .default_size(250.0)
-            .size_range(200.0..=360.0)
+        let width = crate::columns::width(ui.ctx(), crate::columns::Side::Left);
+        let panel = egui::Panel::left("channels")
+            .resizable(false)
+            .exact_size(width)
             .show_separator_line(false)
             .frame(theme::module(theme::bg_sidebar()))
             .show(ui, |ui| {
@@ -434,6 +434,7 @@ impl ChatScreen {
                         }
                     });
             });
+        crate::columns::handle(ui, panel.response.rect, crate::columns::Side::Left);
     }
 
     /// Голосовой канал: строка входа и участники под ней.
@@ -846,9 +847,10 @@ impl ChatScreen {
         rows: &[MemberRow],
     ) -> Option<(String, String)> {
         let mut clicked = None;
-        egui::Panel::right("members")
+        let width = crate::columns::width(ui.ctx(), crate::columns::Side::Right);
+        let panel = egui::Panel::right("members")
             .show_separator_line(false)
-            .exact_size(236.0)
+            .exact_size(width)
             .resizable(false)
             .frame(theme::module(theme::bg_sidebar()).inner_margin(Margin::symmetric(10, 16)))
             .show(ui, |ui| {
@@ -889,6 +891,7 @@ impl ChatScreen {
                         }
                     });
             });
+        crate::columns::handle(ui, panel.response.rect, crate::columns::Side::Right);
         clicked
     }
 

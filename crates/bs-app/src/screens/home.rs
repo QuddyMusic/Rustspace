@@ -380,9 +380,10 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
 
 /// Правая панель «Сейчас онлайн»: друзья по статусам; клик открывает беседу.
 pub(crate) fn show_active_now(ui: &mut egui::Ui, bridge: &Bridge) {
-    egui::Panel::right("active_now")
+    let width = crate::columns::width(ui.ctx(), crate::columns::Side::Right);
+    let panel = egui::Panel::right("active_now")
         .show_separator_line(false)
-        .exact_size(250.0)
+        .exact_size(width)
         .resizable(false)
         .frame(theme::module(theme::bg_chat()).inner_margin(Margin::symmetric(18, 14)))
         .show(ui, |ui| {
@@ -439,6 +440,7 @@ pub(crate) fn show_active_now(ui: &mut egui::Ui, bridge: &Bridge) {
                     }
                 });
         });
+    crate::columns::handle(ui, panel.response.rect, crate::columns::Side::Right);
 }
 
 /// Ширина карточки пространства в обзоре.
