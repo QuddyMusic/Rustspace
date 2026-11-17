@@ -255,7 +255,8 @@ Rustspace has its own version — `version` in the workspace `Cargo.toml`, share
 and the server. The server reports it in `/api/instance/info` as `version`, and the Backspace
 version whose protocol it implements as `compatibleWith`.
 
-To release, bump the version, commit, and push a tag with the same number:
+To release, bump the version, add its section to `CHANGELOG.md` (it becomes the release notes),
+commit, and push a tag with the same number:
 
 ```sh
 git tag v0.2.0 && git push origin v0.2.0

@@ -284,6 +284,12 @@ jobs:
 
           ## Изменения
           EOF
+          # Раздел этой версии из CHANGELOG.md (между её заголовком и следующим).
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            /^## \[/ { on = 0 }
+            /^\[[0-9]/ { next }
+            on' CHANGELOG.md >> notes.md
       - name: Черновик
         env:
           GH_TOKEN: ${{ github.token }}
