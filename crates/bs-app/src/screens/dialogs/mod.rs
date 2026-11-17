@@ -220,6 +220,8 @@ pub(crate) enum SettingsSection {
     Notifications,
     /// Язык интерфейса.
     Language,
+    /// Перевод сообщений.
+    Translate,
     /// Версия клиента и проверка его обновлений.
     About,
     /// Приватность.
@@ -253,6 +255,7 @@ impl SettingsSection {
             Self::Hotkeys => tr("Горячие клавиши"),
             Self::Notifications => tr("Уведомления"),
             Self::Language => tr("Язык"),
+            Self::Translate => tr("Перевод"),
             Self::About => tr("О клиенте"),
             Self::Privacy => tr("Приватность"),
             Self::Connections => tr("Подключения"),
@@ -313,6 +316,7 @@ pub(crate) struct SettingsState {
     appearance: super::appearance::AppearanceState,
     /// Страница «Горячие клавиши».
     hotkeys: super::settings_app::HotkeysState,
+    translate: super::translate_settings::TranslatePage,
     /// До какого момента (`ui.input().time`) идёт проверка микрофона.
     mic_test_until: Option<f64>,
     /// Почему проверка не запустилась.
@@ -355,6 +359,7 @@ impl SettingsState {
             show_activity: user.show_activity.unwrap_or(true),
             appearance: super::appearance::AppearanceState::default(),
             hotkeys: super::settings_app::HotkeysState::default(),
+            translate: super::translate_settings::TranslatePage::default(),
             mic_test_until: None,
             mic_test_error: None,
             connections: super::connections::ConnectionsUi::default(),
@@ -666,6 +671,7 @@ fn settings_nav(
                     SettingsSection::Notifications,
                     SettingsSection::Hotkeys,
                     SettingsSection::Language,
+                    SettingsSection::Translate,
                     SettingsSection::Connections,
                     SettingsSection::About,
                 ],
@@ -776,6 +782,9 @@ fn section_content(
         SettingsSection::Hotkeys => super::settings_app::hotkeys(ui, &mut state.hotkeys),
         SettingsSection::Notifications => super::settings_app::notifications(ui),
         SettingsSection::Language => super::settings_app::language(ui),
+        SettingsSection::Translate => {
+            super::translate_settings::page(ui, &mut state.translate, &bridge.runtime());
+        }
         SettingsSection::About => super::settings_app::about(ui, bridge),
         SettingsSection::Privacy => privacy(ui, state, me, bridge),
         SettingsSection::Connections => connections(ui, state, bridge, action),

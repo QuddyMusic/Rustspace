@@ -1038,6 +1038,16 @@ impl Bridge {
             .collect()
     }
 
+    /// Сессия инстанса по номеру.
+    pub(crate) fn session_at(&self, index: usize) -> Option<&crate::bridge::Session> {
+        self.slots.get(index).map(|slot| &slot.session)
+    }
+
+    /// Сессия инстанса по номеру (для запросов к нему).
+    pub(crate) fn session_at_mut(&mut self, index: usize) -> Option<&mut crate::bridge::Session> {
+        self.slots.get_mut(index).map(|slot| &mut slot.session)
+    }
+
     /// Кэш инстанса по номеру.
     pub(crate) fn cache_at(&self, index: usize) -> Option<&bs_core::Cache> {
         self.slots.get(index)?.session.cache()

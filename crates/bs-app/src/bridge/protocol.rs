@@ -352,6 +352,8 @@ pub(crate) enum BridgeRequest {
     },
     /// Удалить личный стикер.
     DeleteSticker(String),
+    /// «Избранное», закрепы, закладки.
+    Extras(super::extras::ExtrasOp),
     /// Отправить сообщение с карточкой в канал пространства.
     SendCards {
         /// Канал.
@@ -750,6 +752,8 @@ pub(crate) enum SpaceOp {
     DeleteCategory(String),
     /// Загрузить переопределения прав.
     ListOverrides(bs_api::OverrideScope),
+    /// Канал «18+» (сервер Rustspace).
+    SetNsfw(String, bool),
     /// Загрузить мосты канала.
     ListBridges(String),
     /// Связать канал с внешним чатом: канал, сеть, чат.
@@ -1005,6 +1009,8 @@ pub(crate) enum BridgeResponse {
     UserProfile(ProfileEvent),
     /// Токен голосового канала.
     VoiceToken(VoiceTokenEvent),
+    /// «Избранное», закрепы, закладки.
+    Extras(super::extras::ExtrasEvent),
     /// Битрейт голоса после изменения: звонок и итог.
     VoiceBitrate(String, Result<bs_api::VoiceBitrate, String>),
     /// Итог действия над пространством.

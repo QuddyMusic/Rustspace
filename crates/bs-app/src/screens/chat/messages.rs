@@ -58,6 +58,11 @@ impl ChatScreen {
             },
             _ => tr("Сообщение").to_owned(),
         };
+        let hint = if self.is_saved_open(bridge) {
+            tr("Заметка, ссылка, файл — только для вас").to_owned()
+        } else {
+            hint
+        };
         let typing = self.selected_channel.as_ref().and_then(|selected| {
             let cache = bridge.cache()?;
             let me = &cache.me().id;
@@ -570,6 +575,9 @@ impl ChatScreen {
             (false, true) => 0.0,
         };
         ui.add_space(gap);
+        if bridge.cache().is_some_and(|c| c.me().id != row.author_id) {
+            crate::translate::auto(&bridge.runtime(), ui.ctx(), &row.id, &row.body);
+        }
         let (rect, hits) = self.message_body(ui, row, view.show_header);
         let response = ui.interact(rect, ui.auto_id_with(("msg", &row.id)), Sense::click());
         // После подгрузки возвращаем в поле зрения сообщение, которое читали:
@@ -644,8 +652,18 @@ impl ChatScreen {
                     hits.images.extend(media::show_gif(ui, gif));
                 } else if !row.body.is_empty() {
                     let names = &self.names;
-                    let blocks = crate::markdown::parse(&row.body, &|id| names.get(id).cloned());
-                    crate::screens::body::show_text(ui, &row.id, &blocks, row.edited);
+                    let translation = crate::translate::shown(&row.id);
+                    let keep = crate::prefs::get().translate.keep_original;
+                    let hide_original = !keep
+                        && matches!(translation, Some(crate::translate::Translation::Done(..)));
+                    if !hide_original {
+                        let blocks =
+                            crate::markdown::parse(&row.body, &|id| names.get(id).cloned());
+                        crate::screens::body::show_text(ui, &row.id, &blocks, row.edited);
+                    }
+                    if let Some(translation) = translation {
+                        show_translation(ui, &row.id, &translation, names);
+                    }
                 }
                 for attachment in &row.attachments {
                     hits.images
@@ -767,6 +785,17 @@ impl ChatScreen {
                 ui.ctx().copy_text(row.body.clone());
                 ui.close();
             }
+            translate_items(ui, bridge, row);
+            if let Some(menu) = Self::pin_menu(bridge, view.selected, &row.id) {
+                ui.separator();
+                let in_saved = view.selected.origin == 0
+                    && Self::saved_chat(bridge).as_deref() == Some(view.selected.channel.as_str());
+                let text = (!row.body.is_empty()).then_some(row.body.as_str());
+                if let Some(action) = super::saved::menu_items(ui, &menu, &row.id, text, in_saved) {
+                    choice.extras = Some(action);
+                }
+                ui.separator();
+            }
             if ui.button(tr("Отметить непрочитанным")).clicked() {
                 bridge.send(bs_types::ClientEvent::MarkUnread {
                     channel_id: view.selected.channel.clone(),
@@ -793,6 +822,9 @@ impl ChatScreen {
         }
         if choice.react {
             self.react_picker = Some((row.id.clone(), 0));
+        }
+        if choice.extras.is_some() {
+            self.extras_action = choice.extras.take();
         }
         if choice.favorite
             && let Some(url) = &gif_url
@@ -842,6 +874,7 @@ struct MenuChoice {
     react: bool,
     favorite: bool,
     save: Option<crate::download::Click>,
+    extras: Option<super::saved::ExtrasAction>,
 }
 
 /// Пункты меню для картинки: копировать, сохранить, избранное, стикеры.
@@ -891,6 +924,73 @@ fn image_menu(
                 crate::images::RawPurpose::Sticker(tr("Стикер").to_owned()),
             );
         }
+        ui.close();
+    }
+}
+
+/// Перевод под сообщением: подпись сервиса и текст (или ход и ошибка).
+fn show_translation(
+    ui: &mut egui::Ui,
+    id: &str,
+    translation: &crate::translate::Translation,
+    names: &std::collections::HashMap<String, String>,
+) {
+    use crate::translate::Translation;
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(1.0, theme::border()))
+        .corner_radius(crate::theme::rounded(8))
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                crate::icons::paint(
+                    ui.painter(),
+                    rect.center(),
+                    13.0,
+                    crate::icons::Icon::Globe,
+                    theme::sky(),
+                );
+                let label = match translation {
+                    Translation::Pending => tr("Переводим…").to_owned(),
+                    Translation::Done(_, engine) => {
+                        crate::tf!("Перевод · {engine}", engine = engine)
+                    }
+                    Translation::Failed(_) => tr("Перевод не удался").to_owned(),
+                };
+                ui.label(theme::muted(label).size(11.5));
+            });
+            match translation {
+                Translation::Pending => {
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(250));
+                }
+                Translation::Done(text, _) => {
+                    let blocks = crate::markdown::parse(text, &|user| names.get(user).cloned());
+                    crate::screens::body::show_text(ui, &format!("tr{id}"), &blocks, false);
+                }
+                Translation::Failed(err) => {
+                    ui.label(RichText::new(err).size(12.5).color(theme::rose()));
+                }
+            }
+        });
+}
+
+/// «Перевести» или «Показать оригинал» в меню сообщения с текстом.
+fn translate_items(ui: &mut egui::Ui, bridge: &Bridge, row: &MessageRow) {
+    if row.body.is_empty()
+        || media::sticker_of(&row.body).is_some()
+        || media::gif_of(&row.body).is_some()
+    {
+        return;
+    }
+    if crate::translate::shown(&row.id).is_some() {
+        if ui.button(tr("Показать оригинал")).clicked() {
+            crate::translate::hide(&row.id);
+            ui.close();
+        }
+    } else if ui.button(tr("Перевести")).clicked() {
+        crate::translate::request(&bridge.runtime(), ui.ctx(), &row.id, &row.body);
         ui.close();
     }
 }

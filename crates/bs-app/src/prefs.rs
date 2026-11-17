@@ -192,6 +192,12 @@ pub(crate) struct Prefs {
     pub(crate) recent_instances: Vec<RecentInstance>,
     /// Личные переписки, где закрыли предупреждение «не зашифровано».
     pub(crate) plaintext_dismissed: std::collections::BTreeSet<String>,
+    /// Каналы «18+», в которые согласились войти.
+    #[serde(default)]
+    pub(crate) nsfw_allowed: std::collections::BTreeSet<String>,
+    /// Перевод сообщений.
+    #[serde(default)]
+    pub(crate) translate: crate::translate::TranslatePrefs,
 }
 
 /// Инстанс, в который входили с этого устройства.
@@ -239,6 +245,8 @@ impl Default for Prefs {
             updates: crate::updates::UpdatePrefs::default(),
             hub_seen: std::collections::BTreeMap::new(),
             plaintext_dismissed: std::collections::BTreeSet::new(),
+            nsfw_allowed: std::collections::BTreeSet::new(),
+            translate: crate::translate::TranslatePrefs::default(),
             recent_instances: Vec::new(),
         }
     }

@@ -49,6 +49,7 @@ mod social;
 mod sounds;
 mod stage;
 mod theme;
+mod translate;
 mod updates;
 mod video_media;
 mod voice;

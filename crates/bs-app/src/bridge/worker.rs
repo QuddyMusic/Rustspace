@@ -671,6 +671,7 @@ pub(super) async fn space_admin(
         SpaceOp::DeleteCategory(id) => client.delete_category(id).await,
         SpaceOp::PutOverride(scope, entry) => client.put_override(scope, entry).await,
         SpaceOp::DeleteOverride(scope, kind, id) => client.delete_override(scope, *kind, id).await,
+        SpaceOp::SetNsfw(channel, nsfw) => client.set_channel_nsfw(channel, *nsfw).await,
         SpaceOp::DecideRequest(id, accept) => {
             client.decide_join_request(&space_id, id, *accept).await
         }
@@ -1182,6 +1183,9 @@ async fn voice_request(
                 limits,
                 bitrate,
             }))
+        }
+        BridgeRequest::Extras(op) => {
+            Ok(BridgeResponse::Extras(super::extras::run(client, op).await))
         }
         BridgeRequest::SetVoiceBitrate { target, kbps } => {
             let result = client

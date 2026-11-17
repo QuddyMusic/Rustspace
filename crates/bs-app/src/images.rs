@@ -38,6 +38,8 @@ pub(crate) struct Loaded {
     frames: Vec<(TextureHandle, u32)>,
     /// Заранее уменьшенная копия для мелких мест.
     thumbs: Vec<TextureHandle>,
+    /// Размытая копия первого кадра — для спойлеров.
+    blurred: Option<TextureHandle>,
     total_ms: u64,
     bytes: usize,
 }
@@ -83,6 +85,12 @@ impl Loaded {
     /// Первый кадр: для статичного показа.
     pub(crate) fn first(&self) -> &TextureHandle {
         &self.frames[0].0
+    }
+
+    /// Размытая копия: крошечная картинка, растянутая с линейной
+    /// фильтрацией, читается как сильное размытие.
+    pub(crate) fn blurred(&self) -> &TextureHandle {
+        self.blurred.as_ref().unwrap_or(&self.frames[0].0)
     }
 }
 
@@ -473,14 +481,92 @@ fn upload(ctx: &Context, key: &Key, decoded: &Decoded) -> Loaded {
             )
         })
         .collect();
+    let blurred = decoded.frames.first().and_then(|frame| {
+        let (w, h, rgba) = blur_small(decoded.width, decoded.height, &frame.rgba)?;
+        let image = egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba);
+        Some(ctx.load_texture(
+            format!("{}{}#blur", key.0, key.1.as_str()),
+            image,
+            TextureOptions::LINEAR,
+        ))
+    });
     Loaded {
         thumbs,
+        blurred,
         width: decoded.width,
         height: decoded.height,
         frames,
         total_ms,
         bytes: decoded.byte_size(),
     }
+}
+
+/// Размытая копия: уменьшить до 24 точек по длинной стороне (среднее по
+/// блокам) и дважды пройтись размытием 3×3. На экране её растягивают —
+/// деталей не разобрать, а цвета и пятна остаются.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::needless_range_loop,
+    reason = "стороны картинок ограничены 2048 px"
+)]
+fn blur_small(width: u32, height: u32, rgba: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
+    const SIDE: u32 = 24;
+    if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
+        return None;
+    }
+    let scale = (width.max(height) as f32 / SIDE as f32).max(1.0);
+    let w = ((width as f32 / scale).round() as usize).max(1);
+    let h = ((height as f32 / scale).round() as usize).max(1);
+    let (src_w, src_h) = (width as usize, height as usize);
+    let mut small = vec![0_u8; w * h * 4];
+    for y in 0..h {
+        let (y0, y1) = (y * src_h / h, ((y + 1) * src_h / h).max(y * src_h / h + 1));
+        for x in 0..w {
+            let (x0, x1) = (x * src_w / w, ((x + 1) * src_w / w).max(x * src_w / w + 1));
+            let mut sum = [0_u64; 4];
+            // Не каждую точку: для больших картинок хватает выборки.
+            let step = ((x1 - x0).max(y1 - y0) / 16).max(1);
+            let mut count = 0_u64;
+            for sy in (y0..y1.min(src_h)).step_by(step) {
+                for sx in (x0..x1.min(src_w)).step_by(step) {
+                    let i = (sy * src_w + sx) * 4;
+                    for c in 0..4 {
+                        sum[c] += u64::from(rgba[i + c]);
+                    }
+                    count += 1;
+                }
+            }
+            let o = (y * w + x) * 4;
+            for c in 0..4 {
+                small[o + c] = u8::try_from(sum[c] / count.max(1)).unwrap_or(u8::MAX);
+            }
+        }
+    }
+    for _ in 0..2 {
+        let copy = small.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let mut sum = [0_u32; 4];
+                let mut count = 0_u32;
+                for ny in y.saturating_sub(1)..=(y + 1).min(h - 1) {
+                    for nx in x.saturating_sub(1)..=(x + 1).min(w - 1) {
+                        let i = (ny * w + nx) * 4;
+                        for c in 0..4 {
+                            sum[c] += u32::from(copy[i + c]);
+                        }
+                        count += 1;
+                    }
+                }
+                let o = (y * w + x) * 4;
+                for c in 0..4 {
+                    small[o + c] = u8::try_from(sum[c] / count).unwrap_or(u8::MAX);
+                }
+            }
+        }
+    }
+    Some((w, h, small))
 }
 
 /// Вытесняет давно не использованные картинки, пока бюджет превышен.
@@ -567,6 +653,20 @@ pub(crate) fn paint_cover(
     painter.add(RectShape::filled(rect, radius, tint).with_texture(texture.id(), uv));
 }
 
+/// Размытая картинка-спойлер: размытая копия под затемнением.
+pub(crate) fn paint_blurred(
+    painter: &egui::Painter,
+    rect: Rect,
+    image: &Loaded,
+    radius: impl Into<CornerRadius> + Copy,
+) {
+    let uv = cover_uv(image.size_f32(), [rect.width(), rect.height()]);
+    painter.add(
+        RectShape::filled(rect, radius, Color32::WHITE).with_texture(image.blurred().id(), uv),
+    );
+    painter.rect_filled(rect, radius, Color32::from_black_alpha(70));
+}
+
 /// Рисует картинку по значению поля, если она уже загружена.
 /// Возвращает `true`, если нарисовала (иначе вызывающий рисует заглушку).
 pub(crate) fn paint_value(
@@ -650,5 +750,18 @@ mod tests {
     fn same_ratio_uses_whole_image() {
         let uv = cover_uv([50.0, 50.0], [100.0, 100.0]);
         assert!((uv.width() - 1.0).abs() < 1e-6 && (uv.height() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn spoiler_blur_is_tiny_and_keeps_colour() {
+        let (w, h) = (400_u32, 200_u32);
+        let rgba: Vec<u8> = (0..w * h).flat_map(|_| [200, 40, 10, 255]).collect();
+        let (bw, bh, small) = super::blur_small(w, h, &rgba).expect("blur");
+        assert_eq!((bw, bh), (24, 12));
+        assert_eq!(&small[..4], &[200, 40, 10, 255]);
+        assert!(super::blur_small(0, 10, &[]).is_none());
+        assert!(crate::media::is_spoiler_name("SPOILER_cat.png"));
+        assert!(crate::media::is_spoiler_name("spoiler_cat.png"));
+        assert!(!crate::media::is_spoiler_name("cat.png"));
     }
 }

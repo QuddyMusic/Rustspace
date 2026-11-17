@@ -195,3 +195,23 @@ impl ApiClient {
         .await
     }
 }
+
+#[derive(Serialize)]
+struct Nsfw {
+    nsfw: bool,
+}
+
+impl ApiClient {
+    /// Канал «18+» (`PUT /api/rustspace/channels/:id/nsfw`).
+    ///
+    /// # Errors
+    /// Нет права управлять каналом; сервер без этой функции (404).
+    pub async fn set_channel_nsfw(&self, channel_id: &str, nsfw: bool) -> Result<(), ApiError> {
+        self.put_json::<serde_json::Value, _>(
+            &format!("/api/rustspace/channels/{channel_id}/nsfw"),
+            &Nsfw { nsfw },
+        )
+        .await?;
+        Ok(())
+    }
+}

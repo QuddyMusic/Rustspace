@@ -87,6 +87,8 @@ struct Staged {
     size: u64,
     origin: usize,
     state: StagedState,
+    /// Содержимое: чтобы перезалить под другим именем (спойлер).
+    bytes: Arc<Vec<u8>>,
 }
 
 #[derive(Debug)]
@@ -472,6 +474,38 @@ fn paint_gif_fallback(ui: &egui::Ui, rect: Rect, item: &GifItem) -> (bool, Optio
     (painted, Some(message))
 }
 
+/// Под именем выбранного файла: ход загрузки, размер или ошибка.
+fn staged_status(ui: &mut egui::Ui, item: &Staged) {
+    match &item.state {
+        StagedState::Uploading { sent, total } => {
+            let fraction = if *total == 0 {
+                0.0
+            } else {
+                (*sent as f64 / *total as f64) as f32
+            };
+            ui.add(
+                egui::ProgressBar::new(fraction)
+                    .desired_width(110.0)
+                    .desired_height(6.0)
+                    .fill(theme::accent()),
+            );
+        }
+        StagedState::Done(_) => {
+            ui.label(
+                theme::muted(human_size(i64::try_from(item.size).unwrap_or(i64::MAX))).size(11.5),
+            );
+        }
+        StagedState::Failed(message) => {
+            ui.label(
+                RichText::new(theme::truncate_chars(message, 30))
+                    .color(theme::rose())
+                    .size(11.5),
+            )
+            .on_hover_text(message);
+        }
+    }
+}
+
 impl Composer {
     /// Забирает события моста и результаты выбора файлов.
     pub(crate) fn poll(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
@@ -573,6 +607,7 @@ impl Composer {
             (Ok(bytes), _) => {
                 self.next_id += 1;
                 let id = self.next_id;
+                let bytes = Arc::new(bytes);
                 self.staged.push(Staged {
                     id,
                     name: file.name.clone(),
@@ -582,18 +617,47 @@ impl Composer {
                         sent: 0,
                         total: bytes.len() as u64,
                     },
+                    bytes: Arc::clone(&bytes),
                 });
                 let mime = mime_for(&file.name).to_owned();
                 if !bridge.request(BridgeRequest::Upload {
                     id,
                     name: file.name,
                     mime,
-                    bytes: Arc::new(bytes),
+                    bytes,
                 }) && let Some(item) = self.staged.last_mut()
                 {
                     item.state = StagedState::Failed(tr("Нет соединения").to_owned());
                 }
             }
+        }
+    }
+
+    /// Помечает вложение спойлером (имя `SPOILER_…`) или снимает пометку.
+    /// Имя хранит сервер, поэтому файл заливается заново под новым именем.
+    fn toggle_spoiler(&mut self, bridge: &Bridge, id: u64) {
+        self.next_id += 1;
+        let fresh = self.next_id;
+        let Some(item) = self.staged.iter_mut().find(|s| s.id == id) else {
+            return;
+        };
+        item.name = if crate::media::is_spoiler_name(&item.name) {
+            item.name[8..].to_owned()
+        } else {
+            format!("SPOILER_{}", item.name)
+        };
+        item.id = fresh;
+        item.state = StagedState::Uploading {
+            sent: 0,
+            total: item.size,
+        };
+        if !bridge.request(BridgeRequest::Upload {
+            id: fresh,
+            name: item.name.clone(),
+            mime: mime_for(&item.name).to_owned(),
+            bytes: Arc::clone(&item.bytes),
+        }) {
+            item.state = StagedState::Failed(tr("Нет соединения").to_owned());
         }
     }
 
@@ -751,7 +815,7 @@ impl Composer {
         frame
             .inner_margin(Margin::symmetric(14, 10))
             .show(ui, |ui| {
-                self.frame_notes(ui, dragging, editing);
+                self.frame_notes(ui, bridge, dragging, editing);
                 if self.format_open
                     && crate::screens::format_bar::bar(ui, draft, edit_id(), !editing)
                 {
@@ -821,9 +885,9 @@ impl Composer {
     }
 
     /// Вложения, ошибка и подсказка про перетаскивание над полем.
-    fn frame_notes(&mut self, ui: &mut egui::Ui, dragging: bool, editing: bool) {
-        if !editing {
-            self.show_staged(ui);
+    fn frame_notes(&mut self, ui: &mut egui::Ui, bridge: &Bridge, dragging: bool, editing: bool) {
+        if !editing && let Some(id) = self.show_staged(ui) {
+            self.toggle_spoiler(bridge, id);
         }
         if let Some(note) = self.note.clone() {
             ui.horizontal(|ui| {
@@ -947,11 +1011,13 @@ impl Composer {
         };
     }
 
-    fn show_staged(&mut self, ui: &mut egui::Ui) {
+    /// Выбранные файлы; возвращает файл, у которого переключили «спойлер».
+    fn show_staged(&mut self, ui: &mut egui::Ui) -> Option<u64> {
         if self.staged.is_empty() {
-            return;
+            return None;
         }
         let mut remove = None;
+        let mut spoiler = None;
         ui.horizontal_wrapped(|ui| {
             for item in &self.staged {
                 egui::Frame::new()
@@ -981,37 +1047,7 @@ impl Composer {
                                         .color(theme::text())
                                         .size(13.0),
                                 );
-                                match &item.state {
-                                    StagedState::Uploading { sent, total } => {
-                                        let fraction = if *total == 0 {
-                                            0.0
-                                        } else {
-                                            (*sent as f64 / *total as f64) as f32
-                                        };
-                                        ui.add(
-                                            egui::ProgressBar::new(fraction)
-                                                .desired_width(110.0)
-                                                .desired_height(6.0)
-                                                .fill(theme::accent()),
-                                        );
-                                    }
-                                    StagedState::Done(_) => {
-                                        ui.label(
-                                            theme::muted(human_size(
-                                                i64::try_from(item.size).unwrap_or(i64::MAX),
-                                            ))
-                                            .size(11.5),
-                                        );
-                                    }
-                                    StagedState::Failed(message) => {
-                                        ui.label(
-                                            RichText::new(theme::truncate_chars(message, 30))
-                                                .color(theme::rose())
-                                                .size(11.5),
-                                        )
-                                        .on_hover_text(message);
-                                    }
-                                }
+                                staged_status(ui, item);
                             });
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -1027,6 +1063,29 @@ impl Composer {
                                     {
                                         remove = Some(item.id);
                                     }
+                                    let is_image = mime_for(&item.name).starts_with("image/")
+                                        || mime_for(&item.name).starts_with("video/");
+                                    let on = crate::media::is_spoiler_name(&item.name);
+                                    if is_image
+                                        && ui
+                                            .add(widgets::flat_icon(
+                                                Icon::Eye,
+                                                13.0,
+                                                if on {
+                                                    theme::accent()
+                                                } else {
+                                                    theme::text_faint()
+                                                },
+                                            ))
+                                            .on_hover_text(if on {
+                                                tr("Спойлер: снять")
+                                            } else {
+                                                tr("Спрятать под спойлер")
+                                            })
+                                            .clicked()
+                                    {
+                                        spoiler = Some(item.id);
+                                    }
                                 },
                             );
                         });
@@ -1036,6 +1095,7 @@ impl Composer {
         if let Some(id) = remove {
             self.staged.retain(|s| s.id != id);
         }
+        spoiler
     }
 
     fn show_plus_menu(&mut self, ctx: &egui::Context, anchor: Rect) {

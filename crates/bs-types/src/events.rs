@@ -644,6 +644,22 @@ pub enum ServerEvent {
         #[serde(default)]
         dm_channel_id: Option<String>,
     },
+    // ─── Rustspace ────────────────────────────────────────────────────────
+    /// Изменились закреплённые сообщения чата (`kind`: `channel` или `dm`).
+    RsPinsUpdated {
+        kind: String,
+        channel_id: String,
+    },
+    /// Добавлена закладка (PR оригинала #474).
+    BookmarkAdded {
+        bookmark: serde_json::Value,
+    },
+    /// Убрана закладка (PR оригинала #474).
+    BookmarkRemoved {
+        kind: String,
+        channel_id: String,
+        message_id: String,
+    },
     /// Неизвестное событие — не ломаем парсинг.
     #[serde(other)]
     Unknown,

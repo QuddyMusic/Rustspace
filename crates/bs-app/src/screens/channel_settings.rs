@@ -437,6 +437,9 @@ fn overview(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
             .color(theme::text_muted()),
         );
     }
+    if channel && !state.voice {
+        nsfw_row(ui, state, bridge);
+    }
     privacy(ui, state, bridge);
     status_lines(ui, state);
     let dirty = state.name != state.saved_name || state.topic != state.saved_topic;
@@ -481,6 +484,40 @@ fn overview(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
 }
 
 /// Закрытость — запрет `VIEW_CHANNEL` для `@everyone`; роль `@everyone` имеет id пространства.
+/// Переключатель «Канал 18+»: применяется сразу.
+fn nsfw_row(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) {
+    let Target::Channel(id) = state.target.clone() else {
+        return;
+    };
+    let mut nsfw = bridge
+        .cache_at(state.origin)
+        .and_then(|c| c.channel(&id))
+        .is_some_and(|c| c.nsfw);
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.set_max_width(ui.available_width() - 60.0);
+            ui.label(
+                RichText::new(tr("Канал 18+"))
+                    .family(theme::bold_family())
+                    .color(theme::text_bright()),
+            );
+            ui.label(
+                RichText::new(tr(
+                    "Перед входом каждый подтверждает, что ему есть 18. Нужен сервер Rustspace.",
+                ))
+                .size(12.0)
+                .color(theme::text_muted()),
+            );
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if widgets::toggle(ui, &mut nsfw) && !state.busy {
+                state.request(bridge, SpaceOp::SetNsfw(id.clone(), nsfw));
+            }
+        });
+    });
+}
+
 fn privacy(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) {
     let private = bridge
         .cache_at(state.origin)

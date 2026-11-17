@@ -360,7 +360,8 @@ impl ChatScreen {
                         }) {
                             self.channel_list(ui, space, &filter, nav);
                         } else {
-                            self.home_list(ui, dms, &filter, hub_dot, nav);
+                            let saved = Self::saved_chat(bridge);
+                            self.home_list(ui, dms, saved.as_deref(), &filter, hub_dot, nav);
                         }
                     });
             });
@@ -526,11 +527,34 @@ impl ChatScreen {
         }
     }
 
+    /// «Избранное» и «Закладки» в списке главной.
+    fn saved_rows(&self, ui: &mut egui::Ui, saved: Option<&str>, nav: &mut Option<Nav>) {
+        let saved_open = self.view == View::Channel
+            && saved.is_some()
+            && self
+                .selected_channel
+                .as_ref()
+                .is_some_and(|c| c.origin == 0 && Some(c.channel.as_str()) == saved);
+        if widgets::nav_row(ui, Icon::Bookmark, tr("Избранное"), saved_open)
+            .on_hover_text(tr("Чат с самим собой: заметки, ссылки, файлы"))
+            .clicked()
+        {
+            *nav = Some(Nav::Saved);
+        }
+        if widgets::nav_row(ui, Icon::Pin, tr("Закладки"), false)
+            .on_hover_text(tr("Сохранённые сообщения из всех чатов"))
+            .clicked()
+        {
+            *nav = Some(Nav::Bookmarks);
+        }
+    }
+
     /// Главная: «Друзья», «Обзор» и личные беседы.
     pub(super) fn home_list(
         &self,
         ui: &mut egui::Ui,
         dms: &[SidebarDm],
+        saved: Option<&str>,
         filter: &str,
         hub_dot: bool,
         nav: &mut Option<Nav>,
@@ -558,6 +582,7 @@ impl ChatScreen {
         {
             *nav = Some(Nav::Backspace);
         }
+        self.saved_rows(ui, saved, nav);
         ui.add_space(12.0);
         ui.horizontal(|ui| {
             ui.add_space(14.0);
@@ -585,6 +610,7 @@ impl ChatScreen {
         let mut shown = 0;
         for dm in dms
             .iter()
+            .filter(|d| !(d.origin == 0 && Some(d.id.as_str()) == saved))
             .filter(|d| filter.is_empty() || d.label.to_lowercase().contains(filter))
         {
             shown += 1;
@@ -733,6 +759,9 @@ impl ChatScreen {
             .selected_channel
             .as_ref()
             .filter(|s| s.kind == ChannelKind::Dm)?;
+        if self.is_saved_open(bridge) {
+            return None;
+        }
         let cache = bridge.cache_at(selected.origin)?;
         let dm = cache
             .dm_channel(&selected.channel)
@@ -820,6 +849,7 @@ impl ChatScreen {
             }
         }
         if selected.kind == ChannelKind::Dm
+            && !self.is_saved_open(bridge)
             && let Some(dm) = bridge
                 .cache_at(selected.origin)
                 .and_then(|c| c.dm_channel(&selected.channel))
@@ -883,6 +913,70 @@ impl ChatScreen {
         {
             self.search.toggle();
         }
+    }
+
+    /// Канал «18+», в который ещё не соглашались войти: вместо ленты —
+    /// предупреждение. `true` — показано предупреждение.
+    pub(super) fn show_nsfw_gate(
+        &self,
+        ui: &mut egui::Ui,
+        bridge: &Bridge,
+        nav: &mut Option<Nav>,
+    ) -> bool {
+        let Some(selected) = self.selected_channel.as_ref() else {
+            return false;
+        };
+        let nsfw = selected.kind == ChannelKind::Space
+            && bridge
+                .cache_at(selected.origin)
+                .and_then(|c| c.channel(&selected.channel))
+                .is_some_and(|c| c.nsfw);
+        if !nsfw || crate::prefs::get().nsfw_allowed.contains(&selected.channel) {
+            return false;
+        }
+        let channel = selected.channel.clone();
+        ui.add_space((ui.available_height() * 0.25).max(24.0));
+        ui.vertical_centered(|ui| {
+            ui.set_max_width(440.0);
+            ui.label(
+                RichText::new("18+")
+                    .size(40.0)
+                    .family(theme::bold_family())
+                    .color(theme::rose()),
+            );
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(tr("Канал для взрослых"))
+                    .size(20.0)
+                    .family(theme::bold_family())
+                    .color(theme::text_bright()),
+            );
+            ui.add_space(6.0);
+            ui.label(theme::muted(tr(
+                "Здесь может быть контент 18+. Продолжая, вы подтверждаете, что вам \
+                 исполнилось 18 лет и вы готовы его видеть.",
+            )));
+            ui.add_space(16.0);
+            ui.horizontal(|ui| {
+                let width = 150.0_f32.mul_add(2.0, ui.spacing().item_spacing.x);
+                ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+                if ui
+                    .add_sized([150.0, 34.0], egui::Button::new(tr("Назад")))
+                    .clicked()
+                {
+                    *nav = Some(Nav::Friends);
+                }
+                if ui
+                    .add_sized([150.0, 34.0], theme::primary_button(tr("Мне есть 18")))
+                    .clicked()
+                {
+                    crate::prefs::update(|prefs| {
+                        prefs.nsfw_allowed.insert(channel.clone());
+                    });
+                }
+            });
+        });
+        true
     }
 
     /// Шапка ленты: название канала, тема, переключатель участников.

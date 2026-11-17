@@ -54,6 +54,11 @@ impl AttachmentView {
     }
 
     /// Картинка, которую умеем показать (без SVG и прочего).
+    /// Спойлер: имя начинается с `SPOILER_` (как в Discord).
+    pub(crate) fn is_spoiler(&self) -> bool {
+        is_spoiler_name(&self.name)
+    }
+
     pub(crate) fn is_image(&self) -> bool {
         matches!(
             self.mimetype.as_str(),
@@ -327,10 +332,21 @@ pub(crate) fn show_attachment(
     let radius = crate::theme::rounded(10);
     let mut failure: Option<String> = None;
     let mut ready = false;
+    let hidden = att.is_spoiler() && !spoiler_open(ui, rect, &att.filename);
     match state {
+        ImageState::Ready(image) if hidden => {
+            crate::images::paint_blurred(ui.painter(), rect, &image, radius);
+            spoiler_badge(ui, rect);
+            return None;
+        }
         ImageState::Ready(image) => {
             ready = true;
             paint_cover(ui.painter(), rect, &image, radius, true, Color32::WHITE);
+        }
+        _ if hidden => {
+            ui.painter().rect_filled(rect, radius, theme::bg_input());
+            spoiler_badge(ui, rect);
+            return None;
         }
         ImageState::Failed(reason) => {
             placeholder(ui, rect, tr("Не удалось показать картинку"));
@@ -360,6 +376,46 @@ pub(crate) fn show_attachment(
         downloads.push((button, Click::One(target_of(att))));
     }
     ready.then(|| (rect, att.filename.clone()))
+}
+
+/// Имя файла-спойлера.
+pub(crate) fn is_spoiler_name(name: &str) -> bool {
+    name.get(..8)
+        .is_some_and(|head| head.eq_ignore_ascii_case("SPOILER_"))
+}
+
+/// Открыт ли спойлер; щелчок по закрытому открывает его (до перезапуска).
+fn spoiler_open(ui: &egui::Ui, rect: Rect, filename: &str) -> bool {
+    let id = egui::Id::unique(("spoiler", filename));
+    if ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false) {
+        return true;
+    }
+    let hovered = ui.rect_contains_pointer(rect);
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if hovered && ui.input(|i| i.pointer.primary_clicked()) {
+        ui.data_mut(|d| d.insert_temp(id, true));
+        return true;
+    }
+    false
+}
+
+/// Плашка «СПОЙЛЕР» по центру закрытой картинки.
+fn spoiler_badge(ui: &egui::Ui, rect: Rect) {
+    let painter = ui.painter();
+    let galley = painter.layout_no_wrap(
+        tr("СПОЙЛЕР").to_owned(),
+        egui::FontId::new(13.0, crate::theme::bold_family()),
+        Color32::WHITE,
+    );
+    let pill = Rect::from_center_size(rect.center(), galley.size() + Vec2::new(22.0, 12.0));
+    painter.rect_filled(
+        pill,
+        CornerRadius::same(255),
+        Color32::from_black_alpha(170),
+    );
+    painter.galley(pill.center() - galley.size() / 2.0, galley, Color32::WHITE);
 }
 
 /// Тип содержимого по расширению имени файла.

@@ -93,7 +93,26 @@ every WebSocket frame and REST response the client receives.
   the break is closed with ` ``` ` and reopened with the same fence (and language) in the
   next message.
 - **Files and media.** Uploads with progress, image viewer, downloading attachments (one or
-  all), avatars, banners, stickers, GIFs (Klipy search, favourites).
+  all), avatars, banners, stickers, GIFs (Klipy search, favourites). An attachment can be
+  hidden under a **spoiler** (the eye on the staged file): the picture is blurred until
+  clicked. The mark travels as Discord's `SPOILER_` file-name prefix, so it works on any
+  server and through the bridges.
+- **Saved Messages, pins and bookmarks** (needs `bs-server`). *Saved Messages* is a chat with
+  yourself for notes, links and files; any message can be forwarded there from its menu.
+  Pinned messages show in a bar above the chat (click — to the message, then to the next
+  one): in a one-to-one conversation for yourself or for both, in channels and group DMs for
+  everyone (with "Manage messages"). **Bookmarks** are one list across all chats and
+  instances, with search and grouping by date, person or chat, a "with media" filter and
+  jumping to the original.
+- **Translation.** "Translate" in the message menu, or automatic translation of other
+  people's messages that are not in your language. Google needs no setup; Lingva,
+  LibreTranslate and DeepL are there too, and so is a **language model** over any
+  OpenAI-compatible API — locally with Ollama (`ollama pull qwen2.5:3b`), LM Studio or
+  llama.cpp, or a cloud one with a key. The text goes straight from the client to the chosen
+  service; code, links and mentions are not sent and come back unchanged. *Settings →
+  Translation* has a test button.
+- **18+ channels** (`bs-server`). A channel marked 18+ in its settings asks every member to
+  confirm their age once before showing its messages.
 - **Direct messages.** One-to-one and group DMs, friends and requests, user profiles, space
   invites sent as DM cards.
 - **Federation.** Several instances at once, remote ones signed in through the home account.
@@ -473,6 +492,15 @@ curl -H 'Content-Type: application/json' \
 `?wait=true` returns the created message. The address is a secret: delete the webhook if it
 leaks. Managing webhooks needs "Manage channels". Cards are stored as ordinary embeds, so the
 original web client shows their title and text too.
+
+### Saved Messages, pins, bookmarks and 18+ channels
+
+*(bs-server)* Additions over the original API (`/api/rustspace/…`; bookmarks at
+`/api/bookmarks` follow the API proposed for the original in PR #474); original clients simply
+don't see them. Saved Messages is a group DM with its owner as the only member, so the
+original web client shows it as an ordinary group. Pins live in `bs_pins` (scope `me` or
+`all`), bookmarks in `bs_bookmarks`, the 18+ flag in `bs_channel_flags` and in the channel
+object as `nsfw`. Events: `rs_pins_updated`, `bookmark_added`, `bookmark_removed`.
 
 ### Voice bitrate
 

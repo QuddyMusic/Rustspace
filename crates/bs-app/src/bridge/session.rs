@@ -39,6 +39,7 @@ impl Session {
             profile_in: Vec::new(),
             voice_in: Vec::new(),
             bitrate_in: Vec::new(),
+            extras: super::extras::Extras::default(),
             space_in: Vec::new(),
             group_in: Vec::new(),
             call_in: Vec::new(),
@@ -115,11 +116,15 @@ impl Session {
                 self.session_lost = false;
                 self.last_error = None;
                 self.request(BridgeRequest::NotificationSettings);
+                self.extras.reset();
                 if let Some(key) = publish {
                     self.request(BridgeRequest::E2eePublish(key));
                 }
             }
-            BridgeEvent::Server { event } => self.apply_server_event(*event),
+            BridgeEvent::Server { event } => {
+                self.extras.server_event(&event);
+                self.apply_server_event(*event);
+            }
             BridgeEvent::State { state } => self.connection = state,
             BridgeEvent::Error { message } => self.last_error = Some(message),
             BridgeEvent::LoginFailed { message, kind } => {

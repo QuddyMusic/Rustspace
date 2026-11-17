@@ -4,6 +4,7 @@
 mod messages;
 mod model;
 mod panels;
+mod saved;
 
 // Части одного экрана, разнесённые по файлам: модель и панели нужны и
 // снаружи (`crate::screens::chat::SidebarChannel` и т. п.).
@@ -45,6 +46,10 @@ pub(super) enum Nav {
     Space((usize, String)),
     /// Открыть канал или беседу.
     Channel(SelectedChannel),
+    /// Открыть «Избранное».
+    Saved,
+    /// Окно закладок.
+    Bookmarks,
     /// Окно «Создать пространство».
     CreateSpace,
     /// Экран настроек.
@@ -187,6 +192,16 @@ pub(crate) struct ChatScreen {
     jump_to: Option<String>,
     /// Подсвеченное после перехода сообщение и момент, когда подсветка гаснет.
     flash: Option<(String, f64)>,
+    /// Закрепить, в закладки, в «Избранное» — из меню сообщения.
+    extras_action: Option<saved::ExtrasAction>,
+    /// Перейти к сообщению, когда откроется его чат.
+    pending_jump: Option<(SelectedChannel, String)>,
+    /// Открыть чат (из закладок): канал и его пространство.
+    pending_nav: Option<(SelectedChannel, Option<String>)>,
+    /// Какой закреп показан на панели.
+    pin_index: usize,
+    /// Открытое окно закладок.
+    bookmarks: Option<saved::BookmarksUi>,
 }
 
 /// На что отвечаем.
@@ -319,6 +334,8 @@ impl ChatScreen {
     /// Применяет запрошенный кликом переход.
     fn apply_nav(&mut self, nav: Nav, items: &[SidebarSpace], bridge: &mut Bridge) {
         match nav {
+            Nav::Saved => self.open_saved(items, bridge),
+            Nav::Bookmarks => self.bookmarks = Some(saved::BookmarksUi::default()),
             Nav::Friends => {
                 self.active_space = None;
                 self.view = View::Friends;
@@ -490,6 +507,10 @@ impl ChatScreen {
                 }
                 main_module(ui, |ui| {
                     self.show_header(ui, bridge);
+                    if self.show_nsfw_gate(ui, bridge, nav) {
+                        return;
+                    }
+                    self.show_pins_bar(ui, bridge);
                     self.show_plaintext_notice(ui, bridge);
                     self.show_composer(ui, bridge);
                     self.show_messages(ui, bridge);
@@ -587,6 +608,7 @@ impl ChatScreen {
         bridge.ensure_home_info();
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
+        let extras_nav = self.drive_extras(bridge, now);
         self.drive_voice(&ctx, bridge, now);
         let (items, dms) = merged_sidebar(bridge);
 
@@ -627,7 +649,14 @@ impl ChatScreen {
             return action;
         }
 
-        let mut nav: Option<Nav> = None;
+        let mut nav: Option<Nav> = if let Some((target, space)) = self.pending_nav.take() {
+            if let Some(space) = space {
+                self.apply_nav(Nav::Space((target.origin, space)), &items, bridge);
+            }
+            Some(Nav::Channel(target))
+        } else {
+            extras_nav
+        };
         let hosts: Vec<String> = (0..=bridge.live_origins().last().copied().unwrap_or(0))
             .map(|i| {
                 bridge
@@ -645,6 +674,7 @@ impl ChatScreen {
         self.show_center(ui, &ctx, bridge, &mut nav);
 
         self.show_overlays(&ctx, bridge);
+        self.show_bookmarks(&ctx, bridge);
         self.take_group_events(bridge);
         self.show_toast(&ctx, now);
         if let Some(nav) = nav {

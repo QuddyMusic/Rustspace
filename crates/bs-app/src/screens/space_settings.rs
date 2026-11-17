@@ -245,6 +245,7 @@ impl SpaceSettings {
                 | SpaceOp::ListBridges(_)
                 | SpaceOp::AddBridge(..)
                 | SpaceOp::RemoveBridge(_)
+                | SpaceOp::SetNsfw(..)
                 | SpaceOp::ListWebhooks(_)
                 | SpaceOp::CreateWebhook(..)
                 | SpaceOp::DeleteWebhook(_),

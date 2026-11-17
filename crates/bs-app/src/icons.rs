@@ -71,6 +71,14 @@ pub(crate) enum Icon {
     CameraOff,
     /// Монитор со стрелкой: показ экрана.
     Screen,
+    /// Закладка (флажок-ленточка): «Избранное» и закладки.
+    Bookmark,
+    /// Канцелярская кнопка: закреплённые сообщения.
+    Pin,
+    /// Глаз: спойлер.
+    Eye,
+    /// Глобус: перевод.
+    Globe,
 }
 
 /// Точки дуги окружности: углы в градусах, 0° — вправо, по часовой на экране.
@@ -105,6 +113,9 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
         | Icon::Image
         | Icon::Sticker
         | Icon::Send => paint_objects(painter, center, size, icon, color),
+        Icon::Bookmark | Icon::Pin | Icon::Eye | Icon::Globe => {
+            paint_marks(painter, center, size, icon, color);
+        }
         _ => paint_call(painter, center, size, icon, color),
     }
 }
@@ -279,6 +290,56 @@ fn paint_objects(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: 
         Icon::Send => {
             ring(vec![p(3.5, 4.5), p(21.0, 12.0), p(3.5, 19.5), p(6.5, 12.0)]);
             line(vec![p(6.5, 12.0), p(13.0, 12.0)]);
+        }
+        _ => {}
+    }
+}
+
+/// Значки сообщений: закладка, закреп, спойлер, перевод.
+fn paint_marks(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: Color32) {
+    let unit = size / 24.0;
+    let width = (unit * 2.0).max(1.4);
+    let stroke = Stroke::new(width, color);
+    let p = |x: f32, y: f32| center + Vec2::new(x - 12.0, y - 12.0) * unit;
+    let line = |points: Vec<Pos2>| {
+        painter.add(Shape::line(points, stroke));
+    };
+    let ring = |points: Vec<Pos2>| {
+        painter.add(Shape::closed_line(points, stroke));
+    };
+    match icon {
+        Icon::Bookmark => {
+            ring(vec![
+                p(6.5, 3.5),
+                p(17.5, 3.5),
+                p(17.5, 20.5),
+                p(12.0, 16.0),
+                p(6.5, 20.5),
+            ]);
+        }
+        Icon::Pin => {
+            ring(vec![
+                p(9.0, 3.5),
+                p(15.0, 3.5),
+                p(14.0, 9.5),
+                p(17.5, 13.5),
+                p(6.5, 13.5),
+                p(10.0, 9.5),
+            ]);
+            line(vec![p(12.0, 13.5), p(12.0, 20.5)]);
+        }
+        Icon::Eye => {
+            let mut upper = arc(p(12.0, 16.5), unit * 10.0, 205.0, 335.0, 14);
+            let lower = arc(p(12.0, 7.5), unit * 10.0, 25.0, 155.0, 14);
+            upper.extend(lower);
+            ring(upper);
+            painter.circle_stroke(p(12.0, 12.0), unit * 3.0, stroke);
+        }
+        Icon::Globe => {
+            painter.circle_stroke(p(12.0, 12.0), unit * 8.5, stroke);
+            line(vec![p(3.5, 12.0), p(20.5, 12.0)]);
+            line(arc(p(19.0, 12.0), unit * 10.0, 122.0, 238.0, 12));
+            line(arc(p(5.0, 12.0), unit * 10.0, -58.0, 58.0, 12));
         }
         _ => {}
     }

@@ -37,6 +37,7 @@ pub mod peers;
 pub mod profile;
 pub mod read;
 pub mod registry;
+pub mod saved;
 pub mod space_manage;
 pub mod twofactor;
 pub mod webhooks;
@@ -81,6 +82,7 @@ pub use read::{
 pub use registry::{
     IdentityDeleteMode, IdentityDeleteResult, RegistryEntry, RegistryResponse, RegistryStatus,
 };
+pub use saved::{Bookmark, BookmarkAttachment, BookmarkPage, BookmarkStatus, ChatKind, Pin};
 pub use space_manage::{
     Ban, ChannelUpdate, JoinRequest, NewChannel, NewRole, OverrideScope, PermissionOverride,
     RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input,

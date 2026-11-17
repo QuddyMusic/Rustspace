@@ -19,6 +19,7 @@
 //! показана в интерфейсе) только одна.
 
 pub(crate) mod e2ee;
+pub(crate) mod extras;
 mod protocol;
 mod responses;
 mod session;
@@ -117,6 +118,8 @@ pub(crate) struct Session {
     voice_in: Vec<VoiceTokenEvent>,
     /// Битрейт голоса после изменения.
     bitrate_in: Vec<(String, Result<bs_api::VoiceBitrate, String>)>,
+    /// «Избранное», закрепы и закладки.
+    extras: extras::Extras,
     space_in: Vec<SpaceEvent>,
     group_in: Vec<GroupEvent>,
     call_in: Vec<CallEvent>,
