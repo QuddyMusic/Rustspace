@@ -166,21 +166,21 @@ impl RegisterForm {
         let mut back = false;
         ui.add_enabled_ui(!busy, |ui| {
             let width = ui.available_width();
-            ui.label(theme::section_title(tr("Адрес инстанса")));
+            super::login::form_label(ui, tr("Адрес инстанса"));
             ui.add(field(base, width).hint_text("example.com"));
             self.instance_status(ui);
             ui.add_space(6.0);
 
-            ui.label(theme::section_title(tr("Имя пользователя")));
+            super::login::form_label(ui, tr("Имя пользователя"));
             ui.add(field(&mut self.username, width).hint_text(tr("латиница, цифры, _")));
             self.username_status(ui);
             ui.add_space(6.0);
 
-            ui.label(theme::section_title(tr("Отображаемое имя (необязательно)")));
+            super::login::form_label(ui, tr("Отображаемое имя (необязательно)"));
             ui.add(field(&mut self.display_name, width));
             ui.add_space(6.0);
 
-            ui.label(theme::section_title(tr("Пароль")));
+            super::login::form_label(ui, tr("Пароль"));
             ui.add(field(&mut self.password, width).password(true));
             ui.label(
                 theme::muted(crate::tf!(
@@ -190,7 +190,7 @@ impl RegisterForm {
                 .size(12.0),
             );
             ui.add_space(4.0);
-            ui.label(theme::section_title(tr("Повторите пароль")));
+            super::login::form_label(ui, tr("Повторите пароль"));
             ui.add(field(&mut self.confirm, width).password(true));
             if !self.confirm.is_empty() && self.confirm != self.password {
                 ui.label(
@@ -202,24 +202,26 @@ impl RegisterForm {
             ui.add_space(6.0);
 
             if self.needs_invite() || !self.invite.is_empty() {
-                ui.label(theme::section_title(tr("Приглашение")));
+                super::login::form_label(ui, tr("Приглашение"));
                 ui.add(field(&mut self.invite, width).hint_text(tr("ссылка или код")));
                 self.invite_status(ui);
                 ui.add_space(6.0);
             }
 
-            ui.label(theme::section_title(tr("Цвет аватара")));
+            super::login::form_label(ui, tr("Цвет аватара"));
             self.color_picker(ui);
         });
 
-        ui.add_space(8.0);
-        ui.add_enabled(
-            !busy,
-            egui::Checkbox::new(
-                allow_insecure,
-                tr("Разрешить незащищённое соединение (http)"),
-            ),
-        );
+        if base.trim().to_ascii_lowercase().starts_with("http://") {
+            ui.add_space(10.0);
+            ui.add_enabled(
+                !busy,
+                egui::Checkbox::new(
+                    allow_insecure,
+                    tr("Разрешить незащищённое соединение (http)"),
+                ),
+            );
+        }
         ui.add_space(12.0);
 
         let label = if busy {
@@ -227,12 +229,7 @@ impl RegisterForm {
         } else {
             tr("Создать аккаунт")
         };
-        let submit = ui
-            .add_enabled(
-                !busy && self.ready(),
-                theme::primary_button(label).min_size(egui::vec2(ui.available_width(), 38.0)),
-            )
-            .clicked();
+        let submit = super::login::submit_button(ui, label, !busy && self.ready()).clicked();
         if submit {
             self.submit(bridge, base, transport);
         }
@@ -254,8 +251,8 @@ impl RegisterForm {
     fn show_problem(&self, ui: &mut egui::Ui, bridge: &Bridge) {
         let text = self.problem.as_deref().or_else(|| bridge.last_error());
         if let Some(text) = text {
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new(text).color(theme::rose()));
+            ui.add_space(10.0);
+            super::login::error_note(ui, text);
         }
     }
 
@@ -449,7 +446,5 @@ impl RegisterForm {
 }
 
 fn field(text: &mut String, width: f32) -> egui::TextEdit<'_> {
-    egui::TextEdit::singleline(text)
-        .desired_width(width)
-        .margin(egui::vec2(10.0, 8.0))
+    super::login::form_field(text, width)
 }

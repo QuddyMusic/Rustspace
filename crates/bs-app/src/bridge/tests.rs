@@ -396,8 +396,8 @@ async fn run_session_reports_http_login_error_then_ends() {
         super::FailureKind::Auth,
         "отказ сервера не сетевая ошибка"
     );
-    assert!(message.contains("401"), "текст ошибки: {message}");
-    assert!(message.contains("Invalid credentials"), "{message}");
+    // Известный отказ показывается понятной фразой, а не текстом HTTP.
+    assert_eq!(message, "Неверный логин или пароль");
     assert!(
         matches!(events_rx.try_recv(), Ok(BridgeEvent::Ended)),
         "последним событием сессии всегда `Ended`"

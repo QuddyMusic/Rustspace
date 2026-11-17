@@ -230,11 +230,20 @@ fn report_login_failure(
     let message = if refusal.is_some() {
         remote_login_refused(refusal, &err.to_string())
     } else if let bs_instances::InstanceError::Identity(bs_identity::IdentityError::Api(api)) = err
+        && let Some(text) = login_refusal(api.code())
+    {
+        text.to_owned()
+    } else if let bs_instances::InstanceError::Identity(bs_identity::IdentityError::Api(api)) = err
         && api
             .code()
             .is_some_and(|code| code.starts_with("two_factor_"))
     {
         crate::logic::describe_server_error(api.code(), &err.to_string())
+    } else if is_network_error(err) {
+        // Технические подробности — в журнал, человеку — что делать.
+        tracing::warn!(%err, "не удалось подключиться к инстансу");
+        tr("Не удаётся связаться с сервером. Проверьте адрес инстанса и подключение к сети.")
+            .to_owned()
     } else {
         err.to_string()
     };
@@ -245,6 +254,16 @@ fn report_login_failure(
         _ => FailureKind::Auth,
     };
     let _ = events.send(BridgeEvent::LoginFailed { message, kind });
+}
+
+/// Отказ сервера на вход понятными словами.
+fn login_refusal(code: Option<&str>) -> Option<&'static str> {
+    Some(match code? {
+        "invalid_credentials" => tr("Неверный логин или пароль"),
+        "account_deleted" => tr("Этот аккаунт удалён"),
+        "rate_limited" => tr("Слишком много попыток: подождите немного и попробуйте снова"),
+        _ => return None,
+    })
 }
 
 /// Пересылает событие инстанса в GUI; `false` — сессию пора завершать.

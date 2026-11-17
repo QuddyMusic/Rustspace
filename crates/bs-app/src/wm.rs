@@ -33,26 +33,43 @@ impl Wm {
                 candidates.push(PathBuf::from(runtime).join("hypr"));
             }
             candidates.push(PathBuf::from("/tmp/hypr"));
-            return candidates
+            let found = candidates
                 .into_iter()
                 .map(|dir| dir.join(&signature).join(".socket.sock"))
-                .find(|path| path.exists())
-                .map(Self::Hyprland);
+                .find(|path| path.exists());
+            if let Some(path) = &found {
+                tracing::info!(socket = %path.display(), "Hyprland: окно прячется через IPC");
+            } else {
+                tracing::warn!("Hyprland: сокет IPC не найден, окно спрятать не получится");
+            }
+            return found.map(Self::Hyprland);
         }
-        env("SWAYSOCK").map(|path| Self::Sway(PathBuf::from(path)))
+        let sway = env("SWAYSOCK").map(|path| Self::Sway(PathBuf::from(path)));
+        if sway.is_some() {
+            tracing::info!("Sway: окно прячется через IPC (scratchpad)");
+        }
+        sway
     }
 
     /// Спрятать окно этого процесса. `false` — не вышло.
     pub(crate) fn hide(&self) -> bool {
         let pid = std::process::id();
-        match self {
-            Self::Hyprland(socket) => hypr(
-                socket,
-                &format!("dispatch movetoworkspacesilent {SPECIAL},pid:{pid}"),
-            )
-            .is_some_and(|reply| reply.trim() == "ok"),
+        let done = match self {
+            Self::Hyprland(socket) => {
+                let reply = hypr(
+                    socket,
+                    &format!("dispatch movetoworkspacesilent {SPECIAL},pid:{pid}"),
+                );
+                let ok = reply.as_deref().is_some_and(|text| text.trim() == "ok");
+                if !ok {
+                    tracing::warn!(?reply, pid, "Hyprland не спрятал окно");
+                }
+                ok
+            }
             Self::Sway(socket) => sway_ok(socket, &format!("[pid={pid}] move scratchpad")),
-        }
+        };
+        tracing::debug!(done, "окно спрятано через IPC композитора");
+        done
     }
 
     /// Вернуть окно на текущий рабочий стол и дать ему фокус.

@@ -534,7 +534,6 @@
   "Разрешить незащищённое соединение (http)": "Allow insecure connection (http)",
   "Пароль и токен пойдут открытым текстом. Включайте только для инстанса в своей локальной сети. localhost разрешён и без этой галочки.": "The password and token will be sent in plain text. Enable only for an instance on your local network. localhost is allowed without this checkbox.",
   "Подключение…": "Connecting…",
-  "Нет аккаунта? Зарегистрироваться": "No account? Register",
   "Обо всех сообщениях": "All messages",
   "Только об @упоминаниях": "Only @mentions",
   "Ни о чём": "Nothing",
@@ -1127,7 +1126,6 @@
   "Экран {name}": "Screen {name}",
   "Сервер звонков работает без шифрования (ws://) — подключение отклонено": "The call server is unencrypted (ws://) — connection refused",
   "Код двухфакторной защиты": "Two-factor code",
-  "Если защита включена: код из приложения или запасной": "If enabled: authenticator or recovery code",
   "У аккаунта включена двухфакторная защита: введите код": "This account uses two-factor authentication: enter the code",
   "Код двухфакторной защиты не подошёл": "The two-factor code is not valid",
   "Слишком много неверных кодов: подождите четверть часа": "Too many wrong codes: wait fifteen minutes",
@@ -1184,7 +1182,6 @@
   "Это не запись ключа шифрования или она повреждена": "This is not an encryption key record, or it is damaged",
   "Пароль не подходит к этой записи ключа": "The passphrase does not match this key record",
   "Сменить инстанс": "Switch instance",
-  "Недавние:": "Recent:",
   "Забыть этот инстанс": "Forget this instance",
   "Неофициальный клиент и сервер на Rust, совместимые с Backspace.": "An unofficial Rust client and server compatible with Backspace.",
   "Выпуски Rustspace": "Rustspace releases",
@@ -1225,5 +1222,13 @@
   "Море": "Sea",
   "Закат": "Sunset",
   "Лес": "Forest",
-  "Без цвета": "Neutral"
+  "Без цвета": "Neutral",
+  "Код из приложения или запасной": "Code from the app or a backup code",
+  "Есть код двухфакторной защиты?": "Have a two-factor code?",
+  "Нет аккаунта?": "No account?",
+  "Зарегистрироваться": "Sign up",
+  "Не удаётся связаться с сервером. Проверьте адрес инстанса и подключение к сети.": "Can't reach the server. Check the instance address and your network connection.",
+  "Неверный логин или пароль": "Wrong username or password",
+  "Этот аккаунт удалён": "This account has been deleted",
+  "Слишком много попыток: подождите немного и попробуйте снова": "Too many attempts: wait a little and try again"
 }

@@ -269,6 +269,14 @@ impl Desktop {
             self.wm_hidden = false;
         }
         let close = ctx.input(|i| i.viewport().close_requested());
+        if close {
+            tracing::info!(
+                tray = self.tray,
+                close_to_tray,
+                quitting = self.quitting,
+                "окно просят закрыть"
+            );
+        }
         if close && self.tray && close_to_tray && !self.quitting {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.hide(ctx);
@@ -292,6 +300,7 @@ impl Desktop {
 
     fn hide(&mut self, ctx: &egui::Context) {
         if !self.tray {
+            tracing::info!("трея нет: окно не прячется");
             return;
         }
         self.hidden = true;
