@@ -487,6 +487,19 @@ pub(crate) struct Appearance {
     /// Чёткий текст, как у egui по умолчанию: хинтинг и усиленное
     /// сглаживание. Без него текст мягче и тоньше — как в браузере.
     pub(crate) crisp_text: bool,
+    /// Где кнопка «к последним сообщениям».
+    pub(crate) jump_place: JumpPlace,
+}
+
+/// Место кнопки «к последним сообщениям» над полем ввода.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum JumpPlace {
+    /// По центру ленты.
+    #[default]
+    Center,
+    /// У правого края.
+    Right,
 }
 
 impl Default for Appearance {
@@ -497,6 +510,7 @@ impl Default for Appearance {
             radius: 12,
             compact: false,
             crisp_text: false,
+            jump_place: JumpPlace::Center,
         }
     }
 }

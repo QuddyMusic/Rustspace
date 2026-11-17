@@ -1025,7 +1025,11 @@ fn translate_items(ui: &mut egui::Ui, bridge: &Bridge, row: &MessageRow) {
 
 /// Круглая кнопка со стрелкой вниз над полем ввода: к последним сообщениям.
 fn jump_button(ui: &egui::Ui, area: egui::Rect) -> bool {
-    let center = egui::pos2(area.right() - 34.0, area.bottom() - 30.0);
+    let x = match crate::prefs::get().appearance.jump_place {
+        theme::JumpPlace::Center => area.center().x,
+        theme::JumpPlace::Right => area.right() - 34.0,
+    };
+    let center = egui::pos2(x, area.bottom() - 30.0);
     let rect = egui::Rect::from_center_size(center, egui::Vec2::splat(38.0));
     let response = ui
         .interact(rect, ui.scope_id().with("jump_bottom"), Sense::click())

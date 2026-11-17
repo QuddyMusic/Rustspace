@@ -84,6 +84,30 @@ pub(crate) fn page(ui: &mut egui::Ui, state: &mut AppearanceState) {
             ),
             &mut appearance.crisp_text,
         );
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.label(tr("Кнопка «к последним сообщениям»"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::pill_tab(
+                    ui,
+                    tr("Справа"),
+                    appearance.jump_place == theme::JumpPlace::Right,
+                )
+                .clicked()
+                {
+                    appearance.jump_place = theme::JumpPlace::Right;
+                }
+                if widgets::pill_tab(
+                    ui,
+                    tr("По центру"),
+                    appearance.jump_place == theme::JumpPlace::Center,
+                )
+                .clicked()
+                {
+                    appearance.jump_place = theme::JumpPlace::Center;
+                }
+            });
+        });
     });
     ui.add_space(10.0);
     card(ui, |ui| custom_colors(ui, &mut appearance));
