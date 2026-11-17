@@ -701,6 +701,7 @@ impl ChatScreen {
                         ui.set_height(48.0);
                         ui.set_width(ui.available_width());
                         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            let left = ui.cursor().min;
                             theme::avatar(
                                 ui,
                                 face(&name, &my_face),
@@ -735,6 +736,7 @@ impl ChatScreen {
                                     .truncate(),
                                 );
                             });
+                            super::me_menu::button(ui, left, bridge, status, nav);
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 user_bar_buttons(ui, muted, deafened, nav);
                             });

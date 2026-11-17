@@ -1463,5 +1463,11 @@
   "{h} ч {m} мин": "{h} h {m} min",
   "осталось {d}": "{d} left",
   "уже {d}": "for {d}",
-  "К последним сообщениям": "Jump to latest"
+  "К последним сообщениям": "Jump to latest",
+  "Неактивен": "Idle",
+  "Не беспокоить — без уведомлений": "Do not disturb — no notifications",
+  "Свой статус": "Custom status",
+  "Чем заняты?": "What are you up to?",
+  "Мой профиль": "My profile",
+  "Изменить профиль…": "Edit profile…"
 }

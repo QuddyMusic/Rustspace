@@ -1,6 +1,7 @@
 //! Основной экран в стиле Discord: колонка пространств, колонка каналов,
 //! шапка и лента сообщений, поле ввода, панель участников.
 
+mod me_menu;
 mod messages;
 mod model;
 mod panels;
@@ -54,6 +55,8 @@ pub(super) enum Nav {
     CreateSpace,
     /// Экран настроек.
     Settings,
+    /// Свой профиль (окно, как у других).
+    OwnProfile,
     /// Искать людей по строке (вкладка «Добавить»).
     SearchPeople(String),
     /// Войти в голосовой канал.
@@ -338,6 +341,17 @@ impl ChatScreen {
     }
 
     /// Применяет запрошенный кликом переход.
+    /// Открыть свой профиль тем же окном, что и чужие.
+    fn open_own_profile(&mut self, bridge: &Bridge) {
+        if let Some(me) = bridge.cache_at(0).map(|c| c.me().clone()) {
+            let name = me
+                .display_name
+                .clone()
+                .unwrap_or_else(|| me.username.clone());
+            self.profile = Some(super::profile::ProfileState::open(bridge, &me.id, &name));
+        }
+    }
+
     fn apply_nav(&mut self, nav: Nav, items: &[SidebarSpace], bridge: &mut Bridge) {
         match nav {
             Nav::Saved => self.open_saved(items, bridge),
@@ -405,6 +419,7 @@ impl ChatScreen {
                     self.settings = Some(SettingsState::from_user(cache.me()));
                 }
             }
+            Nav::OwnProfile => self.open_own_profile(bridge),
             Nav::VoiceJoin {
                 origin,
                 channel_id,
