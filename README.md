@@ -36,11 +36,23 @@ the [roadmap](ROADMAP.md).
 
 ## Installing the client
 
-Ready builds are on the [releases page](https://github.com/QuddyMusic/Rustspace/releases):
+**Linux, any distribution — built from source:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/QuddyMusic/Rustspace/main/packaging/linux/install.sh | sh
+```
+
+The script asks before installing build packages (pacman, apt, dnf or zypper) and, if needed,
+Rust via rustup; it fetches the sources into `~/.local/src/rustspace`, builds the client and
+puts it into `~/.local/bin` with a menu entry (`--system` — into `/usr/local`). Voice and camera
+need clang 21+; without it the client is built without them and the script says what to
+install. To update, run it again. Options: `--ref v0.1.0`, `--no-voice`, `--uninstall`,
+`--help`. The build needs about 10 GB of disk and a few minutes.
+
+Once there are releases, ready builds will be on the [releases page](https://github.com/QuddyMusic/Rustspace/releases):
 
 | System | How |
 |---|---|
-| Linux, any distribution | `curl -fsSL https://raw.githubusercontent.com/QuddyMusic/Rustspace/main/packaging/linux/install.sh \| sh` — into `~/.local`, no root, with a menu entry |
 | Linux, AppImage | `Rustspace-x86_64.AppImage`: make it executable and run |
 | Debian / Ubuntu | `sudo apt install ./rustspace-linux-x86_64.deb` |
 | Arch | `cd packaging/arch && makepkg -si` (`rustspace-bin`, the release binary) |
@@ -49,8 +61,8 @@ Ready builds are on the [releases page](https://github.com/QuddyMusic/Rustspace/
 
 **Updates from inside.** When a new release is out, a strip at the top offers **Update**: the
 client downloads the file for its system, checks it against the release's `.sha256`, installs
-it and asks to restart. This works for `install.sh`, AppImage, the archive and the Windows
-installer; packages (deb, Arch) are updated by the package manager, and the client says so.
+it and asks to restart. This works for AppImage, the archive and the Windows installer; a
+source build is updated by running `install.sh` again; packages (deb, Arch) are updated by the package manager, and the client says so.
 
 ## Status
 

@@ -35,11 +35,23 @@ Rustspace целиком написан на Rust. Десктоп-клиент �
 
 ## Установка клиента
 
-Готовые сборки — на [странице релизов](https://github.com/QuddyMusic/Rustspace/releases):
+**Linux, любой дистрибутив — сборка из исходников:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/QuddyMusic/Rustspace/main/packaging/linux/install.sh | sh
+```
+
+Скрипт спросит разрешения поставить пакеты для сборки (pacman, apt, dnf или zypper), при
+необходимости Rust через rustup, скачает исходники в `~/.local/src/rustspace`, соберёт клиент и
+положит его в `~/.local/bin` с пунктом в меню (`--system` — в `/usr/local`). Голосу и камере
+нужен clang 21+; без него клиент соберётся без них и скрипт подскажет, что поставить.
+Обновление — тот же запуск ещё раз. Параметры: `--ref v0.1.0`, `--no-voice`, `--uninstall`,
+`--help`. Сборке нужно около 10 ГБ места и несколько минут.
+
+Когда появятся выпуски, готовые сборки будут на [странице релизов](https://github.com/QuddyMusic/Rustspace/releases):
 
 | Система | Как |
 |---|---|
-| Linux, любой дистрибутив | `curl -fsSL https://raw.githubusercontent.com/QuddyMusic/Rustspace/main/packaging/linux/install.sh \| sh` — в `~/.local`, без root, с пунктом в меню |
 | Linux, AppImage | `Rustspace-x86_64.AppImage`: сделать исполняемым и запустить |
 | Debian / Ubuntu | `sudo apt install ./rustspace-linux-x86_64.deb` |
 | Arch | `cd packaging/arch && makepkg -si` (`rustspace-bin`, готовый файл из релиза) |
@@ -48,8 +60,8 @@ Rustspace целиком написан на Rust. Десктоп-клиент �
 
 **Обновление изнутри.** Когда выходит релиз, сверху появляется полоса с кнопкой «Обновить»:
 клиент скачивает файл под свою систему, сверяет его с `.sha256` из релиза, ставит и
-предлагает перезапуститься. Так обновляются установки через `install.sh`, AppImage, архив и
-установщик Windows; пакеты (deb, Arch) обновляет менеджер пакетов — клиент так и скажет.
+предлагает перезапуститься. Так обновляются AppImage, архив и установщик Windows; сборку из
+исходников обновляет повторный запуск `install.sh`; пакеты (deb, Arch) обновляет менеджер пакетов — клиент так и скажет.
 
 ## Статус
 
