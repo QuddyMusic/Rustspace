@@ -225,7 +225,7 @@ pub(crate) enum BridgeRequest {
     /// Удалить друга.
     RemoveFriend(String),
     /// Создать пространство.
-    CreateSpace(bs_api::CreateSpaceRequest),
+    CreateSpace(bs_api::CreateSpaceRequest, Option<SpaceIcon>),
     /// Каталог пространств по подстроке.
     Explore(String),
     /// Общий каталог пространств других инстансов (через свой инстанс).
@@ -924,6 +924,15 @@ pub(crate) struct ProfileEvent {
     pub(crate) user: Result<Box<bs_types::User>, String>,
     /// Общие друзья и пространства, если получены.
     pub(crate) mutuals: Option<bs_api::Mutuals>,
+}
+
+/// Значок нового пространства: имя файла и содержимое.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SpaceIcon {
+    /// Имя файла.
+    pub(crate) name: String,
+    /// Картинка.
+    pub(crate) bytes: std::sync::Arc<Vec<u8>>,
 }
 
 /// Действие со стикерпаками; после любого, кроме [`PackOp::With`], приходит

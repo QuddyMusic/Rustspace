@@ -23,8 +23,10 @@ const SPACE_NAME_MAX: usize = 100;
 /// Максимальная длина описания пространства.
 const SPACE_DESCRIPTION_MAX: usize = 200;
 
+/// Прочитанный файл значка: имя и содержимое (или ошибка).
+type PickedIcon = (String, Result<Vec<u8>, String>);
+
 /// Форма «Создать пространство».
-#[derive(Debug)]
 pub(crate) struct CreateSpaceForm {
     name: String,
     description: String,
@@ -32,6 +34,21 @@ pub(crate) struct CreateSpaceForm {
     color: &'static str,
     /// Форма отправлена: ошибка сервера показывается только после этого.
     submitted: bool,
+    /// Выбранный значок и его текстура для предпросмотра.
+    icon: Option<(crate::bridge::SpaceIcon, Option<egui::TextureHandle>)>,
+    /// Файл ещё читается с диска.
+    picking: Option<std::sync::mpsc::Receiver<PickedIcon>>,
+    /// Ошибка выбора значка.
+    icon_error: Option<String>,
+}
+
+impl std::fmt::Debug for CreateSpaceForm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreateSpaceForm")
+            .field("name", &self.name)
+            .field("icon", &self.icon.as_ref().map(|(icon, _)| &icon.name))
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for CreateSpaceForm {
@@ -42,6 +59,9 @@ impl Default for CreateSpaceForm {
             visibility: SpaceVisibility::Private,
             color: "lavender",
             submitted: false,
+            icon: None,
+            picking: None,
+            icon_error: None,
         }
     }
 }
@@ -64,35 +84,168 @@ impl CreateSpaceForm {
 }
 
 /// Значок будущего пространства и выбор его цвета.
-fn space_icon_picker(ui: &mut egui::Ui, form: &mut CreateSpaceForm) {
-    ui.vertical_centered(|ui| {
-        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(76.0), Sense::hover());
-        let color = theme::palette(form.color).unwrap_or_else(theme::accent);
-        ui.painter().circle_filled(rect.center(), 38.0, color);
-        let letter = form
-            .name
-            .trim()
-            .chars()
-            .next()
-            .map_or_else(|| "S".to_owned(), |c| c.to_uppercase().collect());
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            letter,
-            egui::FontId::new(30.0, theme::bold_family()),
-            egui::Color32::WHITE,
-        );
-    });
-    widgets::field_label(ui, tr("Цвет значка"));
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        for name in theme::PALETTE_NAMES {
-            let color = theme::palette(name).unwrap_or_else(theme::accent);
-            if widgets::color_swatch(ui, color, form.color == name, 30.0).clicked() {
-                form.color = name;
-            }
+/// Самый большой значок, который принимает сервер.
+const MAX_ICON_BYTES: u64 = 16 * 1024 * 1024;
+
+impl CreateSpaceForm {
+    /// Открывает выбор картинки для значка (в отдельном потоке).
+    fn pick_icon(&mut self, ctx: &egui::Context) {
+        if self.picking.is_some() {
+            return;
         }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter(tr("Изображения"), &["png", "jpg", "jpeg", "gif", "webp"])
+                .pick_file()
+            {
+                let name = path
+                    .file_name()
+                    .map_or_else(|| "icon".to_owned(), |n| n.to_string_lossy().into_owned());
+                let bytes = match std::fs::metadata(&path) {
+                    Ok(meta) if meta.len() > MAX_ICON_BYTES => {
+                        Err(tr("Картинка больше 16 МБ").to_owned())
+                    }
+                    Ok(_) => std::fs::read(&path).map_err(|e| e.to_string()),
+                    Err(e) => Err(e.to_string()),
+                };
+                let _ = tx.send((name, bytes));
+            }
+            ctx.request_repaint();
+        });
+        self.picking = Some(rx);
+    }
+
+    /// Забирает прочитанный файл и готовит предпросмотр.
+    fn take_icon(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.picking else {
+            return;
+        };
+        let Ok((name, bytes)) = rx.try_recv() else {
+            return;
+        };
+        self.picking = None;
+        let bytes = match bytes {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                self.icon_error = Some(err);
+                return;
+            }
+        };
+        // Предпросмотр там, где картинку умеем разобрать; GIF уходит как есть.
+        let gif = std::path::Path::new(&name)
+            .extension()
+            .is_some_and(|x| x.eq_ignore_ascii_case("gif"));
+        let texture = match image::load_from_memory(&bytes) {
+            Ok(image) => {
+                let thumb = image.thumbnail(152, 152).to_rgba8();
+                let size = [thumb.width() as usize, thumb.height() as usize];
+                Some(ctx.load_texture(
+                    "create_space_icon",
+                    egui::ColorImage::from_rgba_unmultiplied(size, thumb.as_raw()),
+                    egui::TextureOptions::LINEAR,
+                ))
+            }
+            Err(_) if gif => None,
+            Err(_) => {
+                self.icon_error = Some(tr("Это не картинка").to_owned());
+                return;
+            }
+        };
+        self.icon = Some((
+            crate::bridge::SpaceIcon {
+                name,
+                bytes: std::sync::Arc::new(bytes),
+            },
+            texture,
+        ));
+        self.icon_error = None;
+    }
+}
+
+fn space_icon_picker(ui: &mut egui::Ui, form: &mut CreateSpaceForm) {
+    form.take_icon(ui.ctx());
+    ui.horizontal(|ui| {
+        let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(76.0), Sense::click());
+        let texture = form.icon.as_ref().and_then(|(_, t)| t.as_ref());
+        if let Some(texture) = texture {
+            egui::Image::new(texture)
+                .corner_radius(theme::rounded(22))
+                .paint_at(ui, rect);
+        } else {
+            let color = theme::palette(form.color).unwrap_or_else(theme::accent);
+            ui.painter().rect_filled(rect, theme::rounded(22), color);
+            let letter = if form.icon.is_some() {
+                "GIF".to_owned()
+            } else {
+                form.name
+                    .trim()
+                    .chars()
+                    .next()
+                    .map_or_else(|| "S".to_owned(), |c| c.to_uppercase().collect())
+            };
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                letter,
+                egui::FontId::new(30.0, theme::bold_family()),
+                egui::Color32::WHITE,
+            );
+        }
+        if response.hovered() {
+            ui.painter().rect_filled(
+                rect,
+                theme::rounded(22),
+                egui::Color32::from_black_alpha(130),
+            );
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                tr("Значок"),
+                egui::FontId::new(13.0, theme::bold_family()),
+                egui::Color32::WHITE,
+            );
+        }
+        if response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(tr("Загрузить значок"))
+            .clicked()
+        {
+            form.pick_icon(ui.ctx());
+        }
+        ui.add_space(10.0);
+        ui.vertical(|ui| {
+            widgets::field_label(ui, tr("Цвет значка"));
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for name in theme::PALETTE_NAMES {
+                    let color = theme::palette(name).unwrap_or_else(theme::accent);
+                    if widgets::color_swatch(ui, color, form.color == name, 26.0).clicked() {
+                        form.color = name;
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        form.picking.is_none(),
+                        egui::Button::new(tr("Загрузить значок")),
+                    )
+                    .clicked()
+                {
+                    form.pick_icon(ui.ctx());
+                }
+                if form.icon.is_some() && ui.button(tr("Убрать")).clicked() {
+                    form.icon = None;
+                }
+            });
+        });
     });
+    if let Some(error) = &form.icon_error {
+        ui.label(RichText::new(error).color(theme::rose()).size(12.5));
+    }
 }
 
 /// Приватное, по заявке или публичное.
@@ -191,7 +344,8 @@ pub(crate) fn show_create_space(
                 if create.clicked() || (enter && !busy) {
                     if let Some(request) = request {
                         form.submitted = true;
-                        bridge.request(BridgeRequest::CreateSpace(request));
+                        let icon = form.icon.as_ref().map(|(icon, _)| icon.clone());
+                        bridge.request(BridgeRequest::CreateSpace(request, icon));
                     }
                 }
                 if ui.button(tr("Отмена")).clicked() {

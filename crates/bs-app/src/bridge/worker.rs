@@ -1488,6 +1488,38 @@ async fn social_request(
     })
 }
 
+/// Новое пространство; значок — как в настройках: загрузка файла, затем
+/// PATCH. Не загрузился значок — пространство всё равно создано.
+async fn create_space(
+    client: &bs_api::ApiClient,
+    body: &bs_api::CreateSpaceRequest,
+    icon: Option<super::protocol::SpaceIcon>,
+) -> BridgeResponse {
+    let space = match client.create_space(body).await {
+        Ok(space) => space,
+        Err(err) => return BridgeResponse::Failed(err.to_string()),
+    };
+    if let Some(icon) = icon {
+        let mime = crate::media::mime_for_name(&icon.name);
+        match client
+            .upload_file(&icon.name, mime, &icon.bytes, |_, _| {})
+            .await
+        {
+            Ok(file) => {
+                let update = bs_api::SpaceUpdate {
+                    icon: Some(file.filename),
+                    ..Default::default()
+                };
+                if let Err(err) = client.update_space(&space.id, &update).await {
+                    tracing::warn!(%err, "значок нового пространства не сохранился");
+                }
+            }
+            Err(err) => tracing::warn!(%err, "значок нового пространства не загрузился"),
+        }
+    }
+    full_space(client, &space.id).await
+}
+
 /// Пространства, приглашения, каналы, каталог. Чужие запросы возвращает обратно.
 async fn spaces_request(
     client: &bs_api::ApiClient,
@@ -1557,10 +1589,7 @@ async fn spaces_request(
         // Сервер отвечает голым пространством без каналов и участников:
         // детали берём отдельным запросом, иначе в кэше оказалось бы пустое
         // пространство до переподключения.
-        BridgeRequest::CreateSpace(body) => match client.create_space(&body).await {
-            Ok(space) => full_space(client, &space.id).await,
-            Err(err) => BridgeResponse::Failed(err.to_string()),
-        },
+        BridgeRequest::CreateSpace(body, icon) => create_space(client, &body, icon).await,
         BridgeRequest::Explore(query) => match client.explore_spaces(&query, 50, 0).await {
             Ok(page) => BridgeResponse::Explore(page),
             Err(err) => BridgeResponse::Failed(err.to_string()),
