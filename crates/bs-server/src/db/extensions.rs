@@ -186,6 +186,36 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
              WHERE id = 1 AND (instance_name IS NULL OR instance_name = '' OR instance_name = 'Backspace')",
         ],
     ),
+    (
+        "0012_sticker_packs",
+        &[
+            // Стикерпаки: картинки — те же sticker_assets, что у личных
+            // стикеров, поэтому в сообщениях это обычные стикеры.
+            "CREATE TABLE bs_sticker_packs (
+                id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                shared INTEGER NOT NULL DEFAULT 1,
+                created_at BIGINT NOT NULL,
+                updated_at BIGINT NOT NULL
+            )",
+            "CREATE INDEX bs_sticker_packs_owner ON bs_sticker_packs (owner_id)",
+            "CREATE TABLE bs_sticker_pack_items (
+                pack_id TEXT NOT NULL REFERENCES bs_sticker_packs(id) ON DELETE CASCADE,
+                sticker_id TEXT NOT NULL REFERENCES sticker_assets(id),
+                name TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                PRIMARY KEY (pack_id, sticker_id)
+            )",
+            "CREATE INDEX bs_sticker_pack_items_sticker ON bs_sticker_pack_items (sticker_id)",
+            "CREATE TABLE bs_sticker_pack_users (
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                pack_id TEXT NOT NULL REFERENCES bs_sticker_packs(id) ON DELETE CASCADE,
+                added_at BIGINT NOT NULL,
+                PRIMARY KEY (user_id, pack_id)
+            )",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

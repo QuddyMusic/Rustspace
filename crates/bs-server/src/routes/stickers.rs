@@ -30,14 +30,14 @@ const UPLOADS_PER_MINUTE: u32 = 30;
 /// Предел тела загрузки стикера (`bodyLimit` маршрута у оригинала).
 pub const UPLOAD_BODY_LIMIT: usize = MAX_STICKER_BYTES.div_ceil(3) * 4 + 4096;
 
-fn token_for(state: &AppState, id: &str) -> String {
+pub(crate) fn token_for(state: &AppState, id: &str) -> String {
     format!(
         "sticker:{}/api/stickers/assets/{id}.webp",
         our_origin(&state.config)
     )
 }
 
-fn is_sticker_id(id: &str) -> bool {
+pub(crate) fn is_sticker_id(id: &str) -> bool {
     id.len() == 64
         && id
             .bytes()
@@ -57,7 +57,7 @@ fn collection_full() -> ApiError {
 }
 
 /// Имя стикера (`normalizeStickerName`).
-fn normalize_name(value: &str) -> Option<String> {
+pub(crate) fn normalize_name(value: &str) -> Option<String> {
     let trimmed = js_trim(value);
     (!trimmed.is_empty()
         && utf16_len(trimmed) <= MAX_NAME_LENGTH

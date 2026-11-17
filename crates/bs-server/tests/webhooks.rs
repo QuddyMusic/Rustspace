@@ -587,3 +587,162 @@ async fn admin_requests_a_server_update() {
         .await;
     assert_eq!(status["selfUpdate"]["step"], "updated");
 }
+
+/// Два личных стикера разного цвета; их id.
+async fn two_stickers(server: &Server, token: &str) -> Vec<String> {
+    use base64::Engine as _;
+    let mut ids = Vec::new();
+    for color in [10u8, 200] {
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            32,
+            32,
+            image::Rgba([color, 0, 0, 255]),
+        ))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("png");
+        let body = json!({"name": format!("s{color}"), "image": base64::engine::general_purpose::STANDARD.encode(&png)});
+        let (code, sticker) = server
+            .call(reqwest::Method::POST, "/api/stickers", token, Some(body))
+            .await;
+        assert_eq!(code, 200, "{sticker}");
+        ids.push(sticker["id"].as_str().expect("id").to_owned());
+    }
+    ids
+}
+
+#[tokio::test]
+async fn sticker_packs_are_made_shared_and_added() {
+    let dir = tempfile::tempdir().expect("каталог");
+    let server = start_with(&[("UPLOAD_DIR", dir.path().to_str().expect("путь"))]).await;
+    let (token, _) = user_with_channel(&server).await;
+    let ids = two_stickers(&server, &token).await;
+    let (code, pack) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/rustspace/sticker-packs",
+            &token,
+            Some(json!({"name": "Котики"})),
+        )
+        .await;
+    assert_eq!(code, 200, "{pack}");
+    let pack_id = pack["id"].as_str().expect("id").to_owned();
+    for id in &ids {
+        let (code, _) = server
+            .call(
+                reqwest::Method::PUT,
+                &format!("/api/rustspace/sticker-packs/{pack_id}/stickers/{id}"),
+                &token,
+                Some(json!({})),
+            )
+            .await;
+        assert_eq!(code, 200);
+    }
+    let (_, pack) = server
+        .call(
+            reqwest::Method::PUT,
+            &format!("/api/rustspace/sticker-packs/{pack_id}/order"),
+            &token,
+            Some(json!({"stickers": [ids[1].clone(), ids[0].clone()]})),
+        )
+        .await;
+    assert_eq!(pack["stickers"][0]["id"], ids[1].as_str());
+    assert_eq!(pack["stickers"][0]["name"], "s200");
+    assert!(
+        pack["stickers"][0]["token"]
+            .as_str()
+            .expect("token")
+            .starts_with("sticker:")
+    );
+    guest_adds_then_loses_pack(&server, &token, &pack_id, &ids[0]).await;
+}
+
+/// Второй пользователь находит пак по стикеру и добавляет; закрытый пак
+/// у него пропадает; затем владелец удаляет пак.
+async fn guest_adds_then_loses_pack(server: &Server, token: &str, pack_id: &str, sticker: &str) {
+    // Второй пользователь находит пак по стикеру и добавляет к себе.
+    let (_, guest) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/auth/register",
+            "",
+            Some(json!({"username": "guest", "password": "password123"})),
+        )
+        .await;
+    let guest = guest["token"].as_str().expect("token").to_owned();
+    let (_, found) = server
+        .call(
+            reqwest::Method::GET,
+            &format!("/api/rustspace/sticker-packs/with/{sticker}"),
+            &guest,
+            None,
+        )
+        .await;
+    assert_eq!(found[0]["id"], pack_id);
+    assert_eq!(found[0]["mine"], false);
+    let (code, _) = server
+        .call(
+            reqwest::Method::PUT,
+            &format!("/api/rustspace/sticker-packs/{pack_id}/added"),
+            &guest,
+            None,
+        )
+        .await;
+    assert_eq!(code, 200);
+    let (_, mine) = server
+        .call(
+            reqwest::Method::GET,
+            "/api/rustspace/sticker-packs",
+            &guest,
+            None,
+        )
+        .await;
+    assert_eq!(mine["added"][0]["name"], "Котики");
+    // Чужой пак не правится.
+    let (code, _) = server
+        .call(
+            reqwest::Method::PATCH,
+            &format!("/api/rustspace/sticker-packs/{pack_id}"),
+            &guest,
+            Some(json!({"name": "x"})),
+        )
+        .await;
+    assert_eq!(code, 403);
+    // Закрытый пак пропадает у добавивших.
+    let (_, closed) = server
+        .call(
+            reqwest::Method::PATCH,
+            &format!("/api/rustspace/sticker-packs/{pack_id}"),
+            token,
+            Some(json!({"shared": false})),
+        )
+        .await;
+    assert_eq!(closed["shared"], false);
+    let (_, mine) = server
+        .call(
+            reqwest::Method::GET,
+            "/api/rustspace/sticker-packs",
+            &guest,
+            None,
+        )
+        .await;
+    assert_eq!(mine["added"], json!([]));
+    let (code, _) = server
+        .call(
+            reqwest::Method::GET,
+            &format!("/api/rustspace/sticker-packs/{pack_id}"),
+            &guest,
+            None,
+        )
+        .await;
+    assert_eq!(code, 404);
+    let (code, _) = server
+        .call(
+            reqwest::Method::DELETE,
+            &format!("/api/rustspace/sticker-packs/{pack_id}"),
+            token,
+            None,
+        )
+        .await;
+    assert_eq!(code, 200);
+}

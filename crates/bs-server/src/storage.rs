@@ -304,6 +304,10 @@ fn cleanup_stickers(
     for row in tx.query("SELECT sticker_id FROM personal_stickers", params![])? {
         used.insert(row.text("sticker_id")?);
     }
+    // Стикеры паков Rustspace тоже нужны.
+    for row in tx.query("SELECT sticker_id FROM bs_sticker_pack_items", params![])? {
+        used.insert(row.text("sticker_id")?);
+    }
     for (table, column) in [
         ("messages", "content"),
         ("dm_messages", "content"),

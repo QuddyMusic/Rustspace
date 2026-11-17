@@ -25,6 +25,7 @@ pub mod search;
 pub mod settings;
 pub mod social;
 pub mod spaces;
+pub mod sticker_packs;
 pub mod stickers;
 pub mod twofactor;
 pub mod uploads;
