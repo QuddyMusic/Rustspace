@@ -512,6 +512,23 @@ removing one is accepted inside the 3-second rate limit. `POST /api/game-icons` 
 base64 PNG, JPEG or WebP (up to 512 KB), stores a 256 px WebP and returns its URL; an icon
 nobody uploaded for a year is cleaned up. Ported from Backspace PR #482.
 
+### Updating the server from the client
+
+*(bs-server + `setup.sh`)* *Settings → Updates* has an **Update server** button for the
+instance admin. The server itself gets no root rights and downloads nothing: it only writes a
+request into `/var/lib/rustspace/updater`. A root helper installed by `setup.sh`
+(`/usr/local/lib/rustspace/rustspace-update.sh`, started by `rustspace-update.path` on
+systemd or the `rustspace-updater` service on OpenRC) then:
+
+1. takes the release only from the repository set at install time (`GITHUB_REPO`), never from
+   the request, and checks its published SHA-256;
+2. stops the server and backs up the database and the old binary to `/var/backups/rustspace`
+   (if the backup fails, nothing is changed);
+3. starts the new version and waits up to a minute for it to answer with the new version;
+   otherwise it puts back the old binary and the database.
+
+The client shows each step. `setup.sh --no-updater` leaves the helper out.
+
 ### Saved Messages, pins, bookmarks and 18+ channels
 
 *(bs-server)* Additions over the original API (`/api/rustspace/…`; bookmarks at

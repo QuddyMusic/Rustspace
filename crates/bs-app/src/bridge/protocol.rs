@@ -513,6 +513,8 @@ pub(crate) enum AdminRequest {
     LoadTelemetryPreview,
     /// Состояние обновлений; `true` — проверить заново.
     LoadUpdates(bool),
+    /// Обновить сервер (последний выпуск).
+    UpdateServer,
     /// Удалить свой аккаунт.
     DeleteAccount {
         /// Пароль.
@@ -623,7 +625,7 @@ pub(crate) enum AdminEvent {
     /// Предпросмотр телеметрии (JSON текстом).
     TelemetryPreview(Result<String, String>),
     /// Состояние обновлений.
-    Updates(Result<bs_api::UpdateStatus, String>),
+    Updates(Result<Box<bs_api::UpdateStatus>, String>),
     /// Итог очистки.
     Cleaned(Result<bs_api::CleanupResult, String>),
     /// Итог простого действия: текст успеха или ошибки.

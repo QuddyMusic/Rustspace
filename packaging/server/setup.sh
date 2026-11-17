@@ -59,6 +59,7 @@ pinned_livekit_sha() {
 }
 
 APP=rustspace
+WITH_UPDATER=${WITH_UPDATER:-1}
 ETC=/etc/rustspace
 ENV_FILE=$ETC/rustspace.env
 LK_FILE=$ETC/livekit.yaml
@@ -89,7 +90,7 @@ REGISTRATION_OPEN TRUSTED_PROXY_HOPS TUS_EXPIRATION_HOURS UPLOAD_DIR
 TELEGRAM_BOT_TOKEN TELEGRAM_API_URL DISCORD_BOT_TOKEN DISCORD_API_URL
 MATRIX_HOMESERVER MATRIX_ACCESS_TOKEN"
 # Их скрипт задаёт сам.
-MANAGED_VARS="DOMAIN HOST PORT TRUSTED_PROXY_HOPS DB_PATH DATABASE_URL UPLOAD_DIR
+MANAGED_VARS="BS_UPDATER_DIR DOMAIN HOST PORT TRUSTED_PROXY_HOPS DB_PATH DATABASE_URL UPLOAD_DIR
 JWT_SECRET LIVEKIT_URL LIVEKIT_API_KEY LIVEKIT_API_SECRET BS_WEB_DIST"
 
 usage() {
@@ -123,6 +124,7 @@ usage() {
                          его меняли (по умолчанию — github.com/QuddyMusic/Rustspace)
   --data-from КАТАЛОГ    перенести данные из каталога (*.db и uploads/)
   --livekit-version В    версия LiveKit (1.13.11)
+  --no-updater           не ставить помощника обновления из клиента
   -y, --yes              не задавать вопросов
   -h, --help             эта справка
 EOF
@@ -150,6 +152,7 @@ while [ $# -gt 0 ]; do
         --database-url) DB_CHOICE=external; EXTERNAL_DB_URL="${2:-}"; shift 2 ;;
         --livekit-version) LIVEKIT_VERSION="${2:-}"; shift 2 ;;
         --jobs) JOBS="${2:-}"; shift 2 ;;
+        --no-updater) WITH_UPDATER=0; shift ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Неизвестный параметр: $1" >&2; usage >&2; exit 2 ;;
@@ -772,6 +775,8 @@ NEW_ENV=$(mktemp)
         echo "DB_PATH='$DB_FILE'"
     fi
     echo "UPLOAD_DIR='$DATA/data/uploads'"
+    # Каталог заявок на обновление из клиента (см. rustspace-update.sh).
+    [ "$WITH_UPDATER" = 0 ] || [ -z "$RUST_ARCH" ] || echo "BS_UPDATER_DIR='$DATA/updater'"
     [ -z "$WEB_DIR" ] || echo "BS_WEB_DIST='$WEB_DIR'"
     if [ "$WITH_LIVEKIT" = 1 ]; then
         echo "LIVEKIT_URL='wss://$LIVEKIT_HOST'"
@@ -976,6 +981,77 @@ else
     # Настройки читает root (в них секреты), а сервер работает от $APP.
     warn "  sh -c 'set -a; . $ENV_FILE; set +a; cd $DATA && exec su -s /bin/sh $APP -c $BIN'"
     [ "$WITH_LIVEKIT" = 0 ] || warn "  su -s /bin/sh livekit -c '$LK_BIN --config $LK_FILE'"
+fi
+
+# ─── Обновление из клиента ──────────────────────────────────────────────────
+# Администратор нажимает «Обновить сервер» — сервер (без root) кладёт заявку
+# в $DATA/updater, а этот помощник (root) ставит выпуск из $GITHUB_REPO,
+# сверив контрольную сумму, с резервной копией базы и откатом.
+
+UPDATER=/usr/local/lib/rustspace/rustspace-update.sh
+if [ "$WITH_UPDATER" = 1 ] && [ -n "$RUST_ARCH" ] && { [ "$INIT" = systemd ] || [ "$INIT" = openrc ]; }; then
+    say "Ставлю помощника обновления из клиента"
+    mkdir -p /usr/local/lib/rustspace
+    if [ -f "$SCRIPT_DIR/rustspace-update.sh" ]; then
+        install -m 755 -o root -g root "$SCRIPT_DIR/rustspace-update.sh" "$UPDATER"
+    else
+        ref=main
+        [ -z "$RELEASE" ] || [ "$RELEASE" = latest ] || ref="v$RELEASE"
+        curl -sSfL -o "$UPDATER.new" \
+            "https://raw.githubusercontent.com/$GITHUB_REPO/$ref/packaging/server/rustspace-update.sh" \
+            && install -m 755 -o root -g root "$UPDATER.new" "$UPDATER"
+        rm -f "$UPDATER.new"
+    fi
+    install -d -m 750 -o "$APP" -g "$APP" "$DATA/updater"
+    cat > "$ETC/updater.conf" <<EOF
+APP='$APP'
+BIN='$BIN'
+ENV_FILE='$ENV_FILE'
+UPDATER_DIR='$DATA/updater'
+GITHUB_REPO='$GITHUB_REPO'
+RUST_ARCH='$RUST_ARCH'
+INIT='$INIT'
+PORT='$PORT'
+BACKUPS='$BACKUPS'
+DB_CHOICE='$DB_CHOICE'
+EOF
+    chmod 600 "$ETC/updater.conf"
+    if [ "$INIT" = systemd ]; then
+        cat > "/etc/systemd/system/$APP-update.service" <<EOF
+[Unit]
+Description=Rustspace: update requested from the client
+
+[Service]
+Type=oneshot
+ExecStart=$UPDATER
+EOF
+        cat > "/etc/systemd/system/$APP-update.path" <<EOF
+[Unit]
+Description=Rustspace: watch for update requests
+
+[Path]
+PathExists=$DATA/updater/request.json
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload
+        systemctl enable --now "$APP-update.path" >/dev/null 2>&1 || warn "не удалось включить $APP-update.path"
+    else
+        cat > "/etc/init.d/$APP-updater" <<EOF
+#!/sbin/openrc-run
+description="Rustspace: update requested from the client"
+command="$UPDATER"
+command_args="--watch"
+command_background=true
+pidfile="/run/$APP-updater.pid"
+EOF
+        chmod 755 "/etc/init.d/$APP-updater"
+        rc-update add "$APP-updater" default >/dev/null
+        rc-service "$APP-updater" restart >/dev/null
+    fi
+    touch "$DATA/updater/enabled"
+    chown "$APP:$APP" "$DATA/updater/enabled"
 fi
 
 # ─── Уборка старых имён ─────────────────────────────────────────────────────

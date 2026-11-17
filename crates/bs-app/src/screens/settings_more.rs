@@ -40,6 +40,10 @@ pub(crate) struct MoreUi {
     telemetry_note: Option<Note>,
     updates: Option<UpdateStatus>,
     updates_asked: bool,
+    /// Когда последний раз спрашивали ход обновления (время egui).
+    updates_polled: f64,
+    /// Ждём подтверждения «Обновить сервер».
+    confirm_update: bool,
     updates_note: Option<Note>,
     peers: Option<Vec<Peer>>,
     approvals: Vec<ApprovalRequest>,
@@ -99,7 +103,7 @@ impl MoreUi {
             },
             AdminEvent::Updates(result) => match result {
                 Ok(status) => {
-                    self.updates = Some(status);
+                    self.updates = Some(*status);
                     self.updates_note = None;
                 }
                 Err(message) => self.updates_note = Some(fail(message)),
@@ -428,18 +432,134 @@ pub(crate) fn updates_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridg
     {
         request(bridge, AdminRequest::LoadUpdates(true));
     }
+    if status.self_update.available {
+        ui.add_space(10.0);
+        self_update_card(ui, more, bridge, &status);
+    }
     ui.add_space(10.0);
     card(ui, |ui| {
         ui.label(RichText::new(tr("Как обновить вручную")).color(theme::text_bright()));
         let hint = match status.channel.as_str() {
-            "prebuilt" => tr("Установка из готового образа: на сервере выполните ./update.sh."),
-            "source" => {
-                tr("Установка из исходников: на сервере выполните git pull и затем ./update.sh.")
-            }
-            _ => tr("Способ установки неизвестен. Готовый образ: ./update.sh. \
-                 Из исходников: git pull, затем ./update.sh."),
+            "source" => tr(
+                "Установка из исходников: на сервере в клоне выполните git pull, \
+                 затем sudo sh packaging/server/setup.sh.",
+            ),
+            _ => tr(
+                "На сервере: sudo sh setup.sh --release (последний выпуск) или из клона — \
+                 git pull, затем sudo sh packaging/server/setup.sh. Настройки, данные и копия \
+                 базы сохраняются.",
+            ),
         };
         ui.label(theme::muted(hint).size(12.5));
+    });
+}
+
+/// Шаг помощника обновления понятными словами.
+fn update_step(step: &str) -> &'static str {
+    match step {
+        "looking" => tr("Ищу последний выпуск…"),
+        "downloading" => tr("Скачиваю и сверяю контрольную сумму…"),
+        "backup" => tr("Останавливаю сервер и делаю резервную копию базы…"),
+        "starting" => tr("Запускаю новую версию…"),
+        "updated" => tr("Сервер обновлён."),
+        "same-version" => tr("Эта версия уже установлена."),
+        "bad-version" => tr("Не удалось определить версию выпуска."),
+        "download-failed" => tr("Не удалось скачать выпуск."),
+        "checksum" => tr("Контрольная сумма не совпала — выпуск не установлен."),
+        "no-binary" => tr("В архиве выпуска нет сервера."),
+        "backup-failed" => tr(
+            "Резервная копия базы не получилась — обновление отменено, сервер работает как прежде.",
+        ),
+        "rolled-back" => {
+            tr("Новая версия не запустилась — возвращены прежняя версия и база из резервной копии.")
+        }
+        "helper-error" => tr("Сбой помощника обновления — подробности в журнале сервера."),
+        _ => "",
+    }
+}
+
+/// Обновление из клиента: кнопка с подтверждением и ход работы помощника.
+fn self_update_card(
+    ui: &mut egui::Ui,
+    more: &mut MoreUi,
+    bridge: &Bridge,
+    status: &bs_api::UpdateStatus,
+) {
+    let helper = &status.self_update;
+    let busy = matches!(helper.state.as_str(), "pending" | "running");
+    card(ui, |ui| {
+        ui.label(RichText::new(tr("Обновить из клиента")).color(theme::text_bright()));
+        ui.label(
+            theme::muted(tr(
+                "Помощник на сервере скачает выпуск из репозитория Rustspace, сверит контрольную \
+                 сумму, сделает резервную копию базы и перезапустит сервер. Если новая версия не \
+                 запустится, он вернёт прежнюю и базу. Пока идёт обновление, все отключатся на \
+                 минуту.",
+            ))
+            .size(12.5),
+        );
+        ui.add_space(6.0);
+        if busy {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                let step = update_step(&helper.step);
+                ui.label(if helper.state == "pending" || step.is_empty() {
+                    tr("Заявка принята, ждём помощника…")
+                } else {
+                    step
+                });
+            });
+            // Сервер перезапустится: спрашиваем, пока не закончит.
+            let now = ui.input(|i| i.time);
+            if now - more.updates_polled > 3.0 {
+                more.updates_polled = now;
+                request(bridge, AdminRequest::LoadUpdates(false));
+            }
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(1));
+        } else {
+            let (text, color) = match helper.state.as_str() {
+                "done" => (update_step(&helper.step), theme::mint()),
+                "failed" | "rolled-back" => (update_step(&helper.step), theme::rose()),
+                _ => ("", theme::text()),
+            };
+            if !text.is_empty() {
+                ui.label(RichText::new(text).color(color));
+                if !helper.backup.is_empty() {
+                    ui.label(
+                        theme::muted(crate::tf!(
+                            "Резервная копия: {path}",
+                            path = helper.backup.clone()
+                        ))
+                        .size(12.0),
+                    );
+                }
+            }
+            let newer = status.state != "up-to-date";
+            if more.confirm_update {
+                ui.label(
+                    RichText::new(tr(
+                        "Обновить сервер сейчас? Все участники ненадолго отключатся.",
+                    ))
+                    .color(theme::amber()),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button(tr("Да, обновить")).clicked() {
+                        more.confirm_update = false;
+                        request(bridge, AdminRequest::UpdateServer);
+                    }
+                    if ui.button(tr("Отмена")).clicked() {
+                        more.confirm_update = false;
+                    }
+                });
+            } else if ui
+                .add_enabled(newer, egui::Button::new(tr("Обновить сервер")))
+                .on_disabled_hover_text(tr("Установлена последняя версия"))
+                .clicked()
+            {
+                more.confirm_update = true;
+            }
+        }
     });
 }
 

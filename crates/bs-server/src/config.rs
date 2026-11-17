@@ -83,6 +83,9 @@ pub struct Config {
     pub update_check: bool,
     /// Способ установки для панели обновлений (`BACKSPACE_INSTALL_CHANNEL`).
     pub install_channel: Option<String>,
+    /// Каталог заявок на обновление из клиента (`BS_UPDATER_DIR`); его
+    /// заводит `setup.sh` вместе с root-помощником `rustspace-update.sh`.
+    pub updater_dir: Option<std::path::PathBuf>,
     /// Скольким прокси доверять `X-Forwarded-For` (`TRUSTED_PROXY_HOPS`, 1).
     pub trusted_proxy_hops: u32,
     /// LiveKit.
@@ -272,6 +275,7 @@ impl Config {
             commit: env.optional("BACKSPACE_COMMIT"),
             update_check: env.flag("BACKSPACE_UPDATE_CHECK", false),
             install_channel: env.optional("BACKSPACE_INSTALL_CHANNEL"),
+            updater_dir: env.optional("BS_UPDATER_DIR").map(std::path::PathBuf::from),
             trusted_proxy_hops,
             livekit: LiveKit {
                 url: env.optional("LIVEKIT_URL"),

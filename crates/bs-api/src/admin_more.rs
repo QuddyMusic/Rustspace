@@ -111,6 +111,26 @@ pub struct UpdateStatus {
     pub reason: Option<String>,
     /// Как установлен инстанс: `prebuilt`, `source`, `unknown`.
     pub channel: String,
+    /// Обновление из клиента (`bs-server` с помощником из `setup.sh`).
+    pub self_update: SelfUpdate,
+}
+
+/// Помощник обновления сервера и его последний шаг.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SelfUpdate {
+    /// Помощник поставлен.
+    pub available: bool,
+    /// `idle`, `pending`, `running`, `done`, `failed`, `rolled-back`.
+    pub state: String,
+    /// Какую версию ставили.
+    pub target: String,
+    /// С какой.
+    pub from: String,
+    /// Шаг или причина (код).
+    pub step: String,
+    /// Где резервная копия.
+    pub backup: String,
 }
 
 #[derive(Serialize)]
@@ -161,6 +181,22 @@ impl ApiClient {
     /// Ошибки запроса.
     pub async fn telemetry_preview(&self) -> Result<serde_json::Value, ApiError> {
         self.get_json("/api/admin/telemetry/preview").await
+    }
+
+    /// `POST /api/rustspace/admin/update` — заявка обновить сервер до
+    /// `version` (по умолчанию — последний выпуск).
+    ///
+    /// # Errors
+    /// Ошибки запроса (409 — помощника нет или обновление уже идёт).
+    pub async fn request_server_update(
+        &self,
+        version: Option<&str>,
+    ) -> Result<SelfUpdate, ApiError> {
+        self.post_json(
+            "/api/rustspace/admin/update",
+            &serde_json::json!({ "version": version }),
+        )
+        .await
     }
 
     /// `GET /api/admin/instance/update-status`.

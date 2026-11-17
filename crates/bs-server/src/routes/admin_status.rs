@@ -369,8 +369,9 @@ pub async fn update_status(
         return Ok(refusal);
     }
     let config = &state.config;
+    let updater = updater_status(config);
     let (latest, reason, checked_at) = latest_release(
-        config.update_check,
+        config.update_check || updater["available"] == true,
         query.refresh.as_deref() == Some("true"),
     )
     .await;
@@ -399,11 +400,105 @@ pub async fn update_status(
         "latest": latest,
         "state": status,
         "checkedAt": if reason == Some("disabled") { Value::Null } else { json!(checked_at) },
-        "checkEnabled": config.update_check,
+        "checkEnabled": config.update_check || updater["available"] == true,
         "reason": reason,
         "channel": channel,
+        "selfUpdate": updater,
     }))
     .into_response())
+}
+
+/// Помощник обновления: стоит ли и что делает (`status.json` пишет он).
+fn updater_status(config: &crate::config::Config) -> Value {
+    let Some(dir) = config
+        .updater_dir
+        .as_deref()
+        .filter(|d| d.join("enabled").exists())
+    else {
+        return json!({"available": false});
+    };
+    let mut status = std::fs::read(dir.join("status.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({"state": "idle"}));
+    if dir.join("request.json").exists() {
+        status["state"] = json!("pending");
+    }
+    status["available"] = json!(true);
+    status
+}
+
+/// Тело заявки на обновление.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct UpdateRequest {
+    version: Option<String>,
+}
+
+fn plain_version(version: &str) -> bool {
+    let mut parts = version.splitn(2, ['-', '+']);
+    let core = parts.next().unwrap_or_default();
+    let numbers: Vec<&str> = core.split('.').collect();
+    numbers.len() == 3
+        && numbers
+            .iter()
+            .all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        && parts.next().is_none_or(|rest| {
+            !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.')
+        })
+}
+
+/// `POST /api/rustspace/admin/update` `{version?}` — заявка помощнику:
+/// поставить выпуск (по умолчанию последний). Сервер root-прав не получает
+/// и сам ничего не качает: выпуск берёт помощник из репозитория, заданного
+/// при установке, и сверяет его контрольную сумму.
+pub async fn request_update(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Json(body): Json<UpdateRequest>,
+) -> Outcome {
+    if let Err(refusal) = as_admin(&state, &user, |_, _| Ok::<_, ApiError>(())).await? {
+        return Ok(refusal);
+    }
+    let current = updater_status(&state.config);
+    let Some(dir) = state
+        .config
+        .updater_dir
+        .clone()
+        .filter(|_| current["available"] == true)
+    else {
+        return Err(ApiError::conflict("updater_unavailable"));
+    };
+    if matches!(current["state"].as_str(), Some("pending" | "running")) {
+        return Err(ApiError::conflict("update_in_progress"));
+    }
+    let version = body
+        .version
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("latest");
+    let version = version.strip_prefix('v').unwrap_or(version);
+    if version != "latest" && !plain_version(version) {
+        return Err(ApiError::bad_request("validation_failed"));
+    }
+    let request = json!({"version": version, "requestedBy": user.id, "at": now_ms()});
+    let temporary = dir.join("request.json.tmp");
+    let written = tokio::fs::write(&temporary, request.to_string()).await;
+    if written.is_err()
+        || tokio::fs::rename(&temporary, dir.join("request.json"))
+            .await
+            .is_err()
+    {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(ApiError::internal());
+    }
+    tracing::info!(version, admin = %user.id, "заявка на обновление сервера");
+    Ok((
+        axum::http::StatusCode::ACCEPTED,
+        Json(updater_status(&state.config)),
+    )
+        .into_response())
 }
 
 #[cfg(test)]

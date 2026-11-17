@@ -48,7 +48,8 @@ pub use admin::{
     PasswordReset, StorageBreakdown, StorageStats,
 };
 pub use admin_more::{
-    CurrentVersion, LatestRelease, StreamingLimits, StreamingPatch, TelemetryStatus, UpdateStatus,
+    CurrentVersion, LatestRelease, SelfUpdate, StreamingLimits, StreamingPatch, TelemetryStatus,
+    UpdateStatus,
 };
 pub use assets::{AssetPath, GIF_HOSTS, STICKER_PREFIX, fetch_external, resolve_asset};
 pub use auth::AuthResponse;

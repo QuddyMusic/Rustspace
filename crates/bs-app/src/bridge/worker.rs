@@ -914,9 +914,23 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
                 .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
                 .map_err(|e| text(&e)),
         ),
-        AdminRequest::LoadUpdates(refresh) => {
-            AdminEvent::Updates(client.update_status(refresh).await.map_err(|e| text(&e)))
-        }
+        AdminRequest::LoadUpdates(refresh) => AdminEvent::Updates(
+            client
+                .update_status(refresh)
+                .await
+                .map(Box::new)
+                .map_err(|e| text(&e)),
+        ),
+        AdminRequest::UpdateServer => match client.request_server_update(None).await {
+            Ok(_) => AdminEvent::Updates(
+                client
+                    .update_status(false)
+                    .await
+                    .map(Box::new)
+                    .map_err(|e| text(&e)),
+            ),
+            Err(e) => AdminEvent::Updates(Err(text(&e))),
+        },
         AdminRequest::LoadSettings => {
             AdminEvent::Settings(client.instance_settings().await.map_err(|e| text(&e)))
         }

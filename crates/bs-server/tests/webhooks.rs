@@ -492,3 +492,98 @@ async fn game_icons_upload_and_serve() {
         .await;
     assert_eq!(status, 400);
 }
+
+#[tokio::test]
+async fn admin_requests_a_server_update() {
+    let dir = tempfile::tempdir().expect("каталог");
+    let updater = dir.path().join("updater");
+    std::fs::create_dir_all(&updater).expect("каталог помощника");
+    let server = start_with(&[("BS_UPDATER_DIR", updater.to_str().expect("путь"))]).await;
+    let (token, _) = user_with_channel(&server).await;
+    let (_, status) = server
+        .call(
+            reqwest::Method::GET,
+            "/api/admin/instance/update-status",
+            &token,
+            None,
+        )
+        .await;
+    // Помощник не поставлен — кнопки нет, заявки не принимаются.
+    assert_eq!(status["selfUpdate"]["available"], false);
+    let (code, _) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/rustspace/admin/update",
+            &token,
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(code, 409);
+    std::fs::write(updater.join("enabled"), "").expect("enabled");
+    let (code, body) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/rustspace/admin/update",
+            &token,
+            Some(json!({"version": "v0.3.0"})),
+        )
+        .await;
+    assert_eq!(code, 202, "{body}");
+    assert_eq!(body["state"], "pending");
+    let request: Value =
+        serde_json::from_slice(&std::fs::read(updater.join("request.json")).expect("заявка"))
+            .expect("json");
+    assert_eq!(request["version"], "0.3.0");
+    let (code, _) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/rustspace/admin/update",
+            &token,
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(code, 409, "вторая заявка, пока первая не выполнена");
+    std::fs::remove_file(updater.join("request.json")).expect("убрать заявку");
+    let (code, _) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/rustspace/admin/update",
+            &token,
+            Some(json!({"version": "1.0; rm -rf /"})),
+        )
+        .await;
+    assert_eq!(code, 400);
+    // Не администратор.
+    let (_, other) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/auth/register",
+            "",
+            Some(json!({"username": "guest", "password": "password123"})),
+        )
+        .await;
+    let guest = other["token"].as_str().unwrap_or_default().to_owned();
+    let (code, _) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/rustspace/admin/update",
+            &guest,
+            Some(json!({})),
+        )
+        .await;
+    assert!(code == 403 || code == 401, "{code}");
+    std::fs::write(
+        updater.join("status.json"),
+        r#"{"state":"done","target":"0.3.0","from":"0.2.0","step":"updated","backup":"/x","at":1}"#,
+    )
+    .expect("status");
+    let (_, status) = server
+        .call(
+            reqwest::Method::GET,
+            "/api/admin/instance/update-status",
+            &token,
+            None,
+        )
+        .await;
+    assert_eq!(status["selfUpdate"]["step"], "updated");
+}
