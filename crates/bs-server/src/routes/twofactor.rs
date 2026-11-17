@@ -172,7 +172,7 @@ pub async fn setup(
                 .filter(|name| !name.is_empty()))
         })
         .await?
-        .unwrap_or_else(|| "Backspace".to_owned());
+        .unwrap_or_else(|| "Rustspace".to_owned());
     Ok(Json(json!({
         "secret": twofactor::base32_encode(&secret),
         "otpauthUrl": twofactor::otpauth_url(&issuer, &username, &secret),

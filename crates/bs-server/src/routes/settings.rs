@@ -124,7 +124,7 @@ fn admin_json(tx: &mut dyn Tx, config: &Config, row: &Row) -> DbResult<Value> {
     #[allow(clippy::cast_possible_truncation, reason = "округлённые мегабайты")]
     let upload_mb = (upload_bytes as f64 / 1_048_576.0).round() as i64;
     let mut settings = json!({
-        "instanceName": row.opt_text("instance_name")?.unwrap_or_else(|| "Backspace".to_owned()),
+        "instanceName": row.opt_text("instance_name")?.unwrap_or_else(|| "Rustspace".to_owned()),
         "registrationOpen": row.opt_flag("registration_open")?.unwrap_or(config.registration_open),
         "federatedRegistrationOpen": flag(row, "federated_registration_open")?,
         "discoveryEnabled": flag(row, "discovery_enabled")?,
@@ -203,7 +203,7 @@ fn write(tx: &mut dyn Tx, mut sets: Sets, current: &Row) -> DbResult<()> {
         && name
             != current
                 .opt_text("instance_name")?
-                .unwrap_or_else(|| "Backspace".to_owned())
+                .unwrap_or_else(|| "Rustspace".to_owned())
     {
         dirty = true;
     }

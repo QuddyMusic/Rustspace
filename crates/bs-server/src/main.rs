@@ -22,11 +22,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => Db::open_sqlite(&config.db_path)?,
     };
-    // `backspace-server import-sqlite <файл>`: перенос данных в PostgreSQL.
+    // `rustspace-server import-sqlite <файл>`: перенос данных в PostgreSQL.
     let mut arguments = std::env::args().skip(1);
     if arguments.next().as_deref() == Some("import-sqlite") {
         let Some(path) = arguments.next() else {
-            return Err("укажите файл базы SQLite: backspace-server import-sqlite <файл>".into());
+            return Err("укажите файл базы SQLite: rustspace-server import-sqlite <файл>".into());
         };
         let rows = db.import_sqlite(std::path::Path::new(&path))?;
         tracing::info!(rows, "данные перенесены из SQLite в PostgreSQL");

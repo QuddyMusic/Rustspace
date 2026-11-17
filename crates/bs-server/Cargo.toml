@@ -9,7 +9,7 @@ description = "Сервер Rustspace на Rust, совместимый с ор�
 workspace = true
 
 [[bin]]
-name = "backspace-server"
+name = "rustspace-server"
 path = "src/main.rs"
 
 [dependencies]

@@ -106,7 +106,7 @@ pub fn document(tx: &mut dyn Tx, origin: &str, version: &str) -> DbResult<Value>
         "schema": 1,
         "origin": origin,
         "instance": {
-            "name": name.unwrap_or_else(|| "Backspace".to_owned()),
+            "name": name.unwrap_or_else(|| "Rustspace".to_owned()),
             "federatedRegistrationOpen": flag("federated_registration_open"),
             "version": version,
         },
@@ -153,6 +153,7 @@ fn client(version: &str) -> Option<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
+        // Как у оригинала: каталог Backspace узнаёт по нему совместимый сервер.
         .user_agent(format!("backspace-server/{version}"))
         .build()
         .ok()

@@ -610,7 +610,7 @@ pub fn invite_preview_json(tx: &mut dyn Tx, code: &str) -> DbResult<Option<Value
         .map(|row| row.opt_text("instance_name"))
         .transpose()?
         .flatten()
-        .unwrap_or_else(|| "Backspace".to_owned());
+        .unwrap_or_else(|| "Rustspace".to_owned());
     Ok(Some(json!({
         "spaceId": space_id,
         "spaceName": space.text("name")?,

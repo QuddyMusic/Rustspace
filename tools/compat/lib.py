@@ -38,9 +38,14 @@ def norm(v):
             items.sort(key=key)
         return items
     return v
+# Осознанные отличия Rustspace от оригинала: своя версия, поле совместимости
+# и имя инстанса по умолчанию.
+DELIBERATE = ('.version', '.compatibleWith', '.name', '.instanceName')
+
 def diff(a, b, path='', out=None, ignore=()):
     out = [] if out is None else out
     if any(path.endswith(i) for i in ignore): return out
+    if any(path.endswith(i) for i in DELIBERATE) and path.count('.') == 1: return out
     if path.endswith('.avatarColor') and re.search(r'members\[|user|moderator|friend|\]\.avatarColor$', path) and 'space' not in path.split('.')[-2]: return out
     if isinstance(a, dict) and isinstance(b, dict):
         for k in sorted(set(a)|set(b)):

@@ -353,8 +353,9 @@ async fn instance_info_and_unknown_routes() {
     let server = start(&[]).await;
     let (status, info) = server.get("/api/instance/info", None).await;
     assert_eq!(status, 200);
-    assert_eq!(info["name"], "Backspace");
-    assert_eq!(info["version"], "1.11.0");
+    assert_eq!(info["name"], "Rustspace");
+    assert_eq!(info["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(info["compatibleWith"], "1.11.0");
     assert_eq!(info["registrationOpen"], true);
     assert_eq!(info["directoryConfigured"], false);
     assert_eq!(info["supportCardEnabled"], true);

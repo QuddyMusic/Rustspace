@@ -14,10 +14,12 @@ use crate::state::now_ms;
 /// Ошибка базы.
 pub fn ensure(tx: &mut dyn Tx) -> DbResult<()> {
     tx.execute(
+        // Имя по умолчанию в схеме оригинала — «Backspace»; новая база
+        // Rustspace получает своё, у существующих имя не меняется.
         "INSERT INTO instance_settings
-            (id, max_bitrate_kbps, min_bitrate_kbps, bitrate_step_kbps,
+            (id, instance_name, max_bitrate_kbps, min_bitrate_kbps, bitrate_step_kbps,
              allowed_resolutions, allowed_framerates, max_resolution, max_framerate, updated_at)
-         VALUES (1, 20000, 500, 500, '540,720,1080', '30,45,60', 1080, 60, ?)
+         VALUES (1, 'Rustspace', 20000, 500, 500, '540,720,1080', '30,45,60', 1080, 60, ?)
          ON CONFLICT (id) DO NOTHING",
         params![now_ms()],
     )?;

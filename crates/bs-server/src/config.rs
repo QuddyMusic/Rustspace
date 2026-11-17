@@ -5,15 +5,18 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Версия оригинального сервера, с которой совместим этот (поле `version`
-/// в `/api/instance/info`: по нему клиенты и пиры судят о возможностях).
-pub const COMPAT_VERSION: &str = "1.11.0";
+/// Версия Rustspace (поле `version` в `/api/instance/info`): клиенты и пиры
+/// её только показывают, сравнением версий возможности не определяются.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Версия оригинального Backspace, протокол которой реализует сервер (поле
+/// `compatibleWith`).
+pub const BACKSPACE_COMPAT_VERSION: &str = "1.11.0";
 /// Официальный репозиторий оригинального Backspace.
 pub const UPSTREAM_SOURCE_URL: &str = "https://github.com/TheZwiss/backspace";
 /// Репозиторий этого сервера (Rustspace): значение `sourceCodeUrl` по
 /// умолчанию — AGPL §13 требует давать пользователям исходники того кода,
 /// который действительно запущен.
-pub const SOURCE_URL: &str = "https://github.com/QuddyMusic/backspace-rs";
+pub const SOURCE_URL: &str = "https://github.com/QuddyMusic/Rustspace";
 /// Сколько прокси перед сервером можно доверять самое большее.
 const MAX_TRUSTED_PROXY_HOPS: u32 = 4;
 
@@ -262,7 +265,7 @@ impl Config {
                 && env.raw("ENABLE_TEST_ROUTES") == Some("1"),
             federation_backoff_divisor,
             extra_ca_certs,
-            version: COMPAT_VERSION.to_owned(),
+            version: VERSION.to_owned(),
             source_code_url,
             commit: env.optional("BACKSPACE_COMMIT"),
             update_check: env.flag("BACKSPACE_UPDATE_CHECK", false),
@@ -278,7 +281,9 @@ impl Config {
                 .map(PathBuf::from)
                 .filter(|dir| dir.join("index.html").is_file()),
             upload_dir,
-            db_path: PathBuf::from(env.string("DB_PATH", "data/backspace.db")),
+            db_path: env
+                .optional("DB_PATH")
+                .map_or_else(default_db_path, PathBuf::from),
             database_url: env
                 .optional("DATABASE_URL")
                 .filter(|url| url.starts_with("postgres://") || url.starts_with("postgresql://")),
@@ -292,6 +297,18 @@ impl Config {
                 .to_owned(),
             disable_rate_limits: env.flag("DISABLE_RATE_LIMITS", false),
         })
+    }
+}
+
+/// База SQLite по умолчанию: `data/rustspace.db`, а если её ещё нет, но есть
+/// `data/backspace.db` (старое имя и имя у оригинала), — она.
+fn default_db_path() -> PathBuf {
+    let current = PathBuf::from("data/rustspace.db");
+    let legacy = PathBuf::from("data/backspace.db");
+    if !current.exists() && legacy.exists() {
+        legacy
+    } else {
+        current
     }
 }
 

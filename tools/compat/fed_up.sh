@@ -15,7 +15,7 @@
 # звонки между инстансами выдают токены.
 ORIG=${ORIG:-/home/claude/work/backspace-orig}
 REPO=${REPO:-$(cd "$(dirname "$0")/../.." && pwd)}
-pkill -f 'tsx/esm src/index.ts' 2>/dev/null; pkill -f backspace-server 2>/dev/null; pkill -f tls_front.py 2>/dev/null; sleep 1
+pkill -f 'tsx/esm src/index.ts' 2>/dev/null; pkill -f rustspace-server 2>/dev/null; pkill -f tls_front.py 2>/dev/null; sleep 1
 STAND=$(cd "$(dirname "$0")" && pwd)
 export NO_PROXY="x1.test,y1.test,x2.test,y2.test,localhost,127.0.0.1${NO_PROXY:+,$NO_PROXY}" no_proxy="x1.test,y1.test,x2.test,y2.test,localhost,127.0.0.1${no_proxy:+,$no_proxy}"
 "$STAND/fed_certs.sh" /tmp/fedca || exit 1
@@ -37,7 +37,7 @@ rust() {
     psql "$BS_FED_PG/postgres" -qc "DROP DATABASE IF EXISTS bsfed$1" -c "CREATE DATABASE bsfed$1" || exit 1
     DBURL="$BS_FED_PG/bsfed$1"
   fi
-  (cd "$REPO" && DATABASE_URL=$DBURL PORT=$1 HOST=127.0.0.1 PUBLIC_ORIGIN=https://$(name $1) BS_EXTRA_CA_CERTS=/tmp/fedca/ca.pem FEDERATION_BACKOFF_DIVISOR=${FEDERATION_BACKOFF_DIVISOR:-1000} JWT_SECRET=$SECRET DB_PATH=/tmp/bsfed$1/bs.db UPLOAD_DIR=/tmp/bsfed$1/uploads REGISTRATION_OPEN=true DIRECTORY_ENDPOINT= BACKSPACE_UPDATE_CHECK=false DISABLE_RATE_LIMITS=true FEDERATION_ALLOW_PRIVATE_PEERS=true BS_PASSWORD_HASH_COST=4 NODE_ENV=$NODEENV ENABLE_TEST_ROUTES=$TESTROUTES setsid nohup target/debug/backspace-server > /tmp/bsfed$1/log 2>&1 < /dev/null &)
+  (cd "$REPO" && DATABASE_URL=$DBURL PORT=$1 HOST=127.0.0.1 PUBLIC_ORIGIN=https://$(name $1) BS_EXTRA_CA_CERTS=/tmp/fedca/ca.pem FEDERATION_BACKOFF_DIVISOR=${FEDERATION_BACKOFF_DIVISOR:-1000} JWT_SECRET=$SECRET DB_PATH=/tmp/bsfed$1/bs.db UPLOAD_DIR=/tmp/bsfed$1/uploads REGISTRATION_OPEN=true DIRECTORY_ENDPOINT= BACKSPACE_UPDATE_CHECK=false DISABLE_RATE_LIMITS=true FEDERATION_ALLOW_PRIVATE_PEERS=true BS_PASSWORD_HASH_COST=4 NODE_ENV=$NODEENV ENABLE_TEST_ROUTES=$TESTROUTES setsid nohup target/debug/rustspace-server > /tmp/bsfed$1/log 2>&1 < /dev/null &)
 }
 orig 3111; orig 3112; rust 3113
 if [ -n "$BS_FED_RUST_Y" ]; then rust 3114; else orig 3114; fi

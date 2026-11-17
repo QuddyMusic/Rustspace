@@ -24,10 +24,9 @@ use crate::util::field;
 
 type Outcome = Result<Response, ApiError>;
 
-/// Выпуски оригинального Backspace: сервер объявляет совместимую с ним
-/// версию протокола, поэтому «есть обновление» сверяется с оригиналом.
-const RELEASES_API: &str = "https://api.github.com/repos/TheZwiss/backspace/releases/latest";
-const UPSTREAM_SOURCE: &str = crate::config::UPSTREAM_SOURCE_URL;
+/// Выпуски Rustspace: версия сервера — своя, обновления — оттуда же.
+const RELEASES_API: &str = "https://api.github.com/repos/QuddyMusic/Rustspace/releases/latest";
+const UPSTREAM_SOURCE: &str = crate::config::SOURCE_URL;
 const CACHE_TTL_MS: i64 = 6 * 3_600_000;
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 
@@ -296,7 +295,7 @@ async fn lookup() -> Check {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::none())
-        .user_agent("Backspace")
+        .user_agent(concat!("rustspace-server/", env!("CARGO_PKG_VERSION")))
         .build();
     let Ok(client) = client else {
         return failed("unreachable");
@@ -442,7 +441,7 @@ mod tests {
         assert_eq!(
             release,
             Some(
-                json!({"version": "1.4.0", "url": "https://github.com/TheZwiss/backspace/releases/tag/v1.4.0", "publishedAt": "2026-01-01"})
+                json!({"version": "1.4.0", "url": "https://github.com/QuddyMusic/Rustspace/releases/tag/v1.4.0", "publishedAt": "2026-01-01"})
             )
         );
         assert_eq!(

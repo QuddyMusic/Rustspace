@@ -4,7 +4,7 @@ ORIG=${ORIG:-/home/claude/work/backspace-orig}
 REPO=${REPO:-$(cd "$(dirname "$0")/../.." && pwd)}
 STAND=${STAND:-$(cd "$(dirname "$0")" && pwd)}
 # Оригинал на 3105 (свежая база), наполнение, затем Rust на 3106 с копией базы.
-pkill -f 'tsx/esm src/index.ts' 2>/dev/null; pkill -f backspace-server 2>/dev/null; sleep 1
+pkill -f 'tsx/esm src/index.ts' 2>/dev/null; pkill -f rustspace-server 2>/dev/null; sleep 1
 rm -rf /tmp/bsorig /tmp/bsrust; mkdir -p /tmp/bsorig/uploads /tmp/bsrust/uploads
 start_orig() {
 cd "$ORIG/packages/server"
@@ -26,7 +26,7 @@ cd "$REPO"
 if [ -n "$BS_STAND_PG" ]; then
   psql "$BS_STAND_PG/postgres" -q -c "DROP DATABASE IF EXISTS bs_stand" -c "CREATE DATABASE bs_stand TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'" || exit 1
   export DATABASE_URL="$BS_STAND_PG/bs_stand"
-  JWT_SECRET=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk UPLOAD_DIR=/tmp/bsrust/uploads target/debug/backspace-server import-sqlite /tmp/bsrust/bs.db > /tmp/bsrust/import.log 2>&1 || { tail -5 /tmp/bsrust/import.log; exit 1; }
+  JWT_SECRET=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk UPLOAD_DIR=/tmp/bsrust/uploads target/debug/rustspace-server import-sqlite /tmp/bsrust/bs.db > /tmp/bsrust/import.log 2>&1 || { tail -5 /tmp/bsrust/import.log; exit 1; }
 fi
-PORT=3106 HOST=127.0.0.1 JWT_SECRET=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk DB_PATH=/tmp/bsrust/bs.db UPLOAD_DIR=/tmp/bsrust/uploads REGISTRATION_OPEN=true DIRECTORY_ENDPOINT= BACKSPACE_UPDATE_CHECK=false DISABLE_RATE_LIMITS=true LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=secret BS_PASSWORD_HASH_COST=4 setsid nohup target/debug/backspace-server > /tmp/bsrust/log 2>&1 < /dev/null &
+PORT=3106 HOST=127.0.0.1 JWT_SECRET=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk DB_PATH=/tmp/bsrust/bs.db UPLOAD_DIR=/tmp/bsrust/uploads REGISTRATION_OPEN=true DIRECTORY_ENDPOINT= BACKSPACE_UPDATE_CHECK=false DISABLE_RATE_LIMITS=true LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=secret BS_PASSWORD_HASH_COST=4 setsid nohup target/debug/rustspace-server > /tmp/bsrust/log 2>&1 < /dev/null &
 for i in $(seq 1 30); do curl -sf 127.0.0.1:3106/api/instance/info >/dev/null && echo up && exit 0; sleep 1; done; echo "rust не поднялся"; tail /tmp/bsrust/log; exit 1

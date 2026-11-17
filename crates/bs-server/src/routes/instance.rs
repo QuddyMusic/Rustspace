@@ -46,8 +46,9 @@ pub async fn info(State(state): State<AppState>) -> ApiResult<Json<Value>> {
                 .map(|row| row.opt_text("instance_name"))
                 .transpose()?
                 .flatten()
-                .unwrap_or_else(|| "Backspace".to_owned()),
+                .unwrap_or_else(|| "Rustspace".to_owned()),
             "version": state.config.version,
+            "compatibleWith": crate::config::BACKSPACE_COMPAT_VERSION,
             "registrationOpen": open,
             "federatedRegistrationOpen": flag("federated_registration_open")? == Some(true),
             "instanceId": &*state.instance_id,
