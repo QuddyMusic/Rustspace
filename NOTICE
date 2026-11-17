@@ -78,6 +78,24 @@ Syntax grammars and colour themes come from bat
 theme remains under its own license, listed in that crate.
 
 ================================================================================
+Notable components and their authors
+================================================================================
+
+  grammers (Telegram MTProto client for personal bridges)
+            Lonami and contributors, MIT OR Apache-2.0,
+            https://github.com/Lonami/grammers
+  qrcode    QR codes for two-factor setup; kennytm and contributors,
+            MIT OR Apache-2.0, https://github.com/kennytm/qrcode-rust
+  llama.cpp Local translator engine, downloaded at the user's request from
+            its releases (not bundled); ggml-org and contributors, MIT,
+            https://github.com/ggml-org/llama.cpp
+  Qwen      Translation models, downloaded at the user's request from
+            Hugging Face (not bundled); Qwen team, Alibaba Cloud,
+            Apache-2.0 (see each model card)
+  Rich Presence / activity
+            Based on Backspace PR #482 by QuddyMusic and cirzear.
+
+================================================================================
 Rust dependencies
 ================================================================================
 
