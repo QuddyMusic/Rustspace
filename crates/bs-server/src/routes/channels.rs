@@ -1064,7 +1064,7 @@ pub async fn update_layout(
         .await
 }
 
-/// `PUT /api/rustspace/channels/:id/nsfw` `{nsfw}` — канал «18+» (Rustspace).
+/// `PUT /api/rustspace/channels/:id/nsfw` `{nsfw}` — канал с деликатным контентом (Rustspace).
 /// Перед входом в такой канал клиент спрашивает, есть ли зрителю 18 лет.
 pub async fn set_nsfw(
     State(state): State<AppState>,

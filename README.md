@@ -121,8 +121,9 @@ every WebSocket frame and REST response the client receives.
   added by hand; their icons come from this computer and are uploaded to the home instance
   (`bs-server`). *Settings → Activity*. Ported from Backspace PR #482 by QuddyMusic and
   cirzear, entirely in Rust.
-- **18+ channels** (`bs-server`). A channel marked 18+ in its settings asks every member to
-  confirm their age once before showing its messages.
+- **Sensitive-content channels** (`bs-server`). A channel marked as sensitive in its settings
+  (explicit or shocking content) asks every member once to confirm they want to see it before
+  showing its messages.
 - **Direct messages.** One-to-one and group DMs, friends and requests, user profiles, space
   invites sent as DM cards.
 - **Federation.** Several instances at once, remote ones signed in through the home account.
@@ -530,13 +531,13 @@ systemd or the `rustspace-updater` service on OpenRC) then:
 
 The client shows each step. `setup.sh --no-updater` leaves the helper out.
 
-### Saved Messages, pins, bookmarks and 18+ channels
+### Saved Messages, pins, bookmarks and sensitive content
 
 *(bs-server)* Additions over the original API (`/api/rustspace/…`; bookmarks at
 `/api/bookmarks` follow the API proposed for the original in PR #474); original clients simply
 don't see them. Saved Messages is a group DM with its owner as the only member, so the
 original web client shows it as an ordinary group. Pins live in `bs_pins` (scope `me` or
-`all`), bookmarks in `bs_bookmarks`, the 18+ flag in `bs_channel_flags` and in the channel
+`all`), bookmarks in `bs_bookmarks`, the sensitive-content flag in `bs_channel_flags` and in the channel
 object as `nsfw`. Events: `rs_pins_updated`, `bookmark_added`, `bookmark_removed`.
 
 ### Voice bitrate

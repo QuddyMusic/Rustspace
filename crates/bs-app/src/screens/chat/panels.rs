@@ -920,7 +920,7 @@ impl ChatScreen {
         }
     }
 
-    /// Канал «18+», в который ещё не соглашались войти: вместо ленты —
+    /// Канал с деликатным контентом, в который ещё не соглашались войти: вместо ленты —
     /// предупреждение. `true` — показано предупреждение.
     pub(super) fn show_nsfw_gate(
         &self,
@@ -943,23 +943,22 @@ impl ChatScreen {
         ui.add_space((ui.available_height() * 0.25).max(24.0));
         ui.vertical_centered(|ui| {
             ui.set_max_width(440.0);
-            ui.label(
-                RichText::new("18+")
-                    .size(40.0)
-                    .family(theme::bold_family())
-                    .color(theme::rose()),
-            );
+            ui.add(crate::widgets::flat_icon(
+                crate::icons::Icon::Eye,
+                40.0,
+                theme::rose(),
+            ));
             ui.add_space(6.0);
             ui.label(
-                RichText::new(tr("Канал для взрослых"))
+                RichText::new(tr("Деликатный контент"))
                     .size(20.0)
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
             );
             ui.add_space(6.0);
             ui.label(theme::muted(tr(
-                "Здесь может быть контент 18+. Продолжая, вы подтверждаете, что вам \
-                 исполнилось 18 лет и вы готовы его видеть.",
+                "В этом канале может быть откровенный или шокирующий контент. Продолжайте, \
+                 только если готовы его видеть.",
             )));
             ui.add_space(16.0);
             ui.horizontal(|ui| {
@@ -972,7 +971,7 @@ impl ChatScreen {
                     *nav = Some(Nav::Friends);
                 }
                 if ui
-                    .add_sized([150.0, 34.0], theme::primary_button(tr("Мне есть 18")))
+                    .add_sized([150.0, 34.0], theme::primary_button(tr("Показать")))
                     .clicked()
                 {
                     crate::prefs::update(|prefs| {

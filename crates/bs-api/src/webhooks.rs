@@ -202,7 +202,7 @@ struct Nsfw {
 }
 
 impl ApiClient {
-    /// Канал «18+» (`PUT /api/rustspace/channels/:id/nsfw`).
+    /// Канал с деликатным контентом (`PUT /api/rustspace/channels/:id/nsfw`).
     ///
     /// # Errors
     /// Нет права управлять каналом; сервер без этой функции (404).

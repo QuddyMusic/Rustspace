@@ -484,7 +484,7 @@ fn overview(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
 }
 
 /// Закрытость — запрет `VIEW_CHANNEL` для `@everyone`; роль `@everyone` имеет id пространства.
-/// Переключатель «Канал 18+»: применяется сразу.
+/// Переключатель «Деликатный контент»: применяется сразу.
 fn nsfw_row(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) {
     let Target::Channel(id) = state.target.clone() else {
         return;
@@ -498,13 +498,14 @@ fn nsfw_row(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
         ui.vertical(|ui| {
             ui.set_max_width(ui.available_width() - 60.0);
             ui.label(
-                RichText::new(tr("Канал 18+"))
+                RichText::new(tr("Деликатный контент"))
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
             );
             ui.label(
                 RichText::new(tr(
-                    "Перед входом каждый подтверждает, что ему есть 18. Нужен сервер Rustspace.",
+                    "Откровенный или шокирующий контент: перед входом каждый подтверждает, что готов его \
+                     видеть. Нужен сервер Rustspace.",
                 ))
                 .size(12.0)
                 .color(theme::text_muted()),

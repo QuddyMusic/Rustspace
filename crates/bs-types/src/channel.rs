@@ -41,7 +41,7 @@ pub struct Channel {
     /// Эффективные права текущего пользователя (decimal string).
     #[serde(default)]
     pub my_permissions: Option<String>,
-    /// Канал «18+» (Rustspace; у оригинала поля нет).
+    /// Канал с деликатным контентом (Rustspace; у оригинала поля нет).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub nsfw: bool,
 }

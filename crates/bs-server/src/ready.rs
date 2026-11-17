@@ -181,7 +181,7 @@ pub fn category_base(row: &Row) -> DbResult<Value> {
 }
 
 /// Столбцы канала.
-/// Последний столбец — флаг «18+» Rustspace из своей таблицы.
+/// Последний столбец — флаг деликатного контента Rustspace из своей таблицы.
 pub const CHANNEL_COLUMNS: &str = "id, space_id, name, type, topic, position, category_id, created_at, \
      COALESCE((SELECT f.nsfw FROM bs_channel_flags f WHERE f.channel_id = channels.id), 0) AS nsfw";
 
@@ -201,7 +201,7 @@ pub fn channel_base(row: &Row) -> DbResult<Value> {
         "createdAt": row.int("created_at")?,
     }))
     .map(|mut channel| {
-        // Rustspace: канал «18+». Поле есть только у таких каналов, остальные
+        // Rustspace: канал с деликатным контентом. Поле есть только у таких каналов, остальные
         // выглядят ровно как у оригинала.
         if row.int("nsfw").unwrap_or(0) != 0 {
             channel["nsfw"] = json!(true);
