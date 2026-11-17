@@ -82,6 +82,8 @@ pub(crate) struct VoiceState {
     video_sent: (bool, bool),
     /// Ограничения стриминга по инстансам (приходят с токеном LiveKit).
     host_limits: std::collections::HashMap<usize, bs_api::StreamingLimits>,
+    /// Битрейт микрофона по звонкам: (инстанс, канал или переписка).
+    pub(crate) bitrates: std::collections::HashMap<(usize, String), bs_api::VoiceBitrate>,
 }
 
 /// Что сделать после кадра панели.
@@ -99,6 +101,8 @@ pub(crate) enum DockAction {
     ToggleCamera,
     /// Начать (выбрать источник) или остановить демонстрацию экрана.
     ToggleScreenShare,
+    /// Понизить битрейт голоса звонка (`Some`) или вернуть битрейт инстанса.
+    SetBitrate(Option<u32>),
 }
 
 /// Новые флаги после переключения наушников: как в оригинале, они тянут за собой микрофон.
@@ -220,6 +224,15 @@ impl VoiceState {
             self.toggle_video(action);
             return;
         }
+        if let DockAction::SetBitrate(kbps) = action {
+            if let Some((origin, target)) = self.call_target() {
+                let previous = bridge.focus_index();
+                bridge.focus_on(origin);
+                bridge.request(crate::bridge::BridgeRequest::SetVoiceBitrate { target, kbps });
+                bridge.focus_on(previous);
+            }
+            return;
+        }
         if self.dm.is_some() {
             self.apply_dm(action, bridge);
             return;
@@ -236,12 +249,16 @@ impl VoiceState {
                 DockAction::Leave
                 | DockAction::None
                 | DockAction::ToggleCamera
-                | DockAction::ToggleScreenShare => {}
+                | DockAction::ToggleScreenShare
+                | DockAction::SetBitrate(_) => {}
             }
             return;
         }
         match action {
-            DockAction::None | DockAction::ToggleCamera | DockAction::ToggleScreenShare => {}
+            DockAction::None
+            | DockAction::ToggleCamera
+            | DockAction::ToggleScreenShare
+            | DockAction::SetBitrate(_) => {}
             DockAction::Leave => self.leave(bridge),
             DockAction::ToggleMute => {
                 if let Some(call) = self.call.as_mut()
@@ -471,7 +488,41 @@ impl VoiceState {
         self.sync_video(bridge);
     }
 
+    /// Звонок, в котором мы сейчас: инстанс и канал или переписка.
+    fn call_target(&self) -> Option<(usize, String)> {
+        if let Some(dm) = &self.dm {
+            return dm.dm_id.clone().map(|id| (dm.origin, id));
+        }
+        self.call
+            .as_ref()
+            .map(|call| (call.origin, call.channel_id.clone()))
+    }
+
+    /// Битрейт голоса текущего звонка.
+    pub(crate) fn call_bitrate(&self) -> Option<&bs_api::VoiceBitrate> {
+        self.call_target().and_then(|key| self.bitrates.get(&key))
+    }
+
+    /// Изменённый битрейт: запоминаем и сразу применяем к микрофону.
+    fn poll_bitrates(&mut self, bridge: &mut Bridge) {
+        for (origin, target, result) in bridge.take_voice_bitrates() {
+            match result {
+                Ok(bitrate) => {
+                    let kbps = bitrate.effective_kbps;
+                    self.bitrates.insert((origin, target.clone()), bitrate);
+                    if self.call_target() == Some((origin, target))
+                        && let Some(media) = self.media.as_ref()
+                    {
+                        media.set_mic_bitrate(kbps);
+                    }
+                }
+                Err(err) => self.notice = Some(err),
+            }
+        }
+    }
+
     fn poll_calls(&mut self, bridge: &mut Bridge) {
+        self.poll_bitrates(bridge);
         let mut dm_tokens: Vec<_> = Vec::new();
         for (origin, mut event) in bridge.take_voice_tokens() {
             // Инстанс по https не должен увести звонок на открытый ws://.
@@ -488,6 +539,10 @@ impl VoiceState {
             dm_tokens.push((origin, event.channel_id.clone(), event.result.clone()));
             if let Some(limits) = event.limits {
                 self.host_limits.insert(origin, limits);
+            }
+            if let Some(bitrate) = event.bitrate {
+                self.bitrates
+                    .insert((origin, event.channel_id.clone()), bitrate);
             }
             if let Some(call) = self.call.as_mut()
                 && call.origin == origin
@@ -605,6 +660,10 @@ impl VoiceState {
                             .unwrap_or_else(|| me.username.clone()),
                         muted: call.muted,
                         deafened: call.deafened,
+                        bitrate_kbps: self
+                            .bitrates
+                            .get(&(call.origin, call.channel_id.clone()))
+                            .map(|b| b.effective_kbps),
                     })
                 }
                 _ => None,
@@ -681,9 +740,13 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                             if let Some(detail) = &info.detail {
                                 status.on_hover_text(detail);
                             }
-                            ui.label(
-                                theme::muted(theme::truncate_chars(&info.subtitle, 13)).size(11.5),
-                            );
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                theme::label_fit(ui, theme::muted(&info.subtitle).size(11.5), 92.0);
+                                if let Some(set) = bitrate_chip(ui, state.call_bitrate()) {
+                                    action = set;
+                                }
+                            });
                         });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if widgets::icon_button(ui, Icon::HangUp, 30.0)
@@ -735,6 +798,72 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                 });
         });
     action
+}
+
+/// Битрейт голоса звонка на панели: число, по щелчку — понизить.
+/// Возвращает [`DockAction::SetBitrate`], если битрейт изменили.
+fn bitrate_chip(ui: &mut egui::Ui, bitrate: Option<&bs_api::VoiceBitrate>) -> Option<DockAction> {
+    let bitrate = bitrate?;
+    let label = crate::tf!("{kbps} кбит/с", kbps = bitrate.effective_kbps);
+    let response = ui
+        .add(
+            egui::Label::new(theme::muted(label).size(11.0))
+                .sense(egui::Sense::click())
+                .selectable(false),
+        )
+        .on_hover_text(tr("Битрейт голоса — щёлкните, чтобы изменить"));
+    let edit_id = response.id.with("kbps");
+    let mut chosen = None;
+    egui::Popup::from_toggle_button_response(&response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_width(260.0);
+            ui.label(
+                RichText::new(tr("Битрейт голоса"))
+                    .family(theme::bold_family())
+                    .color(theme::text_bright()),
+            );
+            ui.label(
+                theme::muted(crate::tf!(
+                    "На инстансе — {kbps} кбит/с. Понизьте, если у собеседников рвётся звук.",
+                    kbps = bitrate.instance_kbps
+                ))
+                .size(12.0),
+            );
+            if !bitrate.can_edit {
+                ui.label(theme::muted(tr("Менять может тот, кто управляет каналом.")).size(12.0));
+                return;
+            }
+            let mut value = ui
+                .data(|d| d.get_temp::<u32>(edit_id))
+                .unwrap_or(bitrate.effective_kbps);
+            let low = bitrate.min_kbps.max(8);
+            let high = bitrate.instance_kbps.max(low);
+            ui.add(
+                egui::Slider::new(&mut value, low..=high)
+                    .step_by(8.0)
+                    .suffix(tr(" кбит/с")),
+            );
+            ui.data_mut(|d| d.insert_temp(edit_id, value));
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        value != bitrate.effective_kbps,
+                        theme::primary_button(tr("Применить")),
+                    )
+                    .clicked()
+                {
+                    chosen = Some(DockAction::SetBitrate(
+                        Some(value).filter(|v| *v < bitrate.instance_kbps),
+                    ));
+                }
+                if bitrate.override_kbps.is_some() && ui.button(tr("Как на инстансе")).clicked()
+                {
+                    chosen = Some(DockAction::SetBitrate(None));
+                }
+            });
+        });
+    chosen
 }
 
 /// Что показать на панели.

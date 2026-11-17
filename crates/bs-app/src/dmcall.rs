@@ -309,7 +309,10 @@ impl VoiceState {
     /// Действие панели для DM-звонка.
     pub(crate) fn apply_dm(&mut self, action: DockAction, bridge: &mut Bridge) {
         match action {
-            DockAction::None | DockAction::ToggleCamera | DockAction::ToggleScreenShare => {}
+            DockAction::None
+            | DockAction::ToggleCamera
+            | DockAction::ToggleScreenShare
+            | DockAction::SetBitrate(_) => {}
             DockAction::Leave => self.end_dm(bridge),
             DockAction::ToggleMute | DockAction::ToggleDeafen => {
                 let Some(call) = self.dm.as_mut() else {
@@ -366,6 +369,11 @@ impl VoiceState {
                         .unwrap_or_else(|| me.username.clone()),
                     muted: call.muted,
                     deafened: call.deafened,
+                    bitrate_kbps: call
+                        .dm_id
+                        .as_ref()
+                        .and_then(|id| self.bitrates.get(&(call.origin, id.clone())))
+                        .map(|b| b.effective_kbps),
                 })
             }
             _ => None,

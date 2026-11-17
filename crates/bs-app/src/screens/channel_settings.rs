@@ -40,6 +40,7 @@ enum Tab {
     Overview,
     Access,
     Bridges,
+    Webhooks,
 }
 
 /// Состояние окна.
@@ -74,6 +75,11 @@ pub(crate) struct ChannelSettings {
     /// Черновик новой связи: сеть и чат.
     bridge_kind: String,
     bridge_chat: String,
+    /// Вебхуки канала (после загрузки).
+    webhooks: Option<Vec<bs_api::Webhook>>,
+    webhooks_requested: bool,
+    /// Имя нового вебхука.
+    webhook_name: String,
 }
 
 fn bits(raw: &str) -> Permissions {
@@ -126,6 +132,9 @@ impl ChannelSettings {
             bridges_requested: false,
             bridge_kind: String::new(),
             bridge_chat: String::new(),
+            webhooks: None,
+            webhooks_requested: false,
+            webhook_name: String::new(),
         })
     }
 
@@ -145,6 +154,7 @@ impl ChannelSettings {
     }
 
     /// Учитывает итог действия. `false` — окно надо закрыть.
+    #[allow(clippy::too_many_lines, reason = "один match по всем ответам")]
     pub(crate) fn apply(&mut self, event: &SpaceEvent) -> bool {
         match event {
             SpaceEvent::Admin {
@@ -168,6 +178,13 @@ impl ChannelSettings {
                         self.saved_topic.clone_from(&self.topic);
                         self.notice = Some(tr("Настройки сохранены").to_owned());
                     }
+                    (SpaceOp::CreateWebhook(..) | SpaceOp::DeleteWebhook(..), Ok(())) => {
+                        if matches!(op, SpaceOp::CreateWebhook(..)) {
+                            self.webhook_name.clear();
+                            self.notice = Some(tr("Вебхук создан").to_owned());
+                        }
+                        self.webhooks_requested = false;
+                    }
                     (SpaceOp::AddBridge(..) | SpaceOp::RemoveBridge(..), Ok(())) => {
                         if matches!(op, SpaceOp::AddBridge(..)) {
                             self.bridge_chat.clear();
@@ -189,6 +206,21 @@ impl ChannelSettings {
                         self.error = Some(err.clone());
                     }
                     _ => {}
+                }
+            }
+            SpaceEvent::Webhooks {
+                space_id,
+                channel_id,
+                result,
+            } if *space_id == self.space_id
+                && matches!(&self.target, Target::Channel(mine) if mine == channel_id) =>
+            {
+                match result {
+                    Ok(hooks) => self.webhooks = Some(hooks.clone()),
+                    Err(err) => {
+                        self.webhooks = Some(Vec::new());
+                        self.error = Some(err.clone());
+                    }
                 }
             }
             SpaceEvent::Bridges {
@@ -252,6 +284,15 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut ChannelSettings, bridge: &mu
         state.request(bridge, SpaceOp::ListBridges(id));
         state.busy = false;
     }
+    if state.tab == Tab::Webhooks
+        && !state.webhooks_requested
+        && let Target::Channel(id) = &state.target
+    {
+        state.webhooks_requested = true;
+        let id = id.clone();
+        state.request(bridge, SpaceOp::ListWebhooks(id));
+        state.busy = false;
+    }
     let mut keep_open = true;
     let response = egui::Modal::new(egui::Id::unique("channel_settings"))
         .frame(
@@ -277,6 +318,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut ChannelSettings, bridge: &mu
                                 Tab::Overview => overview(ui, state, bridge),
                                 Tab::Access => access(ui, state, rights, bridge),
                                 Tab::Bridges => bridges_tab(ui, state, bridge),
+                                Tab::Webhooks => webhooks_tab(ui, state, bridge),
                             }
                             ui.add_space(16.0);
                         });
@@ -328,11 +370,13 @@ fn nav(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, keep_open
                 || rights.perms.contains(Permissions::ADMINISTRATOR))
         {
             tabs.push((Tab::Bridges, tr("Мосты"), crate::icons::Icon::Compass));
+            tabs.push((Tab::Webhooks, tr("Вебхуки"), crate::icons::Icon::Send));
         }
         for (tab, label, icon) in tabs {
             if widgets::nav_row(ui, icon, label, state.tab == tab).clicked() {
-                if tab == Tab::Bridges && state.tab != tab {
-                    state.bridges_requested = false;
+                if state.tab != tab {
+                    state.bridges_requested &= tab != Tab::Bridges;
+                    state.webhooks_requested &= tab != Tab::Webhooks;
                 }
                 state.tab = tab;
                 state.error = None;
@@ -1090,6 +1134,106 @@ fn link_form(
     });
     ui.add_space(6.0);
     ui.label(theme::muted(network_hint(&state.bridge_kind)).size(12.5));
+}
+
+/// Вкладка «Вебхуки»: адреса, по которым внешние программы пишут в канал.
+fn webhooks_tab(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) {
+    heading(ui, tr("Вебхуки"));
+    ui.label(
+        RichText::new(tr(
+            "Вебхук — адрес, по которому программа пишет в канал без входа: CI, мониторинг, \
+             RSS, свой бот. Формат как у вебхуков Discord (content, username, embeds), так что \
+             готовые интеграции работают, если подставить этот адрес.",
+        ))
+        .color(theme::text_muted()),
+    );
+    ui.add_space(12.0);
+    let Some(hooks) = state.webhooks.clone() else {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(theme::muted(tr("Загрузка…")));
+        });
+        return;
+    };
+    let Target::Channel(channel) = state.target.clone() else {
+        return;
+    };
+    for hook in &hooks {
+        egui::Frame::new()
+            .fill(theme::bg_input())
+            .corner_radius(crate::theme::rounded(10))
+            .inner_margin(Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&hook.name).family(theme::bold_family()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(!state.busy, egui::Button::new(tr("Удалить")))
+                            .clicked()
+                        {
+                            state.request(bridge, SpaceOp::DeleteWebhook(hook.id.clone()));
+                        }
+                        if ui.button(tr("Копировать адрес")).clicked() {
+                            ui.ctx().copy_text(hook.url.clone());
+                            state.notice = Some(tr("Адрес скопирован").to_owned());
+                        }
+                    });
+                });
+                theme::label_fit(
+                    ui,
+                    RichText::new(&hook.url)
+                        .monospace()
+                        .size(11.5)
+                        .color(theme::text_faint()),
+                    ui.available_width(),
+                );
+            });
+        ui.add_space(6.0);
+    }
+    ui.add_space(10.0);
+    widgets::section_label(ui, tr("Новый вебхук"));
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut state.webhook_name)
+                .hint_text(tr("Имя, например GitHub"))
+                .desired_width(240.0)
+                .margin(egui::vec2(10.0, 7.0)),
+        );
+        let ready = !state.webhook_name.trim().is_empty() && !state.busy;
+        if ui
+            .add_enabled(ready, theme::primary_button(tr("Создать")))
+            .clicked()
+        {
+            let name = state.webhook_name.trim().to_owned();
+            state.request(bridge, SpaceOp::CreateWebhook(channel.clone(), name));
+        }
+    });
+    ui.add_space(6.0);
+    ui.label(
+        theme::muted(tr(
+            "Адрес — секрет: кто его знает, тот пишет в канал. Утёк — удалите вебхук и создайте новый.",
+        ))
+        .size(12.5),
+    );
+    ui.add_space(6.0);
+    ui.label(
+        RichText::new(
+            "curl -H 'Content-Type: application/json' -d '{\"content\":\"Привет\"}' АДРЕС",
+        )
+        .monospace()
+        .size(11.5)
+        .color(theme::text_faint()),
+    );
+    if let Some(err) = &state.error {
+        ui.add_space(8.0);
+        ui.label(RichText::new(err).color(theme::rose()));
+    }
+    if let Some(notice) = &state.notice {
+        ui.add_space(8.0);
+        ui.label(RichText::new(notice).color(theme::mint()));
+    }
 }
 
 #[cfg(test)]

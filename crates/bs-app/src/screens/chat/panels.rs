@@ -53,15 +53,21 @@ pub(super) fn channel_menu(
 pub(super) fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
     ui.horizontal(|ui| {
         ui.add_space(14.0);
-        ui.add(
-            egui::Label::new(
-                RichText::new(theme::truncate_chars(&space.name, 24))
-                    .size(15.5)
-                    .family(theme::bold_family())
-                    .color(theme::text_bright()),
+        let width = ui.available_width() - if space.rights.invite { 40.0 } else { 10.0 };
+        ui.scope(|ui| {
+            ui.set_max_width(width.max(1.0));
+            ui.add(
+                egui::Label::new(
+                    RichText::new(&space.name)
+                        .size(15.5)
+                        .family(theme::bold_family())
+                        .color(theme::text_bright()),
+                )
+                .truncate()
+                .sense(Sense::click()),
             )
-            .sense(Sense::click()),
-        )
+        })
+        .inner
         .context_menu(|ui| space_menu(ui, space, nav));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(10.0);
@@ -676,55 +682,35 @@ impl ChatScreen {
                                 Some(status),
                                 my_avatar.as_deref(),
                             );
+                            // Справа три кнопки: имя не должно на них залезать.
+                            let text_width = ui.available_width() - 106.0;
                             ui.vertical(|ui| {
+                                ui.set_max_width(text_width.max(1.0));
                                 ui.spacing_mut().item_spacing.y = 0.0;
                                 ui.add_space(8.0);
-                                ui.label(
-                                    RichText::new(theme::truncate_chars(&name, 13))
-                                        .size(14.0)
-                                        .family(theme::bold_family())
-                                        .color(theme::text_bright()),
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&name)
+                                            .size(14.0)
+                                            .family(theme::bold_family())
+                                            .color(theme::text_bright()),
+                                    )
+                                    .truncate(),
                                 );
-                                let sub = if connected {
-                                    handle
-                                } else {
-                                    connection_label(bridge.connection())
-                                };
-                                ui.label(theme::muted(theme::truncate_chars(&sub, 18)).size(11.0));
+                                ui.add(
+                                    egui::Label::new(
+                                        theme::muted(if connected {
+                                            handle
+                                        } else {
+                                            connection_label(bridge.connection())
+                                        })
+                                        .size(11.0),
+                                    )
+                                    .truncate(),
+                                );
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if widgets::icon_button(ui, Icon::Gear, 32.0)
-                                    .on_hover_text(tr("Настройки"))
-                                    .clicked()
-                                {
-                                    *nav = Some(Nav::Settings);
-                                }
-                                let phones = if deafened {
-                                    Icon::HeadphonesOff
-                                } else {
-                                    Icon::Headphones
-                                };
-                                if widgets::icon_button(ui, phones, 30.0)
-                                    .on_hover_text(if deafened {
-                                        tr("Включить звук")
-                                    } else {
-                                        tr("Выключить звук")
-                                    })
-                                    .clicked()
-                                {
-                                    *nav = Some(Nav::Voice(crate::voice::DockAction::ToggleDeafen));
-                                }
-                                let mic = if muted { Icon::MicOff } else { Icon::Mic };
-                                if widgets::icon_button(ui, mic, 30.0)
-                                    .on_hover_text(if muted {
-                                        tr("Включить микрофон")
-                                    } else {
-                                        tr("Выключить микрофон")
-                                    })
-                                    .clicked()
-                                {
-                                    *nav = Some(Nav::Voice(crate::voice::DockAction::ToggleMute));
-                                }
+                                user_bar_buttons(ui, muted, deafened, nav);
                             });
                         });
                     });
@@ -1009,21 +995,69 @@ impl ChatScreen {
             .show(ui, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.label(RichText::new(prefix).size(20.0).color(theme::text_faint()));
-                    ui.label(
+                    // Справа кнопки шапки (поиск, участники, звонок…): текст до них.
+                    let buttons = 150.0;
+                    let title_width = (ui.available_width() - buttons).max(60.0);
+                    theme::label_fit(
+                        ui,
                         RichText::new(&title)
                             .family(theme::bold_family())
                             .size(16.5)
                             .color(theme::text_bright()),
+                        title_width,
                     );
                     if let Some(topic) = topic.filter(|t| !t.trim().is_empty()) {
                         ui.add_space(6.0);
-                        ui.label(theme::muted(theme::truncate_chars(&topic, 80)).size(13.0));
+                        let rest = ui.available_width() - buttons;
+                        if rest > 40.0 {
+                            theme::label_fit(
+                                ui,
+                                theme::muted(topic.replace('\n', " ")).size(13.0),
+                                rest,
+                            );
+                        }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         self.header_buttons(ui, bridge, has_members, &title);
                     });
                 });
             });
+    }
+}
+
+/// Кнопки панели «я»: микрофон, звук, настройки (справа налево).
+fn user_bar_buttons(ui: &mut egui::Ui, muted: bool, deafened: bool, nav: &mut Option<Nav>) {
+    if widgets::icon_button(ui, Icon::Gear, 32.0)
+        .on_hover_text(tr("Настройки"))
+        .clicked()
+    {
+        *nav = Some(Nav::Settings);
+    }
+    let phones = if deafened {
+        Icon::HeadphonesOff
+    } else {
+        Icon::Headphones
+    };
+    if widgets::icon_button(ui, phones, 30.0)
+        .on_hover_text(if deafened {
+            tr("Включить звук")
+        } else {
+            tr("Выключить звук")
+        })
+        .clicked()
+    {
+        *nav = Some(Nav::Voice(crate::voice::DockAction::ToggleDeafen));
+    }
+    let mic = if muted { Icon::MicOff } else { Icon::Mic };
+    if widgets::icon_button(ui, mic, 30.0)
+        .on_hover_text(if muted {
+            tr("Включить микрофон")
+        } else {
+            tr("Выключить микрофон")
+        })
+        .clicked()
+    {
+        *nav = Some(Nav::Voice(crate::voice::DockAction::ToggleMute));
     }
 }
 

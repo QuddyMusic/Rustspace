@@ -76,6 +76,10 @@ zeroize = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
 semver = "1"
+# Обновление изнутри: архив релиза и его контрольная сумма.
+flate2 = "1"
+tar = "0.4"
+sha2 = "0.10"
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 notify-rust = { version = "4", default-features = false, features = ["z"] }
 global-hotkey = { version = "0.10", optional = true }

@@ -30,6 +30,10 @@ pub(crate) struct MoreUi {
     edit: Option<StreamingLimits>,
     streaming_asked: bool,
     streaming_note: Option<Note>,
+    voice: Option<bs_api::InstanceVoiceBitrate>,
+    voice_edit: u32,
+    voice_asked: bool,
+    voice_note: Option<Note>,
     telemetry: Option<TelemetryStatus>,
     telemetry_asked: bool,
     preview: Option<String>,
@@ -72,6 +76,14 @@ impl MoreUi {
                     self.streaming_note = None;
                 }
                 Err(message) => self.streaming_note = Some(fail(message)),
+            },
+            AdminEvent::VoiceBitrate(result) => match result {
+                Ok(voice) => {
+                    self.voice_edit = voice.kbps;
+                    self.voice = Some(voice);
+                    self.voice_note = None;
+                }
+                Err(message) => self.voice_note = Some(fail(message)),
             },
             AdminEvent::Telemetry(result) => match result {
                 Ok(status) => {
@@ -132,22 +144,24 @@ pub(crate) fn streaming_patch(saved: &StreamingLimits, edit: &StreamingLimits) -
     patch
 }
 
-fn is_native(value: &serde_json::Value) -> bool {
-    value.as_str() == Some("native")
-}
-
-fn has_resolution(list: &[serde_json::Value], res: Option<u32>) -> bool {
-    list.iter()
-        .any(|v| res.map_or_else(|| is_native(v), |r| v.as_u64() == Some(u64::from(r))))
-}
-
-fn toggle_resolution(list: &mut Vec<serde_json::Value>, res: Option<u32>, on: bool) {
-    list.retain(|v| res.map_or_else(|| !is_native(v), |r| v.as_u64() != Some(u64::from(r))));
-    if on {
-        list.push(res.map_or_else(|| serde_json::json!("native"), |r| serde_json::json!(r)));
+/// Допустимые разрешения и частоты следуют из предельных: всё, что не выше
+/// предела; «исходное» — только когда предел не ниже 4K (иначе оно бы его
+/// обходило). Отдельные галочки не нужны: клиент всё равно упирается в предел.
+pub(crate) fn derive_allowed(edit: &mut StreamingLimits) {
+    let mut resolutions: Vec<serde_json::Value> = RESOLUTIONS
+        .iter()
+        .filter(|res| **res <= edit.max_resolution)
+        .map(|res| serde_json::json!(res))
+        .collect();
+    if edit.max_resolution >= RESOLUTIONS[RESOLUTIONS.len() - 1] {
+        resolutions.push(serde_json::json!("native"));
     }
-    // Числа по возрастанию, «native» в конце — как хранит сервер.
-    list.sort_by_key(|v| v.as_u64().unwrap_or(u64::MAX));
+    edit.allowed_resolutions = resolutions;
+    edit.allowed_framerates = FRAMERATES
+        .iter()
+        .copied()
+        .filter(|fps| *fps <= edit.max_framerate)
+        .collect();
 }
 
 fn combo(ui: &mut egui::Ui, id: &str, value: &mut u32, options: &[u32], suffix: &str) {
@@ -163,6 +177,8 @@ fn combo(ui: &mut egui::Ui, id: &str, value: &mut u32, options: &[u32], suffix: 
 /// «Стриминг»: пределы качества демонстрации экрана и камеры.
 pub(crate) fn streaming_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridge) {
     page_title(ui, tr("Стриминг"));
+    voice_card(ui, more, bridge);
+    ui.add_space(10.0);
     if !more.streaming_asked {
         more.streaming_asked = request(bridge, AdminRequest::LoadStreaming);
     }
@@ -172,7 +188,14 @@ pub(crate) fn streaming_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bri
         return;
     };
     streaming_limits(ui, edit);
-    allowed_choices(ui, edit);
+    if (edit.max_resolution, edit.max_framerate) == (saved.max_resolution, saved.max_framerate) {
+        edit.allowed_resolutions
+            .clone_from(&saved.allowed_resolutions);
+        edit.allowed_framerates
+            .clone_from(&saved.allowed_framerates);
+    } else {
+        derive_allowed(edit);
+    }
     let patch = streaming_patch(&saved, edit);
     let changed = patch != StreamingPatch::default();
     ui.add_space(14.0);
@@ -190,6 +213,56 @@ pub(crate) fn streaming_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bri
         {
             more.edit.clone_from(&more.streaming);
         }
+    });
+}
+
+/// Битрейт голоса в звонках (сервер Rustspace).
+fn voice_card(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridge) {
+    if !more.voice_asked {
+        more.voice_asked = request(bridge, AdminRequest::LoadVoiceBitrate);
+    }
+    card(ui, |ui| {
+        widgets::section_label(ui, tr("Голос в звонках"));
+        ui.add_space(4.0);
+        let Some(voice) = more.voice.clone() else {
+            if more.voice_note.is_some() {
+                ui.label(theme::muted(tr(
+                    "Сервер не поддерживает настройку битрейта голоса (нужен rustspace-server).",
+                )));
+            } else {
+                ui.label(theme::muted(tr("Загрузка…")));
+            }
+            return;
+        };
+        ui.label(theme::muted(tr(
+            "С каким битрейтом клиенты отправляют микрофон. Чем выше — тем чище голос, но \
+             тем больше трафика. Управляющие голосовым каналом и участники личной переписки \
+             могут понизить его у себя, если связь не тянет.",
+        )));
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().slider_width = 260.0;
+            ui.add(
+                egui::Slider::new(&mut more.voice_edit, voice.min.max(16)..=voice.max.max(32))
+                    .step_by(8.0)
+                    .suffix(tr(" кбит/с")),
+            );
+            if ui
+                .add_enabled(
+                    more.voice_edit != voice.kbps,
+                    theme::primary_button(tr("Сохранить")),
+                )
+                .clicked()
+            {
+                request(bridge, AdminRequest::SaveVoiceBitrate(more.voice_edit));
+            }
+        });
+        ui.label(
+            theme::muted(tr(
+                "Ориентиры: 32 — разборчиво, 64 — как в Discord, 96 — чисто, 128 и выше — музыка.",
+            ))
+            .size(12.0),
+        );
     });
 }
 
@@ -229,42 +302,6 @@ fn streaming_limits(ui: &mut egui::Ui, edit: &mut StreamingLimits) {
             ui.add_space(16.0);
             ui.label(tr("Предельная частота кадров"));
             combo(ui, "max_fps", &mut edit.max_framerate, &FRAMERATES, " fps");
-        });
-    });
-}
-
-/// Какие разрешения и частоты можно выбрать.
-fn allowed_choices(ui: &mut egui::Ui, edit: &mut StreamingLimits) {
-    ui.add_space(10.0);
-    widgets::section_label(ui, tr("Допустимые разрешения"));
-    card(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            for res in RESOLUTIONS {
-                let mut on = has_resolution(&edit.allowed_resolutions, Some(res));
-                if ui.checkbox(&mut on, format!("{res}p")).changed() {
-                    toggle_resolution(&mut edit.allowed_resolutions, Some(res), on);
-                }
-            }
-            let mut native = has_resolution(&edit.allowed_resolutions, None);
-            if ui.checkbox(&mut native, tr("Исходное")).changed() {
-                toggle_resolution(&mut edit.allowed_resolutions, None, native);
-            }
-        });
-    });
-    ui.add_space(10.0);
-    widgets::section_label(ui, tr("Допустимая частота кадров"));
-    card(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            for fps in FRAMERATES {
-                let mut on = edit.allowed_framerates.contains(&fps);
-                if ui.checkbox(&mut on, format!("{fps} fps")).changed() {
-                    edit.allowed_framerates.retain(|f| *f != fps);
-                    if on {
-                        edit.allowed_framerates.push(fps);
-                    }
-                    edit.allowed_framerates.sort_unstable();
-                }
-            }
         });
     });
 }
@@ -723,23 +760,32 @@ pub(crate) fn federation_panel(
 
 #[cfg(test)]
 mod tests {
-    use super::{has_resolution, streaming_patch, toggle_resolution};
+    use super::{derive_allowed, streaming_patch};
     use bs_api::StreamingLimits;
 
     #[test]
-    fn native_stays_last_and_toggles() {
-        let mut list = vec![serde_json::json!(720), serde_json::json!("native")];
-        toggle_resolution(&mut list, Some(540), true);
+    fn allowed_follow_the_limits() {
+        let mut edit = StreamingLimits {
+            max_resolution: 1080,
+            max_framerate: 60,
+            ..StreamingLimits::default()
+        };
+        derive_allowed(&mut edit);
         assert_eq!(
-            list,
+            edit.allowed_resolutions,
             vec![
                 serde_json::json!(540),
                 serde_json::json!(720),
-                serde_json::json!("native")
+                serde_json::json!(1080)
             ]
         );
-        toggle_resolution(&mut list, None, false);
-        assert!(!has_resolution(&list, None));
+        assert_eq!(edit.allowed_framerates, vec![30, 45, 60]);
+        edit.max_resolution = 2160;
+        derive_allowed(&mut edit);
+        assert_eq!(
+            edit.allowed_resolutions.last(),
+            Some(&serde_json::json!("native"))
+        );
     }
 
     #[test]

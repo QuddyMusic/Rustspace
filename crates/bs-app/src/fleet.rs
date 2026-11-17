@@ -1155,6 +1155,22 @@ impl Bridge {
             .collect()
     }
 
+    /// Изменения битрейта голоса со всех инстансов.
+    pub(crate) fn take_voice_bitrates(
+        &mut self,
+    ) -> Vec<(usize, String, Result<bs_api::VoiceBitrate, String>)> {
+        self.slots
+            .iter_mut()
+            .enumerate()
+            .flat_map(|(i, slot)| {
+                slot.session
+                    .take_voice_bitrates()
+                    .into_iter()
+                    .map(move |(target, result)| (i, target, result))
+            })
+            .collect()
+    }
+
     /// Токены голоса со всех инстансов: номер инстанса и ответ.
     pub(crate) fn take_voice_tokens(&mut self) -> Vec<(usize, crate::bridge::VoiceTokenEvent)> {
         self.slots

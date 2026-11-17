@@ -137,6 +137,22 @@ impl ChatScreen {
             return;
         };
         let content = outgoing.content;
+        if let Some(card) = outgoing.card {
+            if selected.kind == ChannelKind::Space {
+                let text = content.trim();
+                bridge.send_card(
+                    selected.channel,
+                    (!text.is_empty()).then(|| text.to_owned()),
+                    card,
+                );
+            } else {
+                self.toast = Some((
+                    tr("Карточки можно отправлять только в каналах пространств").to_owned(),
+                    now + 4.0,
+                ));
+            }
+            return;
+        }
         if !outgoing.keep_draft
             && let Some(edit) = self.edit.take()
         {
@@ -636,6 +652,15 @@ impl ChatScreen {
                         .extend(media::show_attachment(ui, attachment, &mut hits.downloads));
                 }
                 media::show_download_all(ui, &row.attachments, &mut hits.downloads);
+                for (index, embed) in row.embeds.iter().enumerate() {
+                    let names = &self.names;
+                    hits.images.extend(crate::screens::body::show_embed(
+                        ui,
+                        &format!("{}e{index}", row.id),
+                        embed,
+                        &|id| names.get(id).cloned(),
+                    ));
+                }
                 if !row.reactions.is_empty() {
                     hits.reactions = crate::screens::body::show_reactions(ui, &row.reactions);
                 }

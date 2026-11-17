@@ -534,6 +534,8 @@ pub(super) struct MessageRow {
     pub(super) face: (String, Option<String>),
     /// Вложения.
     pub(super) attachments: Vec<AttachmentView>,
+    /// Карточки: превью ссылок и карточки вебхуков.
+    pub(super) embeds: Vec<bs_types::Embed>,
     /// Реакции, сгруппированные по эмодзи.
     pub(super) reactions: Vec<crate::screens::body::ReactionGroup>,
     /// Автор и текст сообщения, на которое это — ответ.
@@ -663,6 +665,7 @@ pub(super) fn message_rows(
                     .iter()
                     .map(AttachmentView::from_api)
                     .collect(),
+                embeds: msg.embeds.clone(),
                 reactions: reaction_groups(&msg.reactions, names, me),
                 reply: msg
                     .reply_to
@@ -689,6 +692,7 @@ pub(super) fn message_rows(
                     .iter()
                     .map(AttachmentView::from_api)
                     .collect(),
+                embeds: msg.embeds.clone(),
                 reactions: reaction_groups(&msg.reactions, names, me),
                 reply: msg
                     .reply_to

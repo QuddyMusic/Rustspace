@@ -152,6 +152,30 @@ pub(crate) fn language(ui: &mut egui::Ui) {
     }
 }
 
+/// Можно ли обновиться изнутри и как.
+fn self_update_note(ui: &mut egui::Ui) {
+    match crate::self_update::method() {
+        crate::self_update::Method::Manual(why) => {
+            ui.label(
+                theme::muted(crate::tf!(
+                    "Обновление изнутри недоступно: {why}",
+                    why = why
+                ))
+                .size(12.5),
+            );
+        }
+        _ => {
+            ui.label(
+                theme::muted(tr(
+                    "Кнопка «Обновить» в полосе сверху скачает версию, проверит \
+                     контрольную сумму и поставит её; останется перезапустить.",
+                ))
+                .size(12.5),
+            );
+        }
+    }
+}
+
 /// «О клиенте»: версия и проверка обновлений по релизам репозитория клиента.
 pub(crate) fn about(ui: &mut egui::Ui, bridge: &crate::fleet::Bridge) {
     use crate::updates::{self, UpdateState};
@@ -233,6 +257,7 @@ pub(crate) fn about(ui: &mut egui::Ui, bridge: &crate::fleet::Bridge) {
                     ui.hyperlink_to(tr("Скачать"), download);
                 }
             });
+            self_update_note(ui);
             if prefs.skipped.as_deref() == Some(release.version.as_str())
                 && ui
                     .small_button(tr("Снова напоминать об этой версии"))

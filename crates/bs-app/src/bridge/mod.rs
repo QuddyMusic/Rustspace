@@ -115,6 +115,8 @@ pub(crate) struct Session {
     compose_in: Vec<ComposeEvent>,
     profile_in: Vec<ProfileEvent>,
     voice_in: Vec<VoiceTokenEvent>,
+    /// Битрейт голоса после изменения.
+    bitrate_in: Vec<(String, Result<bs_api::VoiceBitrate, String>)>,
     space_in: Vec<SpaceEvent>,
     group_in: Vec<GroupEvent>,
     call_in: Vec<CallEvent>,

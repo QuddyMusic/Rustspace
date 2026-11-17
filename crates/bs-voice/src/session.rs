@@ -49,6 +49,8 @@ pub struct VoiceSession {
     watched: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Подписываться ли на голос и камеры автоматически.
     auto_subscribe: bool,
+    /// Битрейт микрофона, кбит/с.
+    mic_bitrate_kbps: Arc<std::sync::Mutex<Option<u32>>>,
 }
 
 /// Идущая трансляция системного звука.
@@ -116,6 +118,7 @@ impl VoiceSession {
             screen_audio: Arc::new(tokio::sync::Mutex::new(None)),
             watched: Arc::default(),
             auto_subscribe: config.auto_subscribe,
+            mic_bitrate_kbps: Arc::new(std::sync::Mutex::new(config.mic_bitrate_kbps)),
         };
 
         if let Err(err) = session.audio.start_playback() {
@@ -188,6 +191,10 @@ impl VoiceSession {
         let track = self.audio.create_mic_track("mic")?;
         let options = TrackPublishOptions {
             source: TrackSource::Microphone,
+            // Битрейт от инстанса (или пониженный для канала/переписки).
+            audio_encoding: self.mic_kbps().map(|kbps| AudioEncoding {
+                max_bitrate: u64::from(kbps) * 1000,
+            }),
             ..Default::default()
         };
         let publication = self
@@ -200,8 +207,38 @@ impl VoiceSession {
             publication.mute();
         }
         *self.mic_publication.write().await = Some(publication);
-        info!("микрофон опубликован");
+        info!(kbps = ?self.mic_kbps(), "микрофон опубликован");
         Ok(())
+    }
+
+    fn mic_kbps(&self) -> Option<u32> {
+        *self
+            .mic_bitrate_kbps
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Меняет битрейт микрофона. Битрейт дорожки задаётся при публикации,
+    /// поэтому опубликованный микрофон публикуется заново.
+    ///
+    /// # Errors
+    /// Ошибка LiveKit при переопубликации.
+    pub async fn set_mic_bitrate(&self, kbps: Option<u32>) -> VoiceResult<()> {
+        {
+            let mut current = self
+                .mic_bitrate_kbps
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *current == kbps {
+                return Ok(());
+            }
+            *current = kbps;
+        }
+        if self.mic_publication.read().await.is_none() {
+            return Ok(());
+        }
+        self.unpublish_mic().await?;
+        self.publish_mic().await
     }
 
     /// Снимает микрофон с публикации.

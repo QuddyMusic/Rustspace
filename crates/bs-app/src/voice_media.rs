@@ -237,6 +237,8 @@ pub(crate) struct ConnectRequest {
     pub(crate) muted: bool,
     /// Звук выключен на старте.
     pub(crate) deafened: bool,
+    /// Битрейт микрофона, кбит/с; `None` — по умолчанию.
+    pub(crate) bitrate_kbps: Option<u32>,
 }
 
 /// Можно ли подключаться к этому адресу LiveKit.
@@ -307,6 +309,8 @@ mod stub {
         pub(crate) fn connect(&mut self, _request: ConnectRequest, _prefs: &VoicePrefs) {}
 
         pub(crate) fn set_flags(&self, _muted: bool, _deafened: bool) {}
+
+        pub(crate) fn set_mic_bitrate(&self, _kbps: u32) {}
 
         pub(crate) fn disconnect(&mut self) {}
 
@@ -509,6 +513,7 @@ mod real {
                 start_deafened: request.deafened,
                 processing: processing(prefs),
                 auto_subscribe: true,
+                mic_bitrate_kbps: request.bitrate_kbps,
             };
             let shared = Arc::clone(&self.shared);
             self.task = Some(self.handle.spawn(async move {
@@ -581,6 +586,18 @@ mod real {
         }
 
         /// Передаёт флаги микрофона и звука живой сессии.
+        /// Новый битрейт микрофона: переопубликовать дорожку.
+        pub(crate) fn set_mic_bitrate(&self, kbps: u32) {
+            let session = lock(&self.shared).session.clone();
+            if let Some(session) = session {
+                self.handle.spawn(async move {
+                    if let Err(err) = session.set_mic_bitrate(Some(kbps)).await {
+                        tracing::warn!("битрейт микрофона не применился: {err}");
+                    }
+                });
+            }
+        }
+
         pub(crate) fn set_flags(&self, muted: bool, deafened: bool) {
             let session = lock(&self.shared).session.clone();
             if let Some(session) = session {

@@ -43,6 +43,7 @@ mod prefs;
 mod registry;
 mod saved_session;
 mod screens;
+mod self_update;
 mod share_quality;
 mod social;
 mod sounds;
@@ -61,6 +62,16 @@ mod wm;
 pub(crate) const APP_ID: &str = "io.github.quddymusic.Rustspace";
 
 fn main() -> eframe::Result {
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-V")
+    {
+        #[allow(clippy::print_stdout, reason = "ответ на --version")]
+        {
+            println!("rustspace {}", env!("CARGO_PKG_VERSION"));
+        }
+        return Ok(());
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {

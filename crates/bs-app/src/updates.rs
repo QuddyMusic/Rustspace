@@ -56,6 +56,17 @@ pub(crate) struct Release {
     pub(crate) download: Option<String>,
     /// Заметки к выпуску (первые строки).
     pub(crate) notes: String,
+    /// Все файлы релиза (для обновления изнутри).
+    pub(crate) assets: Vec<Asset>,
+}
+
+/// Файл релиза.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Asset {
+    /// Имя файла.
+    pub(crate) name: String,
+    /// Адрес для скачивания.
+    pub(crate) url: String,
 }
 
 /// Состояние проверки.
@@ -243,6 +254,14 @@ fn pick(releases: Vec<GhRelease>, prereleases: bool) -> Option<Release> {
         .max_by(|a, b| a.0.cmp(&b.0))
         .map(|(_, version, r)| Release {
             download: asset_for_this_system(&r.assets),
+            assets: r
+                .assets
+                .iter()
+                .map(|a| Asset {
+                    name: a.name.clone(),
+                    url: a.browser_download_url.clone(),
+                })
+                .collect(),
             notes: r
                 .body
                 .unwrap_or_default()

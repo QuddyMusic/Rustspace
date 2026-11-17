@@ -75,6 +75,15 @@ pub(crate) fn page(ui: &mut egui::Ui, state: &mut AppearanceState) {
             tr("Меньше отступов между сообщениями — больше сообщений на экране."),
             &mut appearance.compact,
         );
+        ui.add_space(4.0);
+        setting_row(
+            ui,
+            tr("Чёткий текст"),
+            tr(
+                "Буквы прижаты к пиксельной сетке и плотнее. Без этого текст мягче, как в браузере.",
+            ),
+            &mut appearance.crisp_text,
+        );
     });
     ui.add_space(10.0);
     card(ui, |ui| custom_colors(ui, &mut appearance));

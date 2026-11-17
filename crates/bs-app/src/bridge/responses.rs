@@ -187,6 +187,7 @@ impl Session {
             BridgeResponse::Admin(event) => self.admin_in.push(event),
             BridgeResponse::UserProfile(event) => self.profile_in.push(event),
             BridgeResponse::VoiceToken(event) => self.voice_in.push(event),
+            BridgeResponse::VoiceBitrate(target, result) => self.bitrate_in.push((target, result)),
             BridgeResponse::SpaceAction(event) => self.apply_space_event(event),
             BridgeResponse::Directory(result) => self.directory = Some(result),
             BridgeResponse::InstanceInfo(result) => self.instance_info = Some(result),

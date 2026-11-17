@@ -13,6 +13,60 @@ use std::time::Duration;
 /// Спецворкспейс Hyprland, куда прячется окно.
 const SPECIAL: &str = "special:rustspace";
 
+/// Hyprland с Lua-конфигом (0.55+): `dispatch` там принимает только
+/// Lua-выражение, поэтому команды идут через `eval`. Узнаём по первому отказу.
+static HYPR_LUA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Ответ Hyprland — «ok».
+fn hypr_ok(reply: Option<&str>) -> bool {
+    reply.is_some_and(|text| text.trim() == "ok")
+}
+
+/// Ответ Hyprland, по которому видно Lua-конфиг.
+fn wants_lua(reply: Option<&str>) -> bool {
+    reply.is_some_and(|text| text.contains("hl.dispatch") || text.contains("lua"))
+}
+
+/// Lua для `eval`: перенести окна процесса `pid` на `workspace`, не
+/// переключаясь туда, и при `focus` дать им фокус.
+fn lua_move(pid: u32, workspace: &str, focus: bool) -> String {
+    let focus = if focus {
+        " hl.dispatch(hl.dsp.focus({ window = w }))"
+    } else {
+        ""
+    };
+    format!(
+        "for _, w in ipairs(hl.get_windows() or {{}}) do if w.pid == {pid} then \
+         hl.dispatch(hl.dsp.window.move({{ workspace = \"{workspace}\", follow = false, window = w }}))\
+         {focus} end end"
+    )
+}
+
+/// Перенести окна процесса на рабочий стол: классическим `dispatch`, а у
+/// Lua-конфига — через `eval`.
+fn hypr_move(socket: &PathBuf, pid: u32, workspace: &str, focus: bool) -> (bool, Option<String>) {
+    use std::sync::atomic::Ordering;
+    if !HYPR_LUA.load(Ordering::Relaxed) {
+        let reply = hypr(
+            socket,
+            &format!("dispatch movetoworkspacesilent {workspace},pid:{pid}"),
+        );
+        if hypr_ok(reply.as_deref()) {
+            if focus {
+                let _ = hypr(socket, &format!("dispatch focuswindow pid:{pid}"));
+            }
+            return (true, reply);
+        }
+        if !wants_lua(reply.as_deref()) {
+            return (false, reply);
+        }
+        tracing::info!("Hyprland с Lua-конфигом: команды окна идут через eval");
+        HYPR_LUA.store(true, Ordering::Relaxed);
+    }
+    let reply = hypr(socket, &format!("eval {}", lua_move(pid, workspace, focus)));
+    (hypr_ok(reply.as_deref()), reply)
+}
+
 /// Композитор, которому можно приказать спрятать окно.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Wm {
@@ -56,11 +110,7 @@ impl Wm {
         let pid = std::process::id();
         let done = match self {
             Self::Hyprland(socket) => {
-                let reply = hypr(
-                    socket,
-                    &format!("dispatch movetoworkspacesilent {SPECIAL},pid:{pid}"),
-                );
-                let ok = reply.as_deref().is_some_and(|text| text.trim() == "ok");
+                let (ok, reply) = hypr_move(socket, pid, SPECIAL, false);
                 if !ok {
                     tracing::warn!(?reply, pid, "Hyprland не спрятал окно");
                 }
@@ -83,12 +133,10 @@ impl Wm {
                 else {
                     return false;
                 };
-                let moved = hypr(
-                    socket,
-                    &format!("dispatch movetoworkspacesilent {workspace},pid:{pid}"),
-                )
-                .is_some_and(|reply| reply.trim() == "ok");
-                let _ = hypr(socket, &format!("dispatch focuswindow pid:{pid}"));
+                let (moved, reply) = hypr_move(socket, pid, &workspace.to_string(), true);
+                if !moved {
+                    tracing::warn!(?reply, pid, "Hyprland не вернул окно");
+                }
                 moved
             }
             // `scratchpad show` у окна в scratchpad показывает его поверх
@@ -206,5 +254,21 @@ mod tests {
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hyprland_lua_command() {
+        let lua = lua_move(42, SPECIAL, false);
+        assert!(lua.contains("w.pid == 42"), "{lua}");
+        assert!(
+            lua.contains(r#"hl.dsp.window.move({ workspace = "special:rustspace", follow = false, window = w })"#),
+            "{lua}"
+        );
+        assert!(!lua.contains("focus("), "{lua}");
+        assert!(lua_move(42, "3", true).contains("hl.dsp.focus({ window = w })"));
+        assert!(wants_lua(Some(
+            "error: [string \"return hl.dispatch(movetoworkspacesilent spec...\"]:1: ')' expected"
+        )));
+        assert!(!wants_lua(Some("ok")));
     }
 }

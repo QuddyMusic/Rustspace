@@ -992,6 +992,7 @@ mod tests {
             avatar: None,
             face: (author.to_owned(), None),
             attachments: Vec::new(),
+            embeds: Vec::new(),
             reactions: Vec::new(),
             reply: None,
             system: None,

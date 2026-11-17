@@ -281,6 +281,13 @@ pub(crate) enum BridgeRequest {
     Profile(String),
     /// Токен LiveKit для входа в голосовой канал пространства.
     VoiceToken(String),
+    /// Понизить битрейт голоса звонка (`Some`) или вернуть битрейт инстанса.
+    SetVoiceBitrate {
+        /// Голосовой канал или переписка.
+        target: String,
+        /// Кбит/с.
+        kbps: Option<u32>,
+    },
     /// Токен LiveKit для DM-звонка.
     DmVoiceToken(String),
     /// Код приглашения в пространство.
@@ -345,6 +352,15 @@ pub(crate) enum BridgeRequest {
     },
     /// Удалить личный стикер.
     DeleteSticker(String),
+    /// Отправить сообщение с карточкой в канал пространства.
+    SendCards {
+        /// Канал.
+        channel_id: String,
+        /// Текст над карточкой.
+        content: Option<String>,
+        /// Карточка.
+        card: bs_api::CardDraft,
+    },
     /// Отправить сообщение в канал пространства с вложениями.
     SendRest {
         /// Канал.
@@ -483,6 +499,10 @@ pub(crate) enum AdminRequest {
     LoadStreaming,
     /// Сохранить ограничения стриминга.
     SaveStreaming(bs_api::StreamingPatch),
+    /// Битрейт голоса инстанса (Rustspace).
+    LoadVoiceBitrate,
+    /// Задать битрейт голоса инстанса, кбит/с.
+    SaveVoiceBitrate(u32),
     /// Состояние телеметрии.
     LoadTelemetry,
     /// Включить или выключить телеметрию.
@@ -594,6 +614,8 @@ pub(crate) enum AdminEvent {
     PeerDone(Result<String, String>),
     /// Ограничения стриминга (прочитаны или сохранены).
     Streaming(Result<bs_api::StreamingLimits, String>),
+    /// Битрейт голоса инстанса (прочитан или сохранён).
+    VoiceBitrate(Result<bs_api::InstanceVoiceBitrate, String>),
     /// Состояние телеметрии.
     Telemetry(Result<bs_api::TelemetryStatus, String>),
     /// Предпросмотр телеметрии (JSON текстом).
@@ -734,6 +756,12 @@ pub(crate) enum SpaceOp {
     AddBridge(String, String, String),
     /// Развязать: связь.
     RemoveBridge(String),
+    /// Загрузить вебхуки канала.
+    ListWebhooks(String),
+    /// Создать вебхук: канал, имя.
+    CreateWebhook(String, String),
+    /// Удалить вебхук.
+    DeleteWebhook(String),
     /// Создать или заменить переопределение прав.
     PutOverride(bs_api::OverrideScope, bs_api::PermissionOverride),
     /// Убрать переопределение прав.
@@ -782,6 +810,15 @@ pub(crate) enum SpaceEvent {
         scope: bs_api::OverrideScope,
         /// Список или текст ошибки.
         result: Result<Vec<bs_api::PermissionOverride>, String>,
+    },
+    /// Вебхуки канала.
+    Webhooks {
+        /// Пространство.
+        space_id: String,
+        /// Канал.
+        channel_id: String,
+        /// Вебхуки или текст ошибки.
+        result: Result<Vec<bs_api::Webhook>, String>,
     },
     /// Мосты канала.
     Bridges {
@@ -864,6 +901,8 @@ pub(crate) struct VoiceTokenEvent {
     pub(crate) result: Result<bs_types::LiveKitTokenResponse, String>,
     /// Ограничения стриминга этого инстанса (его SFU несёт трансляцию).
     pub(crate) limits: Option<bs_api::StreamingLimits>,
+    /// Битрейт микрофона для этого звонка (сервер Rustspace).
+    pub(crate) bitrate: Option<bs_api::VoiceBitrate>,
 }
 
 /// Ответ на запрос профиля.
@@ -966,6 +1005,8 @@ pub(crate) enum BridgeResponse {
     UserProfile(ProfileEvent),
     /// Токен голосового канала.
     VoiceToken(VoiceTokenEvent),
+    /// Битрейт голоса после изменения: звонок и итог.
+    VoiceBitrate(String, Result<bs_api::VoiceBitrate, String>),
     /// Итог действия над пространством.
     SpaceAction(SpaceEvent),
     /// Итог действия над группой и созданный канал.

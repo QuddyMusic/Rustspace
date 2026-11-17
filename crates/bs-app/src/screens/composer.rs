@@ -47,6 +47,8 @@ pub(crate) struct Outgoing {
     pub(crate) attachments: Vec<String>,
     /// Не трогать черновик: ушёл GIF или стикер.
     pub(crate) keep_draft: bool,
+    /// Карточка; тогда `content` — текст над ней.
+    pub(crate) card: Option<bs_api::CardDraft>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +135,10 @@ pub(crate) struct Composer {
     /// Инстанс, к которому относится накопленное состояние.
     origin: Option<usize>,
     note: Option<String>,
+    /// Показана панель разметки.
+    format_open: bool,
+    /// Открыт конструктор карточки.
+    card: Option<crate::screens::format_bar::CardForm>,
 }
 
 /// Ключ аккаунта для избранных GIF: инстанс + пользователь.
@@ -358,6 +364,7 @@ impl RowState {
             content: draft.trim().to_owned(),
             attachments: self.ready_ids.clone(),
             keep_draft: false,
+            card: None,
         }
     }
 }
@@ -745,8 +752,28 @@ impl Composer {
             .inner_margin(Margin::symmetric(14, 10))
             .show(ui, |ui| {
                 self.frame_notes(ui, dragging, editing);
+                if self.format_open
+                    && crate::screens::format_bar::bar(ui, draft, edit_id(), !editing)
+                {
+                    self.card = Some(crate::screens::format_bar::CardForm::default());
+                }
                 anchors = self.input_row(ui, draft, hint, &row, &mut outgoing);
             });
+        if let Some(form) = &mut self.card {
+            match crate::screens::format_bar::card_window(&ctx, form) {
+                crate::screens::format_bar::CardResult::Open => {}
+                crate::screens::format_bar::CardResult::Closed => self.card = None,
+                crate::screens::format_bar::CardResult::Send(content, card) => {
+                    outgoing = Some(Outgoing {
+                        content: content.unwrap_or_default(),
+                        attachments: Vec::new(),
+                        keep_draft: true,
+                        card: Some(card),
+                    });
+                    self.card = None;
+                }
+            }
+        }
         let (plus_rect, emoji_rect) = anchors;
         match self.open {
             Open::Plus => {
@@ -839,7 +866,7 @@ impl Composer {
                 }
                 plus_rect = Some(ui.min_rect());
             }
-            let tools = if row.editing { 40.0 } else { 150.0 };
+            let tools = if row.editing { 76.0 } else { 186.0 };
             let send = if row.can_send { 40.0 } else { 0.0 };
             let width = (ui.available_width() - tools - send).max(80.0);
             let send_pressed = ui
@@ -871,6 +898,23 @@ impl Composer {
 
     /// Эмодзи, стикеры и GIF справа от поля; возвращает место кнопки эмодзи.
     fn tool_buttons(&mut self, ui: &mut egui::Ui, row: &RowState) -> egui::Rect {
+        let format = ui.add_enabled(
+            row.enabled,
+            egui::Button::new(
+                RichText::new("Aa")
+                    .size(14.5)
+                    .family(theme::bold_family())
+                    .color(if self.format_open {
+                        theme::accent()
+                    } else {
+                        theme::text_muted()
+                    }),
+            )
+            .frame(false),
+        );
+        if format.on_hover_text(tr("Форматирование")).clicked() {
+            self.format_open = !self.format_open;
+        }
         let smile = ui.add_enabled(
             row.enabled,
             widgets::flat_icon(Icon::Smile, 22.0, theme::text_muted()),
@@ -1143,6 +1187,7 @@ impl Composer {
             }
         }
         grid.chosen.map(|url| Outgoing {
+            card: None,
             content: url,
             attachments: Vec::new(),
             keep_draft: true,
@@ -1303,6 +1348,7 @@ impl Composer {
             bridge.request(BridgeRequest::DeleteSticker(id));
         }
         chosen.map(|token| Outgoing {
+            card: None,
             content: token,
             attachments: Vec::new(),
             keep_draft: true,

@@ -43,4 +43,6 @@ pub struct VoiceConfig {
     pub processing: AudioProcessingSettings,
     /// Включать звук новых участников по умолчанию.
     pub auto_subscribe: bool,
+    /// Битрейт микрофона, кбит/с; `None` — по умолчанию LiveKit.
+    pub mic_bitrate_kbps: Option<u32>,
 }

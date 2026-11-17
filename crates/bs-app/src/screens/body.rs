@@ -52,9 +52,30 @@ pub(crate) fn group_reactions<'a>(
     groups
 }
 
-fn rich(span: &Span) -> RichText {
-    let mut text = RichText::new(&span.text).color(theme::text());
-    if span.bold {
+/// Оформление текста блока: заголовки крупнее и жирнее, подпись мельче.
+#[derive(Debug, Clone, Copy)]
+struct Look {
+    size: Option<f32>,
+    color: egui::Color32,
+    bold: bool,
+}
+
+impl Look {
+    fn body() -> Self {
+        Self {
+            size: None,
+            color: theme::text(),
+            bold: false,
+        }
+    }
+}
+
+fn rich(span: &Span, look: Look) -> RichText {
+    let mut text = RichText::new(&span.text).color(look.color);
+    if let Some(size) = look.size {
+        text = text.size(size);
+    }
+    if span.bold || look.bold {
         text = text.family(theme::bold_family());
     }
     if span.italic {
@@ -66,10 +87,10 @@ fn rich(span: &Span) -> RichText {
     text
 }
 
-fn show_span(ui: &mut egui::Ui, salt: &str, index: usize, span: &Span) {
+fn show_span(ui: &mut egui::Ui, salt: &str, index: usize, span: &Span, look: Look) {
     match span.kind {
         Kind::Text => {
-            ui.label(rich(span));
+            ui.label(rich(span, look));
         }
         Kind::Code => {
             ui.label(
@@ -80,11 +101,12 @@ fn show_span(ui: &mut egui::Ui, salt: &str, index: usize, span: &Span) {
             );
         }
         Kind::Link => {
+            let url = span.url.as_deref().unwrap_or(&span.text);
             ui.add(egui::Hyperlink::from_label_and_url(
-                RichText::new(&span.text).color(theme::sky()),
-                &span.text,
+                rich(span, look).color(theme::sky()),
+                url,
             ))
-            .on_hover_text(&span.text);
+            .on_hover_text(url);
         }
         Kind::Mention => {
             ui.label(
@@ -98,7 +120,7 @@ fn show_span(ui: &mut egui::Ui, salt: &str, index: usize, span: &Span) {
             let id = ui.make_persistent_id((salt, index, "spoiler"));
             let shown = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
             if shown {
-                ui.label(rich(span).background_color(theme::bg_active()));
+                ui.label(rich(span, look).background_color(theme::bg_active()));
             } else {
                 let response = ui.label(
                     RichText::new(&span.text)
@@ -141,6 +163,10 @@ fn lines(spans: &[Span]) -> Vec<Vec<Span>> {
 }
 
 fn show_spans(ui: &mut egui::Ui, salt: &str, spans: &[Span], tail: Option<&str>) {
+    show_spans_as(ui, salt, spans, tail, Look::body());
+}
+
+fn show_spans_as(ui: &mut egui::Ui, salt: &str, spans: &[Span], tail: Option<&str>, look: Look) {
     let rows = lines(spans);
     let last = rows.len().saturating_sub(1);
     for (row_index, row) in rows.iter().enumerate() {
@@ -148,7 +174,7 @@ fn show_spans(ui: &mut egui::Ui, salt: &str, spans: &[Span], tail: Option<&str>)
             ui.spacing_mut().item_spacing.x = 0.0;
             for (index, span) in row.iter().enumerate() {
                 if !span.text.is_empty() {
-                    show_span(ui, salt, row_index * 1000 + index, span);
+                    show_span(ui, salt, row_index * 1000 + index, span, look);
                 }
             }
             if row_index == last
@@ -179,6 +205,9 @@ pub(crate) fn show_text(ui: &mut egui::Ui, salt: &str, blocks: &[Block], edited:
                     ui.vertical(|ui| show_spans(ui, &format!("{salt}{index}"), spans, None));
                 });
             }
+            Block::Heading(..) | Block::Subtext(_) | Block::Rule | Block::List(_) => {
+                show_layout_block(ui, &format!("{salt}{index}"), index == 0, block);
+            }
             Block::Code { lang, code } => {
                 egui::Frame::new()
                     .fill(theme::bg_input())
@@ -207,6 +236,179 @@ pub(crate) fn show_text(ui: &mut egui::Ui, salt: &str, blocks: &[Block], edited:
     if let Some(tail) = tail {
         ui.label(theme::muted(tail.trim()).size(11.0));
     }
+}
+
+/// Заголовок, подпись, список или разделитель.
+fn show_layout_block(ui: &mut egui::Ui, salt: &str, first: bool, block: &Block) {
+    match block {
+        Block::Heading(level, spans) => {
+            ui.add_space(if first { 2.0 } else { 6.0 });
+            let size = match level {
+                1 => 22.0,
+                2 => 19.0,
+                _ => 16.5,
+            };
+            show_spans_as(
+                ui,
+                salt,
+                spans,
+                None,
+                Look {
+                    size: Some(size),
+                    color: theme::text_bright(),
+                    bold: true,
+                },
+            );
+            ui.add_space(2.0);
+        }
+        Block::Subtext(spans) => {
+            show_spans_as(
+                ui,
+                salt,
+                spans,
+                None,
+                Look {
+                    size: Some(12.0),
+                    color: theme::text_faint(),
+                    bold: false,
+                },
+            );
+        }
+        Block::Rule => {
+            ui.add_space(4.0);
+            let width = (ui.available_width() - 24.0).clamp(40.0, 560.0);
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 9.0), Sense::hover());
+            ui.painter().hline(
+                rect.x_range(),
+                rect.center().y,
+                Stroke::new(1.0, theme::border()),
+            );
+            ui.add_space(4.0);
+        }
+        Block::List(items) => {
+            for (number, item) in items.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.add_space(f32::from(item.depth).mul_add(20.0, 4.0));
+                    let marker = item.number.map_or_else(
+                        || ["•", "◦", "▪"][usize::from(item.depth) % 3].to_owned(),
+                        |n| format!("{n}."),
+                    );
+                    let (rect, _) = ui.allocate_exact_size(Vec2::new(18.0, 18.0), Sense::hover());
+                    ui.painter().text(
+                        egui::pos2(rect.right() - 4.0, rect.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        marker,
+                        egui::FontId::proportional(14.0),
+                        theme::text_muted(),
+                    );
+                    ui.vertical(|ui| {
+                        show_spans(ui, &format!("{salt}_{number}"), &item.spans, None);
+                    });
+                });
+            }
+        }
+        Block::Paragraph(_) | Block::Quote(_) | Block::Code { .. } => {}
+    }
+}
+
+/// Цвет полосы карточки из `#rrggbb`.
+fn embed_color(value: Option<&str>) -> Option<egui::Color32> {
+    let hex = value?.trim().trim_start_matches('#');
+    if hex.len() != 6 {
+        return None;
+    }
+    let channel = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
+    Some(egui::Color32::from_rgb(
+        channel(0)?,
+        channel(2)?,
+        channel(4)?,
+    ))
+}
+
+/// Сайт ссылки для подписи над заголовком.
+fn embed_site(url: &str) -> Option<&str> {
+    let rest = url.split_once("://")?.1;
+    let host = rest.split(['/', '?', '#']).next()?;
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    (!host.is_empty()).then_some(host)
+}
+
+/// Карточка под сообщением: превью ссылки или карточка вебхука — полоса
+/// цвета, сайт, заголовок-ссылка, текст с разметкой и картинка. Возвращает
+/// картинку для просмотрщика, если она показана.
+pub(crate) fn show_embed(
+    ui: &mut egui::Ui,
+    salt: &str,
+    embed: &bs_types::Embed,
+    name_of: &dyn Fn(&str) -> Option<String>,
+) -> Option<(egui::Rect, String)> {
+    let title = embed.title.as_deref().filter(|t| !t.trim().is_empty());
+    let description = embed
+        .description
+        .as_deref()
+        .filter(|t| !t.trim().is_empty());
+    let image = embed.image.as_deref().filter(|t| !t.is_empty());
+    if embed.embed_type == bs_types::EmbedType::Image {
+        return crate::media::show_gif(ui, image.unwrap_or(&embed.url));
+    }
+    if title.is_none() && description.is_none() {
+        return None;
+    }
+    let stripe = embed_color(embed.color.as_deref()).unwrap_or_else(theme::border);
+    let mut hit = None;
+    ui.add_space(4.0);
+    let width = (ui.available_width() - 24.0).clamp(160.0, 460.0);
+    let frame = egui::Frame::new()
+        .fill(theme::bg_input())
+        .corner_radius(crate::theme::rounded(8))
+        .inner_margin(Margin {
+            left: 14,
+            right: 12,
+            top: 10,
+            bottom: 10,
+        })
+        .show(ui, |ui| {
+            ui.set_max_width(width);
+            ui.spacing_mut().item_spacing.y = 4.0;
+            if let Some(site) = embed_site(&embed.url) {
+                ui.label(theme::muted(site).size(11.5));
+            }
+            if let Some(title) = title {
+                let text = RichText::new(title).family(theme::bold_family()).size(15.0);
+                if embed.url.starts_with("http") {
+                    ui.add(egui::Hyperlink::from_label_and_url(
+                        text.color(theme::sky()),
+                        &embed.url,
+                    ));
+                } else {
+                    ui.label(text.color(theme::text_bright()));
+                }
+            }
+            if let Some(description) = description {
+                let blocks = crate::markdown::parse(description, name_of);
+                show_text(ui, salt, &blocks, false);
+            }
+            if let Some(image) = image {
+                ui.add_space(4.0);
+                hit = crate::media::show_gif(ui, image);
+            }
+        });
+    let rect = frame.response.rect;
+    let bar = egui::Rect::from_min_max(
+        rect.left_top(),
+        egui::pos2(rect.left() + 4.0, rect.bottom()),
+    );
+    ui.painter().rect_filled(
+        bar,
+        CornerRadius {
+            nw: 8,
+            sw: 8,
+            ne: 0,
+            se: 0,
+        },
+        stripe,
+    );
+    hit
 }
 
 /// Цитата сообщения, на которое отвечают.

@@ -167,10 +167,10 @@ impl Palette {
         bg_active: rgb(0x322a44),
         widget_hover: rgb(0x3a3150),
         border: rgb(0x2e2740),
-        text: rgb(0xece8f5),
+        text: rgb(0xdedae8),
         text_muted: rgb(0xb6aecb),
         text_faint: rgb(0x8d86a0),
-        text_bright: rgb(0xffffff),
+        text_bright: rgb(0xf4f1f9),
         channel_text: rgb(0x9c95ad),
         accent: rgb(0xe8743b),
         on_accent: rgb(0xffffff),
@@ -484,6 +484,9 @@ pub(crate) struct Appearance {
     pub(crate) radius: u8,
     /// Компактная лента: меньше отступов между сообщениями.
     pub(crate) compact: bool,
+    /// Чёткий текст, как у egui по умолчанию: хинтинг и усиленное
+    /// сглаживание. Без него текст мягче и тоньше — как в браузере.
+    pub(crate) crisp_text: bool,
 }
 
 impl Default for Appearance {
@@ -493,6 +496,7 @@ impl Default for Appearance {
             custom: None,
             radius: 12,
             compact: false,
+            crisp_text: false,
         }
     }
 }
@@ -916,6 +920,21 @@ pub(crate) fn install(ctx: &egui::Context) {
     install_fonts(ctx);
 }
 
+/// Без «чёткого текста» — мягкая отрисовка букв. По умолчанию egui на
+/// тёмном фоне утолщает глифы (2c − c²) и прижимает их к пиксельной сетке —
+/// текст выходит жирным и резким. Браузер рисует мягче: без жёсткого
+/// хинтинга и с гаммой около 1.
+fn soften_text(visuals: &mut egui::Visuals, crisp: bool, dark: bool) {
+    if crisp {
+        return;
+    }
+    visuals.text_options.font_hinting = false;
+    if dark {
+        visuals.text_options.color_transfer_function =
+            egui::epaint::FontColorTransferFunction::Gamma(1.15);
+    }
+}
+
 /// Применяет оформление: палитру, скругления и стили `egui`.
 pub(crate) fn apply(ctx: &egui::Context, appearance: &Appearance) {
     let mut palette = appearance.palette();
@@ -947,6 +966,7 @@ pub(crate) fn apply(ctx: &egui::Context, appearance: &Appearance) {
     visuals.faint_bg_color = p.bg_sidebar;
     visuals.code_bg_color = p.bg_input;
     visuals.override_text_color = Some(p.text);
+    soften_text(&mut visuals, appearance.crisp_text, p.dark);
     visuals.hyperlink_color = p.sky;
     visuals.warn_fg_color = p.amber;
     visuals.error_fg_color = p.red;
@@ -1413,6 +1433,8 @@ fn list_row_with(
             .layout(Layout::left_to_right(Align::Center)),
     );
     leading(&mut inner);
+    // Справа — место под точку непрочитанного и значок «заглушён».
+    let label_width = inner.available_width() - 22.0;
     let color = if selected || unread {
         text_bright()
     } else {
@@ -1422,7 +1444,10 @@ fn list_row_with(
     if unread {
         text = text.family(bold_family());
     }
-    inner.add(egui::Label::new(text).truncate().selectable(false));
+    inner.scope(|ui| {
+        ui.set_max_width(label_width.max(1.0));
+        ui.add(egui::Label::new(text).truncate().selectable(false));
+    });
     if unread {
         inner.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let (dot, _) = ui.allocate_exact_size(egui::Vec2::splat(8.0), Sense::hover());
@@ -1472,12 +1497,13 @@ pub(crate) fn voice_row(ui: &mut egui::Ui, label: &str, active: bool) -> egui::R
         crate::icons::Icon::Speaker,
         color,
     );
-    ui.painter().text(
+    text_fit(
+        ui.painter(),
         egui::pos2(rect.left() + 46.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        truncate_chars(label, 22),
+        label,
         FontId::proportional(15.0),
         color,
+        rect.right() - 12.0 - (rect.left() + 46.0),
     );
     response
 }
@@ -1523,12 +1549,18 @@ pub(crate) fn occupant_row(
         ui.painter()
             .circle_stroke(avatar_rect.center(), 12.5, egui::Stroke::new(2.0, green()));
     }
-    ui.painter().text(
+    let icons: f32 = [deafened, muted || deafened, camera]
+        .iter()
+        .map(|on| if *on { 1.0 } else { 0.0 })
+        .sum();
+    let badge = if streaming { 64.0 } else { 0.0 };
+    text_fit(
+        ui.painter(),
         egui::pos2(rect.left() + 58.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        truncate_chars(name, 20),
+        name,
         FontId::proportional(13.5),
         if speaking { green() } else { text_muted() },
+        rect.right() - 14.0 - icons.mul_add(18.0, badge) - (rect.left() + 58.0),
     );
     let mut x = rect.right() - 22.0;
     if deafened {
@@ -1595,15 +1627,22 @@ pub(crate) fn category_header(ui: &mut egui::Ui, name: &str, add: bool) -> Categ
     let label = ui
         .horizontal(|ui| {
             ui.add_space(18.0);
-            let label = ui.add(
-                egui::Label::new(
-                    egui::RichText::new(name.to_uppercase())
-                        .size(11.0)
-                        .family(bold_family())
-                        .color(text_faint()),
-                )
-                .sense(egui::Sense::click()),
-            );
+            let width = ui.available_width() - if add { 34.0 } else { 8.0 };
+            let label = ui
+                .scope(|ui| {
+                    ui.set_max_width(width.max(1.0));
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(name.to_uppercase())
+                                .size(11.0)
+                                .family(bold_family())
+                                .color(text_faint()),
+                        )
+                        .truncate()
+                        .sense(egui::Sense::click()),
+                    )
+                })
+                .inner;
             if add {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
@@ -1660,14 +1699,46 @@ pub(crate) fn member_row<'a>(
         offline,
         image,
     );
-    ui.painter().text(
+    text_fit(
+        ui.painter(),
         egui::pos2(avatar_rect.right() + 12.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        truncate_chars(name, 22),
+        name,
         FontId::proportional(15.0),
         if offline { text_faint() } else { text() },
+        rect.right() - 8.0 - (avatar_rect.right() + 12.0),
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Однострочный текст, обрезанный многоточием по ширине `max_width`;
+/// `pos` — левый край по центру строки. Так подпись не залезает на значки
+/// справа, сколько бы букв в ней ни было.
+pub(crate) fn text_fit(
+    painter: &egui::Painter,
+    pos: egui::Pos2,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    max_width: f32,
+) {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(max_width.max(1.0));
+    let galley = painter.layout_job(job);
+    let top = egui::pos2(pos.x, pos.y - galley.size().y / 2.0);
+    painter.galley(top, galley, color);
+}
+
+/// Подпись, обрезанная многоточием по ширине `width` (а не по числу букв).
+pub(crate) fn label_fit(
+    ui: &mut egui::Ui,
+    text: impl Into<egui::WidgetText>,
+    width: f32,
+) -> egui::Response {
+    ui.scope(|ui| {
+        ui.set_max_width(width.max(1.0));
+        ui.add(egui::Label::new(text).truncate())
+    })
+    .inner
 }
 
 /// Обрезает строку до `max` символов с многоточием.

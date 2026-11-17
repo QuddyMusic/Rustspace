@@ -187,11 +187,74 @@ impl BackspaceApp {
     }
 }
 
+/// Кнопки обновления изнутри; `true` — идёт установка, остальное скрыть.
+fn update_buttons(
+    ui: &mut egui::Ui,
+    release: &crate::updates::Release,
+    progress: &crate::self_update::Progress,
+    runtime: &tokio::runtime::Handle,
+) -> bool {
+    use crate::self_update::{Method, Progress};
+    let note = |ui: &mut egui::Ui, text: String| {
+        ui.label(egui::RichText::new(text).color(theme::on_accent()));
+    };
+    match progress {
+        Progress::Downloading(got, total) => {
+            #[allow(clippy::cast_precision_loss, reason = "проценты")]
+            let text = total.filter(|t| *t > 0).map_or_else(
+                || crate::tf!("Скачиваем… {mb} МБ", mb = got / 1_000_000),
+                |total| {
+                    crate::tf!(
+                        "Скачиваем… {percent}%",
+                        percent = (*got as f64 * 100.0 / total as f64).round()
+                    )
+                },
+            );
+            note(ui, text);
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+            true
+        }
+        Progress::Installing => {
+            note(ui, tr("Устанавливаем…").to_owned());
+            true
+        }
+        Progress::Ready(_) => {
+            if ui.small_button(tr("Перезапустить")).clicked() {
+                crate::self_update::restart();
+            }
+            note(ui, tr("Обновление установлено").to_owned());
+            true
+        }
+        Progress::Idle | Progress::Failed(_) => {
+            if let Progress::Failed(err) = progress {
+                note(ui, crate::tf!("Не вышло: {err}", err = err));
+            }
+            if !matches!(crate::self_update::method(), Method::Manual(_))
+                && ui.small_button(tr("Обновить")).clicked()
+            {
+                crate::self_update::start(
+                    runtime,
+                    ui.ctx(),
+                    release.version.clone(),
+                    &release.assets,
+                );
+            }
+            false
+        }
+    }
+}
+
 /// Полоса «Доступна новая версия клиента».
-fn update_strip(ui: &mut egui::Ui, prefs: &crate::updates::UpdatePrefs) {
+fn update_strip(
+    ui: &mut egui::Ui,
+    prefs: &crate::updates::UpdatePrefs,
+    runtime: &tokio::runtime::Handle,
+) {
     let Some(release) = crate::updates::offer(prefs) else {
         return;
     };
+    let progress = crate::self_update::progress();
     egui::Panel::top("client_update")
         .resizable(false)
         .frame(
@@ -211,6 +274,9 @@ fn update_strip(ui: &mut egui::Ui, prefs: &crate::updates::UpdatePrefs) {
                     .family(theme::bold_family()),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if update_buttons(ui, &release, &progress, runtime) {
+                        return;
+                    }
                     if ui.small_button(tr("Пропустить версию")).clicked() {
                         let version = release.version.clone();
                         crate::prefs::update(|prefs| prefs.updates.skipped = Some(version));
@@ -339,11 +405,11 @@ impl BackspaceApp {
         crate::updates::tick(&self.bridge.runtime(), ui.ctx(), &prefs.updates);
         match self.screen {
             Screen::Login => {
-                update_strip(ui, &prefs.updates);
+                update_strip(ui, &prefs.updates, &self.bridge.runtime());
                 self.login.show(ui, &mut self.bridge);
             }
             Screen::Chat => {
-                update_strip(ui, &prefs.updates);
+                update_strip(ui, &prefs.updates, &self.bridge.runtime());
                 self.notice_strip(ui);
                 match self.chat.show(ui, &mut self.bridge) {
                     ChatAction::None => {}

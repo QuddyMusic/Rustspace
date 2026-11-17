@@ -612,6 +612,7 @@ pub(super) async fn set_profile_image(
 }
 
 /// Выполняет административное действие и, если нужно, перечитывает пространство.
+#[allow(clippy::too_many_lines, reason = "один match по всем действиям")]
 pub(super) async fn space_admin(
     client: &bs_api::ApiClient,
     space_id: String,
@@ -695,6 +696,9 @@ pub(super) async fn space_admin(
         | SpaceOp::ListBridges(_)
         | SpaceOp::AddBridge(..)
         | SpaceOp::RemoveBridge(_)
+        | SpaceOp::ListWebhooks(_)
+        | SpaceOp::CreateWebhook(..)
+        | SpaceOp::DeleteWebhook(_)
         | SpaceOp::Notify(..)
         | SpaceOp::UploadImage(..) => Ok(()),
     };
@@ -734,6 +738,21 @@ async fn bridge_op(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) ->
             client.add_channel_bridge(channel, kind, chat).await
         }
         SpaceOp::RemoveBridge(link) => client.remove_bridge(link).await,
+        SpaceOp::ListWebhooks(channel_id) => {
+            let result = client
+                .webhooks(channel_id)
+                .await
+                .map_err(|err| space_message(&err));
+            return BridgeResponse::SpaceAction(SpaceEvent::Webhooks {
+                space_id,
+                channel_id: channel_id.clone(),
+                result,
+            });
+        }
+        SpaceOp::CreateWebhook(channel, name) => {
+            client.create_webhook(channel, name).await.map(|_| ())
+        }
+        SpaceOp::DeleteWebhook(hook) => client.delete_webhook(hook).await,
         _ => Ok(()),
     };
     BridgeResponse::SpaceAction(SpaceEvent::Admin {
@@ -869,6 +888,15 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
         AdminRequest::LoadStreaming => {
             AdminEvent::Streaming(client.streaming_limits().await.map_err(|e| text(&e)))
         }
+        AdminRequest::LoadVoiceBitrate => {
+            AdminEvent::VoiceBitrate(client.instance_voice_bitrate().await.map_err(|e| text(&e)))
+        }
+        AdminRequest::SaveVoiceBitrate(kbps) => AdminEvent::VoiceBitrate(
+            client
+                .set_instance_voice_bitrate(kbps)
+                .await
+                .map_err(|e| text(&e)),
+        ),
         AdminRequest::SaveStreaming(patch) => {
             AdminEvent::Streaming(client.update_streaming(&patch).await.map_err(|e| text(&e)))
         }
@@ -1089,6 +1117,23 @@ pub(super) fn space_message(err: &bs_api::ApiError) -> String {
     crate::logic::describe_server_error(err.code(), &message)
 }
 
+/// Битрейт микрофона для звонка: у сервера Rustspace он свой, оригинал
+/// его не знает (тогда `None` — битрейт LiveKit по умолчанию).
+async fn voice_bitrate_if(
+    client: &bs_api::ApiClient,
+    target: &str,
+    wanted: bool,
+) -> Option<bs_api::VoiceBitrate> {
+    if !wanted {
+        return None;
+    }
+    client
+        .voice_bitrate(target)
+        .await
+        .ok()
+        .filter(|bitrate| bitrate.effective_kbps > 0)
+}
+
 /// Ограничения стриминга инстанса, если токен выдан (иначе звонка нет).
 async fn streaming_limits_if(
     client: &bs_api::ApiClient,
@@ -1102,6 +1147,51 @@ async fn streaming_limits_if(
         .await
         .map_err(|err| tracing::debug!(%err, "ограничения стриминга недоступны"))
         .ok()
+}
+
+/// Токены и битрейт голоса. Чужие запросы возвращает обратно.
+async fn voice_request(
+    client: &bs_api::ApiClient,
+    request: BridgeRequest,
+) -> Result<BridgeResponse, BridgeRequest> {
+    match request {
+        BridgeRequest::DmVoiceToken(dm_id) => {
+            let result = client
+                .livekit_token_dm(&dm_id)
+                .await
+                .map_err(|err| upload_message(&err));
+            let limits = streaming_limits_if(client, result.is_ok()).await;
+            let bitrate = voice_bitrate_if(client, &dm_id, result.is_ok()).await;
+            Ok(BridgeResponse::VoiceToken(VoiceTokenEvent {
+                channel_id: dm_id,
+                result,
+                limits,
+                bitrate,
+            }))
+        }
+        BridgeRequest::VoiceToken(channel_id) => {
+            let result = client
+                .livekit_token_channel(&channel_id)
+                .await
+                .map_err(|err| upload_message(&err));
+            let limits = streaming_limits_if(client, result.is_ok()).await;
+            let bitrate = voice_bitrate_if(client, &channel_id, result.is_ok()).await;
+            Ok(BridgeResponse::VoiceToken(VoiceTokenEvent {
+                channel_id,
+                result,
+                limits,
+                bitrate,
+            }))
+        }
+        BridgeRequest::SetVoiceBitrate { target, kbps } => {
+            let result = client
+                .set_voice_bitrate(&target, kbps)
+                .await
+                .map_err(|err| upload_message(&err));
+            Ok(BridgeResponse::VoiceBitrate(target, result))
+        }
+        other => Err(other),
+    }
 }
 
 pub(super) async fn handle_request(
@@ -1124,6 +1214,10 @@ pub(super) async fn handle_request(
         Ok(response) => return response,
         Err(request) => request,
     };
+    let request = match voice_request(client, request).await {
+        Ok(response) => return response,
+        Err(request) => request,
+    };
     match request {
         BridgeRequest::Admin(request) => BridgeResponse::Admin(handle_admin(client, request).await),
         BridgeRequest::GifEnabled => BridgeResponse::Compose(ComposeEvent::GifEnabled(
@@ -1138,30 +1232,6 @@ pub(super) async fn handle_request(
                 .await
                 .map_err(|err| err.to_string());
             BridgeResponse::Compose(ComposeEvent::Gifs { query, pos, result })
-        }
-        BridgeRequest::DmVoiceToken(dm_id) => {
-            let result = client
-                .livekit_token_dm(&dm_id)
-                .await
-                .map_err(|err| upload_message(&err));
-            let limits = streaming_limits_if(client, result.is_ok()).await;
-            BridgeResponse::VoiceToken(VoiceTokenEvent {
-                channel_id: dm_id,
-                result,
-                limits,
-            })
-        }
-        BridgeRequest::VoiceToken(channel_id) => {
-            let result = client
-                .livekit_token_channel(&channel_id)
-                .await
-                .map_err(|err| upload_message(&err));
-            let limits = streaming_limits_if(client, result.is_ok()).await;
-            BridgeResponse::VoiceToken(VoiceTokenEvent {
-                channel_id,
-                result,
-                limits,
-            })
         }
         BridgeRequest::Stickers => BridgeResponse::Compose(ComposeEvent::Stickers(
             client.stickers().await.map_err(|err| upload_message(&err)),
@@ -1182,6 +1252,17 @@ pub(super) async fn handle_request(
                 .map(|_| ())
                 .map_err(|err| upload_message(&err)),
         )),
+        BridgeRequest::SendCards {
+            channel_id,
+            content,
+            card,
+        } => match client
+            .send_cards(&channel_id, content.as_deref(), std::slice::from_ref(&card))
+            .await
+        {
+            Ok(()) => BridgeResponse::Done,
+            Err(err) => BridgeResponse::Compose(ComposeEvent::SendFailed(upload_message(&err))),
+        },
         BridgeRequest::SendRest { channel_id, body } => {
             match client.send_channel_message(&channel_id, &body).await {
                 Ok(_) => BridgeResponse::Done,
@@ -1335,7 +1416,13 @@ async fn spaces_request(
         }
         BridgeRequest::SpaceAdmin {
             space_id,
-            op: op @ (SpaceOp::ListBridges(_) | SpaceOp::AddBridge(..) | SpaceOp::RemoveBridge(_)),
+            op:
+                op @ (SpaceOp::ListBridges(_)
+                | SpaceOp::AddBridge(..)
+                | SpaceOp::RemoveBridge(_)
+                | SpaceOp::ListWebhooks(_)
+                | SpaceOp::CreateWebhook(..)
+                | SpaceOp::DeleteWebhook(_)),
         } => bridge_op(client, space_id, op).await,
         BridgeRequest::SpaceAdmin { space_id, op } => space_admin(client, space_id, op).await,
         BridgeRequest::GroupAdmin { dm_id, op } => group_admin(client, dm_id, op).await,

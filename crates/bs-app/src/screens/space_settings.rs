@@ -244,7 +244,10 @@ impl SpaceSettings {
                 | SpaceOp::DeleteOverride(..)
                 | SpaceOp::ListBridges(_)
                 | SpaceOp::AddBridge(..)
-                | SpaceOp::RemoveBridge(_),
+                | SpaceOp::RemoveBridge(_)
+                | SpaceOp::ListWebhooks(_)
+                | SpaceOp::CreateWebhook(..)
+                | SpaceOp::DeleteWebhook(_),
                 Ok(()),
             ) => {}
         }

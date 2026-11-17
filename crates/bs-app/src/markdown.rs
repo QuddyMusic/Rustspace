@@ -1,8 +1,10 @@
 //! Разбор текста сообщения: markdown как в Backspace.
 //!
 //! Поддерживается: `**жирный**`, `*курсив*`, `~~зачёркнутый~~`, `` `код` ``,
-//! блоки кода в тройных обратных кавычках, цитаты `> `, `||спойлер||`,
-//! ссылки `http(s)://`, упоминания `<@id>`, `<@&id>`, `@everyone`, `@here`.
+//! блоки кода в тройных обратных кавычках, цитаты `> ` и `>>> `,
+//! `||спойлер||`, ссылки `http(s)://` и `[текст](адрес)`, упоминания `<@id>`,
+//! `<@&id>`, `@everyone`, `@here`; заголовки `#`, `##`, `###`, подпись `-# `,
+//! списки `- `, `* `, `1. ` (вложенность — отступом), разделитель `---`.
 //! Внутри кода разметка и упоминания не работают.
 
 /// Вид отрезка текста.
@@ -33,6 +35,8 @@ pub(crate) struct Span {
     pub(crate) italic: bool,
     /// Зачёркнутый.
     pub(crate) strike: bool,
+    /// Адрес ссылки `[текст](адрес)`; у голой ссылки адрес — сам текст.
+    pub(crate) url: Option<String>,
 }
 
 impl Span {
@@ -47,8 +51,20 @@ impl Span {
             bold: style.bold,
             italic: style.italic,
             strike: style.strike,
+            url: None,
         }
     }
+}
+
+/// Пункт списка.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ListItem {
+    /// Уровень вложенности, с нуля.
+    pub(crate) depth: u8,
+    /// Номер у нумерованного пункта; `None` — маркер.
+    pub(crate) number: Option<u32>,
+    /// Текст пункта.
+    pub(crate) spans: Vec<Span>,
 }
 
 /// Крупный блок сообщения.
@@ -58,6 +74,14 @@ pub(crate) enum Block {
     Paragraph(Vec<Span>),
     /// Цитата.
     Quote(Vec<Span>),
+    /// Заголовок `#`…`###`: уровень 1–3.
+    Heading(u8, Vec<Span>),
+    /// Мелкая приглушённая подпись `-# `.
+    Subtext(Vec<Span>),
+    /// Список.
+    List(Vec<ListItem>),
+    /// Горизонтальный разделитель.
+    Rule,
     /// Блок кода: язык из ограды (` ```bash `) и сам код.
     Code {
         /// Язык; `None` — ограда без языка.
@@ -122,7 +146,30 @@ pub(crate) fn parse(text: &str, name_of: &dyn Fn(&str) -> Option<String>) -> Vec
         }
         let (line, tail) = rest.split_once('\n').map_or((rest, ""), |(l, t)| (l, t));
         let had_newline = rest.len() > line.len();
-        if let Some(quoted) = line.strip_prefix("> ") {
+        if let Some(quoted) = line.strip_prefix(">>> ") {
+            // Всё до конца сообщения — цитата.
+            flush(&mut blocks, &mut paragraph, &mut quote);
+            let body = if tail.is_empty() {
+                quoted.to_owned()
+            } else {
+                format!("{quoted}\n{tail}")
+            };
+            blocks.push(Block::Quote(inline(body.trim_end_matches('\n'), name_of)));
+            break;
+        }
+        if let Some(block) = line_block(line, name_of) {
+            flush(&mut blocks, &mut paragraph, &mut quote);
+            match (block, blocks.last_mut()) {
+                (Block::List(items), Some(Block::List(open))) => open.extend(items),
+                (block, _) => blocks.push(block),
+            }
+            rest = tail;
+            continue;
+        }
+        if let Some(quoted) = line
+            .strip_prefix("> ")
+            .or_else(|| (line == ">").then_some(""))
+        {
             if !paragraph.is_empty() {
                 flush(&mut blocks, &mut paragraph, &mut quote);
             }
@@ -141,6 +188,52 @@ pub(crate) fn parse(text: &str, name_of: &dyn Fn(&str) -> Option<String>) -> Vec
     }
     flush(&mut blocks, &mut paragraph, &mut quote);
     blocks
+}
+
+/// Строка-блок: заголовок, подпись, пункт списка или разделитель.
+fn line_block(line: &str, name_of: &dyn Fn(&str) -> Option<String>) -> Option<Block> {
+    let trimmed = line.trim();
+    if trimmed.len() >= 3
+        && ["-", "*", "_"]
+            .iter()
+            .any(|c| trimmed.chars().all(|ch| ch.to_string() == *c))
+    {
+        return Some(Block::Rule);
+    }
+    for (prefix, level) in [("### ", 3), ("## ", 2), ("# ", 1)] {
+        if let Some(text) = line.strip_prefix(prefix) {
+            return Some(Block::Heading(level, inline(text.trim(), name_of)));
+        }
+    }
+    if let Some(text) = line.strip_prefix("-# ") {
+        return Some(Block::Subtext(inline(text.trim(), name_of)));
+    }
+    let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
+    let body = &line[indent..];
+    let depth = u8::try_from((indent / 2).min(4)).unwrap_or(4);
+    if let Some(text) = ["- ", "* ", "+ "]
+        .iter()
+        .find_map(|marker| body.strip_prefix(marker))
+    {
+        return Some(Block::List(vec![ListItem {
+            depth,
+            number: None,
+            spans: inline(text, name_of),
+        }]));
+    }
+    let digits = body.chars().take_while(char::is_ascii_digit).count();
+    if (1..=9).contains(&digits)
+        && let Some(text) = body[digits..]
+            .strip_prefix(". ")
+            .or_else(|| body[digits..].strip_prefix(") "))
+    {
+        return Some(Block::List(vec![ListItem {
+            depth,
+            number: body[..digits].parse().ok(),
+            spans: inline(text, name_of),
+        }]));
+    }
+    None
 }
 
 /// Разбирает строку без блочной разметки.
@@ -163,6 +256,7 @@ fn merge(spans: Vec<Span>) -> Vec<Span> {
             && last.bold == span.bold
             && last.italic == span.italic
             && last.strike == span.strike
+            && last.url == span.url
         {
             last.text.push_str(&span.text);
             continue;
@@ -280,6 +374,31 @@ impl Inline<'_> {
         Some((end + 2, spans))
     }
 
+    /// Ссылка с текстом `[текст](https://…)`.
+    fn masked(&self, i: usize) -> Found {
+        let body = self.text[i..].strip_prefix('[')?;
+        let close = body.find("](")?;
+        let label = &body[..close];
+        if label.is_empty() || label.contains('\n') {
+            return None;
+        }
+        let after = &body[close + 2..];
+        if !(after.starts_with("http://") || after.starts_with("https://")) {
+            return None;
+        }
+        let end = after.find(')')?;
+        let url = &after[..end];
+        if url.contains(char::is_whitespace) {
+            return None;
+        }
+        let mut spans = self.nested(label, self.style);
+        for span in &mut spans {
+            span.kind = Kind::Link;
+            span.url = Some(url.to_owned());
+        }
+        Some((1 + close + 2 + end + 1, spans))
+    }
+
     /// Голая ссылка `https://…`.
     fn autolink(&self, i: usize) -> Found {
         let rest = &self.text[i..];
@@ -346,7 +465,7 @@ fn inline_into(
         // Экранирование.
         if rest.starts_with('\\')
             && let Some(next) = rest[1..].chars().next()
-            && "*_~`|\\<>".contains(next)
+            && "*_~`|\\<>[]#-".contains(next)
         {
             plain.push(next);
             i += 1 + next.len_utf8();
@@ -354,6 +473,7 @@ fn inline_into(
         }
         let found = parser
             .code(i)
+            .or_else(|| parser.masked(i))
             .or_else(|| parser.paired(i))
             .or_else(|| parser.italic(i))
             .or_else(|| parser.autolink(i))
@@ -476,5 +596,38 @@ mod tests {
     fn snake_case_is_not_italic() {
         assert_eq!(kinds("my_var_name").len(), 1);
         assert_eq!(kinds("2 * 3 * 4").len(), 1);
+    }
+
+    #[test]
+    fn headings_lists_rules_and_subtext() {
+        let blocks = parse(
+            "## Правила\n- **2.14** спам\n  - вложенный\n1. первый\n---\n-# мелко\nтекст",
+            &none,
+        );
+        assert!(matches!(&blocks[0], super::Block::Heading(2, s) if s[0].text == "Правила"));
+        let super::Block::List(items) = &blocks[1] else {
+            panic!("{blocks:?}");
+        };
+        assert_eq!(items.len(), 3);
+        assert_eq!((items[1].depth, items[1].number), (1, None));
+        assert_eq!(items[2].number, Some(1));
+        assert!(matches!(blocks[2], super::Block::Rule));
+        assert!(matches!(&blocks[3], super::Block::Subtext(s) if s[0].text == "мелко"));
+        assert!(matches!(&blocks[4], super::Block::Paragraph(_)));
+        // «2.14.0 - Спам» — не нумерованный список.
+        assert!(matches!(
+            &parse("2.14.0 - Спам", &none)[0],
+            super::Block::Paragraph(_)
+        ));
+    }
+
+    #[test]
+    fn masked_links_and_long_quotes() {
+        let spans = inline("см. [правила](https://example.org/r) тут", &none);
+        let link = spans.iter().find(|s| s.kind == Kind::Link).expect("link");
+        assert_eq!(link.text, "правила");
+        assert_eq!(link.url.as_deref(), Some("https://example.org/r"));
+        let blocks = parse("до\n>>> раз\nдва", &none);
+        assert!(matches!(&blocks[1], super::Block::Quote(s) if s[0].text == "раз\nдва"));
     }
 }

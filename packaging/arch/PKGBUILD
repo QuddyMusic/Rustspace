@@ -1,0 +1,32 @@
+# Maintainer: Quddy <quddymusic@proton.me>
+#
+# Готовый клиент Rustspace из релиза GitHub (без сборки).
+#   cd packaging/arch && makepkg -si
+# Обновление: поменяйте pkgver (и суммы: updpkgsums) и снова makepkg -si.
+pkgname=rustspace-bin
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Rustspace — неофициальный клиент на Rust, совместимый с Backspace (чат, ЛС, голос)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/QuddyMusic/Rustspace"
+license=('AGPL-3.0-only')
+depends=('gtk3' 'libayatana-appindicator' 'alsa-lib' 'libpipewire' 'dbus' 'libxkbcommon'
+         'mesa' 'libva' 'libdrm')
+optdepends=('pipewire-pulse: системный звук демонстрации экрана'
+            'xdg-desktop-portal: глобальные клавиши и захват экрана под Wayland')
+provides=('rustspace')
+conflicts=('rustspace')
+source_x86_64=("rustspace-linux-x86_64-$pkgver.tar.gz::$url/releases/download/v$pkgver/rustspace-linux-x86_64.tar.gz")
+source_aarch64=("rustspace-linux-aarch64-$pkgver.tar.gz::$url/releases/download/v$pkgver/rustspace-linux-aarch64.tar.gz")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+    cd "rustspace-linux-$CARCH"
+    install -Dm755 rustspace "$pkgdir/usr/bin/rustspace"
+    install -Dm644 io.github.quddymusic.Rustspace.desktop \
+        "$pkgdir/usr/share/applications/io.github.quddymusic.Rustspace.desktop"
+    install -Dm644 rustspace.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/rustspace.png"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+}

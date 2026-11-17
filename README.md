@@ -12,7 +12,7 @@
 
 *English · [Русский](README.ru.md)*
 
-[Features](#what-the-gui-does) · [Build](#building-and-running) · [Server](#server-bs-server) ·
+[Install](#installing-the-client) · [Features](#what-the-gui-does) · [Build](#building-and-running) · [Server](#server-bs-server) ·
 [Install on a server](#installing-on-a-server-one-script) · [Roadmap](ROADMAP.md) · [License](#license)
 
 </div>
@@ -33,6 +33,24 @@ The goal is full compatibility with the original: the client talks to unmodified
 instances (including federated ones) and supports everything the original web and desktop
 clients do, and `bs-server` serves the original clients too. What is still missing is listed in
 the [roadmap](ROADMAP.md).
+
+## Installing the client
+
+Ready builds are on the [releases page](https://github.com/QuddyMusic/Rustspace/releases):
+
+| System | How |
+|---|---|
+| Linux, any distribution | `curl -fsSL https://raw.githubusercontent.com/QuddyMusic/Rustspace/main/packaging/linux/install.sh \| sh` — into `~/.local`, no root, with a menu entry |
+| Linux, AppImage | `Rustspace-x86_64.AppImage`: make it executable and run |
+| Debian / Ubuntu | `sudo apt install ./rustspace-linux-x86_64.deb` |
+| Arch | `cd packaging/arch && makepkg -si` (`rustspace-bin`, the release binary) |
+| Windows | `rustspace-setup-x86_64.exe` — installs for the current user, no admin rights |
+| macOS (Apple Silicon) | `rustspace-macos-aarch64.zip` — unsigned: first launch via *Open* in the context menu |
+
+**Updates from inside.** When a new release is out, a strip at the top offers **Update**: the
+client downloads the file for its system, checks it against the release's `.sha256`, installs
+it and asks to restart. This works for `install.sh`, AppImage, the archive and the Windows
+installer; packages (deb, Arch) are updated by the package manager, and the client says so.
 
 ## Status
 
@@ -62,6 +80,12 @@ every WebSocket frame and REST response the client receives.
 - **Spaces.** Channels and categories, roles and permissions, per-channel overrides, members,
   bans, invites, join requests, the instance directory, notification settings per space and
   per channel (including timed mute).
+- **Formatting and cards.** Markdown like the original web client: headings `#`–`###`, lists
+  (`-`, `1.`, nested by indent), `---` rules, quotes `>` and `>>>`, `-#` small text, links
+  `[text](url)`. The **Aa** button above the composer adds a toolbar (bold, italic, code,
+  spoiler, headings, lists, quote, link) and a **card** builder: a block with a colour bar,
+  title, text and picture — handy for rules and announcements (needs `bs-server`). Link
+  previews and webhook cards are shown under messages.
 - **Messages.** Send, edit, delete, replies, reactions, mentions, markdown, read state,
   history paging, message search with filters and jump-to-result. Code blocks are
   syntax-highlighted by the fence language (` ```bash `, ` ```rust `…; Prism aliases too). Text longer than the
@@ -85,6 +109,9 @@ every WebSocket frame and REST response the client receives.
   limits; system audio without Backspace's own sound (per-application capture over
   PulseAudio/PipeWire on Linux, output loopback on Windows and macOS). Remote streams and
   their audio are received only while you watch them, and the sharer sees who is watching.
+  On `bs-server` the microphone uses the instance's voice bitrate (96 kbit/s by default); the
+  number next to the call in the voice panel lowers it for a voice channel or a DM call when
+  the connection can't keep up.
 - **Desktop integration** (`--features desktop`). Tray icon with show/hide, mute, deafen and
   quit; closing the window hides it to the tray. Global hotkeys (including push-to-talk with
   key release) on X11, Windows and macOS, and on Wayland through the XDG GlobalShortcuts
@@ -95,7 +122,8 @@ every WebSocket frame and REST response the client receives.
   dialogs. Glass is part of the theme — panel opacity, glow strength and glow colours (with
   ready-made pairs) are set in *Appearance* and travel with the theme's JSON file. Also: custom
   accent, editing any colour, corner radius (the whole window is made of rounded modules that
-  follow it), compact mode, JSON theme import/export, UI scale. Interface sounds from the original.
+  follow it), compact mode, JSON theme import/export, UI scale, soft or *crisp* text.
+  Interface sounds from the original.
   System notifications by the original's rules (levels, mutes, DND, mentions).
 - **Languages.** Russian and English built in, switchable live; any other language can be
   added as a JSON catalog in `<config dir>/locales/<code>.json` (see *Settings → Language*).
@@ -104,7 +132,8 @@ every WebSocket frame and REST response the client receives.
   source.
 - **Client updates.** *Settings → About the client* checks the releases of the client's own
   GitHub repository (`owner/repo`; a default can be baked in with `BS_UPDATE_REPO=owner/repo`
-  at build time) and offers the download for your system.
+  at build time); a new version is downloaded, verified and installed from inside (see
+  [Installing the client](#installing-the-client)).
 - **Administration.** Profile, password change, account deletion; the instance admin panel
   (settings, users, storage, registration, federation peers, streaming limits, telemetry,
   updates).
@@ -124,10 +153,10 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
 | `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, system audio, data-channel signals | 68 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 248 |
+| `bs-app` | The GUI and its entry point | 254 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 140 |
+| `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 144 |
 | `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 7 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
@@ -214,14 +243,11 @@ application they can find there.
 
 ### Packaging
 
-```sh
-cargo install cargo-packager --locked
-cargo packager --release -p bs-app --formats deb,appimage   # Linux
-cargo packager --release -p bs-app --formats dmg            # macOS
-cargo packager --release -p bs-app --formats nsis           # Windows
-```
-
-Packages land in `target/packages`; the icon and `.desktop` file are in `packaging/linux`.
+The release workflow builds everything from the table in
+[Installing the client](#installing-the-client): the archive with `install.sh`, `.deb`
+(`dpkg-deb`), AppImage (`linuxdeploy`), the Windows installer (Inno Setup,
+`packaging/windows/rustspace.iss`) and the macOS `.app`. Arch users build
+`packaging/arch/PKGBUILD`. The icon and `.desktop` file are in `packaging/linux`.
 
 ### Versions and releases
 
@@ -429,6 +455,30 @@ cannot log in. Files go out as links to the server.
 
 `TELEGRAM_API_URL` and `DISCORD_API_URL` change the API address (a local Bot API server,
 tests).
+
+### Webhooks and cards
+
+*(bs-server)* Channel settings → **Webhooks** creates an address an outside program writes to
+without logging in: CI, monitoring, RSS, your own bot. The body is the same as Discord's
+(`content`, `username`, `avatar_url`, `embeds` with title, description, colour, fields,
+footer, image), so ready integrations work once the address is swapped:
+
+```sh
+curl -H 'Content-Type: application/json' \
+  -d '{"content":"Build **passed**","embeds":[{"title":"main","color":3066993}]}' \
+  https://your.domain/api/webhooks/ID/TOKEN
+```
+
+`?wait=true` returns the created message. The address is a secret: delete the webhook if it
+leaks. Managing webhooks needs "Manage channels". Cards are stored as ordinary embeds, so the
+original web client shows their title and text too.
+
+### Voice bitrate
+
+*(bs-server)* The original publishes the microphone with LiveKit's default bitrate. Here the
+instance admin sets it in *Settings → Streaming → Voice in calls* (16–510 kbit/s, 96 by
+default); whoever manages a voice channel, and both sides of a DM call, can lower it for that
+call when the connection is poor. The client applies a change on the fly.
 
 ### Configuration
 

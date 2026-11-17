@@ -38,6 +38,7 @@ impl Session {
             compose_in: Vec::new(),
             profile_in: Vec::new(),
             voice_in: Vec::new(),
+            bitrate_in: Vec::new(),
             space_in: Vec::new(),
             group_in: Vec::new(),
             call_in: Vec::new(),
@@ -415,6 +416,7 @@ impl Session {
         self.compose_in.clear();
         self.profile_in.clear();
         self.voice_in.clear();
+        self.bitrate_in.clear();
         self.space_in.clear();
         self.group_in.clear();
         self.call_in.clear();
@@ -1002,6 +1004,13 @@ impl Session {
         std::mem::take(&mut self.new_messages)
     }
 
+    /// Забирает ответы на изменение битрейта голоса.
+    pub(crate) fn take_voice_bitrates(
+        &mut self,
+    ) -> Vec<(String, Result<bs_api::VoiceBitrate, String>)> {
+        std::mem::take(&mut self.bitrate_in)
+    }
+
     /// Забирает накопленные ответы на запросы токена голоса.
     pub(crate) fn take_voice_tokens(&mut self) -> Vec<VoiceTokenEvent> {
         std::mem::take(&mut self.voice_in)
@@ -1015,6 +1024,20 @@ impl Session {
     /// Забирает накопленные события композера.
     pub(crate) fn take_compose_events(&mut self) -> Vec<ComposeEvent> {
         std::mem::take(&mut self.compose_in)
+    }
+
+    /// Отправляет сообщение с карточкой в канал пространства.
+    pub(crate) fn send_card(
+        &self,
+        channel_id: String,
+        content: Option<String>,
+        card: bs_api::CardDraft,
+    ) {
+        self.request(BridgeRequest::SendCards {
+            channel_id,
+            content,
+            card,
+        });
     }
 
     /// Отправляет сообщение в канал пространства (REST, нужен для вложений).
