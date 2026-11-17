@@ -1549,5 +1549,10 @@
   "РОЛИ — {a0}": "ROLES — {a0}",
   "Перетащите, чтобы поменять порядок": "Drag to reorder",
   "Это не картинка": "This is not an image",
-  "Значок": "Icon"
+  "Значок": "Icon",
+  "Rustspace — QR-код для приложения": "Rustspace — QR code for your app",
+  "Отсканируйте в приложении-аутентификаторе": "Scan it in your authenticator app",
+  "Ссылка слишком длинная для QR-кода.": "The link is too long for a QR code.",
+  "Или введите ключ вручную:": "Or enter the key manually:",
+  "Показать QR-код": "Show QR code"
 }

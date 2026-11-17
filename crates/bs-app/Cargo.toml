@@ -71,6 +71,8 @@ tokio = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 rfd = { workspace = true }
+# QR-код ключа двухфакторной защиты (MIT/Apache-2.0).
+qrcode = { version = "0.14", default-features = false }
 arboard = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -69,6 +69,8 @@ struct TwoFactorUi {
     /// `None` — сервер защиту не поддерживает.
     status: Option<bs_api::TwoFactorStatus>,
     setup: Option<bs_api::TwoFactorSetup>,
+    /// Открыто окно с QR-кодом ключа.
+    qr_open: bool,
     codes: Option<Vec<String>>,
     password: String,
     code: String,
@@ -91,10 +93,13 @@ impl TwoFactorUi {
                 self.status = view.status;
                 if view.setup.is_some() {
                     self.setup = view.setup;
+                    // Ключ пришёл — сразу окно с QR поверх всех.
+                    self.qr_open = true;
                 }
                 if view.codes.is_some() {
                     self.codes = view.codes;
                     self.setup = None;
+                    self.qr_open = false;
                 }
                 if self
                     .status
@@ -499,6 +504,9 @@ fn two_factor_card(ui: &mut egui::Ui, state: &mut TwoFactorUi, federated: bool, 
         ui.add_space(4.0);
         ui.label(RichText::new(&setup.secret).monospace());
         ui.horizontal(|ui| {
+            if ui.button(tr("Показать QR-код")).clicked() {
+                state.qr_open = true;
+            }
             if ui.button(tr("Скопировать ключ")).clicked() {
                 ui.ctx().copy_text(setup.secret.clone());
             }
@@ -506,6 +514,12 @@ fn two_factor_card(ui: &mut egui::Ui, state: &mut TwoFactorUi, federated: bool, 
                 ui.ctx().copy_text(setup.otpauth_url.clone());
             }
         });
+        crate::screens::qr_window::show(
+            ui.ctx(),
+            &mut state.qr_open,
+            &setup.secret,
+            &setup.otpauth_url,
+        );
         widgets::field_label(ui, tr("Код из приложения"));
         widgets::text_field(ui, &mut state.code, "123456", 6);
         ui.add_space(8.0);
