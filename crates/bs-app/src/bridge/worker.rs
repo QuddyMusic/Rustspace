@@ -864,6 +864,7 @@ pub(super) async fn peer_op(client: &bs_api::ApiClient, op: PeerOp) -> Result<St
 pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminRequest) -> AdminEvent {
     let text = |err: &bs_api::ApiError| upload_message(err);
     match request {
+        AdminRequest::Personal(op) => AdminEvent::Personal(personal_op(client, op).await),
         AdminRequest::LoadInvites { archived } => AdminEvent::Invites(
             client
                 .invites(archived)
@@ -947,6 +948,95 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
         other => match account_admin(client, other).await {
             Ok(event) | Err(event) => event,
         },
+    }
+}
+
+/// Текст ошибки личного моста: подробность с той стороны, если есть.
+fn personal_message(err: &bs_api::ApiError) -> String {
+    if let bs_api::ApiError::Server { body, .. } = err {
+        if let Some(message) = body
+            .details
+            .as_ref()
+            .and_then(|d| d.get("message"))
+            .and_then(serde_json::Value::as_str)
+        {
+            return message.to_owned();
+        }
+        match body.code.as_deref() {
+            Some("personal_bridge_limit") => {
+                return tr("Подключено слишком много аккаунтов").to_owned();
+            }
+            Some("personal_bridge_chat_limit") => {
+                return tr("Связано слишком много чатов этого аккаунта").to_owned();
+            }
+            Some("personal_bridge_offline") => {
+                return tr("Аккаунт ещё подключается — попробуйте через минуту").to_owned();
+            }
+            _ => {}
+        }
+    }
+    err.to_string()
+}
+
+/// Свежий список личных мостов (`Err(None)` — сервер их не знает).
+async fn personal_list(client: &bs_api::ApiClient) -> PersonalEvent {
+    PersonalEvent::Loaded(client.personal_bridges().await.map_err(|err| {
+        (err.status() != Some(reqwest::StatusCode::NOT_FOUND)).then(|| personal_message(&err))
+    }))
+}
+
+/// Действие с личными мостами.
+async fn personal_op(client: &bs_api::ApiClient, op: PersonalOp) -> PersonalEvent {
+    let done = match op {
+        PersonalOp::Load => return personal_list(client).await,
+        PersonalOp::TelegramLogin { phone, app } => {
+            return PersonalEvent::TelegramStarted(
+                client
+                    .telegram_login(&phone, app.as_ref().map(|(id, hash)| (*id, hash.as_str())))
+                    .await
+                    .map_err(|err| personal_message(&err)),
+            );
+        }
+        PersonalOp::TelegramCode { login, code } => {
+            return telegram_step(client.telegram_code(&login, &code).await);
+        }
+        PersonalOp::TelegramPassword { login, password } => {
+            let step = client.telegram_password(&login, password.expose()).await;
+            return telegram_step(step);
+        }
+        PersonalOp::RemoteChats(account) => {
+            let result = client
+                .personal_remote_chats(&account)
+                .await
+                .map_err(|err| personal_message(&err));
+            return PersonalEvent::RemoteChats { account, result };
+        }
+        PersonalOp::AddMatrix { homeserver, login } => client
+            .add_matrix_bridge(&homeserver, &login)
+            .await
+            .map(drop),
+        PersonalOp::Remove(id) => client.remove_personal_bridge(&id).await.map(drop),
+        PersonalOp::Link { account, chat } => {
+            client.link_personal_chat(&account, &chat).await.map(drop)
+        }
+        PersonalOp::Unlink { account, chat } => {
+            client.unlink_personal_chat(&account, &chat).await.map(drop)
+        }
+    };
+    match done {
+        Ok(()) => personal_list(client).await,
+        Err(err) => PersonalEvent::Failed(personal_message(&err)),
+    }
+}
+
+fn telegram_step(step: Result<bs_api::TelegramStep, bs_api::ApiError>) -> PersonalEvent {
+    match step {
+        Ok(step) if step.password_required => {
+            PersonalEvent::Telegram(Ok(TelegramNext::Password(step.hint)))
+        }
+        // Список экран попросит следом: аккаунт уже заведён.
+        Ok(_) => PersonalEvent::Telegram(Ok(TelegramNext::Done)),
+        Err(err) => PersonalEvent::Telegram(Err(personal_message(&err))),
     }
 }
 

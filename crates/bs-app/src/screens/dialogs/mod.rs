@@ -378,6 +378,8 @@ pub(crate) enum SettingsSection {
     Translate,
     /// Игры, музыка, Rich Presence.
     Activity,
+    /// Личные мосты: свои аккаунты Matrix и Telegram.
+    Bridges,
     /// Версия клиента и проверка его обновлений.
     About,
     /// Приватность.
@@ -413,6 +415,7 @@ impl SettingsSection {
             Self::Language => tr("Язык"),
             Self::Translate => tr("Перевод"),
             Self::Activity => tr("Активность"),
+            Self::Bridges => tr("Мосты"),
             Self::About => tr("О клиенте"),
             Self::Privacy => tr("Приватность"),
             Self::Connections => tr("Подключения"),
@@ -821,6 +824,7 @@ fn settings_nav(
                     SettingsSection::Voice,
                     SettingsSection::Privacy,
                     SettingsSection::Activity,
+                    SettingsSection::Bridges,
                 ],
                 &mut state.section,
             );
@@ -943,6 +947,9 @@ fn section_content(
         SettingsSection::Notifications => super::settings_app::notifications(ui),
         SettingsSection::Language => super::settings_app::language(ui),
         SettingsSection::Activity => super::activity_settings::page(ui, &mut state.activity),
+        SettingsSection::Bridges => {
+            super::personal_bridges::page(ui, &mut state.extra.personal, bridge);
+        }
         SettingsSection::Translate => {
             super::translate_settings::page(ui, &mut state.translate, &bridge.runtime());
         }

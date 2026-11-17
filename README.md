@@ -502,7 +502,7 @@ tests).
 ### Personal bridges: your own Matrix and Telegram accounts in DMs
 
 *(bs-server)* Besides channel bridges, anyone can connect **their own** account: in the client,
-Settings → **Connections** → *Personal bridges*. Then pick chats — each becomes a direct
+Settings → **Bridges**. Then pick chats — each becomes a direct
 conversation with a contact named like "Anna · Telegram": their messages come from them, your
 replies go to the chat from your account, and what you write from your phone shows up too.
 In group chats the author's name precedes the text.

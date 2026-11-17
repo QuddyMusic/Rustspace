@@ -34,6 +34,7 @@ pub mod instance;
 pub mod invites;
 pub mod notifications;
 pub mod peers;
+pub mod personal_bridges;
 pub mod profile;
 pub mod read;
 pub mod registry;
@@ -76,6 +77,9 @@ pub use instance::{
 };
 pub use invites::{Invite, InvitePatch, NewInvite, Redemption};
 pub use peers::{ApprovalRequest, Peer, Recheck};
+pub use personal_bridges::{
+    MatrixLogin, PersonalAccount, PersonalBridges, PersonalChat, RemoteChat, TelegramStep,
+};
 pub use profile::{MutualSpace, Mutuals};
 pub use read::{
     DmMessagePage, MESSAGES_LIMIT_DEFAULT, MESSAGES_LIMIT_MAX, MESSAGES_LIMIT_MIN, MessagePage,

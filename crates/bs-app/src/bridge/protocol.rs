@@ -450,6 +450,8 @@ pub(crate) enum ImageKind {
 /// Запросы настроек: администрирование и аккаунт.
 #[derive(Debug, Clone)]
 pub(crate) enum AdminRequest {
+    /// Личные мосты: свои аккаунты Matrix и Telegram.
+    Personal(PersonalOp),
     /// Прочитать настройки инстанса.
     LoadSettings,
     /// Сохранить настройки инстанса.
@@ -592,9 +594,95 @@ pub(crate) struct TwoFactorView {
     pub(crate) codes: Option<Vec<String>>,
 }
 
+/// Действие с личными мостами.
+#[derive(Debug, Clone)]
+pub(crate) enum PersonalOp {
+    /// Сети и аккаунты.
+    Load,
+    /// Подключить Matrix.
+    AddMatrix {
+        /// Домашний сервер.
+        homeserver: String,
+        /// Токен или логин с паролем.
+        login: bs_api::MatrixLogin,
+    },
+    /// Начать вход в Telegram: номер и, если у сервера нет своих, ключи
+    /// приложения.
+    TelegramLogin {
+        /// Номер.
+        phone: String,
+        /// API ID и API hash.
+        app: Option<(i32, String)>,
+    },
+    /// Код из Telegram.
+    TelegramCode {
+        /// Вход.
+        login: String,
+        /// Код.
+        code: String,
+    },
+    /// Облачный пароль Telegram.
+    TelegramPassword {
+        /// Вход.
+        login: String,
+        /// Пароль.
+        password: Secret,
+    },
+    /// Отключить аккаунт.
+    Remove(String),
+    /// Чаты на той стороне.
+    RemoteChats(String),
+    /// Связать чат.
+    Link {
+        /// Аккаунт.
+        account: String,
+        /// Чат.
+        chat: bs_api::RemoteChat,
+    },
+    /// Отвязать чат.
+    Unlink {
+        /// Аккаунт.
+        account: String,
+        /// Связь.
+        chat: String,
+    },
+}
+
+/// Что дальше во входе в Telegram.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TelegramNext {
+    /// Нужен облачный пароль; подсказка.
+    Password(Option<String>),
+    /// Вошли.
+    Done,
+}
+
+/// Ответы о личных мостах.
+#[derive(Debug)]
+pub(crate) enum PersonalEvent {
+    /// Сети и аккаунты (после любого изменения); `Err(None)` — сервер их не
+    /// знает.
+    Loaded(Result<bs_api::PersonalBridges, Option<String>>),
+    /// Действие не удалось.
+    Failed(String),
+    /// Код отправлен: идентификатор входа.
+    TelegramStarted(Result<String, String>),
+    /// Шаг входа в Telegram.
+    Telegram(Result<TelegramNext, String>),
+    /// Чаты на той стороне.
+    RemoteChats {
+        /// Аккаунт.
+        account: String,
+        /// Чаты или ошибка.
+        result: Result<Vec<bs_api::RemoteChat>, String>,
+    },
+}
+
 /// Ответы на [`AdminRequest`] и загрузку картинки профиля.
 #[derive(Debug)]
 pub(crate) enum AdminEvent {
+    /// Личные мосты.
+    Personal(PersonalEvent),
     /// Двухфакторная защита: состояние или текст ошибки.
     TwoFactor(Result<TwoFactorView, String>),
     /// Настройки инстанса.

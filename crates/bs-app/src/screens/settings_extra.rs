@@ -188,6 +188,8 @@ pub(super) fn ensure_settings(admin: &mut AdminUi, bridge: &Bridge) {
 pub(crate) struct ExtraUi {
     pub(crate) account: AccountUi,
     pub(crate) admin: AdminUi,
+    /// Личные мосты.
+    pub(crate) personal: super::personal_bridges::PersonalUi,
 }
 
 impl ExtraUi {
@@ -205,6 +207,7 @@ impl ExtraUi {
                     self.apply_done(action, result);
                 }
                 AdminEvent::TwoFactor(result) => self.account.two_factor.apply(result),
+                AdminEvent::Personal(event) => self.personal.apply(event),
                 other => self.admin.apply(other),
             }
         }
