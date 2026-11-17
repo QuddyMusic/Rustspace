@@ -406,6 +406,7 @@ impl ChatScreen {
         response: &egui::Response,
         rect: egui::Rect,
         id: &str,
+        slot: egui::layers::ShapeIdx,
     ) {
         let now = ui.input(|i| i.time);
         if self.jump_to.as_deref() == Some(id) {
@@ -420,16 +421,29 @@ impl ChatScreen {
             if left <= 0.0 {
                 self.flash = None;
             } else {
+                // Быстро проявляется и плавно гаснет.
+                let t = left.clamp(0.0, 1.0);
+                let rise = ((1.0 - t) / 0.12).clamp(0.0, 1.0);
+                let fall = t * t * 2.0f64.mul_add(-t, 3.0);
                 #[allow(
                     clippy::cast_possible_truncation,
                     clippy::cast_sign_loss,
                     reason = "доля 0..1 переводится в альфа-канал 0..255"
                 )]
-                let alpha = (left.clamp(0.0, 1.0) * 46.0) as u8;
-                ui.painter().rect_filled(
-                    rect,
-                    4.0,
-                    egui::Color32::from_rgba_unmultiplied(252, 211, 77, alpha),
+                let alpha = (rise.min(fall) * 70.0) as u8;
+                let accent = theme::accent();
+                ui.painter().set(
+                    slot,
+                    egui::Shape::rect_filled(
+                        rect.expand2(egui::vec2(0.0, 2.0)),
+                        theme::rounded(8),
+                        egui::Color32::from_rgba_unmultiplied(
+                            accent.r(),
+                            accent.g(),
+                            accent.b(),
+                            alpha,
+                        ),
+                    ),
                 );
                 ui.ctx().request_repaint();
             }
@@ -443,6 +457,9 @@ impl ChatScreen {
             return;
         };
         self.search.sync(bridge);
+        if let Some(id) = self.reply_jump.take() {
+            bridge.jump_to(selected.kind, &selected.channel, &id);
+        }
         if let Some(id) = self
             .search
             .show(ctx, bridge, selected.kind, &selected.channel)
@@ -584,6 +601,8 @@ impl ChatScreen {
         if bridge.cache().is_some_and(|c| c.me().id != row.author_id) {
             crate::translate::auto(&bridge.runtime(), ui.ctx(), &row.id, &row.body);
         }
+        // Подсветка рисуется под сообщением: место в списке фигур занимаем заранее.
+        let flash_slot = ui.painter().add(egui::Shape::Noop);
         let (rect, hits) = self.message_body(ui, row, view.show_header);
         let response = ui.interact(rect, ui.auto_id_with(("msg", &row.id)), Sense::click());
         // После подгрузки возвращаем в поле зрения сообщение, которое читали:
@@ -594,7 +613,15 @@ impl ChatScreen {
             response.scroll_to_me(Some(egui::Align::TOP));
             self.scroll_anchor = None;
         }
-        self.jump_and_flash(ui, &response, rect, &row.id);
+        self.jump_and_flash(ui, &response, rect, &row.id, flash_slot);
+        if let Some(pos) = response.hover_pos()
+            && hits
+                .reply
+                .as_ref()
+                .is_some_and(|(quote, _)| quote.contains(pos))
+        {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
         {
@@ -649,8 +676,9 @@ impl ChatScreen {
                         ui.label(theme::muted(theme::stamp(row.created_at, now_ms())).size(11.5));
                     });
                 }
-                if let Some((author, text)) = &row.reply {
-                    crate::screens::body::show_reply_quote(ui, author, text);
+                if let Some((id, author, text)) = &row.reply {
+                    let quote = crate::screens::body::show_reply_quote(ui, author, text);
+                    hits.reply = Some((quote.rect, id.clone()));
                 }
                 if let Some(sticker) = media::sticker_of(&row.body) {
                     hits.images.extend(media::show_sticker(ui, sticker));
@@ -704,6 +732,10 @@ impl ChatScreen {
         hits: &MessageHits,
         pos: egui::Pos2,
     ) {
+        if let Some((_, id)) = hits.reply.as_ref().filter(|(rect, _)| rect.contains(pos)) {
+            self.reply_jump = Some(id.clone());
+            return;
+        }
         if let Some((_, click)) = hits.downloads.iter().find(|(rect, _)| rect.contains(pos)) {
             if self.save_pending.is_none() {
                 self.save_pending = Some(crate::download::start(ui.ctx(), click.clone()));
@@ -892,6 +924,8 @@ struct MessageHits {
     downloads: Vec<media::DownloadHit>,
     profile: Vec<egui::Rect>,
     reactions: Vec<(egui::Rect, crate::screens::body::ReactionClick)>,
+    /// Цитата ответа и id исходного сообщения.
+    reply: Option<(egui::Rect, String)>,
 }
 
 /// Что выбрали в контекстном меню сообщения.

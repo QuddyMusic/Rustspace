@@ -542,8 +542,8 @@ pub(super) struct MessageRow {
     pub(super) embeds: Vec<bs_types::Embed>,
     /// Реакции, сгруппированные по эмодзи.
     pub(super) reactions: Vec<crate::screens::body::ReactionGroup>,
-    /// Автор и текст сообщения, на которое это — ответ.
-    pub(super) reply: Option<(String, String)>,
+    /// Сообщение, на которое это — ответ: id, автор и текст.
+    pub(super) reply: Option<(String, String, String)>,
     /// Системное сообщение беседы (`type: "system"`); `None` — обычное.
     pub(super) system: Option<SystemLine>,
 }
@@ -671,10 +671,10 @@ pub(super) fn message_rows(
                     .collect(),
                 embeds: msg.embeds.clone(),
                 reactions: reaction_groups(&msg.reactions, names, me),
-                reply: msg
-                    .reply_to
-                    .as_ref()
-                    .map(|r| quote(&r.user, r.message.content.as_ref())),
+                reply: msg.reply_to.as_ref().map(|r| {
+                    let (author, text) = quote(&r.user, r.message.content.as_ref());
+                    (r.message.id.clone(), author, text)
+                }),
                 system: None,
             })
             .collect(),
@@ -698,10 +698,10 @@ pub(super) fn message_rows(
                     .collect(),
                 embeds: msg.embeds.clone(),
                 reactions: reaction_groups(&msg.reactions, names, me),
-                reply: msg
-                    .reply_to
-                    .as_ref()
-                    .map(|r| quote(&r.user, r.message.content.as_ref())),
+                reply: msg.reply_to.as_ref().map(|r| {
+                    let (author, text) = quote(&r.user, r.message.content.as_ref());
+                    (r.message.id.clone(), author, text)
+                }),
                 system: (msg.message.message_type == Some(bs_types::MessageType::System)).then(
                     || {
                         msg.message

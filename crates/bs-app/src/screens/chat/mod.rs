@@ -201,6 +201,8 @@ pub(crate) struct ChatScreen {
     jump_to: Option<String>,
     /// Подсвеченное после перехода сообщение и момент, когда подсветка гаснет.
     flash: Option<(String, f64)>,
+    /// Нажали на цитату ответа: перейти к исходному сообщению.
+    reply_jump: Option<String>,
     /// Закрепить, в закладки, в «Избранное» — из меню сообщения.
     extras_action: Option<saved::ExtrasAction>,
     /// Перейти к сообщению, когда откроется его чат.
