@@ -49,6 +49,58 @@ pub(super) fn channel_menu(
     });
 }
 
+/// Шестерёнка настроек на строке канала при наведении, как в оригинале
+/// (`ChannelSidebar`: только с правом управлять каналами). Возвращает `true`,
+/// если щелчок пришёлся на неё — тогда строка канал не открывает.
+pub(super) fn channel_gear(
+    ui: &egui::Ui,
+    row: &egui::Response,
+    space: &SidebarSpace,
+    channel: &SidebarChannel,
+    nav: &mut Option<Nav>,
+) -> bool {
+    if !space.rights.manage_channels {
+        return false;
+    }
+    // Значок «без звука» стоит у правого края — шестерёнка левее него.
+    let shift = if channel.muted { 40.0 } else { 18.0 };
+    let center = egui::pos2(row.rect.right() - shift, row.rect.center().y);
+    let gear = egui::Rect::from_center_size(center, egui::Vec2::splat(20.0));
+    // Только когда указатель над самой строкой (не под окном поверх неё).
+    if !row.contains_pointer() {
+        return false;
+    }
+    let over_gear = ui
+        .ctx()
+        .pointer_hover_pos()
+        .is_some_and(|p| gear.contains(p));
+    let color = if over_gear {
+        theme::text_bright()
+    } else {
+        theme::text_muted()
+    };
+    crate::icons::paint(ui.painter(), center, 15.0, Icon::Gear, color);
+    if over_gear {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        egui::Tooltip::always_open(
+            ui.ctx().clone(),
+            ui.layer_id(),
+            row.id.with("gear_tip"),
+            egui::PopupAnchor::Pointer,
+        )
+        .show(|ui| ui.label(tr("Настройки канала")));
+    }
+    let clicked = row.clicked() && row.interact_pointer_pos().is_some_and(|p| gear.contains(p));
+    if clicked {
+        *nav = Some(Nav::ChannelSettings {
+            origin: space.origin,
+            space_id: space.id.clone(),
+            target: crate::screens::channel_settings::Target::Channel(channel.id.clone()),
+        });
+    }
+    clicked
+}
+
 /// Шапка пространства: имя (ПКМ — меню) и кнопка приглашения.
 pub(super) fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
     ui.horizontal(|ui| {
@@ -387,7 +439,7 @@ impl ChatScreen {
             theme::muted_mark(ui, &row.rect);
         }
         channel_menu(&row, space, channel, nav);
-        if row.clicked() {
+        if !channel_gear(ui, &row, space, channel, nav) && row.clicked() {
             *nav = Some(Nav::VoiceJoin {
                 origin: space.origin,
                 channel_id: channel.id.clone(),
@@ -508,7 +560,7 @@ impl ChatScreen {
                     theme::muted_mark(ui, &row.rect);
                 }
                 channel_menu(&row, space, channel, nav);
-                if row.clicked() {
+                if !channel_gear(ui, &row, space, channel, nav) && row.clicked() {
                     *nav = Some(Nav::Channel(SelectedChannel {
                         origin: space.origin,
                         channel: channel.id.clone(),
