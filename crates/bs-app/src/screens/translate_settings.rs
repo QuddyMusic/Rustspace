@@ -30,7 +30,7 @@ pub(crate) fn page(ui: &mut egui::Ui, state: &mut TranslatePage, runtime: &tokio
             ui.radio_value(&mut prefs.engine, engine, engine.title());
         }
         ui.add_space(6.0);
-        engine_fields(ui, &mut prefs);
+        engine_fields(ui, &mut prefs, runtime);
     });
     ui.add_space(10.0);
     card(ui, |ui| {
@@ -137,8 +137,8 @@ fn check_card(
     });
 }
 
-/// Адреса и ключи выбранного сервиса.
-fn engine_fields(ui: &mut egui::Ui, prefs: &mut TranslatePrefs) {
+/// Настройки выбранного варианта.
+fn engine_fields(ui: &mut egui::Ui, prefs: &mut TranslatePrefs, runtime: &tokio::runtime::Handle) {
     let field = |ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str, secret: bool| {
         widgets::field_label(ui, label);
         ui.add(
@@ -150,49 +150,26 @@ fn engine_fields(ui: &mut egui::Ui, prefs: &mut TranslatePrefs) {
         );
     };
     match prefs.engine {
-        Engine::Google => {
-            ui.label(
-                theme::muted(tr(
-                    "Без ключа и настройки. Это неофициальный адрес веб-переводчика: при частых \
-                 запросах Google может временно отказывать — тогда выберите другой сервис.",
-                ))
-                .size(12.5),
-            );
-        }
-        Engine::Lingva => {
-            field(
-                ui,
-                tr("Адрес Lingva"),
-                &mut prefs.lingva_url,
-                "https://lingva.ml",
-                false,
-            );
-        }
+        Engine::Local => local_fields(ui, &mut prefs.local, runtime),
         Engine::Libre => {
             field(
                 ui,
                 tr("Адрес LibreTranslate"),
                 &mut prefs.libre_url,
-                "https://libretranslate.com",
+                "http://127.0.0.1:5000",
                 false,
             );
             field(
                 ui,
-                tr("Ключ API (если нужен)"),
+                tr("Ключ API (если сервер его просит)"),
                 &mut prefs.libre_key,
                 "",
                 true,
             );
-            ui.label(theme::muted(tr(
-                "Свой сервер без ключа: docker run -p 5000:5000 libretranslate/libretranslate — \
-                 адрес http://127.0.0.1:5000.",
-            )).size(12.0));
-        }
-        Engine::Deepl => {
-            field(ui, tr("Ключ DeepL API"), &mut prefs.deepl_key, "…:fx", true);
             ui.label(
                 theme::muted(tr(
-                    "Бесплатный ключ (до 500 000 знаков в месяц) — на deepl.com/pro-api.",
+                    "LibreTranslate — открытый переводчик на моделях Argos. Свой сервер: \
+                     pip install libretranslate && libretranslate — адрес http://127.0.0.1:5000.",
                 ))
                 .size(12.0),
             );
@@ -202,28 +179,138 @@ fn engine_fields(ui: &mut egui::Ui, prefs: &mut TranslatePrefs) {
                 ui,
                 tr("Адрес API (OpenAI-совместимый)"),
                 &mut prefs.llm_url,
-                "http://127.0.0.1:11434/v1",
+                "http://127.0.0.1:8080/v1",
                 false,
             );
-            field(ui, tr("Модель"), &mut prefs.llm_model, "qwen2.5:3b", false);
             field(
                 ui,
-                tr("Ключ (для локальной не нужен)"),
+                tr("Модель (если сервер держит несколько)"),
+                &mut prefs.llm_model,
+                "",
+                false,
+            );
+            field(
+                ui,
+                tr("Ключ (если сервер его просит)"),
                 &mut prefs.llm_key,
                 "",
                 true,
             );
-            ui.add_space(4.0);
             ui.label(
                 theme::muted(tr(
-                    "Локально через Ollama: установите ollama.com, затем ollama pull qwen2.5:3b — \
-                 адрес по умолчанию уже подходит. Маленькие модели (1.5–3B) быстры на \
-                 процессоре; 7B переводят заметно лучше. Подходят LM Studio \
-                 (http://127.0.0.1:1234/v1) и llama.cpp (llama-server, /v1), а также облачные \
-                 сервисы с OpenAI-совместимым API и ключом.",
+                    "Например, llama-server из llama.cpp на другом компьютере: \
+                     llama-server -m модель.gguf --host 0.0.0.0 --port 8080.",
                 ))
                 .size(12.0),
             );
         }
+    }
+}
+
+/// llama.cpp на этом компьютере: модель, устройство, установка.
+fn local_fields(
+    ui: &mut egui::Ui,
+    local: &mut crate::local_llm::LocalPrefs,
+    runtime: &tokio::runtime::Handle,
+) {
+    use crate::local_llm::{self, MODELS, Progress};
+    ui.label(
+        theme::muted(tr(
+            "Перевод без ключей и без интернета: llama.cpp (MIT) и открытая модель Qwen \
+             (Apache-2.0) скачиваются один раз и работают на этом компьютере.",
+        ))
+        .size(12.5),
+    );
+    widgets::field_label(ui, tr("Модель"));
+    for model in MODELS {
+        ui.radio_value(
+            &mut local.model,
+            model.id.to_owned(),
+            crate::tf!(
+                "{title} · ≈{size} ГБ",
+                title = model.title(),
+                size = model.size
+            ),
+        );
+    }
+    widgets::field_label(ui, tr("Где считать"));
+    ui.horizontal(|ui| {
+        ui.radio_value(&mut local.gpu, true, tr("Видеокарта"));
+        ui.radio_value(&mut local.gpu, false, tr("Процессор"));
+    });
+    if local.gpu && !local_llm::gpu_available() {
+        ui.label(
+            theme::muted(tr("Vulkan не найден — на видеокарте может не запуститься.")).size(12.0),
+        );
+    }
+    ui.add_space(8.0);
+    let have = local_llm::installed(&local.model);
+    let ready = have.engine.is_some() && have.model.is_some() && have.gpu == local.gpu;
+    let status = local_llm::status();
+    let busy = matches!(
+        status,
+        Progress::Looking(_) | Progress::Downloading(..) | Progress::Unpacking
+    );
+    ui.horizontal(|ui| {
+        if ready {
+            ui.label(
+                RichText::new(crate::tf!(
+                    "Установлено: llama.cpp {tag}",
+                    tag = have.engine.clone().unwrap_or_default()
+                ))
+                .color(theme::mint()),
+            );
+        } else if ui
+            .add_enabled(!busy, egui::Button::new(tr("Установить")))
+            .clicked()
+        {
+            local_llm::install(runtime, ui.ctx(), local);
+        }
+        if (have.engine.is_some() || have.model.is_some())
+            && !busy
+            && ui
+                .small_button(tr("Удалить всё"))
+                .on_hover_text(tr("llama.cpp и скачанные модели"))
+                .clicked()
+        {
+            local_llm::remove();
+        }
+    });
+    match status {
+        Progress::Looking(what) => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(theme::muted(crate::tf!("Ищу {what}…", what = what)));
+            });
+        }
+        Progress::Downloading(what, got, total) => {
+            #[allow(clippy::cast_precision_loss, reason = "доля для полосы")]
+            let fraction = total.map_or(0.0, |t| got as f32 / t.max(1) as f32);
+            let mb = |b: u64| b / (1024 * 1024);
+            let text = total.map_or_else(
+                || crate::tf!("{what}: {got} МБ", what = what, got = mb(got)),
+                |t| {
+                    crate::tf!(
+                        "{what}: {got} из {total} МБ",
+                        what = what,
+                        got = mb(got),
+                        total = mb(t)
+                    )
+                },
+            );
+            ui.add(egui::ProgressBar::new(fraction).text(text));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+        }
+        Progress::Unpacking => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(theme::muted(tr("Распаковываю…")));
+            });
+        }
+        Progress::Failed(error) => {
+            ui.label(RichText::new(error).color(theme::rose()));
+        }
+        Progress::Done | Progress::Idle => {}
     }
 }

@@ -104,13 +104,13 @@ every WebSocket frame and REST response the client receives.
   everyone (with "Manage messages"). **Bookmarks** are one list across all chats and
   instances, with search and grouping by date, person or chat, a "with media" filter and
   jumping to the original.
-- **Translation.** "Translate" in the message menu, or automatic translation of other
-  people's messages that are not in your language. Google needs no setup; Lingva,
-  LibreTranslate and DeepL are there too, and so is a **language model** over any
-  OpenAI-compatible API — locally with Ollama (`ollama pull qwen2.5:3b`), LM Studio or
-  llama.cpp, or a cloud one with a key. The text goes straight from the client to the chosen
-  service; code, links and mentions are not sent and come back unchanged. *Settings →
-  Translation* has a test button.
+- **Translation**, open projects only. "Translate" in the message menu, or automatic
+  translation of other people's messages that are not in your language. By default it runs
+  on this computer: *Settings → Translation* installs llama.cpp (MIT) and an open Qwen model
+  (Apache-2.0) with one button — CPU or GPU (Vulkan, Metal on macOS) — and the client starts
+  and stops `llama-server` itself; no keys, the text never leaves the machine. Your own
+  LibreTranslate server or any OpenAI-compatible model server (llama-server, vLLM) work too.
+  Code, links and mentions are not translated and come back unchanged.
 - **Activity (Rich Presence).** Members show what they play, listen to or watch: under the
   name in the member list and as cards with cover art, timers and track progress in the
   profile. The client finds running games itself — the Backspace game dictionary, Steam,

@@ -300,6 +300,8 @@ fn update_strip(
 impl eframe::App for BackspaceApp {
     fn on_exit(&mut self) {
         crate::prefs::flush(true);
+        // Локальный переводчик живёт отдельным процессом: гасим его.
+        crate::local_llm::stop();
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {

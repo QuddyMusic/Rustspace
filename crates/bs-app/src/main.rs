@@ -33,6 +33,7 @@ mod hotkeys;
 mod i18n;
 mod icons;
 mod images;
+mod local_llm;
 mod logic;
 mod markdown;
 mod media;

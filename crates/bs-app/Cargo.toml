@@ -93,6 +93,8 @@ two-face = { version = "0.5.2", default-features = false, features = ["syntect-f
 syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
 # Иконки игр: значки из .exe (ICO), PNG и JPEG с диска.
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "ico", "webp"] }
+# Сборки llama.cpp под Windows приходят архивом zip.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 # Список процессов для поиска игр на Windows и macOS (на Linux — /proc).

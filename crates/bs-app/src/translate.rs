@@ -1,14 +1,13 @@
 //! Перевод сообщений.
 //!
-//! По умолчанию — машинный перевод (Google без ключа, Lingva, LibreTranslate
-//! или DeepL). Вместо него можно выбрать языковую модель: локальную (Ollama,
-//! LM Studio, llama.cpp — всё, что говорит на OpenAI-совместимом
-//! `/v1/chat/completions`) или облачную с ключом.
+//! Только открытые проекты. По умолчанию — llama.cpp с открытой моделью на
+//! этом компьютере: ставится из настроек одной кнопкой, без ключей, текст
+//! никуда не уходит. Можно указать свой сервер LibreTranslate или свой
+//! сервер модели с OpenAI-совместимым API (llama.cpp `llama-server`, vLLM).
 //!
-//! Перевод идёт прямо из клиента, без сервера: текст сообщения уходит только
-//! в выбранный сервис. Перед отправкой код, ссылки и упоминания заменяются
-//! метками `⟦0⟧` и после перевода возвращаются на место — их не перевирают.
-//! Сообщение, которое уже на нужном языке (по письменности), не переводится.
+//! Перед отправкой код, ссылки и упоминания заменяются метками `⟦0⟧` и
+//! после перевода возвращаются на место — их не перевирают. Сообщение,
+//! которое уже на нужном языке (по письменности), не переводится.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -21,37 +20,27 @@ use crate::i18n::tr;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Engine {
-    /// Google Translate без ключа (неофициальный адрес веб-переводчика).
+    /// llama.cpp и открытая модель на этом компьютере. Прежние закрытые
+    /// сервисы в старых настройках переходят сюда.
     #[default]
-    Google,
-    /// Lingva — открытый фронтенд Google Translate.
-    Lingva,
-    /// LibreTranslate — свой или публичный сервер.
+    #[serde(alias = "google", alias = "lingva", alias = "deepl")]
+    Local,
+    /// LibreTranslate — свой сервер.
     Libre,
-    /// DeepL API (нужен ключ, есть бесплатный).
-    Deepl,
-    /// Языковая модель через OpenAI-совместимый API (локальная или облачная).
+    /// Свой сервер модели с OpenAI-совместимым API.
     Llm,
 }
 
 impl Engine {
     /// Все варианты для выбора.
-    pub(crate) const ALL: [Self; 5] = [
-        Self::Google,
-        Self::Lingva,
-        Self::Libre,
-        Self::Deepl,
-        Self::Llm,
-    ];
+    pub(crate) const ALL: [Self; 3] = [Self::Local, Self::Libre, Self::Llm];
 
     /// Подпись.
     pub(crate) fn title(self) -> &'static str {
         match self {
-            Self::Google => tr("Google (без ключа)"),
-            Self::Lingva => "Lingva",
-            Self::Libre => "LibreTranslate",
-            Self::Deepl => "DeepL",
-            Self::Llm => tr("Языковая модель (локальная или облачная)"),
+            Self::Local => tr("На этом компьютере — llama.cpp"),
+            Self::Libre => tr("Свой сервер LibreTranslate"),
+            Self::Llm => tr("Свой сервер модели (OpenAI-совместимый API)"),
         }
     }
 }
@@ -64,19 +53,17 @@ pub(crate) struct TranslatePrefs {
     pub(crate) engine: Engine,
     /// Язык перевода (`ru`, `en`, …); пусто — язык интерфейса.
     pub(crate) target: String,
-    /// Адрес Lingva.
-    pub(crate) lingva_url: String,
+    /// Модель и устройство для llama.cpp на этом компьютере.
+    pub(crate) local: crate::local_llm::LocalPrefs,
     /// Адрес LibreTranslate.
     pub(crate) libre_url: String,
-    /// Ключ LibreTranslate.
+    /// Ключ LibreTranslate (если сервер его просит).
     pub(crate) libre_key: String,
-    /// Ключ DeepL (`…:fx` — бесплатный).
-    pub(crate) deepl_key: String,
     /// Корень OpenAI-совместимого API.
     pub(crate) llm_url: String,
     /// Модель.
     pub(crate) llm_model: String,
-    /// Ключ (у локальной модели не нужен).
+    /// Ключ (если сервер его просит).
     pub(crate) llm_key: String,
     /// Переводить чужие сообщения сразу.
     pub(crate) auto: bool,
@@ -87,14 +74,13 @@ pub(crate) struct TranslatePrefs {
 impl Default for TranslatePrefs {
     fn default() -> Self {
         Self {
-            engine: Engine::Google,
+            engine: Engine::Local,
             target: String::new(),
-            lingva_url: "https://lingva.ml".to_owned(),
-            libre_url: "https://libretranslate.com".to_owned(),
+            local: crate::local_llm::LocalPrefs::default(),
+            libre_url: "http://127.0.0.1:5000".to_owned(),
             libre_key: String::new(),
-            deepl_key: String::new(),
-            llm_url: "http://127.0.0.1:11434/v1".to_owned(),
-            llm_model: "qwen2.5:3b".to_owned(),
+            llm_url: "http://127.0.0.1:8080/v1".to_owned(),
+            llm_model: String::new(),
             llm_key: String::new(),
             auto: false,
             keep_original: true,
@@ -115,10 +101,9 @@ impl TranslatePrefs {
     /// Отпечаток настроек для кэша: другой сервис — другой перевод.
     fn signature(&self) -> String {
         match self.engine {
+            Engine::Local => format!("local|{}", self.local.model),
             Engine::Llm => format!("llm|{}|{}", self.llm_url, self.llm_model),
-            Engine::Lingva => format!("lingva|{}", self.lingva_url),
             Engine::Libre => format!("libre|{}", self.libre_url),
-            other => format!("{other:?}"),
         }
     }
 }
@@ -398,10 +383,8 @@ pub(crate) fn request(
 
 fn engine_label(engine: Engine) -> &'static str {
     match engine {
-        Engine::Google => "Google",
-        Engine::Lingva => "Lingva",
+        Engine::Local => "llama.cpp",
         Engine::Libre => "LibreTranslate",
-        Engine::Deepl => "DeepL",
         Engine::Llm => "LLM",
     }
 }
@@ -430,11 +413,25 @@ pub(crate) async fn translate(
     let (protected, kept) = protect(text);
     let client = client()?;
     let raw = match prefs.engine {
-        Engine::Google => google(&client, target, &protected).await,
-        Engine::Lingva => lingva(&client, &prefs.lingva_url, target, &protected).await,
+        Engine::Local => {
+            let base = crate::local_llm::ensure(&prefs.local).await?;
+            llm(&client, &base, "local", "", target, &protected).await
+        }
         Engine::Libre => libre(&client, prefs, target, &protected).await,
-        Engine::Deepl => deepl(&client, &prefs.deepl_key, target, &protected).await,
-        Engine::Llm => llm(&client, prefs, target, &protected).await,
+        Engine::Llm => {
+            if prefs.llm_url.trim().is_empty() {
+                return Err(tr("укажите адрес сервера модели").to_owned());
+            }
+            llm(
+                &client,
+                &prefs.llm_url,
+                &prefs.llm_model,
+                &prefs.llm_key,
+                target,
+                &protected,
+            )
+            .await
+        }
     }?;
     restore(raw.trim(), &kept)
 }
@@ -461,48 +458,6 @@ async fn get_json(request: reqwest::RequestBuilder) -> Result<serde_json::Value,
     response.json().await.map_err(|e| e.to_string())
 }
 
-async fn google(client: &reqwest::Client, target: &str, text: &str) -> Result<String, String> {
-    let value = get_json(
-        client
-            .get("https://translate.googleapis.com/translate_a/single")
-            .query(&[
-                ("client", "gtx"),
-                ("sl", "auto"),
-                ("tl", target),
-                ("dt", "t"),
-                ("q", text),
-            ]),
-    )
-    .await?;
-    let parts = value[0]
-        .as_array()
-        .ok_or_else(|| tr("непонятный ответ Google").to_owned())?;
-    Ok(parts
-        .iter()
-        .filter_map(|part| part[0].as_str())
-        .collect::<String>())
-}
-
-async fn lingva(
-    client: &reqwest::Client,
-    base: &str,
-    target: &str,
-    text: &str,
-) -> Result<String, String> {
-    let base = base.trim_end_matches('/');
-    let mut url =
-        reqwest::Url::parse(&format!("{base}/api/v1/auto/{target}/")).map_err(|e| e.to_string())?;
-    url.path_segments_mut()
-        .map_err(|()| tr("неверный адрес Lingva").to_owned())?
-        .pop_if_empty()
-        .push(text);
-    let value = get_json(client.get(url)).await?;
-    value["translation"]
-        .as_str()
-        .map(str::to_owned)
-        .ok_or_else(|| tr("непонятный ответ Lingva").to_owned())
-}
-
 async fn libre(
     client: &reqwest::Client,
     prefs: &TranslatePrefs,
@@ -523,39 +478,6 @@ async fn libre(
         .ok_or_else(|| tr("непонятный ответ LibreTranslate").to_owned())
 }
 
-async fn deepl(
-    client: &reqwest::Client,
-    key: &str,
-    target: &str,
-    text: &str,
-) -> Result<String, String> {
-    let key = key.trim();
-    if key.is_empty() {
-        return Err(tr("для DeepL нужен ключ API").to_owned());
-    }
-    let host = if key.ends_with(":fx") {
-        "https://api-free.deepl.com"
-    } else {
-        "https://api.deepl.com"
-    };
-    let target = match target {
-        "en" => "EN-US",
-        "pt" => "PT-BR",
-        other => other,
-    };
-    let value = get_json(
-        client
-            .post(format!("{host}/v2/translate"))
-            .header("Authorization", format!("DeepL-Auth-Key {key}"))
-            .json(&serde_json::json!({"text": [text], "target_lang": target.to_uppercase()})),
-    )
-    .await?;
-    value["translations"][0]["text"]
-        .as_str()
-        .map(str::to_owned)
-        .ok_or_else(|| tr("непонятный ответ DeepL").to_owned())
-}
-
 /// Подсказка модели: только перевод, без ответов на текст.
 fn llm_prompt(target: &str) -> String {
     format!(
@@ -569,31 +491,32 @@ fn llm_prompt(target: &str) -> String {
 
 async fn llm(
     client: &reqwest::Client,
-    prefs: &TranslatePrefs,
+    base: &str,
+    model: &str,
+    key: &str,
     target: &str,
     text: &str,
 ) -> Result<String, String> {
-    let base = prefs.llm_url.trim().trim_end_matches('/');
-    if base.is_empty() || prefs.llm_model.trim().is_empty() {
-        return Err(tr("укажите адрес и модель").to_owned());
+    let base = base.trim().trim_end_matches('/');
+    let mut body = serde_json::json!({
+        "temperature": 0.2,
+        "stream": false,
+        "messages": [
+            {"role": "system", "content": llm_prompt(target)},
+            {"role": "user", "content": text},
+        ],
+    });
+    // llama-server берёт загруженную модель и без имени.
+    if !model.trim().is_empty() {
+        body["model"] = serde_json::json!(model.trim());
     }
-    let mut request = client
-        .post(format!("{base}/chat/completions"))
-        .json(&serde_json::json!({
-            "model": prefs.llm_model.trim(),
-            "temperature": 0.2,
-            "stream": false,
-            "messages": [
-                {"role": "system", "content": llm_prompt(target)},
-                {"role": "user", "content": text},
-            ],
-        }));
-    if !prefs.llm_key.trim().is_empty() {
-        request = request.bearer_auth(prefs.llm_key.trim());
+    let mut request = client.post(format!("{base}/chat/completions")).json(&body);
+    if !key.trim().is_empty() {
+        request = request.bearer_auth(key.trim());
     }
     let value = get_json(request).await.map_err(|err| {
         if err == tr("нет связи с сервисом перевода") {
-            tr("модель не отвечает: запущен ли Ollama (ollama serve)?").to_owned()
+            tr("сервер модели не отвечает").to_owned()
         } else {
             err
         }
