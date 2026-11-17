@@ -231,13 +231,19 @@ fn role_row(
     let editable = rights.manage_roles && can_manage_role_at(rights.standing, role.position);
     let mut open = false;
     let mut mv: Option<(String, RoleSide)> = None;
-    egui::Frame::new()
+    let draggable = editable && !everyone && !state.busy;
+    let frame = egui::Frame::new()
         .fill(theme::bg_rail())
         .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
+                if draggable {
+                    drag_handle(ui, &role.id);
+                } else if rights.manage_roles {
+                    ui.add_space(18.0);
+                }
                 let color = hex_color(&role.color).unwrap_or_else(theme::text_muted);
                 let (dot, _) =
                     ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::hover());
@@ -297,6 +303,14 @@ fn role_row(
                 });
             });
         });
+    if rights.manage_roles
+        && !state.busy
+        && let Some((dragged, (anchor, side))) =
+            drop_target(ui, &frame.response, roles, index, rights)
+    {
+        let op = SpaceOp::UpdateRole(dragged, RoleUpdate::moved(&anchor, side));
+        state.request(bridge, op);
+    }
     if open {
         state.roles.selected = Some(role.id.clone());
         state.roles.reload();
@@ -307,6 +321,69 @@ fn role_row(
         let op = SpaceOp::UpdateRole(role.id.clone(), RoleUpdate::moved(&anchor, side));
         state.request(bridge, op);
     }
+}
+
+/// Ручка для перетаскивания роли: несёт её id.
+fn drag_handle(ui: &mut egui::Ui, role_id: &str) {
+    let id = ui.scope_id().with(("role_drag", role_id));
+    let response = ui
+        .dnd_drag_source(id, role_id.to_owned(), |ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 18.0), egui::Sense::hover());
+            for row in 0..3 {
+                for col in 0..2 {
+                    #[allow(clippy::cast_precision_loss, reason = "0..3")]
+                    let at = rect.left_top()
+                        + egui::vec2(
+                            (col as f32).mul_add(6.0, 3.0),
+                            (row as f32).mul_add(5.0, 4.0),
+                        );
+                    ui.painter().circle_filled(at, 1.4, theme::text_muted());
+                }
+            }
+        })
+        .response;
+    response
+        .on_hover_cursor(egui::CursorIcon::Grab)
+        .on_hover_text(tr("Перетащите, чтобы поменять порядок"));
+}
+
+/// Куда бросили перетаскиваемую роль: (её id, (опорная роль, сторона)).
+/// Пока тянут над строкой — рисует линию вставки.
+fn drop_target(
+    ui: &egui::Ui,
+    row: &egui::Response,
+    roles: &[Role],
+    index: usize,
+    rights: Rights,
+) -> Option<(String, (String, RoleSide))> {
+    let target = &roles[index];
+    let pointer = ui.ctx().pointer_interact_pos()?;
+    let upper = pointer.y < row.rect.center().y;
+    // Над @everyone можно только «выше него» — то есть ниже последней роли.
+    let (anchor, side) = if target.is_everyone == Some(true) {
+        let last = index.checked_sub(1).and_then(|i| roles.get(i))?;
+        (last, RoleSide::Below)
+    } else if upper {
+        (target, RoleSide::Above)
+    } else {
+        (target, RoleSide::Below)
+    };
+    // Выше роли, которой не управляешь, ставить нельзя.
+    let allowed = side == RoleSide::Below || can_manage_role_at(rights.standing, anchor.position);
+    if row.dnd_hover_payload::<String>().is_some() && allowed {
+        let y = if target.is_everyone == Some(true) || upper {
+            row.rect.top() - 2.0
+        } else {
+            row.rect.bottom() + 2.0
+        };
+        ui.painter().hline(
+            row.rect.x_range(),
+            y,
+            egui::Stroke::new(2.0, theme::accent()),
+        );
+    }
+    let dragged = row.dnd_release_payload::<String>()?;
+    (allowed && *dragged != anchor.id).then(|| ((*dragged).clone(), (anchor.id.clone(), side)))
 }
 
 fn load_draft(role: &Role) -> Draft {

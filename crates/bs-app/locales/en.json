@@ -1545,5 +1545,7 @@
   "По центру": "In the center",
   "Аватар ведёт ваш домашний инстанс: меняйте его там.": "Your home instance manages your avatar: change it there.",
   "Сменить": "Change",
-  "без уведомлений": "no notifications"
+  "без уведомлений": "no notifications",
+  "РОЛИ — {a0}": "ROLES — {a0}",
+  "Перетащите, чтобы поменять порядок": "Drag to reorder"
 }

@@ -1691,6 +1691,7 @@ pub(crate) fn member_row<'a>(
     ui: &mut egui::Ui,
     face: impl Into<Face<'a>>,
     status: UserStatus,
+    name_color: Option<Color32>,
     image: Option<&str>,
     activity: Option<(crate::icons::Icon, &str, Color32)>,
 ) -> egui::Response {
@@ -1726,7 +1727,13 @@ pub(crate) fn member_row<'a>(
         egui::pos2(left, name_y),
         name,
         FontId::proportional(15.0),
-        if offline { text_faint() } else { text() },
+        // Цвет роли не зависит от присутствия: у офлайн он просто приглушён.
+        match (name_color, offline) {
+            (Some(color), true) => color.gamma_multiply(0.55),
+            (Some(color), false) => color,
+            (None, true) => text_faint(),
+            (None, false) => text(),
+        },
         width,
     );
     // Вторая строка: во что играет или что слушает.

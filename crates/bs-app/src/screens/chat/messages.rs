@@ -670,7 +670,7 @@ impl ChatScreen {
                             RichText::new(&row.author)
                                 .family(theme::bold_family())
                                 .size(15.5)
-                                .color(theme::text_bright()),
+                                .color(row.name_color.unwrap_or_else(theme::text_bright)),
                         ));
                         hits.profile.push(name.rect);
                         ui.label(theme::muted(theme::stamp(row.created_at, now_ms())).size(11.5));

@@ -789,17 +789,15 @@ impl ChatScreen {
                         let mut current: Option<MemberSection> = None;
                         for row in rows {
                             let section = row.section();
-                            if current != Some(section) {
+                            if current.as_ref() != Some(&section) {
                                 if current.is_some() {
                                     ui.add_space(12.0);
                                 }
                                 let count = rows.iter().filter(|r| r.section() == section).count();
+                                let title = section.title();
                                 ui.horizontal(|ui| {
                                     ui.add_space(8.0);
-                                    ui.label(theme::section_title(&format!(
-                                        "{} — {count}",
-                                        section.title()
-                                    )));
+                                    ui.label(theme::section_title(&format!("{title} — {count}")));
                                 });
                                 ui.add_space(4.0);
                                 current = Some(section);
@@ -808,6 +806,7 @@ impl ChatScreen {
                                 ui,
                                 face(&row.name, &row.face),
                                 row.status,
+                                row.name_color(),
                                 row.avatar.as_deref(),
                                 row.activity
                                     .as_ref()

@@ -401,6 +401,52 @@ pub(crate) struct MemberRow {
     pub(crate) face: (String, Option<String>),
     /// Активность: значок, строка и цвет.
     pub(crate) activity: Option<(crate::icons::Icon, String, egui::Color32)>,
+    /// Старшая роль в пространстве (по ней группа и цвет имени).
+    pub(crate) role: Option<TopRole>,
+}
+
+/// Старшая роль участника.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TopRole {
+    /// Идентификатор.
+    pub(crate) id: String,
+    /// Название.
+    pub(crate) name: String,
+    /// Место в иерархии: больше — старше.
+    pub(crate) position: i64,
+    /// Цвет имени.
+    pub(crate) color: egui::Color32,
+}
+
+/// Старшая роль из ролей участника (`@everyone` не в счёт), как в оригинале
+/// (`memberTopRole`).
+pub(crate) fn top_role(roles: &[bs_types::Role]) -> Option<TopRole> {
+    roles
+        .iter()
+        .filter(|r| r.is_everyone != Some(true))
+        .max_by_key(|r| r.position)
+        .map(|r| TopRole {
+            id: r.id.clone(),
+            name: r.name.clone(),
+            position: r.position,
+            color: role_color(&r.color).unwrap_or_else(theme::text),
+        })
+}
+
+/// Цвет роли `#rrggbb`.
+pub(crate) fn role_color(hex: &str) -> Option<egui::Color32> {
+    let digits = hex.trim().trim_start_matches('#');
+    if digits.len() != 6 {
+        return None;
+    }
+    let [_, red, green, blue] = u32::from_str_radix(digits, 16).ok()?.to_be_bytes();
+    Some(egui::Color32::from_rgb(red, green, blue))
+}
+
+/// Цвет имени участника пространства: старшая роль; у владельца без ролей —
+/// розовый (`memberNameColor` оригинала); иначе обычный текст.
+pub(crate) fn name_color(role: Option<&TopRole>, owner: bool) -> Option<egui::Color32> {
+    role.map(|r| r.color).or_else(|| owner.then(theme::rose))
 }
 
 /// Ключ цвета заглушки аватара и сохранённый цвет пользователя.
@@ -421,11 +467,20 @@ pub(crate) fn face<'a>(name: &'a str, pair: &'a (String, Option<String>)) -> the
 }
 
 /// Секция правой панели.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MemberSection {
     /// Владелец пространства.
     Owner,
-    /// В сети (включая «неактивен» и «не беспокоить»).
+    /// В сети, по старшей роли (старшие выше).
+    Role {
+        /// Роль.
+        id: String,
+        /// Название.
+        name: String,
+        /// Место в иерархии.
+        position: i64,
+    },
+    /// В сети без ролей (включая «неактивен» и «не беспокоить»).
     Online,
     /// Не в сети.
     Offline,
@@ -438,19 +493,41 @@ impl MemberRow {
             MemberSection::Owner
         } else if matches!(self.status, UserStatus::Offline) {
             MemberSection::Offline
+        } else if let Some(role) = &self.role {
+            MemberSection::Role {
+                id: role.id.clone(),
+                name: role.name.clone(),
+                position: role.position,
+            }
         } else {
             MemberSection::Online
         }
+    }
+
+    /// Цвет имени.
+    pub(crate) fn name_color(&self) -> Option<egui::Color32> {
+        name_color(self.role.as_ref(), self.owner)
     }
 }
 
 impl MemberSection {
     /// Заголовок секции без числа.
-    pub(crate) fn title(self) -> &'static str {
+    pub(crate) fn title(&self) -> String {
         match self {
-            Self::Owner => tr("Владелец"),
-            Self::Online => tr("В сети"),
-            Self::Offline => tr("Не в сети"),
+            Self::Owner => tr("Владелец").to_owned(),
+            Self::Role { name, .. } => name.clone(),
+            Self::Online => tr("В сети").to_owned(),
+            Self::Offline => tr("Не в сети").to_owned(),
+        }
+    }
+
+    /// Порядок секций: владелец, роли от старшей, в сети, не в сети.
+    fn rank(&self) -> (u8, i64) {
+        match self {
+            Self::Owner => (0, 0),
+            Self::Role { position, .. } => (1, -position),
+            Self::Online => (2, 0),
+            Self::Offline => (3, 0),
         }
     }
 }
@@ -486,11 +563,13 @@ pub(crate) fn member_rows(cache: &Cache, space_id: &str) -> Vec<MemberRow> {
             avatar: m.user.avatar.clone(),
             face: face_of(&m.user),
             activity: crate::screens::activity_view::summary(cache.user_activities(&m.user.id)),
+            role: top_role(&m.roles),
         })
         .collect();
     rows.sort_by(|a, b| {
-        (a.section() as u8)
-            .cmp(&(b.section() as u8))
+        a.section()
+            .rank()
+            .cmp(&b.section().rank())
             .then_with(|| status_rank(a.status).cmp(&status_rank(b.status)))
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
@@ -511,11 +590,13 @@ pub(crate) fn group_member_rows(cache: &Cache, dm: &bs_types::DmChannel) -> Vec<
             avatar: user.avatar.clone(),
             face: face_of(user),
             activity: crate::screens::activity_view::summary(cache.user_activities(&user.id)),
+            role: None,
         })
         .collect();
     rows.sort_by(|a, b| {
-        (a.section() as u8)
-            .cmp(&(b.section() as u8))
+        a.section()
+            .rank()
+            .cmp(&b.section().rank())
             .then_with(|| status_rank(a.status).cmp(&status_rank(b.status)))
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
@@ -546,6 +627,8 @@ pub(super) struct MessageRow {
     pub(super) reply: Option<(String, String, String)>,
     /// Системное сообщение беседы (`type: "system"`); `None` — обычное.
     pub(super) system: Option<SystemLine>,
+    /// Цвет имени автора (старшая роль в пространстве).
+    pub(super) name_color: Option<egui::Color32>,
 }
 
 /// Содержимое системного сообщения.
@@ -644,6 +727,26 @@ pub(super) fn message_rows(
     names: &HashMap<String, String>,
 ) -> Vec<MessageRow> {
     let me = cache.me().id.as_str();
+    // Цвета имён по ролям пространства этого канала.
+    let space_colors: HashMap<String, egui::Color32> = if kind == ChannelKind::Space {
+        cache
+            .channel(channel_id)
+            .and_then(|channel| cache.space(&channel.space_id))
+            .map(|space| {
+                space
+                    .members
+                    .iter()
+                    .filter_map(|m| {
+                        let owner = m.user.id == space.space.owner_id;
+                        name_color(top_role(&m.roles).as_ref(), owner)
+                            .map(|color| (m.user.id.clone(), color))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
     let quote = |user: &bs_types::User, content: Option<&String>| {
         (
             author_name(user.display_name.as_deref(), &user.username).to_owned(),
@@ -676,6 +779,7 @@ pub(super) fn message_rows(
                     (r.message.id.clone(), author, text)
                 }),
                 system: None,
+                name_color: space_colors.get(&msg.user.id).copied(),
             })
             .collect(),
         ChannelKind::Dm => cache
@@ -713,6 +817,7 @@ pub(super) fn message_rows(
                             })
                     },
                 ),
+                name_color: None,
             })
             .collect(),
     }

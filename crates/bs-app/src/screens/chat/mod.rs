@@ -576,6 +576,11 @@ impl ChatScreen {
             && self.member_panel_rows(bridge).is_some();
         if let Some(state) = self.profile.as_mut() {
             state.poll(bridge);
+            state.set_space(
+                self.active_space
+                    .clone()
+                    .filter(|_| self.view == View::Channel),
+            );
             let me = bridge
                 .cache()
                 .map(|cache| cache.me().id.clone())
@@ -1053,6 +1058,7 @@ mod tests {
             reactions: Vec::new(),
             reply: None,
             system: None,
+            name_color: None,
         }
     }
 

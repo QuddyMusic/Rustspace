@@ -28,6 +28,8 @@ pub(crate) enum Anchor {
 pub(crate) struct ProfileState {
     user_id: String,
     anchor: Anchor,
+    /// Пространство, из которого смотрят профиль: показать роли в нём.
+    space: Option<(usize, String)>,
     name: String,
     user: Option<Box<User>>,
     error: Option<String>,
@@ -55,11 +57,17 @@ impl ProfileState {
         Self {
             user_id: user_id.to_owned(),
             anchor,
+            space: None,
             name: name.to_owned(),
             user: None,
             error: None,
             mutuals: None,
         }
+    }
+
+    /// Пространство, в котором показать роли пользователя.
+    pub(crate) fn set_space(&mut self, space: Option<(usize, String)>) {
+        self.space = space;
     }
 
     /// Открыт ли профиль этого пользователя (повторный щелчок закрывает).
@@ -142,7 +150,77 @@ fn header(ui: &mut egui::Ui, state: &ProfileState) {
     );
 }
 
-fn body(ui: &mut egui::Ui, state: &ProfileState, activities: &[bs_types::Activity]) {
+/// Роли пользователя в пространстве, откуда открыт профиль: от старшей.
+fn space_roles(bridge: &Bridge, state: &ProfileState) -> Vec<(String, Color32)> {
+    let Some((origin, space_id)) = &state.space else {
+        return Vec::new();
+    };
+    let Some(space) = bridge.cache_at(*origin).and_then(|c| c.space(space_id)) else {
+        return Vec::new();
+    };
+    let Some(member) = space.members.iter().find(|m| m.user.id == state.user_id) else {
+        return Vec::new();
+    };
+    let mut roles: Vec<_> = member
+        .roles
+        .iter()
+        .filter(|r| r.is_everyone != Some(true))
+        .collect();
+    roles.sort_by_key(|r| std::cmp::Reverse(r.position));
+    roles
+        .into_iter()
+        .map(|r| (r.name.clone(), role_color(&r.color)))
+        .collect()
+}
+
+/// Цвет роли `#rrggbb`; без цвета — приглушённый.
+fn role_color(hex: &str) -> Color32 {
+    let digits = hex.trim().trim_start_matches('#');
+    match u32::from_str_radix(digits, 16) {
+        Ok(value) if digits.len() == 6 => {
+            let [_, red, green, blue] = value.to_be_bytes();
+            Color32::from_rgb(red, green, blue)
+        }
+        _ => theme::text_muted(),
+    }
+}
+
+/// Роли плашками с цветной точкой.
+fn roles_section(ui: &mut egui::Ui, roles: &[(String, Color32)]) {
+    if roles.is_empty() {
+        return;
+    }
+    ui.add_space(10.0);
+    ui.label(theme::section_title(&crate::tf!(
+        "РОЛИ — {a0}",
+        a0 = roles.len()
+    )));
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+        for (name, color) in roles {
+            egui::Frame::new()
+                .fill(theme::bg_hover())
+                .corner_radius(theme::rounded(6))
+                .inner_margin(egui::Margin::symmetric(8, 3))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let (dot, _) =
+                            ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
+                        ui.painter().circle_filled(dot.center(), 4.5, *color);
+                        ui.label(RichText::new(name).size(12.5).color(theme::text()));
+                    });
+                });
+        }
+    });
+}
+
+fn body(
+    ui: &mut egui::Ui,
+    state: &ProfileState,
+    activities: &[bs_types::Activity],
+    roles: &[(String, Color32)],
+) {
     let Some(user) = state.user.as_deref() else {
         if let Some(error) = &state.error {
             ui.colored_label(theme::red(), error);
@@ -170,6 +248,7 @@ fn body(ui: &mut egui::Ui, state: &ProfileState, activities: &[bs_types::Activit
         ui.label(theme::muted(crate::tf!("Домашний инстанс: {home}", home = home)).size(12.5));
     }
     super::activity_view::section(ui, &user.id, activities);
+    roles_section(ui, roles);
     if let Some(bio) = user.bio.as_deref().filter(|b| !b.trim().is_empty()) {
         ui.add_space(10.0);
         ui.label(theme::section_title(tr("О СЕБЕ")));
@@ -268,7 +347,8 @@ pub(crate) fn show(
                         .cache()
                         .map(|c| c.user_activities(&state.user_id).to_vec())
                         .unwrap_or_default();
-                    body(ui, state, &activities);
+                    let roles = space_roles(bridge, state);
+                    body(ui, state, &activities, &roles);
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
                         if state.user_id != me {
