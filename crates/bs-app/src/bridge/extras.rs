@@ -49,6 +49,13 @@ pub(crate) enum ExtrasOp {
         /// Добавить или убрать.
         on: bool,
     },
+    /// Загрузить иконку игры для активности.
+    GameIcon {
+        /// Название игры.
+        name: String,
+        /// PNG.
+        image: Vec<u8>,
+    },
 }
 
 /// Ответы сервера.
@@ -64,6 +71,8 @@ pub(crate) enum ExtrasEvent {
     Bookmarks(bool, Result<bs_api::BookmarkPage, String>),
     /// Итог действия: что сказать пользователю (ошибка — красным).
     Done(Result<Option<String>, String>),
+    /// Иконка игры загружена (ссылка) или нет.
+    GameIcon(String, Result<String, String>),
 }
 
 /// Состояние одной сессии.
@@ -97,6 +106,8 @@ pub(crate) struct Extras {
     bookmarks_loading: bool,
     /// Что сказать пользователю.
     pub(crate) notices: Vec<Result<String, String>>,
+    /// Итоги загрузки иконок игр (их забирает движок активности).
+    pub(crate) game_icons: Vec<(String, Result<String, String>)>,
 }
 
 impl Extras {
@@ -144,6 +155,7 @@ impl Extras {
             ExtrasEvent::Done(Ok(Some(text))) => self.notices.push(Ok(text)),
             ExtrasEvent::Done(Ok(None)) => {}
             ExtrasEvent::Done(Err(err)) => self.notices.push(Err(err)),
+            ExtrasEvent::GameIcon(name, result) => self.game_icons.push((name, result)),
         }
     }
 
@@ -334,6 +346,9 @@ pub(super) async fn run(client: &bs_api::ApiClient, op: ExtrasOp) -> ExtrasEvent
                 client.remove_bookmark(kind, &message).await.map(|()| None)
             };
             ExtrasEvent::Done(result.map_err(text))
+        }
+        ExtrasOp::GameIcon { name, image } => {
+            ExtrasEvent::GameIcon(name, client.upload_game_icon(&image).await.map_err(text))
         }
     }
 }

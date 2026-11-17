@@ -40,6 +40,7 @@ mod notify;
 #[cfg(all(feature = "global-hotkeys", target_os = "linux"))]
 mod portal_keys;
 mod prefs;
+mod presence;
 mod registry;
 mod saved_session;
 mod screens;

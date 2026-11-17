@@ -111,6 +111,15 @@ every WebSocket frame and REST response the client receives.
   llama.cpp, or a cloud one with a key. The text goes straight from the client to the chosen
   service; code, links and mentions are not sent and come back unchanged. *Settings →
   Translation* has a test button.
+- **Activity (Rich Presence).** Members show what they play, listen to or watch: under the
+  name in the member list and as cards with cover art, timers and track progress in the
+  profile. The client finds running games itself — the Backspace game dictionary, Steam,
+  Flatpak, GOG, Heroic, Bottles, Lutris, games under Wine and Proton — takes music from any
+  MPRIS player on Linux, and runs a local Rich Presence server (`discord-ipc-N`), so games such
+  as osu!lazer report their map, mode and time. Games can be renamed, hidden, reordered or
+  added by hand; their icons come from this computer and are uploaded to the home instance
+  (`bs-server`). *Settings → Activity*. Ported from Backspace PR #482 by QuddyMusic and
+  cirzear, entirely in Rust.
 - **18+ channels** (`bs-server`). A channel marked 18+ in its settings asks every member to
   confirm their age once before showing its messages.
 - **Direct messages.** One-to-one and group DMs, friends and requests, user profiles, space
@@ -493,6 +502,16 @@ curl -H 'Content-Type: application/json' \
 leaks. Managing webhooks needs "Manage channels". Cards are stored as ordinary embeds, so the
 original web client shows their title and text too.
 
+### Activity and game icons
+
+*(bs-server)* Activities may carry `playback` (`positionMs`, `durationMs`): a track position
+that does not depend on anyone's clock; the server moves it forward while it holds the
+activity, so a late `ready` shows the current point. An activity disappears as soon as the
+connection that published it closes (the desktop app quit, the browser tab stays), and
+removing one is accepted inside the 3-second rate limit. `POST /api/game-icons` takes a
+base64 PNG, JPEG or WebP (up to 512 KB), stores a 256 px WebP and returns its URL; an icon
+nobody uploaded for a year is cleaned up. Ported from Backspace PR #482.
+
 ### Saved Messages, pins, bookmarks and 18+ channels
 
 *(bs-server)* Additions over the original API (`/api/rustspace/…`; bookmarks at
@@ -603,6 +622,18 @@ translation, and placeholders (`{name}`) must match. To add a language, copy `en
 - Errors: `thiserror` in libraries, `anyhow` in the application.
 - Permissions are `bitflags` over `u64`, serialised as decimal strings (JSON loses bits above
   2^53). Snowflake IDs are strings. `Origin` is an enum `{Home, Remote(Url)}`.
+
+## Acknowledgements
+
+Rustspace stands on the work of the people behind Backspace:
+
+- **TheZwiss** and the Backspace contributors — the original project: protocol, data model,
+  server logic, web client and the game dictionary.
+- **QuddyMusic** and **cirzear** — activity and Rich Presence: the local IPC server, game and
+  media detection, game icons (Backspace PR #482; part of that code was written with Z.ai).
+- **cirzear** — message translation in Backspace (PR #448), the starting point for the
+  translator here.
+- **QuddyMusic** — the bookmarks API (Backspace PR #474) that Rustspace's bookmarks follow.
 
 ## License
 

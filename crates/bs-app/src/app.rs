@@ -392,6 +392,11 @@ impl BackspaceApp {
             });
         }
 
+        // Активность (игры, музыка, Rich Presence) — всем инстансам.
+        if matches!(self.screen, Screen::Chat) {
+            crate::presence::tick(ui.ctx(), &mut self.bridge);
+        }
+
         // Только что открытый личный канал — сразу переключаемся в чат.
         if let Some((origin, channel)) = self.bridge.take_opened_dm() {
             self.chat.open_channel(SelectedChannel {

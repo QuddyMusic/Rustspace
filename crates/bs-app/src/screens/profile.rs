@@ -121,7 +121,7 @@ fn header(ui: &mut egui::Ui, state: &ProfileState) {
     );
 }
 
-fn body(ui: &mut egui::Ui, state: &ProfileState) {
+fn body(ui: &mut egui::Ui, state: &ProfileState, activities: &[bs_types::Activity]) {
     let Some(user) = state.user.as_deref() else {
         if let Some(error) = &state.error {
             ui.colored_label(theme::red(), error);
@@ -148,6 +148,7 @@ fn body(ui: &mut egui::Ui, state: &ProfileState) {
     if let Some(home) = user.home_instance.as_deref() {
         ui.label(theme::muted(crate::tf!("Домашний инстанс: {home}", home = home)).size(12.5));
     }
+    super::activity_view::section(ui, &user.id, activities);
     if let Some(bio) = user.bio.as_deref().filter(|b| !b.trim().is_empty()) {
         ui.add_space(10.0);
         ui.label(theme::section_title(tr("О СЕБЕ")));
@@ -225,7 +226,11 @@ pub(crate) fn show(
                 .show(ui, |ui| {
                     ui.set_width(WIDTH - 32.0);
                     ui.add_space(30.0);
-                    body(ui, state);
+                    let activities = bridge
+                        .cache()
+                        .map(|c| c.user_activities(&state.user_id).to_vec())
+                        .unwrap_or_default();
+                    body(ui, state, &activities);
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
                         if state.user_id != me {

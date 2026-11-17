@@ -198,6 +198,9 @@ pub(crate) struct Prefs {
     /// Перевод сообщений.
     #[serde(default)]
     pub(crate) translate: crate::translate::TranslatePrefs,
+    /// Активность: игры, музыка, Rich Presence.
+    #[serde(default)]
+    pub(crate) activity: crate::presence::ActivityPrefs,
 }
 
 /// Инстанс, в который входили с этого устройства.
@@ -247,6 +250,7 @@ impl Default for Prefs {
             plaintext_dismissed: std::collections::BTreeSet::new(),
             nsfw_allowed: std::collections::BTreeSet::new(),
             translate: crate::translate::TranslatePrefs::default(),
+            activity: crate::presence::ActivityPrefs::default(),
             recent_instances: Vec::new(),
         }
     }

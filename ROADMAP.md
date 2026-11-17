@@ -101,6 +101,25 @@ original server.
 - **TUI** lags behind the GUI (no DM feed, groups, space settings or voice UI). Postponed by
   the owner's decision.
 
+## Next
+- **Invite to a space from the friend and DM menu** (as in Backspace PR #485 by
+  bonderaustria) and **resizable sidebar and member columns** (Backspace PR #477 by
+  QuddyMusic).
+- **Media on Windows and macOS.** Games and Rich Presence already work there (process list,
+  named pipes); "listening" needs the Windows media session (SMTC) and macOS notifications,
+  written in Rust and tried on real machines.
+- **Bot API**, compatible and pure Rust:
+  1. Bot accounts on `bs-server`: a user row with a `bot` flag, an owner and a token
+     (`Bot <token>` in `Authorization`), created and reset in *Settings → Bots*; bots join a
+     space through the usual invite and get roles like anyone else.
+  2. The same REST and WebSocket as clients, so `bs-api`/`bs-core` already are the SDK; plus
+     a small `bs-bot` crate: an event loop over `bs-core`, typed handlers, reconnects, rate
+     limits, and slash commands later.
+  3. Interactions in messages: buttons and selects on webhook/bot cards, delivered to the bot
+     as events; original clients see the card without them.
+  4. Compatibility: messages from bots are ordinary messages with a `bot` author flag that
+     original clients ignore; nothing in the original protocol changes.
+
 ## Server stage (in progress)
 1. **Security audit.** Client: done. Server: runs alongside the port: 22 findings (S1–S22),
    19 fixed in `bs-server`, the rest kept for compatibility and described; see

@@ -222,6 +222,8 @@ pub(crate) enum SettingsSection {
     Language,
     /// Перевод сообщений.
     Translate,
+    /// Игры, музыка, Rich Presence.
+    Activity,
     /// Версия клиента и проверка его обновлений.
     About,
     /// Приватность.
@@ -256,6 +258,7 @@ impl SettingsSection {
             Self::Notifications => tr("Уведомления"),
             Self::Language => tr("Язык"),
             Self::Translate => tr("Перевод"),
+            Self::Activity => tr("Активность"),
             Self::About => tr("О клиенте"),
             Self::Privacy => tr("Приватность"),
             Self::Connections => tr("Подключения"),
@@ -317,6 +320,7 @@ pub(crate) struct SettingsState {
     /// Страница «Горячие клавиши».
     hotkeys: super::settings_app::HotkeysState,
     translate: super::translate_settings::TranslatePage,
+    activity: super::activity_settings::ActivityPage,
     /// До какого момента (`ui.input().time`) идёт проверка микрофона.
     mic_test_until: Option<f64>,
     /// Почему проверка не запустилась.
@@ -360,6 +364,7 @@ impl SettingsState {
             appearance: super::appearance::AppearanceState::default(),
             hotkeys: super::settings_app::HotkeysState::default(),
             translate: super::translate_settings::TranslatePage::default(),
+            activity: super::activity_settings::ActivityPage::default(),
             mic_test_until: None,
             mic_test_error: None,
             connections: super::connections::ConnectionsUi::default(),
@@ -661,6 +666,7 @@ fn settings_nav(
                     SettingsSection::Appearance,
                     SettingsSection::Voice,
                     SettingsSection::Privacy,
+                    SettingsSection::Activity,
                 ],
                 &mut state.section,
             );
@@ -782,6 +788,7 @@ fn section_content(
         SettingsSection::Hotkeys => super::settings_app::hotkeys(ui, &mut state.hotkeys),
         SettingsSection::Notifications => super::settings_app::notifications(ui),
         SettingsSection::Language => super::settings_app::language(ui),
+        SettingsSection::Activity => super::activity_settings::page(ui, &mut state.activity),
         SettingsSection::Translate => {
             super::translate_settings::page(ui, &mut state.translate, &bridge.runtime());
         }

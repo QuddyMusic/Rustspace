@@ -48,8 +48,11 @@ sounds = ["dep:rodio"]
 global-hotkeys = ["dep:global-hotkey", "dep:zbus"]
 # Значок в трее и сворачивание в него; на Linux нужны GTK 3 и appindicator.
 tray = ["dep:tray-icon", "dep:gtk"]
+# Активность: музыка из плееров по MPRIS (D-Bus) на Linux. Игры и Rich
+# Presence работают и без неё.
+presence = ["dep:zbus"]
 # Всё настольное разом.
-desktop = ["global-hotkeys", "tray"]
+desktop = ["global-hotkeys", "tray", "presence"]
 
 [dependencies]
 bs-voice = { workspace = true, optional = true }
@@ -88,6 +91,12 @@ global-hotkey = { version = "0.10", optional = true }
 tray-icon = { version = "0.24", optional = true, default-features = false, features = ["gtk"] }
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
+# Иконки игр: значки из .exe (ICO), PNG и JPEG с диска.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "ico", "webp"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+# Список процессов для поиска игр на Windows и macOS (на Linux — /proc).
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", optional = true }

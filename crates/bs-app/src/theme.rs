@@ -1678,6 +1678,7 @@ pub(crate) fn member_row<'a>(
     face: impl Into<Face<'a>>,
     status: UserStatus,
     image: Option<&str>,
+    activity: Option<(crate::icons::Icon, &str, Color32)>,
 ) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), Sense::click());
@@ -1699,14 +1700,34 @@ pub(crate) fn member_row<'a>(
         offline,
         image,
     );
+    let left = avatar_rect.right() + 12.0;
+    let width = rect.right() - 8.0 - left;
+    let name_y = if activity.is_some() {
+        rect.center().y - 8.0
+    } else {
+        rect.center().y
+    };
     text_fit(
         ui.painter(),
-        egui::pos2(avatar_rect.right() + 12.0, rect.center().y),
+        egui::pos2(left, name_y),
         name,
         FontId::proportional(15.0),
         if offline { text_faint() } else { text() },
-        rect.right() - 8.0 - (avatar_rect.right() + 12.0),
+        width,
     );
+    // Вторая строка: во что играет или что слушает.
+    if let Some((icon, line, color)) = activity {
+        let y = rect.center().y + 9.0;
+        crate::icons::paint(ui.painter(), egui::pos2(left + 6.0, y), 12.0, icon, color);
+        text_fit(
+            ui.painter(),
+            egui::pos2(left + 16.0, y),
+            line,
+            FontId::proportional(12.0),
+            text_muted(),
+            width - 16.0,
+        );
+    }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 

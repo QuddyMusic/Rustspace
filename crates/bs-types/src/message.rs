@@ -273,6 +273,16 @@ pub struct ActivityTimestamps {
     pub end: Option<i64>,
 }
 
+/// Прогресс воспроизведения, не зависящий от часов отправителя: получатель
+/// привязывает позицию к своим часам в момент получения.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityPlayback {
+    pub position_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+}
+
 /// Картинки activity.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -300,6 +310,8 @@ pub struct Activity {
     pub state: Option<String>,
     #[serde(default)]
     pub timestamps: Option<ActivityTimestamps>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playback: Option<ActivityPlayback>,
     #[serde(default)]
     pub assets: Option<ActivityAssets>,
     #[serde(default)]

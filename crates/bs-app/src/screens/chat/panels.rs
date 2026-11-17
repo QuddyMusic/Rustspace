@@ -807,6 +807,9 @@ impl ChatScreen {
                                 face(&row.name, &row.face),
                                 row.status,
                                 row.avatar.as_deref(),
+                                row.activity
+                                    .as_ref()
+                                    .map(|(icon, text, color)| (*icon, text.as_str(), *color)),
                             )
                             .clicked()
                             {

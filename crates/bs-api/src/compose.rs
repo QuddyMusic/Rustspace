@@ -273,6 +273,31 @@ impl ApiClient {
         self.post_json("/api/stickers", &body).await
     }
 
+    /// Загружает иконку игры для активности (`bs-server`, PR оригинала
+    /// #482); возвращает ссылку на неё на этом инстансе.
+    ///
+    /// # Errors
+    /// Ошибки запроса (сервер без маршрута отвечает 404).
+    pub async fn upload_game_icon(&self, image: &[u8]) -> Result<String, ApiError> {
+        #[derive(Serialize)]
+        struct Upload {
+            image: String,
+        }
+        #[derive(Deserialize)]
+        struct Uploaded {
+            url: String,
+        }
+        let uploaded: Uploaded = self
+            .post_json(
+                "/api/game-icons",
+                &Upload {
+                    image: base64(image),
+                },
+            )
+            .await?;
+        Ok(uploaded.url)
+    }
+
     /// Удаляет личный стикер.
     ///
     /// # Errors

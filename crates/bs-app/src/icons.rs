@@ -79,6 +79,14 @@ pub(crate) enum Icon {
     Eye,
     /// Глобус: перевод.
     Globe,
+    /// Игра.
+    Gamepad,
+    /// Музыка.
+    Music,
+    /// Видео.
+    Play,
+    /// Трансляция.
+    Broadcast,
 }
 
 /// Точки дуги окружности: углы в градусах, 0° — вправо, по часовой на экране.
@@ -113,7 +121,14 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
         | Icon::Image
         | Icon::Sticker
         | Icon::Send => paint_objects(painter, center, size, icon, color),
-        Icon::Bookmark | Icon::Pin | Icon::Eye | Icon::Globe => {
+        Icon::Bookmark
+        | Icon::Pin
+        | Icon::Eye
+        | Icon::Globe
+        | Icon::Gamepad
+        | Icon::Music
+        | Icon::Play
+        | Icon::Broadcast => {
             paint_marks(painter, center, size, icon, color);
         }
         _ => paint_call(painter, center, size, icon, color),
@@ -340,6 +355,38 @@ fn paint_marks(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: Co
             line(vec![p(3.5, 12.0), p(20.5, 12.0)]);
             line(arc(p(19.0, 12.0), unit * 10.0, 122.0, 238.0, 12));
             line(arc(p(5.0, 12.0), unit * 10.0, -58.0, 58.0, 12));
+        }
+        Icon::Gamepad => {
+            // Корпус с ручками, крестовина слева, две кнопки справа.
+            let mut body = arc(p(7.0, 14.0), unit * 4.5, 90.0, 270.0, 10);
+            body.extend(arc(p(17.0, 14.0), unit * 4.5, -90.0, 90.0, 10));
+            ring(body);
+            line(vec![p(5.0, 14.0), p(9.0, 14.0)]);
+            line(vec![p(7.0, 12.0), p(7.0, 16.0)]);
+            painter.circle_filled(p(16.0, 13.0), unit * 1.1, color);
+            painter.circle_filled(p(18.5, 15.5), unit * 1.1, color);
+        }
+        Icon::Music => {
+            painter.circle_stroke(p(7.5, 17.5), unit * 2.8, stroke);
+            painter.circle_stroke(p(17.0, 15.5), unit * 2.8, stroke);
+            line(vec![
+                p(10.3, 17.5),
+                p(10.3, 5.5),
+                p(19.8, 3.5),
+                p(19.8, 15.5),
+            ]);
+            line(vec![p(10.3, 9.0), p(19.8, 7.0)]);
+        }
+        Icon::Play => {
+            ring(vec![p(3.5, 5.5), p(20.5, 5.5), p(20.5, 18.5), p(3.5, 18.5)]);
+            ring(vec![p(10.0, 9.0), p(15.5, 12.0), p(10.0, 15.0)]);
+        }
+        Icon::Broadcast => {
+            painter.circle_filled(p(12.0, 12.0), unit * 2.0, color);
+            line(arc(p(12.0, 12.0), unit * 5.5, -50.0, 50.0, 10));
+            line(arc(p(12.0, 12.0), unit * 5.5, 130.0, 230.0, 10));
+            line(arc(p(12.0, 12.0), unit * 9.0, -50.0, 50.0, 12));
+            line(arc(p(12.0, 12.0), unit * 9.0, 130.0, 230.0, 12));
         }
         _ => {}
     }

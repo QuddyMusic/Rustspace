@@ -399,6 +399,8 @@ pub(crate) struct MemberRow {
     pub(crate) avatar: Option<String>,
     /// Ключ цвета заглушки и `avatarColor`.
     pub(crate) face: (String, Option<String>),
+    /// Активность: значок, строка и цвет.
+    pub(crate) activity: Option<(crate::icons::Icon, String, egui::Color32)>,
 }
 
 /// Ключ цвета заглушки аватара и сохранённый цвет пользователя.
@@ -483,6 +485,7 @@ pub(crate) fn member_rows(cache: &Cache, space_id: &str) -> Vec<MemberRow> {
             owner: &m.user.id == owner_id,
             avatar: m.user.avatar.clone(),
             face: face_of(&m.user),
+            activity: crate::screens::activity_view::summary(cache.user_activities(&m.user.id)),
         })
         .collect();
     rows.sort_by(|a, b| {
@@ -507,6 +510,7 @@ pub(crate) fn group_member_rows(cache: &Cache, dm: &bs_types::DmChannel) -> Vec<
             owner: dm.owner_id.as_deref() == Some(user.id.as_str()),
             avatar: user.avatar.clone(),
             face: face_of(user),
+            activity: crate::screens::activity_view::summary(cache.user_activities(&user.id)),
         })
         .collect();
     rows.sort_by(|a, b| {

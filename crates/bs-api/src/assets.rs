@@ -17,6 +17,8 @@ use crate::error::ApiError;
 const UPLOADS: &str = "/api/uploads/";
 /// Префикс ассетов стикеров.
 const STICKERS: &str = "/api/stickers/assets/";
+/// Префикс иконок игр активности (`bs-server`, PR оригинала #482).
+const GAME_ICONS: &str = "/api/game-icons/assets/";
 /// Префикс токена стикера в тексте сообщения.
 pub const STICKER_PREFIX: &str = "sticker:";
 /// Самое длинное допустимое значение поля с файлом.
@@ -29,6 +31,30 @@ const MAX_NAME_LEN: usize = 128;
 /// Это CDN сервиса Klipy (и прежний Tenor): GIF в сообщении — это ссылка на
 /// такой файл, а поиск идёт через свой инстанс, который хранит ключ сервиса.
 pub const GIF_HOSTS: [&str; 2] = ["static.klipy.com", "media.tenor.com"];
+
+/// Хосты обложек в активности «слушает».
+///
+/// Это CDN музыкальных сервисов, откуда плееры берут картинку трека. Другие
+/// адреса из чужой активности клиент не открывает (иначе любой мог бы узнать
+/// IP зрителя своего профиля).
+pub const ART_HOSTS: [&str; 16] = [
+    "i.scdn.co",
+    "mosaic.scdn.co",
+    "lh3.googleusercontent.com",
+    "i.ytimg.com",
+    "avatars.yandex.net",
+    "p1.music.126.net",
+    "p2.music.126.net",
+    "y.gtimg.cn",
+    "resources.tidal.com",
+    "cdn-images.dzcdn.net",
+    "e-cdns-images.dzcdn.net",
+    "is1-ssl.mzstatic.com",
+    "is2-ssl.mzstatic.com",
+    "is3-ssl.mzstatic.com",
+    "f4.bcbits.com",
+    "i1.sndcdn.com",
+];
 /// Самая длинная допустимая внешняя ссылка.
 const MAX_EXTERNAL_LEN: usize = 300;
 
@@ -43,7 +69,8 @@ impl AssetPath {
     pub fn parse(path: &str) -> Option<Self> {
         let name = path
             .strip_prefix(UPLOADS)
-            .or_else(|| path.strip_prefix(STICKERS))?;
+            .or_else(|| path.strip_prefix(STICKERS))
+            .or_else(|| path.strip_prefix(GAME_ICONS))?;
         let valid = !name.is_empty()
             && name.len() <= MAX_NAME_LEN
             && !name.starts_with('.')
@@ -64,7 +91,9 @@ impl AssetPath {
         }
         let url = Url::parse(value).ok()?;
         let allowed = url.scheme() == "https"
-            && url.host_str().is_some_and(|h| GIF_HOSTS.contains(&h))
+            && url
+                .host_str()
+                .is_some_and(|h| GIF_HOSTS.contains(&h) || ART_HOSTS.contains(&h))
             && url.port().is_none()
             && url.username().is_empty()
             && url.password().is_none()
