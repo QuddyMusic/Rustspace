@@ -67,7 +67,7 @@ fn normalize_name(value: &str) -> Option<String> {
 
 /// Строковое поле по схеме маршрута: приведение типов и пределы длины, как у
 /// проверки Fastify (Ajv с `coerceTypes`).
-fn schema_string(
+pub(crate) fn schema_string(
     body: &Value,
     name: &str,
     min: usize,
@@ -99,7 +99,7 @@ fn schema_string(
     Ok(text)
 }
 
-fn schema_object(body: &Value, required: &[&str]) -> Result<(), Response> {
+pub(crate) fn schema_object(body: &Value, required: &[&str]) -> Result<(), Response> {
     let Some(fields) = body.as_object() else {
         return Err(schema_error("body must be object"));
     };

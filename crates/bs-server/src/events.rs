@@ -183,6 +183,40 @@ pub async fn handle(
 /// Соединение закрылось: снять с него то, что к нему привязано (голос).
 pub fn connection_closed(state: &AppState, user_id: &str, connection: u64) {
     crate::voice::connection_closed(state, user_id, connection);
+    if state.hub.release_activities(user_id, connection) {
+        // Ушёл клиент, публиковавший активность (например, настольный):
+        // остальные вкладки и друзья сразу видят, что игра закончилась.
+        let app = state.clone();
+        let user_id = user_id.to_owned();
+        tokio::spawn(async move {
+            let state = app.clone();
+            let result = app
+                .run(move |tx, out| {
+                    let status = state
+                        .hub
+                        .status(&user_id)
+                        .unwrap_or_else(|| "online".to_owned());
+                    let payload = ws::presence_update(tx, &user_id, &status, Some(&[]))?;
+                    ws::to_profile_audience(tx, out, &user_id, &payload)?;
+                    out.to_user(&user_id, &payload);
+                    crate::federation::relay::presence(
+                        tx,
+                        crate::federation::relay::Relay {
+                            config: &state.config,
+                            ids: &state.ids,
+                        },
+                        &user_id,
+                        &status,
+                        &[],
+                    )?;
+                    Ok(())
+                })
+                .await;
+            if let Err(error) = result {
+                tracing::warn!(?error, "не удалось снять активность закрытого соединения");
+            }
+        });
+    }
 }
 
 /// Текст сообщения из события, проверенный так же, как в оригинале.
@@ -642,6 +676,12 @@ fn presence_update(
 
 /// Проверяет и приводит список активностей (`validateActivities`).
 #[must_use]
+/// Миллисекунды целым числом (как их пишет JS-клиент).
+#[allow(clippy::cast_possible_truncation, reason = "проверено: 0..=7 суток")]
+fn whole_ms(value: f64) -> i64 {
+    value.round() as i64
+}
+
 pub fn validate_activities(raw: Option<&Value>) -> Option<Vec<Value>> {
     const MAX_TEXT: usize = 128;
     const MAX_URL: usize = 512;
@@ -681,6 +721,29 @@ pub fn validate_activities(raw: Option<&Value>) -> Option<Vec<Value>> {
             && (url.starts_with("https://") || url.starts_with("http://"))
         {
             activity["url"] = json!(url);
+        }
+        if let Some(playback) = object.get("playback").and_then(Value::as_object) {
+            const MAX_PLAYBACK: f64 = 7.0 * 24.0 * 60.0 * 60.0 * 1000.0;
+            let in_range = |key: &str, min_exclusive: bool| {
+                playback.get(key).and_then(Value::as_f64).filter(|n| {
+                    n.is_finite()
+                        && *n <= MAX_PLAYBACK
+                        && if min_exclusive { *n > 0.0 } else { *n >= 0.0 }
+                })
+            };
+            if let Some(position) = in_range("positionMs", false) {
+                let mut kept = Map::new();
+                if let Some(duration) = in_range("durationMs", true) {
+                    kept.insert(
+                        "positionMs".to_owned(),
+                        json!(whole_ms(position.min(duration))),
+                    );
+                    kept.insert("durationMs".to_owned(), json!(whole_ms(duration)));
+                } else {
+                    kept.insert("positionMs".to_owned(), json!(whole_ms(position)));
+                }
+                activity["playback"] = Value::Object(kept);
+            }
         }
         if let Some(stamps) = object.get("timestamps").and_then(Value::as_object) {
             let mut kept = Map::new();
@@ -732,18 +795,23 @@ fn activity_update(
     if !app.hub.show_activity(&cx.user_id) {
         return Ok(());
     }
-    if !app
-        .hub
-        .allow(&format!("activity:{}", cx.user_id), 1, ACTIVITY_INTERVAL)
-    {
-        error(out, &cx.user_id, "Activity update rate limited");
-        return Ok(());
-    }
     let Some(activities) = validate_activities(event.get("activities")) else {
         error(out, &cx.user_id, "Invalid activity payload");
         return Ok(());
     };
-    app.hub.set_activities(&cx.user_id, activities.clone());
+    // Снять уже показанное можно и внутри окна ограничителя: иначе пауза
+    // сразу после смены трека теряется и у других остаётся «слушает».
+    let removing = activities.len() < app.hub.activity_count(&cx.user_id);
+    if !app
+        .hub
+        .allow(&format!("activity:{}", cx.user_id), 1, ACTIVITY_INTERVAL)
+        && !removing
+    {
+        error(out, &cx.user_id, "Activity update rate limited");
+        return Ok(());
+    }
+    app.hub
+        .publish_activities(&cx.user_id, activities.clone(), Some(cx.connection));
     let status = app
         .hub
         .status(&cx.user_id)

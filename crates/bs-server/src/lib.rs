@@ -336,6 +336,8 @@ pub fn app(state: AppState) -> Router {
         .route("/api/utils/metadata", get(routes::utils::metadata))
         .route("/api/stickers", get(routes::stickers::list).post(routes::stickers::create))
         .route("/api/stickers/assets/{filename}", get(routes::stickers::asset))
+        .route("/api/game-icons", post(routes::game_icons::upload))
+        .route("/api/game-icons/assets/{filename}", get(routes::game_icons::asset))
         .route("/api/stickers/{id}/collect", post(routes::stickers::collect_existing))
         .route("/api/stickers/{id}", delete(routes::stickers::remove).patch(routes::stickers::rename))
         .route("/api/gif/enabled", get(routes::gif::enabled))

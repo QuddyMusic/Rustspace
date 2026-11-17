@@ -34,6 +34,47 @@ struct Connection {
     closer: Arc<Notify>,
 }
 
+/// Опубликованная активность: когда её получили и каким соединением.
+#[derive(Debug)]
+struct Published {
+    list: Vec<Value>,
+    observed: Instant,
+    /// Соединение-источник; с его закрытием активность снимается. `None` —
+    /// пришла от дома реплики и живёт дольше здешних сеансов.
+    owner: Option<u64>,
+}
+
+/// Сдвигает позиции воспроизведения на время, которое активность провела
+/// на сервере: поздний `ready` видит текущий момент трека, а не тот, о
+/// котором клиент сообщил последним.
+#[must_use]
+pub fn project_playback(list: &[Value], elapsed_ms: f64) -> Vec<Value> {
+    list.iter()
+        .map(|activity| {
+            let mut activity = activity.clone();
+            if elapsed_ms <= 0.0 {
+                return activity;
+            }
+            if let Some(playback) = activity.get_mut("playback").and_then(Value::as_object_mut) {
+                let position = playback
+                    .get("positionMs")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                let advanced = playback
+                    .get("durationMs")
+                    .and_then(Value::as_f64)
+                    .map_or(position + elapsed_ms, |duration| {
+                        duration.min(position + elapsed_ms)
+                    });
+                #[allow(clippy::cast_possible_truncation, reason = "миллисекунды трека")]
+                let advanced = advanced.round() as i64;
+                playback.insert("positionMs".to_owned(), serde_json::json!(advanced));
+            }
+            activity
+        })
+        .collect()
+}
+
 /// Ведро токенов на пользователя (общее для всех его вкладок): 30 событий
 /// сразу и ещё 2 в секунду.
 #[derive(Debug)]
@@ -54,7 +95,7 @@ struct Inner {
     offline_generation: HashMap<String, u64>,
     statuses: HashMap<String, String>,
     show_activity: HashMap<String, bool>,
-    activities: HashMap<String, Vec<Value>>,
+    activities: HashMap<String, Published>,
     /// Счётчики ограничителей с фиксированным окном: начало окна и число.
     windows: HashMap<String, (Instant, u32)>,
     /// Кого надо отключить от медиасервера: комната и участник.
@@ -389,24 +430,68 @@ impl Hub {
             .unwrap_or(true)
     }
 
-    /// Текущая активность пользователя.
+    /// Текущая активность пользователя (позиции треков — на сейчас).
     #[must_use]
     pub fn activities(&self, user_id: &str) -> Vec<Value> {
         self.lock()
             .activities
             .get(user_id)
-            .cloned()
+            .map(|published| {
+                #[allow(
+                    clippy::cast_precision_loss,
+                    reason = "миллисекунды за время жизни процесса"
+                )]
+                let elapsed = published.observed.elapsed().as_millis() as f64;
+                project_playback(&published.list, elapsed)
+            })
             .unwrap_or_default()
     }
 
-    /// Заменяет активность пользователя.
+    /// Сколько активностей опубликовано сейчас.
+    #[must_use]
+    pub fn activity_count(&self, user_id: &str) -> usize {
+        self.lock()
+            .activities
+            .get(user_id)
+            .map_or(0, |p| p.list.len())
+    }
+
+    /// Заменяет активность пользователя (без соединения-источника).
     pub fn set_activities(&self, user_id: &str, activities: Vec<Value>) {
+        self.publish_activities(user_id, activities, None);
+    }
+
+    /// Заменяет активность; `owner` — соединение, с закрытием которого она
+    /// снимается (настольный клиент вышел, а браузер остался).
+    pub fn publish_activities(&self, user_id: &str, activities: Vec<Value>, owner: Option<u64>) {
         let mut inner = self.lock();
         if activities.is_empty() {
             inner.activities.remove(user_id);
         } else {
-            inner.activities.insert(user_id.to_owned(), activities);
+            inner.activities.insert(
+                user_id.to_owned(),
+                Published {
+                    list: activities,
+                    observed: Instant::now(),
+                    owner,
+                },
+            );
         }
+    }
+
+    /// Закрылось соединение: снять активность, если её опубликовало оно.
+    /// `true` — сняли, об этом надо сообщить.
+    pub fn release_activities(&self, user_id: &str, connection: u64) -> bool {
+        let mut inner = self.lock();
+        if inner
+            .activities
+            .get(user_id)
+            .is_some_and(|published| published.owner == Some(connection))
+        {
+            inner.activities.remove(user_id);
+            return true;
+        }
+        false
     }
 
     /// Списывает токен за событие клиента; `false` — лимит исчерпан.
@@ -587,6 +672,37 @@ mod tests {
         assert!(a_rx.try_recv().is_err());
         assert!(matches!(b_rx.try_recv(), Ok(Outgoing::Text(t)) if t.contains("\"y\"")));
         assert!(b_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn playback_advances_and_publisher_owns_activity() {
+        let list = vec![
+            serde_json::json!({"type": "listening", "name": "a", "playback": {"positionMs": 1000, "durationMs": 1500}}),
+            serde_json::json!({"type": "listening", "name": "b", "playback": {"positionMs": 1000}}),
+            serde_json::json!({"type": "playing", "name": "c"}),
+        ];
+        let moved = super::project_playback(&list, 2000.0);
+        assert_eq!(moved[0]["playback"]["positionMs"], 1500);
+        assert_eq!(moved[1]["playback"]["positionMs"], 3000);
+        assert_eq!(moved[2], list[2]);
+        let hub = Hub::default();
+        hub.publish_activities("u", list.clone(), Some(7));
+        assert!(!hub.release_activities("u", 8));
+        assert_eq!(hub.activity_count("u"), 3);
+        assert!(hub.release_activities("u", 7));
+        assert_eq!(hub.activity_count("u"), 0);
+        hub.set_activities("u", list);
+        assert!(!hub.release_activities("u", 7));
+        let checked = crate::events::validate_activities(Some(&serde_json::json!([
+            {"type": "listening", "name": "x", "playback": {"positionMs": 9000, "durationMs": 5000}},
+            {"type": "listening", "name": "y", "playback": {"positionMs": -1}},
+        ])))
+        .unwrap_or_default();
+        assert_eq!(
+            checked[0]["playback"],
+            serde_json::json!({"positionMs": 5000, "durationMs": 5000})
+        );
+        assert!(checked[1].get("playback").is_none());
     }
 
     #[test]

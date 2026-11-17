@@ -159,6 +159,23 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             "CREATE INDEX bs_bookmark_attachments_bookmark ON bs_bookmark_attachments (bookmark_id)",
         ],
     ),
+    (
+        "0010_game_icons",
+        &[
+            // Как game_icon_assets и game_icons из PR оригинала #482
+            // (QuddyMusic, cirzear), под своим именем — по той же причине.
+            "CREATE TABLE bs_game_icon_assets (
+                id TEXT PRIMARY KEY,
+                created_at BIGINT NOT NULL
+            )",
+            "CREATE TABLE bs_game_icons (
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                icon_id TEXT NOT NULL REFERENCES bs_game_icon_assets(id),
+                created_at BIGINT NOT NULL,
+                PRIMARY KEY (user_id, icon_id)
+            )",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

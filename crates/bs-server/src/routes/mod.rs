@@ -13,6 +13,7 @@ pub mod explore;
 pub mod federated;
 pub mod federation;
 pub mod files;
+pub mod game_icons;
 pub mod gif;
 pub mod instance;
 pub mod invites;

@@ -437,3 +437,58 @@ async fn saved_messages_pins_and_bookmarks() {
     .await;
     assert_eq!(keys, json!([]));
 }
+
+#[tokio::test]
+async fn game_icons_upload_and_serve() {
+    use base64::Engine as _;
+    let dir = tempfile::tempdir().expect("каталог");
+    let server = start_with(&[("UPLOAD_DIR", dir.path().to_str().expect("путь"))]).await;
+    let (token, _) = user_with_channel(&server).await;
+    let mut png = Vec::new();
+    image::DynamicImage::new_rgba8(512, 512)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("png");
+    let body = json!({"image": base64::engine::general_purpose::STANDARD.encode(&png)});
+    let (status, first) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/game-icons",
+            &token,
+            Some(body.clone()),
+        )
+        .await;
+    assert_eq!(status, 200, "{first}");
+    let url = first["url"].as_str().expect("url");
+    assert!(url.ends_with(&format!(
+        "/api/game-icons/assets/{}.webp",
+        first["id"].as_str().expect("id")
+    )));
+    // Повторная загрузка той же картинки — та же иконка.
+    let (_, again) = server
+        .call(reqwest::Method::POST, "/api/game-icons", &token, Some(body))
+        .await;
+    assert_eq!(again["id"], first["id"]);
+    let path = url
+        .split_once("/api/")
+        .map(|(_, rest)| format!("/api/{rest}"))
+        .expect("путь");
+    let response = server
+        .http
+        .get(format!("{}{path}", server.base))
+        .send()
+        .await
+        .expect("запрос");
+    assert_eq!(response.status().as_u16(), 200);
+    let bytes = response.bytes().await.expect("тело");
+    let icon = image::load_from_memory(&bytes).expect("webp");
+    assert_eq!((icon.width(), icon.height()), (256, 256));
+    let (status, _) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/game-icons",
+            &token,
+            Some(json!({"image": "bm90IGFuIGltYWdl"})),
+        )
+        .await;
+    assert_eq!(status, 400);
+}

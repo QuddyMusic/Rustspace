@@ -160,6 +160,7 @@ fn parser_for(content_type: &str) -> Option<Parser> {
 fn body_limit(path: &str) -> usize {
     match path {
         "/api/stickers" => crate::routes::stickers::UPLOAD_BODY_LIMIT,
+        "/api/game-icons" => crate::routes::game_icons::UPLOAD_BODY_LIMIT,
         "/api/federation/epoch"
         | "/api/federation/users/lookup"
         | "/api/federation/users/by-home-id"

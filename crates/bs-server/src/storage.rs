@@ -418,6 +418,7 @@ pub fn cleanup(tx: &mut dyn Tx, config: &Config, dry_run: bool) -> DbResult<Clea
         result.deleted_records += 1;
     }
     cleanup_stickers(tx, config, dry_run, &mut result)?;
+    crate::routes::game_icons::cleanup(tx, config, dry_run, &mut result)?;
     Ok(result)
 }
 
