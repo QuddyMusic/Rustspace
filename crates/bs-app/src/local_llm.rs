@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use crate::i18n::tr;
 
 /// Выпуски llama.cpp.
-const RELEASES: &str = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
+/// Последние выпуски: в свежем сборка под нужную систему бывает ещё не готова.
+const RELEASES: &str = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15";
 /// Сервер гаснет после такого простоя.
 const IDLE: Duration = Duration::from_secs(10 * 60);
 /// Сколько ждать, пока модель загрузится в память.
@@ -121,6 +122,14 @@ fn server_name() -> &'static str {
     }
 }
 
+/// `llama-server` из пакетов системы (`PATH`), если есть.
+fn system_server() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(server_name()))
+        .find(|p| p.is_file())
+}
+
 /// Найти файл по имени внутри каталога (архивы кладут его по-разному).
 fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
     let mut stack = vec![dir.to_path_buf()];
@@ -144,6 +153,9 @@ pub(crate) struct Installed {
     pub(crate) engine: Option<String>,
     /// Сборка под видеокарту.
     pub(crate) gpu: bool,
+    /// llama.cpp из пакетов системы или сборка без нужного ускорения: выбор
+    /// GPU/CPU её не переустанавливает.
+    pub(crate) fixed: bool,
     /// Файл модели, если скачан.
     pub(crate) model: Option<PathBuf>,
 }
@@ -158,10 +170,19 @@ pub(crate) fn installed(model: &str) -> Installed {
     let engine = tag.filter(|_| find_file(&engine_dir, server_name()).is_some());
     let gpu = engine_dir.join("GPU").exists();
     let model = model_file(&root, model).filter(|p| p.exists());
-    Installed {
-        engine: engine.map(|t| t.trim().to_owned()),
-        gpu,
-        model,
+    match engine {
+        Some(tag) => Installed {
+            engine: Some(tag.trim().to_owned()),
+            gpu,
+            fixed: engine_dir.join("CPU_FALLBACK").exists(),
+            model,
+        },
+        None => Installed {
+            engine: system_server().map(|_| tr("из системы").to_owned()),
+            gpu: false,
+            fixed: true,
+            model,
+        },
     }
 }
 
@@ -214,39 +235,77 @@ fn set(ctx: &egui::Context, state: Progress) {
     ctx.request_repaint();
 }
 
-/// Имя архива llama.cpp для этой системы: `(часть имени, расширение)`.
-pub(crate) fn asset_suffix(os: &str, arch: &str, gpu: bool) -> Option<String> {
+/// Окончания имён архивов llama.cpp для системы, от лучшего к запасному:
+/// сборка под видеокарту (если просили), затем обычная; `.tar.gz` и `.zip`
+/// (Linux-сборки раньше выходили в zip).
+pub(crate) fn asset_candidates(os: &str, arch: &str, gpu: bool) -> Vec<String> {
     let arch = match arch {
         "x86_64" => "x64",
         "aarch64" => "arm64",
-        _ => return None,
+        _ => return Vec::new(),
     };
-    Some(match (os, gpu) {
-        ("linux", true) if arch == "x64" => "bin-ubuntu-vulkan-x64.tar.gz".to_owned(),
-        ("linux", _) => format!("bin-ubuntu-{arch}.tar.gz"),
-        ("windows", true) if arch == "x64" => "bin-win-vulkan-x64.zip".to_owned(),
-        ("windows", _) => format!("bin-win-cpu-{arch}.zip"),
-        ("macos", _) => format!("bin-macos-{arch}.tar.gz"),
-        _ => return None,
-    })
+    let mut out = Vec::new();
+    match os {
+        "linux" => {
+            if gpu {
+                out.push(format!("bin-ubuntu-vulkan-{arch}.tar.gz"));
+                out.push(format!("bin-ubuntu-vulkan-{arch}.zip"));
+            }
+            out.push(format!("bin-ubuntu-{arch}.tar.gz"));
+            out.push(format!("bin-ubuntu-{arch}.zip"));
+        }
+        "windows" => {
+            if gpu {
+                out.push(format!("bin-win-vulkan-{arch}.zip"));
+            }
+            out.push(format!("bin-win-cpu-{arch}.zip"));
+        }
+        "macos" => {
+            out.push(format!("bin-macos-{arch}.tar.gz"));
+            out.push(format!("bin-macos-{arch}.zip"));
+        }
+        _ => {}
+    }
+    out
 }
 
-/// Подходящий архив из ответа GitHub: тег и адрес.
-pub(crate) fn pick_asset(release: &serde_json::Value, suffix: &str) -> Option<(String, String)> {
-    let tag = release.get("tag_name")?.as_str()?.to_owned();
-    let assets = release.get("assets")?.as_array()?;
-    let url = assets.iter().find_map(|asset| {
-        let name = asset.get("name")?.as_str()?;
-        (name.starts_with("llama-") && name.ends_with(suffix))
-            .then(|| {
-                asset
-                    .get("browser_download_url")?
-                    .as_str()
-                    .map(str::to_owned)
+/// Найденный архив llama.cpp.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Asset {
+    /// Тег выпуска.
+    pub(crate) tag: String,
+    /// Адрес архива.
+    pub(crate) url: String,
+    /// Окончание имени (по нему — вид архива и сборка под видеокарту).
+    pub(crate) suffix: String,
+}
+
+/// Лучший архив из списка выпусков GitHub (новые первыми): сначала по
+/// предпочтению сборки, затем по свежести выпуска.
+pub(crate) fn pick_asset(releases: &serde_json::Value, candidates: &[String]) -> Option<Asset> {
+    let releases: Vec<&serde_json::Value> = match releases {
+        serde_json::Value::Array(list) => list.iter().collect(),
+        one => vec![one],
+    };
+    candidates.iter().find_map(|suffix| {
+        releases.iter().find_map(|release| {
+            if release.get("draft").and_then(serde_json::Value::as_bool) == Some(true) {
+                return None;
+            }
+            let tag = release.get("tag_name")?.as_str()?;
+            release.get("assets")?.as_array()?.iter().find_map(|asset| {
+                let name = asset.get("name")?.as_str()?;
+                if !(name.starts_with("llama-") && name.ends_with(suffix.as_str())) {
+                    return None;
+                }
+                Some(Asset {
+                    tag: tag.to_owned(),
+                    url: asset.get("browser_download_url")?.as_str()?.to_owned(),
+                    suffix: suffix.clone(),
+                })
             })
-            .flatten()
-    })?;
-    Some((tag, url))
+        })
+    })
 }
 
 /// Файл модели в репозитории: GGUF с квантованием Q4_K_M.
@@ -372,9 +431,11 @@ async fn install_engine(
     gpu: bool,
 ) -> Result<(), String> {
     set(ctx, Progress::Looking("llama.cpp"));
-    let suffix = asset_suffix(std::env::consts::OS, std::env::consts::ARCH, gpu)
-        .ok_or_else(|| tr("для этой системы нет готовой сборки llama.cpp").to_owned())?;
-    let release: serde_json::Value = client
+    let candidates = asset_candidates(std::env::consts::OS, std::env::consts::ARCH, gpu);
+    if candidates.is_empty() {
+        return Err(tr("для этой системы нет готовой сборки llama.cpp").to_owned());
+    }
+    let releases: serde_json::Value = client
         .get(RELEASES)
         .header("Accept", "application/vnd.github+json")
         .send()
@@ -384,10 +445,10 @@ async fn install_engine(
         .json()
         .await
         .map_err(|e| e.to_string())?;
-    let (tag, url) = pick_asset(&release, &suffix).ok_or_else(|| {
+    let Asset { tag, url, suffix } = pick_asset(&releases, &candidates).ok_or_else(|| {
         crate::tf!(
-            "в выпуске llama.cpp нет архива {name}",
-            name = suffix.clone()
+            "в последних выпусках llama.cpp нет архива {name}; поставьте llama.cpp из пакетов системы — Rustspace возьмёт его llama-server",
+            name = candidates[0].clone()
         )
     })?;
     std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
@@ -407,8 +468,12 @@ async fn install_engine(
         .map_err(|e| e.to_string())??;
     let _ = std::fs::remove_file(&archive);
     std::fs::write(dir.join("VERSION"), &tag).map_err(|e| e.to_string())?;
-    if gpu {
+    if suffix.contains("vulkan") {
         let _ = std::fs::write(dir.join("GPU"), "1");
+    } else if gpu {
+        // Под видеокарту сборки не нашлось: стоит обычная, без повторной
+        // установки при каждом запуске.
+        let _ = std::fs::write(dir.join("CPU_FALLBACK"), "1");
     }
     Ok(())
 }
@@ -455,7 +520,7 @@ pub(crate) fn install(runtime: &tokio::runtime::Handle, ctx: &egui::Context, pre
             let root = root().ok_or_else(|| tr("нет каталога настроек").to_owned())?;
             let client = http()?;
             let have = installed(&prefs.model);
-            if have.engine.is_none() || have.gpu != prefs.gpu {
+            if have.engine.is_none() || (!have.fixed && have.gpu != prefs.gpu) {
                 stop();
                 install_engine(&ctx, &client, &root, prefs.gpu).await?;
             }
@@ -581,9 +646,11 @@ pub(crate) async fn ensure(prefs: &LocalPrefs) -> Result<String, String> {
     let model = have.model.ok_or_else(|| {
         tr("локальная модель не установлена — установите её в настройках перевода").to_owned()
     })?;
-    let server = find_file(&root.join("engine"), server_name()).ok_or_else(|| {
-        tr("llama.cpp не установлен — установите его в настройках перевода").to_owned()
-    })?;
+    let server = find_file(&root.join("engine"), server_name())
+        .or_else(system_server)
+        .ok_or_else(|| {
+            tr("llama.cpp не установлен — установите его в настройках перевода").to_owned()
+        })?;
     let (port, ready) = start_or_reuse(&server, &model, have.gpu)?;
     if ready {
         return Ok(format!("http://127.0.0.1:{port}/v1"));
@@ -643,29 +710,40 @@ mod tests {
     #[test]
     fn assets_follow_the_release_naming() {
         assert_eq!(
-            asset_suffix("linux", "x86_64", true).as_deref(),
-            Some("bin-ubuntu-vulkan-x64.tar.gz")
+            asset_candidates("linux", "x86_64", true),
+            [
+                "bin-ubuntu-vulkan-x64.tar.gz",
+                "bin-ubuntu-vulkan-x64.zip",
+                "bin-ubuntu-x64.tar.gz",
+                "bin-ubuntu-x64.zip"
+            ]
         );
         assert_eq!(
-            asset_suffix("linux", "x86_64", false).as_deref(),
-            Some("bin-ubuntu-x64.tar.gz")
+            asset_candidates("windows", "x86_64", false),
+            ["bin-win-cpu-x64.zip"]
         );
+        assert!(asset_candidates("linux", "riscv64", false).is_empty());
+        // В свежем выпуске нет сборки под Vulkan: берём её из прошлого.
+        let releases = serde_json::json!([
+            {"tag_name": "b7001", "assets": [
+                {"name": "llama-b7001-bin-ubuntu-x64.tar.gz", "browser_download_url": "https://x/c1"},
+            ]},
+            {"tag_name": "b7000", "assets": [
+                {"name": "llama-b7000-bin-ubuntu-vulkan-x64.tar.gz", "browser_download_url": "https://x/v0"},
+            ]},
+        ]);
+        let gpu = asset_candidates("linux", "x86_64", true);
         assert_eq!(
-            asset_suffix("windows", "x86_64", false).as_deref(),
-            Some("bin-win-cpu-x64.zip")
+            pick_asset(&releases, &gpu).map(|a| (a.tag, a.url)),
+            Some(("b7000".into(), "https://x/v0".into()))
         );
+        let cpu = asset_candidates("linux", "x86_64", false);
         assert_eq!(
-            asset_suffix("macos", "aarch64", true).as_deref(),
-            Some("bin-macos-arm64.tar.gz")
+            pick_asset(&releases, &cpu).map(|a| a.tag),
+            Some("b7001".into())
         );
-        let release = serde_json::json!({"tag_name": "b7000", "assets": [
-            {"name": "llama-b7000-bin-ubuntu-vulkan-x64.tar.gz", "browser_download_url": "https://x/v"},
-            {"name": "llama-b7000-bin-ubuntu-x64.tar.gz", "browser_download_url": "https://x/c"},
-        ]});
-        assert_eq!(
-            pick_asset(&release, "bin-ubuntu-x64.tar.gz"),
-            Some(("b7000".into(), "https://x/c".into()))
-        );
+        let none = serde_json::json!([{"tag_name": "b1", "assets": []}]);
+        assert_eq!(pick_asset(&none, &cpu), None);
         let model = serde_json::json!({"siblings": [
             {"rfilename": "README.md"},
             {"rfilename": "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"},

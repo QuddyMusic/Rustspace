@@ -245,7 +245,15 @@ fn local_fields(
     }
     ui.add_space(8.0);
     let have = local_llm::installed(&local.model);
-    let ready = have.engine.is_some() && have.model.is_some() && have.gpu == local.gpu;
+    let ready =
+        have.engine.is_some() && have.model.is_some() && (have.fixed || have.gpu == local.gpu);
+    ui.label(
+        theme::muted(tr(
+            "Если llama.cpp уже стоит из пакетов системы (например, llama.cpp-vulkan в AUR), \
+             Rustspace возьмёт его llama-server и скачает только модель.",
+        ))
+        .size(12.0),
+    );
     let status = local_llm::status();
     let busy = matches!(
         status,
@@ -276,6 +284,12 @@ fn local_fields(
             local_llm::remove();
         }
     });
+    progress_line(ui, status);
+}
+
+/// Ход установки.
+fn progress_line(ui: &mut egui::Ui, status: crate::local_llm::Progress) {
+    use crate::local_llm::Progress;
     match status {
         Progress::Looking(what) => {
             ui.horizontal(|ui| {
