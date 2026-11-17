@@ -763,12 +763,24 @@ impl ChatScreen {
             }
             None => {}
         }
-        if hits.profile.iter().any(|rect| rect.contains(pos)) {
-            self.profile = Some(crate::screens::profile::ProfileState::open(
-                bridge,
-                &row.author_id,
-                &row.author,
-            ));
+        if let Some(rect) = hits.profile.iter().find(|rect| rect.contains(pos)) {
+            // Повторный щелчок по тому же человеку закрывает окно.
+            if self
+                .profile
+                .as_ref()
+                .is_some_and(|p| p.is_of(&row.author_id))
+            {
+                self.profile = None;
+            } else {
+                // Рядом с аватаркой (первая область), даже если щёлкнули по имени.
+                let anchor = hits.profile.first().copied().unwrap_or(*rect);
+                self.profile = Some(crate::screens::profile::ProfileState::open_at(
+                    bridge,
+                    &row.author_id,
+                    &row.author,
+                    crate::screens::profile::Anchor::Beside(anchor),
+                ));
+            }
         }
     }
 

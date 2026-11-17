@@ -14,10 +14,20 @@ const WIDTH: f32 = 380.0;
 /// Высота баннера.
 const BANNER: f32 = 110.0;
 
+/// Где показать окно профиля.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Anchor {
+    /// У правого края, вплотную к списку участников.
+    Panel,
+    /// Рядом с тем, по чему щёлкнули (аватар или имя в ленте).
+    Beside(egui::Rect),
+}
+
 /// Что открыто в окне.
 #[derive(Debug)]
 pub(crate) struct ProfileState {
     user_id: String,
+    anchor: Anchor,
     name: String,
     user: Option<Box<User>>,
     error: Option<String>,
@@ -36,14 +46,25 @@ pub(crate) enum ProfileAction {
 impl ProfileState {
     /// Открывает профиль и запрашивает данные у сервера.
     pub(crate) fn open(bridge: &Bridge, user_id: &str, name: &str) -> Self {
+        Self::open_at(bridge, user_id, name, Anchor::Panel)
+    }
+
+    /// Открывает профиль у заданного места.
+    pub(crate) fn open_at(bridge: &Bridge, user_id: &str, name: &str, anchor: Anchor) -> Self {
         bridge.request(BridgeRequest::Profile(user_id.to_owned()));
         Self {
             user_id: user_id.to_owned(),
+            anchor,
             name: name.to_owned(),
             user: None,
             error: None,
             mutuals: None,
         }
+    }
+
+    /// Открыт ли профиль этого пользователя (повторный щелчок закрывает).
+    pub(crate) fn is_of(&self, user_id: &str) -> bool {
+        self.user_id == user_id
     }
 
     /// Применяет пришедшие ответы.
@@ -204,14 +225,31 @@ pub(crate) fn show(
 ) -> ProfileAction {
     let mut action = ProfileAction::None;
     let mut open = true;
+    let (pivot, pos) = match state.anchor {
+        Anchor::Panel => (egui::Align2::RIGHT_TOP, egui::pos2(right_edge - 4.0, 56.0)),
+        Anchor::Beside(rect) => {
+            // Справа от аватара; не влезает — слева. По высоте — в пределах окна.
+            let screen = ctx.content_rect();
+            let height = 420.0_f32.min(screen.height() - 16.0);
+            let top = rect
+                .top()
+                .clamp(screen.top() + 8.0, (screen.bottom() - height).max(8.0));
+            if rect.right() + 12.0 + WIDTH <= screen.right() - 8.0 {
+                (egui::Align2::LEFT_TOP, egui::pos2(rect.right() + 12.0, top))
+            } else {
+                (egui::Align2::RIGHT_TOP, egui::pos2(rect.left() - 12.0, top))
+            }
+        }
+    };
     egui::Window::new("profile_window")
         .title_bar(false)
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .fixed_size(Vec2::new(WIDTH, 0.0))
-        .pivot(egui::Align2::RIGHT_TOP)
-        .fixed_pos(egui::pos2(right_edge - 4.0, 56.0))
+        .pivot(pivot)
+        .fixed_pos(pos)
+        .constrain(true)
         .frame(
             egui::Frame::new()
                 .fill(theme::bg_sidebar())

@@ -525,7 +525,11 @@ impl ChatScreen {
                     if let Some(rows) = rows
                         && let Some((id, name)) = Self::show_member_panel(ui, &rows)
                     {
-                        self.profile = Some(super::profile::ProfileState::open(bridge, &id, &name));
+                        self.profile = if self.profile.as_ref().is_some_and(|p| p.is_of(&id)) {
+                            None
+                        } else {
+                            Some(super::profile::ProfileState::open(bridge, &id, &name))
+                        };
                     }
                 }
                 main_module(ui, |ui| {
