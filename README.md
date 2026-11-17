@@ -124,10 +124,10 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
 | `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, system audio, data-channel signals | 68 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 242 |
+| `bs-app` | The GUI and its entry point | 248 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 129 |
+| `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 140 |
 | `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 7 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
@@ -402,6 +402,33 @@ without it the server answers `401` with code `two_factor_required`. The secret 
 encrypted with a key derived from `JWT_SECRET`: after changing `JWT_SECRET`, protection has
 to be set up again. Someone who lost both the phone and the recovery codes is let back in by
 the administrator: a password reset in the admin panel also removes the second factor.
+
+### Bridges to Telegram, Discord and Matrix
+
+*(bs-server)* A text channel can be linked to a Telegram group, a Discord channel or a
+Matrix room: messages from the channel go there, messages from there come into the channel.
+People from another network appear as separate users named like "Anna · Telegram"; they
+cannot log in. Files go out as links to the server.
+
+1. Create a bot and put its token into `/etc/rustspace/rustspace.env`, then restart the
+   server (`systemctl restart rustspace` or `rc-service rustspace restart`). The installer
+   keeps these variables on updates.
+   - **Telegram**: create a bot with @BotFather, set `TELEGRAM_BOT_TOKEN`. Turn privacy mode
+     off (`/setprivacy` → Disable), otherwise the bot only sees commands.
+   - **Discord**: create an application at discord.com/developers, add a bot, turn on
+     *Message Content Intent*, set `DISCORD_BOT_TOKEN`. Invite the bot with the permissions
+     to view channels, send messages and *Manage Webhooks* (with webhooks Discord shows the
+     author's name instead of the bot's).
+   - **Matrix**: register an account for the bot, set `MATRIX_HOMESERVER`
+     (`https://matrix.org`) and `MATRIX_ACCESS_TOKEN` (Element: Settings → Help & About →
+     Access Token). Encrypted rooms are not supported.
+2. Add the bot to the chat and send `/rustspace_id` (Telegram) or `!rustspace_id` (Discord,
+   Matrix): it replies with the chat ID. A Matrix bot joins rooms it is invited to.
+3. In the Rust client open the channel settings → **Bridges**, pick the network and paste
+   the ID. Linking needs the "Manage channels" permission.
+
+`TELEGRAM_API_URL` and `DISCORD_API_URL` change the API address (a local Bot API server,
+tests).
 
 ### Configuration
 

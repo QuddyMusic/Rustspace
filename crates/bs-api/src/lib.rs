@@ -23,6 +23,7 @@ pub mod admin;
 pub mod admin_more;
 pub mod assets;
 pub mod auth;
+pub mod bridges;
 pub mod client;
 pub mod community;
 pub mod compose;
@@ -49,6 +50,7 @@ pub use admin_more::{
 };
 pub use assets::{AssetPath, GIF_HOSTS, STICKER_PREFIX, fetch_external, resolve_asset};
 pub use auth::AuthResponse;
+pub use bridges::{BridgeLink, ChannelBridges};
 pub use bs_types::{LiveKitTokenRequest, LiveKitTokenResponse};
 pub use client::{ApiClient, DEFAULT_TIMEOUT, MAX_RESPONSE_BYTES, USER_AGENT};
 pub use community::{

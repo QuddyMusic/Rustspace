@@ -1230,5 +1230,20 @@
   "Не удаётся связаться с сервером. Проверьте адрес инстанса и подключение к сети.": "Can't reach the server. Check the instance address and your network connection.",
   "Неверный логин или пароль": "Wrong username or password",
   "Этот аккаунт удалён": "This account has been deleted",
-  "Слишком много попыток: подождите немного и попробуйте снова": "Too many attempts: wait a little and try again"
+  "Слишком много попыток: подождите немного и попробуйте снова": "Too many attempts: wait a little and try again",
+  "Мосты": "Bridges",
+  "Канал связан": "Channel linked",
+  "Связать": "Link",
+  "Отвязать": "Unlink",
+  "Связать с чатом": "Link to a chat",
+  "На сервере мосты не настроены": "Bridges aren't configured on this server",
+  "Эта сеть на сервере не настроена": "This network isn't configured on the server",
+  "Не похоже на ID чата этой сети": "That doesn't look like a chat ID for this network",
+  "Канал уже связан с этим чатом": "The channel is already linked to this chat",
+  "Связь уже удалена": "The link has already been removed",
+  "Сообщения канала уходят в связанные чаты Telegram, Discord и Matrix, а оттуда приходят сюда. Авторы из других сетей подписаны названием сети.": "Channel messages go out to linked Telegram, Discord and Matrix chats, and messages from there come back here. Authors from other networks are labelled with the network name.",
+  "Администратор сервера задаёт токены ботов в настройках сервера: TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, MATRIX_HOMESERVER и MATRIX_ACCESS_TOKEN. Подробности — в README, раздел «Мосты».": "The server administrator sets the bot tokens in the server settings: TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, MATRIX_HOMESERVER and MATRIX_ACCESS_TOKEN. See the \"Bridges\" section of the README.",
+  "Добавьте бота в группу и отправьте там /rustspace_id — бот ответит ID чата (вида -100…). Чтобы бот видел все сообщения, выключите ему privacy mode: @BotFather → /setprivacy → Disable.": "Add the bot to the group and send /rustspace_id there: the bot replies with the chat ID (like -100…). For the bot to see every message, turn its privacy mode off: @BotFather → /setprivacy → Disable.",
+  "Пригласите бота на сервер и в нужном канале напишите !rustspace_id — бот ответит ID канала. Боту нужны права читать и писать сообщения и «Управлять вебхуками» (тогда в Discord видно имя автора).": "Invite the bot to the server and type !rustspace_id in the channel you want: the bot replies with the channel ID. The bot needs permission to read and send messages and to Manage Webhooks (so Discord shows the author's name).",
+  "Пригласите бота в комнату — он войдёт сам, — затем напишите !rustspace_id: бот ответит ID комнаты (вида !abc:matrix.org). Зашифрованные комнаты не поддерживаются.": "Invite the bot to the room (it joins on its own), then type !rustspace_id: the bot replies with the room ID (like !abc:matrix.org). Encrypted rooms aren't supported."
 }

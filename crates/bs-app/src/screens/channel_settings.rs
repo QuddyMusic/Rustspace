@@ -39,6 +39,7 @@ impl Target {
 enum Tab {
     Overview,
     Access,
+    Bridges,
 }
 
 /// Состояние окна.
@@ -67,6 +68,12 @@ pub(crate) struct ChannelSettings {
     error: Option<String>,
     notice: Option<String>,
     member_search: String,
+    /// Мосты канала (после загрузки).
+    bridges: Option<bs_api::ChannelBridges>,
+    bridges_requested: bool,
+    /// Черновик новой связи: сеть и чат.
+    bridge_kind: String,
+    bridge_chat: String,
 }
 
 fn bits(raw: &str) -> Permissions {
@@ -115,6 +122,10 @@ impl ChannelSettings {
             error: None,
             notice: None,
             member_search: String::new(),
+            bridges: None,
+            bridges_requested: false,
+            bridge_kind: String::new(),
+            bridge_chat: String::new(),
         })
     }
 
@@ -157,6 +168,13 @@ impl ChannelSettings {
                         self.saved_topic.clone_from(&self.topic);
                         self.notice = Some(tr("Настройки сохранены").to_owned());
                     }
+                    (SpaceOp::AddBridge(..) | SpaceOp::RemoveBridge(..), Ok(())) => {
+                        if matches!(op, SpaceOp::AddBridge(..)) {
+                            self.bridge_chat.clear();
+                            self.notice = Some(tr("Канал связан").to_owned());
+                        }
+                        self.bridges_requested = false;
+                    }
                     (SpaceOp::PutOverride(..) | SpaceOp::DeleteOverride(..), Ok(())) => {
                         self.overrides = None;
                         self.overrides_requested = false;
@@ -171,6 +189,27 @@ impl ChannelSettings {
                         self.error = Some(err.clone());
                     }
                     _ => {}
+                }
+            }
+            SpaceEvent::Bridges {
+                space_id,
+                channel_id,
+                result,
+            } if *space_id == self.space_id
+                && matches!(&self.target, Target::Channel(mine) if mine == channel_id) =>
+            {
+                match result {
+                    Ok(bridges) => {
+                        if !bridges.available.contains(&self.bridge_kind) {
+                            self.bridge_kind =
+                                bridges.available.first().cloned().unwrap_or_default();
+                        }
+                        self.bridges = Some(bridges.clone());
+                    }
+                    Err(err) => {
+                        self.bridges = Some(bs_api::ChannelBridges::default());
+                        self.error = Some(err.clone());
+                    }
                 }
             }
             SpaceEvent::Overrides {
@@ -204,6 +243,15 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut ChannelSettings, bridge: &mu
         state.request(bridge, SpaceOp::ListOverrides(state.target.scope()));
         state.busy = false;
     }
+    if state.tab == Tab::Bridges
+        && !state.bridges_requested
+        && let Target::Channel(id) = &state.target
+    {
+        state.bridges_requested = true;
+        let id = id.clone();
+        state.request(bridge, SpaceOp::ListBridges(id));
+        state.busy = false;
+    }
     let mut keep_open = true;
     let response = egui::Modal::new(egui::Id::unique("channel_settings"))
         .frame(
@@ -228,6 +276,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut ChannelSettings, bridge: &mu
                             match state.tab {
                                 Tab::Overview => overview(ui, state, bridge),
                                 Tab::Access => access(ui, state, rights, bridge),
+                                Tab::Bridges => bridges_tab(ui, state, bridge),
                             }
                             ui.add_space(16.0);
                         });
@@ -272,8 +321,19 @@ fn nav(ui: &mut egui::Ui, state: &mut ChannelSettings, rights: Rights, keep_open
         if rights.manage_roles {
             tabs.push((Tab::Access, tr("Права доступа"), crate::icons::Icon::Users));
         }
+        if state.is_channel()
+            && !state.voice
+            && (rights.owner
+                || rights.perms.contains(Permissions::MANAGE_CHANNELS)
+                || rights.perms.contains(Permissions::ADMINISTRATOR))
+        {
+            tabs.push((Tab::Bridges, tr("Мосты"), crate::icons::Icon::Compass));
+        }
         for (tab, label, icon) in tabs {
             if widgets::nav_row(ui, icon, label, state.tab == tab).clicked() {
+                if tab == Tab::Bridges && state.tab != tab {
+                    state.bridges_requested = false;
+                }
                 state.tab = tab;
                 state.error = None;
                 state.notice = None;
@@ -858,6 +918,178 @@ fn editor(
             state.request(bridge, op);
         }
     });
+}
+
+/// Подпись сети.
+fn network_title(kind: &str) -> &str {
+    match kind {
+        "telegram" => "Telegram",
+        "discord" => "Discord",
+        "matrix" => "Matrix",
+        other => other,
+    }
+}
+
+/// Как узнать идентификатор чата в сети.
+fn network_hint(kind: &str) -> &'static str {
+    match kind {
+        "telegram" => tr(
+            "Добавьте бота в группу и отправьте там /rustspace_id — бот ответит ID чата \
+             (вида -100…). Чтобы бот видел все сообщения, выключите ему privacy mode: \
+             @BotFather → /setprivacy → Disable.",
+        ),
+        "discord" => tr(
+            "Пригласите бота на сервер и в нужном канале напишите !rustspace_id — бот ответит \
+             ID канала. Боту нужны права читать и писать сообщения и «Управлять вебхуками» \
+             (тогда в Discord видно имя автора).",
+        ),
+        "matrix" => tr(
+            "Пригласите бота в комнату — он войдёт сам, — затем напишите !rustspace_id: бот \
+             ответит ID комнаты (вида !abc:matrix.org). Зашифрованные комнаты не поддерживаются.",
+        ),
+        _ => "",
+    }
+}
+
+/// Вкладка «Мосты»: связи канала с Telegram, Discord и Matrix.
+fn bridges_tab(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) {
+    heading(ui, tr("Мосты"));
+    ui.label(
+        RichText::new(tr(
+            "Сообщения канала уходят в связанные чаты Telegram, Discord и Matrix, а оттуда \
+             приходят сюда. Авторы из других сетей подписаны названием сети.",
+        ))
+        .color(theme::text_muted()),
+    );
+    ui.add_space(12.0);
+    let Some(bridges) = state.bridges.clone() else {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(theme::muted(tr("Загрузка…")));
+        });
+        return;
+    };
+    let Target::Channel(channel) = state.target.clone() else {
+        return;
+    };
+    if bridges.available.is_empty() {
+        egui::Frame::new()
+            .fill(theme::bg_input())
+            .corner_radius(crate::theme::rounded(10))
+            .inner_margin(Margin::same(14))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(
+                    RichText::new(tr("На сервере мосты не настроены")).family(theme::bold_family()),
+                );
+                ui.add_space(4.0);
+                ui.label(theme::muted(tr(
+                    "Администратор сервера задаёт токены ботов в настройках сервера: \
+                     TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, MATRIX_HOMESERVER и \
+                     MATRIX_ACCESS_TOKEN. Подробности — в README, раздел «Мосты».",
+                )));
+            });
+    }
+
+    links(ui, state, &bridges.links, bridge);
+    if bridges.available.is_empty() {
+        return;
+    }
+    ui.add_space(10.0);
+    link_form(ui, state, &bridges.available, &channel, bridge);
+    if let Some(err) = &state.error {
+        ui.add_space(8.0);
+        ui.label(RichText::new(err).color(theme::rose()));
+    }
+    if let Some(notice) = &state.notice {
+        ui.add_space(8.0);
+        ui.label(RichText::new(notice).color(theme::mint()));
+    }
+}
+
+/// Список связей канала.
+fn links(
+    ui: &mut egui::Ui,
+    state: &mut ChannelSettings,
+    links: &[bs_api::BridgeLink],
+    bridge: &mut Bridge,
+) {
+    for link in links {
+        egui::Frame::new()
+            .fill(theme::bg_input())
+            .corner_radius(crate::theme::rounded(10))
+            .inner_margin(Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(network_title(&link.kind)).family(theme::bold_family()));
+                    ui.label(
+                        RichText::new(&link.external_id)
+                            .monospace()
+                            .color(theme::text_muted()),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(!state.busy, egui::Button::new(tr("Отвязать")))
+                            .clicked()
+                        {
+                            state.request(bridge, SpaceOp::RemoveBridge(link.id.clone()));
+                        }
+                    });
+                });
+            });
+        ui.add_space(6.0);
+    }
+}
+
+/// Форма новой связи: сеть, чат и подсказка, где взять ID.
+fn link_form(
+    ui: &mut egui::Ui,
+    state: &mut ChannelSettings,
+    available: &[String],
+    channel: &str,
+    bridge: &mut Bridge,
+) {
+    widgets::section_label(ui, tr("Связать с чатом"));
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("bridge_kind")
+            .selected_text(network_title(&state.bridge_kind).to_owned())
+            .width(130.0)
+            .show_ui(ui, |ui| {
+                for kind in available {
+                    ui.selectable_value(&mut state.bridge_kind, kind.clone(), network_title(kind));
+                }
+            });
+        let hint = match state.bridge_kind.as_str() {
+            "telegram" => "-1001234567890",
+            "discord" => "123456789012345678",
+            "matrix" => "!room:matrix.org",
+            _ => "",
+        };
+        ui.add(
+            egui::TextEdit::singleline(&mut state.bridge_chat)
+                .hint_text(hint)
+                .desired_width(240.0)
+                .margin(egui::vec2(10.0, 7.0)),
+        );
+        let ready = !state.bridge_chat.trim().is_empty() && !state.busy;
+        if ui
+            .add_enabled(ready, theme::primary_button(tr("Связать")))
+            .clicked()
+        {
+            state.request(
+                bridge,
+                SpaceOp::AddBridge(
+                    channel.to_owned(),
+                    state.bridge_kind.clone(),
+                    state.bridge_chat.trim().to_owned(),
+                ),
+            );
+        }
+    });
+    ui.add_space(6.0);
+    ui.label(theme::muted(network_hint(&state.bridge_kind)).size(12.5));
 }
 
 #[cfg(test)]

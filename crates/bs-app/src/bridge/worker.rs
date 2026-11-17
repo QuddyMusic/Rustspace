@@ -692,6 +692,9 @@ pub(super) async fn space_admin(
         SpaceOp::ListBans
         | SpaceOp::ListJoinRequests
         | SpaceOp::ListOverrides(_)
+        | SpaceOp::ListBridges(_)
+        | SpaceOp::AddBridge(..)
+        | SpaceOp::RemoveBridge(_)
         | SpaceOp::Notify(..)
         | SpaceOp::UploadImage(..) => Ok(()),
     };
@@ -710,6 +713,34 @@ pub(super) async fn space_admin(
         op,
         result: done.map_err(|err| space_message(&err)),
         space,
+    })
+}
+
+/// Связывает или развязывает канал с внешним чатом.
+async fn bridge_op(client: &bs_api::ApiClient, space_id: String, op: SpaceOp) -> BridgeResponse {
+    let done = match &op {
+        SpaceOp::ListBridges(channel_id) => {
+            let result = client
+                .channel_bridges(channel_id)
+                .await
+                .map_err(|err| space_message(&err));
+            return BridgeResponse::SpaceAction(SpaceEvent::Bridges {
+                space_id,
+                channel_id: channel_id.clone(),
+                result,
+            });
+        }
+        SpaceOp::AddBridge(channel, kind, chat) => {
+            client.add_channel_bridge(channel, kind, chat).await
+        }
+        SpaceOp::RemoveBridge(link) => client.remove_bridge(link).await,
+        _ => Ok(()),
+    };
+    BridgeResponse::SpaceAction(SpaceEvent::Admin {
+        space_id,
+        op,
+        result: done.map_err(|err| space_message(&err)),
+        space: None,
     })
 }
 
@@ -1302,6 +1333,10 @@ async fn spaces_request(
                 .map_err(|err| space_message(&err));
             BridgeResponse::SpaceAction(SpaceEvent::Left { space_id, result })
         }
+        BridgeRequest::SpaceAdmin {
+            space_id,
+            op: op @ (SpaceOp::ListBridges(_) | SpaceOp::AddBridge(..) | SpaceOp::RemoveBridge(_)),
+        } => bridge_op(client, space_id, op).await,
         BridgeRequest::SpaceAdmin { space_id, op } => space_admin(client, space_id, op).await,
         BridgeRequest::GroupAdmin { dm_id, op } => group_admin(client, dm_id, op).await,
         BridgeRequest::CreateChannel { space_id, channel } => {

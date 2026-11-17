@@ -728,6 +728,12 @@ pub(crate) enum SpaceOp {
     DeleteCategory(String),
     /// Загрузить переопределения прав.
     ListOverrides(bs_api::OverrideScope),
+    /// Загрузить мосты канала.
+    ListBridges(String),
+    /// Связать канал с внешним чатом: канал, сеть, чат.
+    AddBridge(String, String, String),
+    /// Развязать: связь.
+    RemoveBridge(String),
     /// Создать или заменить переопределение прав.
     PutOverride(bs_api::OverrideScope, bs_api::PermissionOverride),
     /// Убрать переопределение прав.
@@ -776,6 +782,15 @@ pub(crate) enum SpaceEvent {
         scope: bs_api::OverrideScope,
         /// Список или текст ошибки.
         result: Result<Vec<bs_api::PermissionOverride>, String>,
+    },
+    /// Мосты канала.
+    Bridges {
+        /// Пространство.
+        space_id: String,
+        /// Канал.
+        channel_id: String,
+        /// Мосты или текст ошибки.
+        result: Result<bs_api::ChannelBridges, String>,
     },
     /// Итог изменения настроек уведомлений.
     Notified {

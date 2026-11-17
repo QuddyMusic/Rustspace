@@ -223,13 +223,24 @@ fn two_factor_error(code: Option<&str>) -> Option<&'static str> {
     })
 }
 
+/// Отказы мостов Rustspace.
+fn bridge_error(code: Option<&str>) -> Option<&'static str> {
+    Some(match code? {
+        "bridge_not_configured" => tr("Эта сеть на сервере не настроена"),
+        "bridge_chat_invalid" => tr("Не похоже на ID чата этой сети"),
+        "bridge_exists" => tr("Канал уже связан с этим чатом"),
+        "bridge_not_found" => tr("Связь уже удалена"),
+        _ => return None,
+    })
+}
+
 /// Понятный текст отказа сервера на действие пользователя.
 ///
 /// Известные коды получают русскую формулировку. Неизвестный код показывает
 /// текст сервера, но очищенный от управляющих символов и обрезанный: он
 /// приходит с чужого инстанса и не должен ломать интерфейс.
 pub(crate) fn describe_server_error(code: Option<&str>, message: &str) -> String {
-    if let Some(text) = two_factor_error(code) {
+    if let Some(text) = two_factor_error(code).or_else(|| bridge_error(code)) {
         return text.to_owned();
     }
     let known = match code {

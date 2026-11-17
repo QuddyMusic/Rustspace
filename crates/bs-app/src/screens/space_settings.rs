@@ -241,7 +241,10 @@ impl SpaceSettings {
                 | SpaceOp::DeleteCategory(_)
                 | SpaceOp::ListOverrides(_)
                 | SpaceOp::PutOverride(..)
-                | SpaceOp::DeleteOverride(..),
+                | SpaceOp::DeleteOverride(..)
+                | SpaceOp::ListBridges(_)
+                | SpaceOp::AddBridge(..)
+                | SpaceOp::RemoveBridge(_),
                 Ok(()),
             ) => {}
         }
