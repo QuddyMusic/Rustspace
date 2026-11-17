@@ -64,6 +64,7 @@ async fn start_with(bridges: &[(&str, &str)]) -> Server {
     let config = Config::from_map(&vars).expect("конфигурация");
     let state = AppState::new(config, Db::open_memory().expect("база")).expect("состояние");
     bs_server::bridges::spawn(&state);
+    bs_server::bridges::personal::spawn(&state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("порт");
@@ -529,4 +530,168 @@ async fn discord_messages_go_out_through_a_webhook() {
     // Вебхук создан один раз и дальше берётся из памяти.
     let created = bodies(&discord, "/channels/111/webhooks").await;
     assert_eq!(created, vec![json!({"name": "Rustspace"})]);
+}
+
+#[tokio::test]
+#[allow(clippy::too_many_lines, reason = "один сквозной сценарий")]
+async fn personal_matrix_chat_becomes_a_dm() {
+    use wiremock::matchers::{path_regex, query_param};
+    let matrix = MockServer::start().await;
+    let reply = |body: Value| ResponseTemplate::new(200).set_body_json(body);
+    Mock::given(method("GET"))
+        .and(path("/_matrix/client/v3/account/whoami"))
+        .respond_with(reply(json!({"user_id": "@me:hs.test"})))
+        .mount(&matrix)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/_matrix/client/v3/sync"))
+        .respond_with(reply(json!({"next_batch": "s1"})))
+        .mount(&matrix)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/_matrix/client/v3/joined_rooms"))
+        .respond_with(reply(json!({"joined_rooms": ["!dm:hs.test"]})))
+        .mount(&matrix)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex("^/_matrix/client/v3/rooms/.+/joined_members$"))
+        .respond_with(reply(json!({"joined": {
+            "@me:hs.test": {"display_name": "Я"},
+            "@anna:hs.test": {"display_name": "Анна"}
+        }})))
+        .mount(&matrix)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(
+            "^/_matrix/client/v3/rooms/.+/state/m.room.name$",
+        ))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({"errcode": "M_NOT_FOUND"})))
+        .mount(&matrix)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path_regex(
+            "^/_matrix/client/v3/rooms/.+/send/m.room.message/.+$",
+        ))
+        .respond_with(reply(json!({"event_id": "$e"})))
+        .mount(&matrix)
+        .await;
+    let server = start_with(&[]).await;
+    let (_, me) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/auth/register",
+            "",
+            Some(json!({"username": "quddy", "password": "password123"})),
+        )
+        .await;
+    let token = me["token"].as_str().unwrap().to_owned();
+    let (status, account) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/rustspace/personal-bridges/matrix",
+            &token,
+            Some(json!({"homeserver": matrix.uri(), "accessToken": "mx-user-token"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{account}");
+    assert_eq!(account["remoteId"], "@me:hs.test");
+    let id = account["id"].as_str().unwrap().to_owned();
+    let (status, chats) = server
+        .call(
+            reqwest::Method::GET,
+            &format!("/api/rustspace/personal-bridges/{id}/remote-chats"),
+            &token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{chats}");
+    assert_eq!(
+        chats,
+        json!([{"id": "!dm:hs.test", "title": "Анна", "group": false, "linked": false}])
+    );
+    let (status, linked) = server
+        .call(
+            reqwest::Method::PUT,
+            &format!("/api/rustspace/personal-bridges/{id}/chats"),
+            &token,
+            Some(json!({"remoteChat": "!dm:hs.test", "title": "Анна", "group": false})),
+        )
+        .await;
+    assert_eq!(status, 201, "{linked}");
+    let dm = linked["dmChannelId"].as_str().unwrap().to_owned();
+    Mock::given(method("GET"))
+        .and(path("/_matrix/client/v3/sync"))
+        .and(query_param("since", "s1"))
+        .respond_with(reply(json!({
+            "next_batch": "s2",
+            "rooms": {"join": {"!dm:hs.test": {"timeline": {"events": [
+                {"type": "m.room.message", "sender": "@anna:hs.test",
+                 "content": {"msgtype": "m.text", "body": "Привет из Matrix"}},
+                {"type": "m.room.message", "sender": "@me:hs.test",
+                 "content": {"msgtype": "m.text", "body": "с телефона"}},
+                {"type": "m.room.message", "sender": "@me:hs.test",
+                 "content": {"msgtype": "m.text", "body": "эхо моста"},
+                 "unsigned": {"transaction_id": "rsp1-0"}}
+            ]}}}}
+        })))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&matrix)
+        .await;
+    let mut got = Vec::new();
+    for _ in 0..80 {
+        let (_, messages) = server
+            .call(
+                reqwest::Method::GET,
+                &format!("/api/dm/{dm}/messages"),
+                &token,
+                None,
+            )
+            .await;
+        got = messages
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|m| (m["content"].clone(), m["user"]["username"].clone()))
+            .collect();
+        if got.len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0].0, "Привет из Matrix");
+    assert_ne!(got[0].1, "quddy");
+    assert_eq!(got[1], (json!("с телефона"), json!("quddy")));
+    let (status, _) = server
+        .call(
+            reqwest::Method::POST,
+            &format!("/api/dm/{dm}/messages"),
+            &token,
+            Some(json!({"content": "Ответ"})),
+        )
+        .await;
+    assert_eq!(status, 201);
+    let sent = bodies(&matrix, "/send/m.room.message/").await;
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0]["body"], "Ответ");
+    let (_, list) = server
+        .call(
+            reqwest::Method::GET,
+            "/api/rustspace/personal-bridges",
+            &token,
+            None,
+        )
+        .await;
+    assert_eq!(list["accounts"][0]["chats"][0]["dmChannelId"], dm.as_str());
+    assert_eq!(list["networks"]["telegram"]["serverKeys"], false);
+    let (status, _) = server
+        .call(
+            reqwest::Method::DELETE,
+            &format!("/api/rustspace/personal-bridges/{id}"),
+            &token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 200);
 }

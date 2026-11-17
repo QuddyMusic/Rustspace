@@ -725,6 +725,7 @@ pub async fn create_message(
             )
         })
         .await?;
+    crate::bridges::personal::notify_dm(&state, message["id"].as_str().unwrap_or_default());
     embeds::schedule(
         &state,
         message["id"].as_str().unwrap_or_default().to_owned(),

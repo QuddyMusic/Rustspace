@@ -340,6 +340,42 @@ pub fn app(state: AppState) -> Router {
         .route("/api/game-icons/assets/{filename}", get(routes::game_icons::asset))
         .route("/api/stickers/{id}/collect", post(routes::stickers::collect_existing))
         .route(
+            "/api/rustspace/personal-bridges",
+            get(routes::personal_bridges::list),
+        )
+        .route(
+            "/api/rustspace/personal-bridges/matrix",
+            post(routes::personal_bridges::add_matrix),
+        )
+        .route(
+            "/api/rustspace/personal-bridges/telegram/login",
+            post(routes::personal_bridges::telegram_login),
+        )
+        .route(
+            "/api/rustspace/personal-bridges/telegram/code",
+            post(routes::personal_bridges::telegram_code),
+        )
+        .route(
+            "/api/rustspace/personal-bridges/telegram/password",
+            post(routes::personal_bridges::telegram_password),
+        )
+        .route(
+            "/api/rustspace/personal-bridges/{id}",
+            delete(routes::personal_bridges::remove),
+        )
+        .route(
+            "/api/rustspace/personal-bridges/{id}/remote-chats",
+            get(routes::personal_bridges::remote_chats),
+        )
+        .route(
+            "/api/rustspace/personal-bridges/{id}/chats",
+            put(routes::personal_bridges::link_chat),
+        )
+        .route(
+            "/api/rustspace/personal-bridges/{id}/chats/{chat}",
+            delete(routes::personal_bridges::unlink_chat),
+        )
+        .route(
             "/api/rustspace/sticker-packs",
             get(routes::sticker_packs::list).post(routes::sticker_packs::create),
         )
@@ -525,6 +561,7 @@ pub fn spawn_background(state: &AppState) {
     federation::worker::spawn(state);
     federation::calls::spawn(state);
     bridges::spawn(state);
+    bridges::personal::spawn(state);
     tokio::spawn(routes::livekit::run_evictions(state.clone()));
     let uploads = state.clone();
     tokio::spawn(async move {

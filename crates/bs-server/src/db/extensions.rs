@@ -216,6 +216,37 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             )",
         ],
     ),
+    (
+        "0013_personal_bridges",
+        &[
+            // Свои аккаунты пользователей в других сетях; секрет зашифрован.
+            "CREATE TABLE bs_personal_accounts (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                remote_id TEXT NOT NULL,
+                display TEXT NOT NULL,
+                secret TEXT NOT NULL,
+                state TEXT NOT NULL,
+                error TEXT,
+                created_at BIGINT NOT NULL
+            )",
+            "CREATE INDEX bs_personal_accounts_user ON bs_personal_accounts (user_id)",
+            // Связанные чаты: чат на той стороне ↔ личная переписка с марионеткой.
+            "CREATE TABLE bs_personal_chats (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES bs_personal_accounts(id) ON DELETE CASCADE,
+                remote_chat TEXT NOT NULL,
+                title TEXT NOT NULL,
+                grouped INTEGER NOT NULL DEFAULT 0,
+                dm_channel_id TEXT NOT NULL,
+                puppet_id TEXT NOT NULL,
+                created_at BIGINT NOT NULL,
+                UNIQUE (account_id, remote_chat)
+            )",
+            "CREATE INDEX bs_personal_chats_dm ON bs_personal_chats (dm_channel_id)",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

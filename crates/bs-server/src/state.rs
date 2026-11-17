@@ -31,6 +31,8 @@ pub struct AppState {
     pub federation: Arc<crate::federation::handshake::Runtime>,
     /// Очередь мостов во внешние сети.
     pub bridges: crate::bridges::Bridges,
+    /// Личные мосты пользователей (свои аккаунты Matrix и Telegram).
+    pub personal: crate::bridges::personal::Personal,
 }
 
 impl AppState {
@@ -61,6 +63,7 @@ impl AppState {
             instance_id: instance_id.into(),
             federation: Arc::default(),
             bridges: crate::bridges::Bridges::default(),
+            personal: crate::bridges::personal::Personal::default(),
         })
     }
 }

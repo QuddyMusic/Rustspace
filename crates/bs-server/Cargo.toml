@@ -51,6 +51,10 @@ tokio-postgres-rustls = "0.14"
 tokio-postgres = "0.7"
 
 tokio-tungstenite = { workspace = true }
+# Личные мосты в Telegram: клиент MTProto на чистом Rust (grammers,
+# MIT/Apache-2.0, Lonami и участники). Хранилище сессии — своё, в базе.
+grammers-client = { version = "0.12", default-features = false }
+grammers-session = { version = "0.12", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
 tempfile = "3"

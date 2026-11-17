@@ -20,6 +20,7 @@ pub mod invites;
 pub mod livekit;
 pub mod messages;
 pub mod notifications;
+pub mod personal_bridges;
 pub mod saved;
 pub mod search;
 pub mod settings;

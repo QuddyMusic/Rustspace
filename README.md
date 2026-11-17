@@ -499,6 +499,29 @@ cannot log in. Files go out as links to the server.
 `TELEGRAM_API_URL` and `DISCORD_API_URL` change the API address (a local Bot API server,
 tests).
 
+### Personal bridges: your own Matrix and Telegram accounts in DMs
+
+*(bs-server)* Besides channel bridges, anyone can connect **their own** account: in the client,
+Settings → **Connections** → *Personal bridges*. Then pick chats — each becomes a direct
+conversation with a contact named like "Anna · Telegram": their messages come from them, your
+replies go to the chat from your account, and what you write from your phone shows up too.
+In group chats the author's name precedes the text.
+
+- **Matrix** — the homeserver and an access token (Element: Settings → Help & About) or a
+  login and password. Encrypted rooms are not supported.
+- **Telegram** — sign in with a phone number and code, plus the cloud password if two-step
+  verification is on. It needs an API ID and API hash from
+  [my.telegram.org](https://my.telegram.org): the admin sets `TELEGRAM_API_ID` and
+  `TELEGRAM_API_HASH` in `rustspace.env`, otherwise everyone enters their own when signing in.
+  The MTProto client is [grammers](https://github.com/Lonami/grammers) (MIT/Apache-2.0,
+  Lonami and contributors).
+- **Discord** personal accounts are not supported: signing in as a user breaks Discord's terms.
+
+Keys (the Matrix token, Telegram session keys) are stored in the server database encrypted
+with a key derived from `JWT_SECRET`; the server sees the bridged chats, so only connect an
+account on an instance you trust. Disconnecting removes the keys. To turn personal bridges off
+on a server: `PERSONAL_BRIDGES=off`.
+
 ### Webhooks and cards
 
 *(bs-server)* Channel settings → **Webhooks** creates an address an outside program writes to

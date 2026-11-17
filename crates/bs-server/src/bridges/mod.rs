@@ -16,6 +16,7 @@
 
 mod discord;
 mod matrix;
+pub mod personal;
 mod telegram;
 
 use std::sync::{Arc, OnceLock};
@@ -119,6 +120,12 @@ pub struct BridgeConfig {
     pub matrix_homeserver: Option<String>,
     /// `MATRIX_ACCESS_TOKEN` пользователя-бота.
     pub matrix_token: Option<String>,
+    /// Личные мосты пользователей (`PERSONAL_BRIDGES`, по умолчанию включены).
+    pub personal: bool,
+    /// `TELEGRAM_API_ID` приложения с my.telegram.org — для личных мостов.
+    pub telegram_api_id: Option<i32>,
+    /// `TELEGRAM_API_HASH` к нему.
+    pub telegram_api_hash: Option<String>,
 }
 
 impl std::fmt::Debug for BridgeConfig {
@@ -127,6 +134,8 @@ impl std::fmt::Debug for BridgeConfig {
             .field("telegram", &self.telegram_token.is_some())
             .field("discord", &self.discord_token.is_some())
             .field("matrix", &self.matrix_homeserver)
+            .field("personal", &self.personal)
+            .field("telegram_app", &self.telegram_api_id)
             .finish_non_exhaustive()
     }
 }
@@ -295,13 +304,18 @@ fn outgoing(
     message_id: &str,
 ) -> DbResult<Option<(Outgoing, Vec<(Kind, String)>)>> {
     let Some(row) = tx.query_one(
-        "SELECT m.channel_id, m.user_id, m.content, m.type, u.username, u.display_name \
+        "SELECT m.channel_id, m.user_id, m.content, m.type, m.edited_at, u.username, u.display_name \
          FROM messages m JOIN users u ON u.id = m.user_id WHERE m.id = ?",
         params![message_id],
     )?
     else {
         return Ok(None);
     };
+    // Правка приходит тем же путём, что и новое сообщение: наружу не шлём,
+    // иначе на той стороне появится дубль.
+    if row.opt_int("edited_at")?.is_some() {
+        return Ok(None);
+    }
     if row.opt_text("type")?.is_some_and(|kind| kind == "system") {
         return Ok(None);
     }
@@ -509,6 +523,14 @@ pub(crate) fn config_from(get: &dyn Fn(&str) -> Option<String>) -> BridgeConfig 
         matrix_homeserver: non_empty("MATRIX_HOMESERVER")
             .map(|url| url.trim_end_matches('/').to_owned()),
         matrix_token: non_empty("MATRIX_ACCESS_TOKEN"),
+        personal: non_empty("PERSONAL_BRIDGES").is_none_or(|v| {
+            !matches!(
+                v.to_ascii_lowercase().as_str(),
+                "0" | "off" | "false" | "no"
+            )
+        }),
+        telegram_api_id: non_empty("TELEGRAM_API_ID").and_then(|v| v.parse().ok()),
+        telegram_api_hash: non_empty("TELEGRAM_API_HASH"),
     }
 }
 
