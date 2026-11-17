@@ -288,7 +288,7 @@ To release, bump the version, add its section to `CHANGELOG.md` (it becomes the 
 commit, and push a tag with the same number:
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 `.github/workflows/release.yml` checks that the tag matches `Cargo.toml`, builds the server

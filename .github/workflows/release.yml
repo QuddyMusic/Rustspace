@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Тег существующего коммита, например v0.2.0"
+        description: "Тег существующего коммита, например v0.1.0"
         required: true
 
 permissions:

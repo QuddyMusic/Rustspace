@@ -283,7 +283,7 @@ cargo run -p bs-tui -- --allow-insecure                # аргументы по
 заметки к выпуску), закоммитьте и отправьте тег с тем же номером:
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 `.github/workflows/release.yml` проверит, что тег совпадает с `Cargo.toml`, соберёт сервер

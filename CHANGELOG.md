@@ -3,7 +3,7 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/).
 Заметки к выпуску на GitHub берутся из раздела версии.
 
-## [0.2.0] — 2026-11-17
+## [0.1.0] — не выпущено
 
 Первый публичный выпуск Rustspace: клиент и сервер на Rust, совместимые с Backspace.
 
@@ -60,4 +60,4 @@
 TheZwiss и участникам Backspace; QuddyMusic и cirzear — за Rich Presence (PR #482);
 cirzear — за перевод сообщений (PR #448); QuddyMusic — за API закладок (PR #474).
 
-[0.2.0]: https://github.com/QuddyMusic/Rustspace/releases/tag/v0.2.0
+[0.1.0]: https://github.com/QuddyMusic/Rustspace/releases/tag/v0.1.0
