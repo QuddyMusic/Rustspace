@@ -152,14 +152,88 @@ fn escape_html(text: &str) -> String {
 }
 
 /// Заглушка на `/`: инстанс принимает только десктоп-клиент на Rust.
-fn landing_page(config: &crate::config::Config) -> String {
+/// Язык страницы-заглушки.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lang {
+    Ru,
+    En,
+}
+
+impl Lang {
+    const fn code(self) -> &'static str {
+        match self {
+            Self::Ru => "ru",
+            Self::En => "en",
+        }
+    }
+}
+
+/// Язык заглушки: `?lang=ru|en`, иначе первый по весу язык из
+/// `Accept-Language`. Русский — тем, кто предпочитает русский (а также
+/// белорусский и казахский интерфейс, где русский обычно понимают),
+/// остальным — английский.
+fn pick_lang(query: Option<&str>, accept_language: Option<&str>) -> Lang {
+    let forced = query.and_then(|query| {
+        url::form_urlencoded::parse(query.as_bytes())
+            .find(|(key, _)| key == "lang")
+            .map(|(_, value)| value.to_ascii_lowercase())
+    });
+    match forced.as_deref() {
+        Some("ru") => return Lang::Ru,
+        Some("en") => return Lang::En,
+        _ => {}
+    }
+    let best = accept_language
+        .into_iter()
+        .flat_map(|header| header.split(','))
+        .filter_map(|item| {
+            let mut parts = item.split(';');
+            let tag = parts.next()?.trim().to_ascii_lowercase();
+            let weight = parts
+                .find_map(|param| param.trim().strip_prefix("q="))
+                .map_or(Some(1.0), |q| q.trim().parse::<f32>().ok())?;
+            (!tag.is_empty() && weight > 0.0).then_some((tag, weight))
+        })
+        // Первый из равных по весу — как в заголовке.
+        .fold(None::<(String, f32)>, |best, (tag, weight)| match best {
+            Some((_, top)) if top >= weight => best,
+            _ => Some((tag, weight)),
+        });
+    match best {
+        Some((tag, _))
+            if ["ru", "be", "kk"].contains(&tag.split('-').next().unwrap_or_default()) =>
+        {
+            Lang::Ru
+        }
+        _ => Lang::En,
+    }
+}
+
+/// Убирает из шаблона блок другого языка (`<!--RU-->…<!--/RU-->`).
+fn keep_language(page: &str, lang: Lang) -> String {
+    let (drop_open, drop_close) = match lang {
+        Lang::Ru => ("<!--EN-->", "<!--/EN-->"),
+        Lang::En => ("<!--RU-->", "<!--/RU-->"),
+    };
+    let mut out = page.to_owned();
+    if let (Some(start), Some(end)) = (out.find(drop_open), out.find(drop_close)) {
+        out.replace_range(start..end + drop_close.len(), "");
+    }
+    out.replace("<!--RU-->", "")
+        .replace("<!--/RU-->", "")
+        .replace("<!--EN-->", "")
+        .replace("<!--/EN-->", "")
+}
+
+fn landing_page(config: &crate::config::Config, lang: Lang) -> String {
     use base64::Engine as _;
     let origin = crate::federation::our_origin(config);
     let host = origin
         .trim_start_matches("https://")
         .trim_start_matches("http://")
         .to_owned();
-    LANDING
+    keep_language(LANDING, lang)
+        .replace("{{LANG}}", lang.code())
         .replace(
             "{{ICON_B64}}",
             &base64::engine::general_purpose::STANDARD.encode(ICON),
@@ -200,13 +274,14 @@ fn client_link(config: &crate::config::Config, linked: &str, otherwise: &str) ->
     }
 }
 
-fn landing(config: &crate::config::Config) -> Response {
+fn landing(config: &crate::config::Config, lang: Lang) -> Response {
     (
         [
             (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
             (axum::http::header::CACHE_CONTROL, "no-cache"),
+            (axum::http::header::VARY, "Accept-Language"),
         ],
-        landing_page(config),
+        landing_page(config, lang),
     )
         .into_response()
 }
@@ -228,7 +303,11 @@ pub async fn fallback(State(state): State<AppState>, request: axum::extract::Req
         && path == "/"
         && (method == Method::GET || method == Method::HEAD)
     {
-        return landing(&state.config);
+        let accept = request
+            .headers()
+            .get(axum::http::header::ACCEPT_LANGUAGE)
+            .and_then(|value| value.to_str().ok());
+        return landing(&state.config, pick_lang(uri.query(), accept));
     }
     let Some(root) = state.config.web_dist.as_deref().filter(|_| !api) else {
         let shown = uri
@@ -268,6 +347,24 @@ pub async fn fallback(State(state): State<AppState>, request: axum::extract::Req
 #[allow(clippy::expect_used, reason = "тесты")]
 mod tests {
     #[test]
+    fn landing_speaks_the_visitors_language() {
+        assert_eq!(pick_lang(None, Some("ru-RU,ru;q=0.9,en;q=0.8")), Lang::Ru);
+        assert_eq!(pick_lang(None, Some("en-US,en;q=0.9,ru;q=0.8")), Lang::En);
+        assert_eq!(pick_lang(None, Some("de;q=0.5, ru;q=0.7")), Lang::Ru);
+        assert_eq!(pick_lang(None, Some("uk-UA,uk;q=0.9")), Lang::En);
+        assert_eq!(pick_lang(None, None), Lang::En);
+        assert_eq!(pick_lang(Some("lang=ru"), Some("en")), Lang::Ru);
+        assert_eq!(pick_lang(Some("x=1&lang=en"), Some("ru")), Lang::En);
+        let plain = std::iter::once(("JWT_SECRET".to_owned(), "s".repeat(40))).collect();
+        let config = crate::config::Config::from_map(&plain).expect("конфигурация");
+        let page = landing_page(&config, Lang::En);
+        assert!(page.contains(r#"<html lang="en">"#));
+        assert!(page.contains("There is no web app here") && page.contains("source and builds"));
+        assert!(!page.contains("Здесь нет веб-версии") && !page.contains("<!--"));
+        assert!(page.contains(r#"href="?lang=ru""#));
+    }
+
+    #[test]
     fn landing_names_the_instance_and_escapes() {
         let vars = [
             ("JWT_SECRET", "s".repeat(40)),
@@ -281,13 +378,17 @@ mod tests {
         .map(|(k, v)| (k.to_owned(), v))
         .collect();
         let config = crate::config::Config::from_map(&vars).expect("конфигурация");
-        let page = landing_page(&config);
+        let page = landing_page(&config, Lang::Ru);
         assert!(!page.contains("{{"), "все подстановки сделаны");
+        assert!(!page.contains("No web app") && !page.contains("<!--"));
         assert!(page.contains("https://chat.example"));
         assert!(page.contains(r#"<a href="https://example.org/src?a=1&amp;b=2" rel="noopener">исходный код и сборки</a>"#));
         // По умолчанию ссылка ведёт в репозиторий Rustspace.
         let plain = std::iter::once(("JWT_SECRET".to_owned(), "s".repeat(40))).collect();
-        let page = landing_page(&crate::config::Config::from_map(&plain).expect("конфигурация"));
+        let page = landing_page(
+            &crate::config::Config::from_map(&plain).expect("конфигурация"),
+            Lang::Ru,
+        );
         assert!(page.contains(crate::config::SOURCE_URL));
         assert!(page.contains("<svg"));
         // Ссылка на оригинал клиента на Rust не даёт — её не показываем.
@@ -301,7 +402,10 @@ mod tests {
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v))
         .collect();
-        let page = landing_page(&crate::config::Config::from_map(&upstream).expect("конфигурация"));
+        let page = landing_page(
+            &crate::config::Config::from_map(&upstream).expect("конфигурация"),
+            Lang::Ru,
+        );
         assert!(page.contains("ссылку на сборки даст администратор"));
         assert!(!page.contains("исходный код и сборки"));
         assert_eq!(

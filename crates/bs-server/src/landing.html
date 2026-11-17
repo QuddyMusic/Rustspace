@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="{{LANG}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,11 +45,11 @@
   li { counter-increment: step; position: relative; padding-left: 40px; margin-bottom: 18px; color: var(--muted); }
   li::before {
     content: counter(step); position: absolute; left: 0; top: -1px;
-    width: 26px; height: 26px; border-radius: 8px; background: rgba(124,108,246,.18);
-    color: var(--violet); font-weight: 700; font-size: 14px; display: grid; place-items: center;
+    width: 26px; height: 26px; border-radius: 8px; background: rgba(232,116,59,.16);
+    color: #f3a77c; font-weight: 700; font-size: 14px; display: grid; place-items: center;
   }
   li strong { color: var(--text); font-weight: 600; }
-  a { color: var(--violet); text-decoration: none; }
+  a { color: #f3a77c; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .address {
     display: block; margin-top: 8px; padding: 11px 14px; border-radius: 10px;
@@ -59,8 +59,6 @@
   }
   @media (max-width: 440px) { .address { font-size: 13px; padding: 10px 12px; } h1 { font-size: 26px; } }
   .hint { font-size: 12.5px; color: var(--faint); margin-top: 6px; display: block; }
-  .en { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 6px; }
-  .en p { font-size: 14px; color: var(--faint); }
   footer { font-size: 12.5px; color: var(--faint); display: flex; flex-wrap: wrap; gap: 6px 14px; }
 </style>
 </head>
@@ -70,7 +68,7 @@
     {{ICON_SVG}}
     <div><b>Rustspace</b><small>{{HOST}}</small></div>
   </div>
-
+<!--RU-->
   <span class="tag">Сервер на Rust</span>
   <h1>Здесь нет веб-версии</h1>
   <p>Этот инстанс работает на <strong>bs-server</strong> и принимает пользователей только
@@ -90,17 +88,40 @@
     </ol>
   </section>
 
-  <div class="en">
-    <p><strong>No web app here.</strong> This Rustspace instance runs on bs-server and only
-      accepts the Rustspace desktop client, written in Rust. Install the client
-      ({{CLIENT_LINK_EN}}) and sign in with the address <span lang="en">{{ORIGIN}}</span>.</p>
-  </div>
-
   <footer>
     <span>Rustspace · bs-server {{VERSION}}</span>
     <a href="{{SOURCE}}" rel="noopener">Исходный код (AGPL-3.0)</a>
     <span>Независимый проект, не связан с Backspace.</span>
+    <a href="?lang=en" hreflang="en" lang="en">English</a>
   </footer>
+<!--/RU-->
+<!--EN-->
+  <span class="tag">Rust server</span>
+  <h1>There is no web app here</h1>
+  <p>This instance runs <strong>bs-server</strong> and only accepts the
+    <strong>Rustspace desktop client</strong>, written in Rust. You cannot sign in from a
+    browser.</p>
+
+  <section class="card">
+    <h2>How to connect</h2>
+    <ol>
+      <li><strong>Install the Rustspace client</strong> for Linux, Windows
+        or macOS: {{CLIENT_LINK_EN}}.</li>
+      <li><strong>Enter the instance address</strong> on the sign-in screen:
+        <span class="address">{{ORIGIN}}</span>
+        <span class="hint">One click selects the whole address, ready to copy.</span></li>
+      <li><strong>Sign in or create an account.</strong> Voice, video, screen sharing and
+        end-to-end encrypted direct messages work in the client.</li>
+    </ol>
+  </section>
+
+  <footer>
+    <span>Rustspace · bs-server {{VERSION}}</span>
+    <a href="{{SOURCE}}" rel="noopener">Source code (AGPL-3.0)</a>
+    <span>An independent project, not affiliated with Backspace.</span>
+    <a href="?lang=ru" hreflang="ru" lang="ru">Русский</a>
+  </footer>
+<!--/EN-->
 </main>
 </body>
 </html>

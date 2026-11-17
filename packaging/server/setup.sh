@@ -98,6 +98,8 @@ usage() {
                          (при обновлении берётся из прежних настроек)
   --livekit-host ИМЯ     адрес LiveKit для клиентов (по умолчанию lk.ДОМЕН)
   --no-livekit           без голоса и стримов
+  --livekit              включить голос и стримы (при обновлении установки,
+                         где их не было; иначе они включены и так)
 
 Откуда взять сервер (по умолчанию — сборка, если скрипт лежит в репозитории,
 иначе последний релиз):
@@ -129,6 +131,7 @@ while [ $# -gt 0 ]; do
         --domain) DOMAIN="${2:-}"; shift 2 ;;
         --livekit-host) LIVEKIT_HOST="${2:-}"; shift 2 ;;
         --no-livekit) WITH_LIVEKIT=0; shift ;;
+        --livekit) WITH_LIVEKIT=1; shift ;;
         --binary) BINARY="${2:-}"; shift 2 ;;
         --release)
             case "${2:-}" in
