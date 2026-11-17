@@ -1591,5 +1591,10 @@
   "Подсказка: {hint}": "Hint: {hint}",
   "Подключено слишком много аккаунтов": "Too many accounts connected",
   "Связано слишком много чатов этого аккаунта": "Too many chats linked for this account",
-  "Аккаунт ещё подключается — попробуйте через минуту": "The account is still connecting — try again in a minute"
+  "Аккаунт ещё подключается — попробуйте через минуту": "The account is still connecting — try again in a minute",
+  "У вас пока нет пространств.": "You don't have any spaces yet.",
+  "Найти пространство": "Find a space",
+  "Пригласить {a0} в пространство": "Invite {a0} to a space",
+  "Пригласить в пространство": "Invite to a space",
+  "Пригласить в пространство…": "Invite to a space…"
 }

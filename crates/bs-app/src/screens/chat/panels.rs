@@ -101,6 +101,23 @@ pub(super) fn channel_gear(
     clicked
 }
 
+/// ПКМ по беседе один на один: позвать собеседника в своё пространство
+/// (PR #485 оригинала).
+fn dm_menu(response: &egui::Response, dm: &SidebarDm, nav: &mut Option<Nav>) {
+    if dm.status.is_none() {
+        return;
+    }
+    response.context_menu(|ui| {
+        if ui.button(tr("Пригласить в пространство…")).clicked() {
+            *nav = Some(Nav::InvitePerson {
+                origin: dm.origin,
+                dm_id: dm.id.clone(),
+            });
+            ui.close();
+        }
+    });
+}
+
 /// Шапка пространства: имя (ПКМ — меню) и кнопка приглашения.
 pub(super) fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Option<Nav>) {
     ui.horizontal(|ui| {
@@ -686,6 +703,7 @@ impl ChatScreen {
                     avatar: dm.avatar.as_deref(),
                 },
             );
+            dm_menu(&response, dm, nav);
             if response.clicked() {
                 *nav = Some(Nav::Channel(SelectedChannel {
                     origin: dm.origin,

@@ -1621,7 +1621,7 @@ async fn spaces_request(
                 .space_invite_code(&space_id)
                 .await
                 .map_err(|err| space_message(&err));
-            BridgeResponse::SpaceAction(SpaceEvent::Invite { result })
+            BridgeResponse::SpaceAction(SpaceEvent::Invite { space_id, result })
         }
         BridgeRequest::InviteFriend { friend_id, request } => {
             let result = client

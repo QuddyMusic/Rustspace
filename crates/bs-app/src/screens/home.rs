@@ -43,6 +43,8 @@ pub(crate) struct HomeState {
     pub(crate) explore_query: String,
     /// Данные друзей уже запрашивались в этой сессии.
     loaded: bool,
+    /// Друг, которого попросили пригласить в пространство.
+    pub(crate) invite_person: Option<bs_types::Friend>,
 }
 
 impl HomeState {
@@ -134,8 +136,8 @@ pub(crate) fn show_friends(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Br
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| match state.tab {
-                    FriendsTab::Online => friends_list(ui, bridge, true),
-                    FriendsTab::All => friends_list(ui, bridge, false),
+                    FriendsTab::Online => friends_list(ui, bridge, true, &mut state.invite_person),
+                    FriendsTab::All => friends_list(ui, bridge, false, &mut state.invite_person),
                     FriendsTab::Pending => pending_list(ui, bridge),
                     FriendsTab::Add => add_friend(ui, state, bridge),
                 });
@@ -156,7 +158,12 @@ fn reload(bridge: &Bridge, tab: FriendsTab) {
 }
 
 /// Друзья: только те, кто в сети, или все.
-fn friends_list(ui: &mut egui::Ui, bridge: &Bridge, online_only: bool) {
+fn friends_list(
+    ui: &mut egui::Ui,
+    bridge: &Bridge,
+    online_only: bool,
+    invite: &mut Option<bs_types::Friend>,
+) {
     let mut friends: Vec<_> = bridge
         .friends()
         .iter()
@@ -222,6 +229,12 @@ fn friends_list(ui: &mut egui::Ui, bridge: &Bridge, online_only: bool) {
                     .clicked()
                 {
                     bridge.request(BridgeRequest::OpenDm(friend.id.clone()));
+                }
+                if widgets::icon_button(ui, Icon::Join, 34.0)
+                    .on_hover_text(tr("Пригласить в пространство"))
+                    .clicked()
+                {
+                    *invite = Some(friend.clone());
                 }
             },
         );

@@ -98,6 +98,8 @@ pub(super) enum Nav {
     },
     /// Создать ссылку-приглашение и скопировать её.
     Invite { origin: usize, space_id: String },
+    /// Пригласить собеседника беседы один на один в одно из своих пространств.
+    InvitePerson { origin: usize, dm_id: String },
     /// Действие панели голоса.
     Voice(crate::voice::DockAction),
     /// Локальная громкость участника.
@@ -133,6 +135,8 @@ pub(crate) struct ChatScreen {
     pending_join: Option<super::invite_card::InviteJoin>,
     /// Окно «Пригласить людей».
     invite_dialog: Option<super::invite_dialog::InviteDialog>,
+    /// «Пригласить в пространство» для друга или собеседника.
+    person_invite: Option<super::invite_dialog::PersonInvite>,
     /// Выбранный канал и его инстанс.
     pub(crate) selected_channel: Option<SelectedChannel>,
     pub(crate) draft: String,
@@ -343,6 +347,22 @@ impl ChatScreen {
     }
 
     /// Применяет запрошенный кликом переход.
+    /// «Пригласить в пространство» для собеседника беседы один на один.
+    fn open_person_invite(&mut self, bridge: &Bridge, origin: usize, dm_id: &str) {
+        let person = bridge.cache_at(origin).and_then(|cache| {
+            let me = cache.me().id.clone();
+            cache
+                .dm_channel(dm_id)?
+                .members
+                .iter()
+                .find(|m| m.id != me)
+                .map(super::invite_dialog::friend_from_user)
+        });
+        if let Some(person) = person {
+            self.person_invite = Some(super::invite_dialog::PersonInvite::open(person));
+        }
+    }
+
     /// Открыть свой профиль тем же окном, что и чужие.
     fn open_own_profile(&mut self, bridge: &Bridge) {
         if let Some(me) = bridge.cache_at(0).map(|c| c.me().clone()) {
@@ -416,6 +436,7 @@ impl ChatScreen {
                     bridge, origin, space_id,
                 ));
             }
+            Nav::InvitePerson { origin, dm_id } => self.open_person_invite(bridge, origin, &dm_id),
             Nav::Settings => {
                 if let Some(cache) = bridge.cache_at(0) {
                     self.settings = Some(SettingsState::from_user(cache.me()));
@@ -565,6 +586,14 @@ impl ChatScreen {
             && !super::invite_dialog::show(ctx, dialog, bridge)
         {
             self.invite_dialog = None;
+        }
+        if let Some(person) = self.home.invite_person.take() {
+            self.person_invite = Some(super::invite_dialog::PersonInvite::open(person));
+        }
+        if let Some(dialog) = self.person_invite.as_mut()
+            && !super::invite_dialog::show_person(ctx, dialog, bridge)
+        {
+            self.person_invite = None;
         }
         if let Some(value) = self.viewer.clone()
             && media::viewer(ctx, &value)
@@ -751,36 +780,68 @@ impl ChatScreen {
         }
     }
 
+    /// Код приглашения и итог отправки; `true` — событие разобрано.
+    fn invite_event(
+        &mut self,
+        bridge: &mut Bridge,
+        ctx: &egui::Context,
+        now: f64,
+        origin: usize,
+        event: &crate::bridge::SpaceEvent,
+    ) -> bool {
+        use crate::bridge::SpaceEvent;
+        match event {
+            SpaceEvent::InviteSent { friend_id, result } => {
+                if self
+                    .person_invite
+                    .as_mut()
+                    .is_some_and(|dialog| dialog.accept_sent(friend_id, result))
+                {
+                    return true;
+                }
+                if let Some(dialog) = self.invite_dialog.as_mut() {
+                    dialog.accept_sent(friend_id, result);
+                }
+                true
+            }
+            SpaceEvent::Invite { space_id, result } => {
+                if self
+                    .person_invite
+                    .as_mut()
+                    .is_some_and(|dialog| dialog.accept_code(bridge, origin, space_id, result))
+                {
+                    return true;
+                }
+                if self
+                    .invite_dialog
+                    .as_mut()
+                    .is_some_and(|dialog| dialog.accept_code(origin, result))
+                {
+                    return true;
+                }
+                let text = match result {
+                    Ok(code) => {
+                        let base = bridge.base_at(origin).unwrap_or_default();
+                        ctx.copy_text(bs_api::invite_url(base, code));
+                        tr("Ссылка-приглашение скопирована").to_owned()
+                    }
+                    Err(err) => err.clone(),
+                };
+                self.toast = Some((text, now + 3.0));
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Итоги приглашений, создания каналов, входа и выхода.
     fn take_space_events(&mut self, bridge: &mut Bridge, ctx: &egui::Context, now: f64) {
         use crate::bridge::{SpaceEvent, SpaceOp};
         for (origin, event) in bridge.take_space_events() {
+            if self.invite_event(bridge, ctx, now, origin, &event) {
+                continue;
+            }
             match &event {
-                SpaceEvent::InviteSent { friend_id, result } => {
-                    if let Some(dialog) = self.invite_dialog.as_mut() {
-                        dialog.accept_sent(friend_id, result);
-                    }
-                    continue;
-                }
-                SpaceEvent::Invite { result, .. } => {
-                    if self
-                        .invite_dialog
-                        .as_mut()
-                        .is_some_and(|dialog| dialog.accept_code(origin, result))
-                    {
-                        continue;
-                    }
-                    let text = match result {
-                        Ok(code) => {
-                            let base = bridge.base_at(origin).unwrap_or_default();
-                            ctx.copy_text(bs_api::invite_url(base, code));
-                            tr("Ссылка-приглашение скопирована").to_owned()
-                        }
-                        Err(err) => err.clone(),
-                    };
-                    self.toast = Some((text, now + 3.0));
-                    continue;
-                }
                 SpaceEvent::Left {
                     space_id,
                     result: Ok(()),

@@ -950,6 +950,8 @@ pub(crate) enum SpaceEvent {
     },
     /// Код приглашения (или ошибка).
     Invite {
+        /// Пространство.
+        space_id: String,
         /// Код или текст ошибки.
         result: Result<String, String>,
     },
