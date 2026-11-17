@@ -29,6 +29,8 @@ pub struct AppState {
     pub csp: Arc<str>,
     /// Незавершённые рукопожатия и одноразовые числа пиров.
     pub federation: Arc<crate::federation::handshake::Runtime>,
+    /// Очередь мостов во внешние сети.
+    pub bridges: crate::bridges::Bridges,
 }
 
 impl AppState {
@@ -58,6 +60,7 @@ impl AppState {
             ids: Arc::new(Snowflake::new(worker)),
             instance_id: instance_id.into(),
             federation: Arc::default(),
+            bridges: crate::bridges::Bridges::default(),
         })
     }
 }

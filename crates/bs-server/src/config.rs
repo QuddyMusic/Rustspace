@@ -106,6 +106,8 @@ pub struct Config {
     pub directory_endpoint: String,
     /// Отключить ограничения частоты (`DISABLE_RATE_LIMITS`, для тестов).
     pub disable_rate_limits: bool,
+    /// Мосты в Telegram, Discord и Matrix (токены ботов).
+    pub bridges: crate::bridges::BridgeConfig,
 }
 
 impl std::fmt::Debug for Config {
@@ -296,6 +298,7 @@ impl Config {
                 .trim_end_matches('/')
                 .to_owned(),
             disable_rate_limits: env.flag("DISABLE_RATE_LIMITS", false),
+            bridges: crate::bridges::config_from(&|key| env.optional(key)),
         })
     }
 }

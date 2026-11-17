@@ -172,6 +172,9 @@ pub async fn handle(
         files::delete_upload_file(&state.config, file).await;
     }
     if let Some((message_id, content, place)) = after.embeds {
+        if matches!(place, embeds::Place::Channel { .. }) {
+            crate::bridges::notify(state, &message_id);
+        }
         embeds::schedule(state, message_id, content, place);
     }
     Ok(())

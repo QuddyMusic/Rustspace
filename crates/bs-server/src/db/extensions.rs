@@ -1,5 +1,5 @@
 //! Таблицы расширений этого сервера, которых нет в схеме оригинала:
-//! двухфакторная аутентификация, ключи сквозного шифрования.
+//! двухфакторная аутентификация, ключи сквозного шифрования, мосты.
 //!
 //! Они лежат в той же базе под именами `bs_*`. Оригинальный сервер их не
 //! замечает, так что файл базы по-прежнему открывается обоими. Описания
@@ -35,6 +35,27 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
                 public_key TEXT NOT NULL,
                 updated_at BIGINT NOT NULL
             )"],
+    ),
+    (
+        "0003_bridges",
+        &[
+            "CREATE TABLE bs_bridge_links (
+                id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                external_id TEXT NOT NULL,
+                created_by TEXT,
+                created_at BIGINT NOT NULL,
+                UNIQUE (channel_id, kind, external_id)
+            )",
+            "CREATE INDEX bs_bridge_links_external ON bs_bridge_links (kind, external_id)",
+            "CREATE TABLE bs_bridge_puppets (
+                user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                external_id TEXT NOT NULL,
+                UNIQUE (kind, external_id)
+            )",
+        ],
     ),
 ];
 

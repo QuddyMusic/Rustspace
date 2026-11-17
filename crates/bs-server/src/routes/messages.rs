@@ -197,6 +197,7 @@ pub async fn create(
         })
         .await?;
     let message_id = message["id"].as_str().unwrap_or_default().to_owned();
+    crate::bridges::notify(&state, &message_id);
     embeds::schedule(
         &state,
         message_id,

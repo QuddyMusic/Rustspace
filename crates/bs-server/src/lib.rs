@@ -34,6 +34,7 @@
 )]
 
 pub mod auth;
+pub mod bridges;
 pub mod broadcast;
 pub mod config;
 pub mod db;
@@ -428,6 +429,11 @@ pub fn app(state: AppState) -> Router {
             get(routes::e2ee::mine).put(routes::e2ee::publish).delete(routes::e2ee::withdraw),
         )
         .route("/api/e2ee/keys/{userId}", get(routes::e2ee::of_user))
+        .route(
+            "/api/rustspace/channels/{id}/bridges",
+            get(routes::bridges::list).post(routes::bridges::create),
+        )
+        .route("/api/rustspace/bridges/{linkId}", delete(routes::bridges::remove))
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         // Тело разбирается до обработчика (и до проверки входа), как у Fastify.
@@ -463,6 +469,7 @@ pub fn spawn_background(state: &AppState) {
     tokio::spawn(directory::run_pinger(state.clone()));
     federation::worker::spawn(state);
     federation::calls::spawn(state);
+    bridges::spawn(state);
     tokio::spawn(routes::livekit::run_evictions(state.clone()));
     let uploads = state.clone();
     tokio::spawn(async move {
