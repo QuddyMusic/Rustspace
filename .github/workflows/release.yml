@@ -1,0 +1,235 @@
+name: Release
+
+# Тег vX.Y.Z (совпадает с version в Cargo.toml) → сборки сервера и клиента →
+# черновик релиза на GitHub. Черновик проверяют и публикуют вручную: клиент
+# и setup.sh видят только опубликованные релизы.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Тег существующего коммита, например v0.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  version:
+    name: тег = версия в Cargo.toml
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - id: check
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::тег $TAG не совпадает с версией $version в Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  server:
+    name: сервер (linux-${{ matrix.arch }})
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    env:
+      TARGET: ${{ matrix.arch }}-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      # Статическая сборка (musl): один файл для Debian, Ubuntu и Alpine.
+      - name: musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+          rustup target add "$TARGET"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server-${{ matrix.arch }}
+      - name: cargo build
+        run: cargo build --release --locked -p bs-server --target "$TARGET"
+      - name: архив
+        run: |
+          name="rustspace-server-linux-${{ matrix.arch }}"
+          mkdir -p stage dist
+          cp "target/$TARGET/release/rustspace-server" stage/
+          cp packaging/server/setup.sh LICENSE NOTICE README.md stage/
+          tar czf "dist/$name.tar.gz" -C stage .
+          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+          file "stage/rustspace-server"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.arch }}
+          path: dist/*
+
+  client:
+    name: клиент (${{ matrix.name }})
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Старый glibc: бинарник запустится и на не самых свежих системах.
+          - name: linux-x86_64
+            runner: ubuntu-22.04
+          - name: linux-aarch64
+            runner: ubuntu-22.04-arm
+          - name: windows-x86_64
+            runner: windows-latest
+          - name: macos-aarch64
+            runner: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      # libwebrtc (голос) требует clang 21+, а трей, звук и захват — системные
+      # заголовки. На macOS и Windows всё нужное уже есть в образе.
+      - name: Системные зависимости (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libdbus-1-dev libpipewire-0.3-dev libgbm-dev libxkbcommon-dev \
+            libgtk-3-dev libayatana-appindicator3-dev \
+            libwayland-dev libx11-dev libxrandr-dev libxcb1-dev libegl1-mesa-dev libglib2.0-dev \
+            libva-dev libdrm-dev libxext-dev libxfixes-dev libxdamage-dev libxcomposite-dev libxtst-dev
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh 21
+          echo "CC=clang-21" >> "$GITHUB_ENV"
+          echo "CXX=clang++-21" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=/usr/lib/llvm-21/lib" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: client-${{ matrix.name }}
+      - name: cargo build
+        run: cargo build --release --locked -p bs-app --features voice,camera,desktop
+      - name: архив (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          name="rustspace-${{ matrix.name }}"
+          mkdir -p "stage/$name" dist
+          cp target/release/rustspace "stage/$name/"
+          cp packaging/linux/io.github.quddymusic.Rustspace.desktop packaging/linux/rustspace.png \
+             LICENSE NOTICE README.md "stage/$name/"
+          tar czf "dist/$name.tar.gz" -C stage "$name"
+          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+      - name: архив (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "rustspace-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force -Path "stage/$name", dist | Out-Null
+          Copy-Item target/release/rustspace.exe, LICENSE, NOTICE, README.md "stage/$name/"
+          Compress-Archive -Path "stage/$name" -DestinationPath "dist/$name.zip"
+          $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii -NoNewline "dist/$name.zip.sha256"
+      - name: архив (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          name="rustspace-${{ matrix.name }}"
+          version="${{ needs.version.outputs.version }}"
+          app="stage/Rustspace.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" dist
+          cp target/release/rustspace "$app/Contents/MacOS/"
+          cp LICENSE NOTICE "$app/Contents/Resources/"
+          cat > "$app/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Rustspace</string>
+            <key>CFBundleDisplayName</key><string>Rustspace</string>
+            <key>CFBundleIdentifier</key><string>io.github.quddymusic.rustspace</string>
+            <key>CFBundleExecutable</key><string>rustspace</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$version</string>
+            <key>CFBundleVersion</key><string>$version</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>NSMicrophoneUsageDescription</key><string>Голосовые звонки</string>
+            <key>NSCameraUsageDescription</key><string>Видеозвонки</string>
+          </dict></plist>
+          EOF
+          # Подпись без сертификата (ad-hoc): без неё arm64 не запустит бинарник.
+          codesign --force --deep --sign - "$app"
+          ditto -c -k --keepParent "$app" "dist/$name.zip"
+          (cd dist && shasum -a 256 "$name.zip" > "$name.zip.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-${{ matrix.name }}
+          path: dist/*
+
+  release:
+    name: черновик релиза
+    needs: [version, server, client]
+    if: ${{ !cancelled() && needs.version.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Заметки к выпуску
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cat > notes.md <<EOF
+          > Rustspace — неофициальный клиент и сервер на Rust, совместимые с Backspace.
+          > Официальный репозиторий Backspace: https://github.com/TheZwiss/backspace
+
+          ## Клиент
+
+          | Система | Файл |
+          |---|---|
+          | Linux x86_64 / aarch64 | \`rustspace-linux-*.tar.gz\` — распакуйте и запустите \`rustspace\` |
+          | Windows x86_64 | \`rustspace-windows-x86_64.zip\` |
+          | macOS (Apple Silicon) | \`rustspace-macos-aarch64.zip\` — сборка без сертификата Apple: первый запуск через «Открыть» в контекстном меню |
+
+          ## Сервер
+
+          Установка или обновление одной командой (Debian, Ubuntu, Alpine; x86_64 и aarch64):
+
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/v$VERSION/packaging/server/setup.sh \\
+            | sudo sh -s -- --release $VERSION --domain ВАШ.ДОМЕН
+          \`\`\`
+
+          Файлы \`*.sha256\` — контрольные суммы; \`setup.sh\` проверяет их сам.
+
+          ## Изменения
+          EOF
+      - name: Черновик
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ls -la dist
+          gh release create "$TAG" dist/* \
+            --repo "${{ github.repository }}" \
+            --draft \
+            --verify-tag \
+            --title "Rustspace $VERSION" \
+            --notes-file notes.md \
+            --generate-notes

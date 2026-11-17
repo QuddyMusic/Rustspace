@@ -22,12 +22,12 @@
 > одобрен и не поддерживается ими. **Официальный репозиторий Backspace —
 > [TheZwiss/backspace](https://github.com/TheZwiss/backspace).** «Backspace» и его логотип —
 > товарные знаки Jannis Braun; Rustspace упоминает это имя только чтобы сказать, с чем он
-> совместим. О проблемах Rustspace пишите [сюда](https://github.com/QuddyMusic/backspace-rs/issues),
+> совместим. О проблемах Rustspace пишите [сюда](https://github.com/QuddyMusic/Rustspace/issues),
 > а не в Backspace.
 
 Rustspace целиком написан на Rust. Десктоп-клиент — графический (`egui`/`eframe`, крейт
-`bs-app`, бинарник `backspace-rs`); рядом лежит терминальный клиент `bs-tui` для проверки
-протокола. Сервер `bs-server` (бинарник `backspace-server`) — порт оригинального сервера.
+`bs-app`, бинарник `rustspace`); рядом лежит терминальный клиент `bs-tui` для проверки
+протокола. Сервер `bs-server` (бинарник `rustspace-server`) — порт оригинального сервера.
 
 Цель — полная совместимость с оригиналом: клиент работает с неизменёнными инстансами Backspace
 (в том числе федеративными) и умеет всё, что умеют веб- и десктоп-клиенты оригинала, а
@@ -119,7 +119,7 @@ WebSocket и каждый REST-ответ, который получает кл�
 | `bs-media` | Декодирование картинок и GIF с лимитами размера и пикселей | 13 |
 | `bs-voice` | Голос и видео поверх LiveKit: свой звуковой тракт (cpal), микшер, сцена видео, камера, захват экрана, сигналы канала данных | 68 |
 | `bs-core` | Состояние и кэш инстанса, применение событий, правила уведомлений | 72 |
-| `bs-app` | GUI и точка входа | 238 |
+| `bs-app` | GUI и точка входа | 241 |
 | `bs-tui` | Терминальный клиент (`ratatui`), один инстанс | 35 |
 | `bs-contract` | Контрактные тесты против настоящего сервера Backspace | 2 |
 | `bs-server` | Сервер на Rust: REST и шлюз WebSocket оригинала поверх той же базы — см. раздел «Сервер» | 128 |
@@ -139,35 +139,35 @@ cargo build --release -p bs-app --features voice,camera,desktop     # всё с�
 cargo build --release -p bs-tui                                     # терминальный клиент
 ```
 
-В пакете `bs-app` один бинарник — **`backspace-rs`**, в `bs-tui` — **`bs-tui`**. Release-сборка
+В пакете `bs-app` один бинарник — **`rustspace`**, в `bs-tui` — **`bs-tui`**. Release-сборка
 лежит в `target/release/` (отладочная, без `--release`, — в `target/debug/`).
 
 ### Запуск собранного
 
 ```sh
-./target/release/backspace-rs            # Linux и macOS
-.\target\release\backspace-rs.exe        # Windows
+./target/release/rustspace               # Linux и macOS
+.\target\release\rustspace.exe           # Windows
 ./target/release/bs-tui                  # терминальный клиент
 ./target/release/bs-tui --allow-insecure # bs-tui: разрешить http вне loopback
 ```
 
 Бинарник самодостаточен: его можно скопировать куда угодно и запустить. Параметров командной
-строки у `backspace-rs` нет, всё настраивается в приложении («Настройки»). Из окружения
+строки у `rustspace` нет, всё настраивается в приложении («Настройки»). Из окружения
 читается только `RUST_LOG` для логов, например
-`RUST_LOG=bs_app=debug,bs_voice=debug ./target/release/backspace-rs`. Форма входа спрашивает
+`RUST_LOG=rustspace=debug,bs_voice=debug ./target/release/rustspace`. Форма входа спрашивает
 адрес инстанса, имя и пароль; для инстанса по `http://` вне loopback поставьте флажок
 «Разрешить незащищённое соединение (http)».
 
 Чтобы программа была в `PATH`:
 
 ```sh
-cargo install --path crates/bs-app --features voice,camera,desktop   # → ~/.cargo/bin/backspace-rs
-backspace-rs
+cargo install --path crates/bs-app --features voice,camera,desktop   # → ~/.cargo/bin/rustspace
+rustspace
 ```
 
 ### Собрать и сразу запустить (для разработки)
 
-`cargo run` собирает пакет и запускает его бинарник (`backspace-rs` у `bs-app`) с теми же
+`cargo run` собирает пакет и запускает его бинарник (`rustspace` у `bs-app`) с теми же
 флагами, что вы передали:
 
 ```sh
@@ -197,10 +197,14 @@ cargo run -p bs-tui -- --allow-insecure                # аргументы по
 
 ### Где лежат данные
 
-`~/.config/backspace-rs/` на Linux (учитывается `XDG_CONFIG_HOME`),
-`~/Library/Application Support/backspace-rs/` на macOS, `%APPDATA%\backspace-rs\` на Windows:
+`~/.config/rustspace/` на Linux (учитывается `XDG_CONFIG_HOME`),
+`~/Library/Application Support/rustspace/` на macOS, `%APPDATA%\rustspace\` на Windows:
 `session.json` (адрес инстанса; токен — в хранилище ключей), `prefs.json` (тема, масштаб,
 голос, звуки, уведомления, горячие клавиши, язык), `locales/` (свои переводы).
+Настройки прежних версий (`backspace-rs/`) и их записи в хранилище ключей переносятся при
+первом запуске. На Linux клиент ещё кладёт в `~/.local/share` файл
+`io.github.quddymusic.Rustspace.desktop` и значок, если их не поставил пакет: порталы рабочего
+стола (глобальные клавиши) принимают только приложение, которое там находят.
 
 ### Упаковка
 
@@ -212,6 +216,24 @@ cargo packager --release -p bs-app --formats nsis           # Windows
 ```
 
 Пакеты — в `target/packages`; иконка и `.desktop` — в `packaging/linux`.
+
+### Версии и релизы
+
+У Rustspace своя версия — `version` в `Cargo.toml` рабочей области, общая для клиента и
+сервера. Сервер отдаёт её в `/api/instance/info` как `version`, а версию Backspace, протокол
+которой реализует, — как `compatibleWith`.
+
+Чтобы выпустить релиз, поднимите версию, закоммитьте и отправьте тег с тем же номером:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` проверит, что тег совпадает с `Cargo.toml`, соберёт сервер
+(статический, Linux x86_64 и aarch64 — подходит для Debian, Ubuntu и Alpine) и клиент (Linux
+x86_64 и aarch64, Windows, macOS на Apple Silicon) и создаст **черновик** релиза с архивами и
+файлами `.sha256`. Проверьте его и нажмите *Publish*: проверка обновлений в клиенте и
+`setup.sh --release` видят только опубликованные релизы.
 
 ### Проверки
 
@@ -266,45 +288,66 @@ cargo xtask contract --url http://127.0.0.1:3000    # против запуще�
 ### Сборка
 
 ```sh
-cargo build --release -p bs-server      # target/release/backspace-server
+cargo build --release -p bs-server      # target/release/rustspace-server
 ```
 
 Нужен только компилятор C (SQLite собирается вместе с сервером). Node.js не нужен.
 
 ### Установка на сервер (один скрипт)
 
-`packaging/server/setup.sh` настраивает сервер с нуля на Debian, Ubuntu или Alpine (systemd
-или OpenRC), вместе с голосом, видео и стримами через LiveKit:
+`packaging/server/setup.sh` ставит, обновляет и переносит сервер на Debian, Ubuntu или
+Alpine (systemd или OpenRC), с PostgreSQL и с голосом, видео и стримами через LiveKit.
+Без клонирования репозитория (берёт последний релиз):
 
 ```sh
-git clone <этот репозиторий> bs-rs && cd bs-rs
+curl -fsSL https://raw.githubusercontent.com/QuddyMusic/Rustspace/main/packaging/server/setup.sh \
+  | sudo sh -s -- --domain chat.example.org
+```
+
+или из клона (собирает сервер из исходников):
+
+```sh
+git clone https://github.com/QuddyMusic/Rustspace && cd Rustspace
 sudo sh packaging/server/setup.sh --domain chat.example.org
 ```
 
-Скрипт ставит пакеты (`ffmpeg`, компилятор C), собирает `backspace-server` (или берёт
-`--binary`), скачивает LiveKit и проверяет его хэш, пишет `/etc/backspace/backspace.env` и
-`/etc/backspace/livekit.yaml`, заводит службы `backspace` и `livekit` и проверяет, что обе
-отвечают. Сервер, запущенный вручную, подхватывается: его `JWT_SECRET`, настройки, база и
-файлы переезжают в `/var/lib/backspace` (прежние остаются на месте), а старый процесс
-останавливается. Повторный запуск (например, после `git pull`) сохраняет данные и секреты.
+Что делает скрипт:
+
+- ставит пакеты и **PostgreSQL**, заводит в нём базу и роль `rustspace` (`--sqlite` — всё в
+  SQLite, `--database-url` — внешний PostgreSQL);
+- собирает `rustspace-server` из клона, или скачивает из релиза (`--release [ВЕРСИЯ]`) и
+  сверяет контрольную сумму, или берёт `--binary`;
+- скачивает LiveKit и проверяет его хэш;
+- пишет `/etc/rustspace/rustspace.env` и `/etc/rustspace/livekit.yaml`, заводит службы
+  `rustspace` и `livekit` и проверяет, что обе отвечают;
+- **обновляет**: повторный запуск без параметров (после `git pull` или с `--release`)
+  сохраняет домен, секреты и данные, а перед заменой сервера снимает дамп базы в
+  `/var/backups/rustspace` (хранятся пять последних);
+- **переносит**: найденную по дороге базу SQLite — от установки на SQLite, от сервера,
+  запущенного вручную (он подхватывается и останавливается), из `--data-from КАТАЛОГ` —
+  копирует в `/var/lib/rustspace` и переносит в PostgreSQL командой `rustspace-server
+  import-sqlite` одной транзакцией; файл SQLite после этого остаётся как `*.migrated`. Если
+  запуск оборвался, следующий продолжит. Установку со старыми именами (`/etc/backspace`,
+  `/var/lib/backspace`, служба и пользователь `backspace`) переносит на новые, а старые
+  убирает.
+
 Рассчитан на обратный прокси впереди (Nginx Proxy Manager, Caddy…): в конце печатает, что
 настроить в нём и на роутере — `https://ДОМЕН` → порт 3000, `https://lk.ДОМЕН` → порт 7880
-(оба с WebSocket), TCP 7881 и UDP 7882 — проброс на машину. Параметры — `--help`
-(`--no-livekit`, `--web-dist`, `--source-url`, `--data-from`, `--port`, `--proxy-hops`…).
+(оба с WebSocket), TCP 7881 и UDP 7882 — проброс на машину. Все параметры — `--help`.
 
 ### Запуск
 
 ```sh
 JWT_SECRET="$(openssl rand -hex 32)" \
-DB_PATH=data/backspace.db UPLOAD_DIR=data/uploads \
-target/release/backspace-server
+DB_PATH=data/rustspace.db UPLOAD_DIR=data/uploads \
+target/release/rustspace-server
 ```
 
 Сервер слушает `0.0.0.0:3000`. Первый зарегистрированный пользователь становится
 администратором. Останавливается по `Ctrl+C` или `SIGTERM`, дожидаясь открытых запросов.
 
 Перейти с оригинального сервера: остановите его, сделайте копию базы и запустите
-`backspace-server` с теми же `JWT_SECRET`, `DB_PATH` и `UPLOAD_DIR`. Вернуться — так же в
+`rustspace-server` с теми же `JWT_SECRET`, `DB_PATH` и `UPLOAD_DIR`. Вернуться — так же в
 обратную сторону.
 
 Чтобы сервер отдавал и веб-клиент оригинала, соберите его (`pnpm --filter @backspace/web build`) и
@@ -318,7 +361,7 @@ target/release/backspace-server
 
 ```sh
 createdb -T template0 -E UTF8 --lc-collate=C --lc-ctype=C backspace
-DATABASE_URL=postgres://user:password@127.0.0.1/backspace JWT_SECRET=… target/release/backspace-server
+DATABASE_URL=postgres://user:password@127.0.0.1/rustspace JWT_SECRET=… target/release/rustspace-server
 ```
 
 Схему сервер создаёт и дополняет сам: она выводится из миграций оригинала. Сортировка `C`
@@ -326,7 +369,7 @@ DATABASE_URL=postgres://user:password@127.0.0.1/backspace JWT_SECRET=… target/
 (оригинального сервера или `bs-server`) в пустую базу PostgreSQL:
 
 ```sh
-DATABASE_URL=postgres://… JWT_SECRET=… target/release/backspace-server import-sqlite data/backspace.db
+DATABASE_URL=postgres://… JWT_SECRET=… target/release/rustspace-server import-sqlite data/rustspace.db
 ```
 
 Перенос идёт одной транзакцией: либо всё, либо ничего. Обратного переноса нет. TLS к
@@ -362,7 +405,7 @@ DATABASE_URL='postgres://user:password@db.example/backspace?sslmode=verify-full&
 | `JWT_SECRET` | — (обязательна) | Ключ подписи токенов, не короче 32 знаков |
 | `JWT_EXPIRES_IN` | `30d` | Срок жизни токена (`30d`, `12h`, `3600`) |
 | `PORT`, `HOST` | `3000`, `0.0.0.0` | Где слушать |
-| `DB_PATH` | `data/backspace.db` | Файл базы SQLite |
+| `DB_PATH` | `data/rustspace.db` (или `data/backspace.db`, если есть только он) | Файл базы SQLite |
 | `DATABASE_URL` | — | *(bs-server)* Адрес PostgreSQL `postgres://…` (TLS: `sslmode`, `sslrootcert`); если задан, `DB_PATH` не используется |
 | `UPLOAD_DIR` | `data/uploads` | Каталог загруженных файлов |
 | `MAX_UPLOAD_SIZE` | `104857600` | Предел размера файла, байт (администратор меняет в настройках) |

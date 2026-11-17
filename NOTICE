@@ -1,6 +1,6 @@
-Rustspace (backspace-rs)
+Rustspace
 Copyright (c) 2026 Rustspace contributors
-https://github.com/QuddyMusic/backspace-rs
+https://github.com/QuddyMusic/Rustspace
 
 Rustspace is free software under the GNU Affero General Public License v3.0
 only (AGPL-3.0-only); see the LICENSE file.
@@ -33,9 +33,7 @@ repository, not to Backspace.
 Jannis Braun. Rustspace does not use the Backspace logo or icons and does not
 claim any rights to the Backspace name; it is mentioned only to describe
 compatibility. The Rustspace "R" mark (packaging/brand/rustspace/,
-packaging/linux/backspace-rs.*) is an original work of this project. The
-program and package names "backspace-rs" and "backspace-server" are technical
-identifiers kept for compatibility with existing installations.
+packaging/linux/rustspace.*) is an original work of this project.
 
 The commercial license offered for Backspace (LICENSE-COMMERCIAL.md in the
 original repository) does not apply to Rustspace.

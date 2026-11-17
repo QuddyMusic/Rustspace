@@ -1,6 +1,6 @@
 # Security policy
 
-This policy covers **Rustspace** (`backspace-rs`, `backspace-server`), an unofficial Rust
+This policy covers **Rustspace** (`rustspace`, `rustspace-server`), an unofficial Rust
 client and server compatible with Backspace. It does not cover the original Backspace.
 
 ## Reporting a vulnerability
@@ -8,7 +8,7 @@ client and server compatible with Backspace. It does not cover the original Back
 Please **do not open a public issue** for a security problem.
 
 Report it privately through GitHub:
-[QuddyMusic/backspace-rs → Security → Report a vulnerability](https://github.com/QuddyMusic/backspace-rs/security/advisories/new).
+[QuddyMusic/Rustspace → Security → Report a vulnerability](https://github.com/QuddyMusic/Rustspace/security/advisories/new).
 
 Include what is affected (client, server, federation, a specific endpoint), the version or
 commit, steps to reproduce and the impact you expect. We will acknowledge the report, keep you
