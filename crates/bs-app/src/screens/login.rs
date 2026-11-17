@@ -167,7 +167,7 @@ impl LoginScreen {
 
     fn card(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) {
         ui.vertical_centered(|ui| {
-            if let Some(icon) = crate::brand::icon_texture(ui.ctx()) {
+            if let Some(icon) = crate::brand::icon_texture(ui.ctx(), 56.0) {
                 ui.add(egui::Image::new(&icon).fit_to_exact_size(egui::vec2(56.0, 56.0)));
                 ui.add_space(10.0);
             }

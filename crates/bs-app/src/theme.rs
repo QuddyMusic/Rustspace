@@ -1316,13 +1316,13 @@ pub(crate) fn rail_home(ui: &mut egui::Ui, selected: bool, unread: bool) -> egui
         16
     };
     let painter = ui.painter();
-    if let Some(texture) = crate::brand::icon_texture(ui.ctx()) {
-        // Значок Rustspace: на наведении чуть крупнее, как у пространств.
-        let icon = if selected || response.hovered() {
-            icon.expand(1.0)
-        } else {
-            icon
-        };
+    // Значок Rustspace: на наведении чуть крупнее, как у пространств.
+    let icon = if selected || response.hovered() {
+        icon.expand(1.0)
+    } else {
+        icon
+    };
+    if let Some(texture) = crate::brand::icon_texture(ui.ctx(), icon.width()) {
         painter.image(
             texture.id(),
             icon,

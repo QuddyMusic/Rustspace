@@ -27,22 +27,34 @@ pub(crate) const UPDATE_REPO: &str = "QuddyMusic/Rustspace";
 /// Rustspace.
 pub(crate) const UPSTREAM: &str = "https://github.com/TheZwiss/backspace";
 
-/// Значок приложения (PNG 256×256) как текстура; грузится один раз.
-pub(crate) fn icon_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-    let id = egui::Id::unique("rustspace_icon_texture");
+/// Исходник значка: плитка 512×512 без светлого ободка (на 46 точках он
+/// выглядит белой рамкой). Из `packaging/brand/rustspace/tile.svg`.
+const TILE_PNG: &[u8] = include_bytes!("../assets/brand-tile.png");
+
+/// Значок приложения как текстура ровно того размера в пикселях экрана, в
+/// котором его рисуют: уменьшение на видеокарте без мипмапов даёт рваные
+/// края, поэтому картинка заранее сжимается усреднением (без звона Ланцоша). Каждый размер
+/// готовится один раз.
+pub(crate) fn icon_texture(ctx: &egui::Context, points: f32) -> Option<egui::TextureHandle> {
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "размер в пикселях, ограничен 16..=512"
+    )]
+    let px = (points * ctx.pixels_per_point()).round().clamp(16.0, 512.0) as u32;
+    let id = egui::Id::unique(("rustspace_icon_texture", px));
     if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id)) {
         return Some(texture);
     }
-    let icon =
-        // Плитка без светлого ободка: на 46 точках он выглядит белой рамкой.
-        // Исходник — `packaging/brand/rustspace/tile.svg`.
-        eframe::icon_data::from_png_bytes(include_bytes!("../assets/brand-tile.png")).ok()?;
-    let size = [
-        usize::try_from(icon.width).ok()?,
-        usize::try_from(icon.height).ok()?,
-    ];
-    let image = egui::ColorImage::from_rgba_unmultiplied(size, &icon.rgba);
-    let texture = ctx.load_texture("rustspace_icon", image, egui::TextureOptions::LINEAR);
+    let source = image::load_from_memory(TILE_PNG).ok()?.to_rgba8();
+    let scaled = image::imageops::resize(&source, px, px, image::imageops::FilterType::Triangle);
+    let size = [px as usize, px as usize];
+    let image = egui::ColorImage::from_rgba_unmultiplied(size, scaled.as_raw());
+    let texture = ctx.load_texture(
+        format!("rustspace_icon_{px}"),
+        image,
+        egui::TextureOptions::LINEAR,
+    );
     ctx.data_mut(|data| data.insert_temp(id, texture.clone()));
     Some(texture)
 }
