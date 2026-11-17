@@ -281,3 +281,159 @@ async fn voice_bitrate_can_only_go_down() {
         .await;
     assert_eq!(info["effectiveKbps"], 128);
 }
+
+/// Отправляет сообщение и возвращает его id.
+async fn say(server: &Server, token: &str, path: &str, text: &str) -> String {
+    let (status, message) = server
+        .call(
+            reqwest::Method::POST,
+            path,
+            token,
+            Some(json!({"content": text})),
+        )
+        .await;
+    assert!(status == 200 || status == 201, "{status} {message}");
+    message["id"].as_str().unwrap().to_owned()
+}
+
+#[tokio::test]
+#[allow(clippy::too_many_lines, reason = "один сквозной сценарий")]
+async fn saved_messages_pins_and_bookmarks() {
+    let server = start_with(&[]).await;
+    let (token, channel) = user_with_channel(&server).await;
+    let get = |path: String| {
+        let server = &server;
+        let token = token.clone();
+        async move { server.call(reqwest::Method::GET, &path, &token, None).await }
+    };
+
+    // «Избранное»: одна и та же переписка, писать в неё можно, звать — нет.
+    let (status, saved) = get("/api/rustspace/saved".to_owned()).await;
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(saved["savedMessages"], true);
+    let saved_id = saved["id"].as_str().unwrap().to_owned();
+    let (_, again) = get("/api/rustspace/saved".to_owned()).await;
+    assert_eq!(again["id"], saved_id.as_str());
+    let note = say(
+        &server,
+        &token,
+        &format!("/api/dm/{saved_id}/messages"),
+        "идея",
+    )
+    .await;
+    let (status, _) = server
+        .call(
+            reqwest::Method::POST,
+            &format!("/api/dm/{saved_id}/members"),
+            &token,
+            Some(json!({"userId": "1"})),
+        )
+        .await;
+    assert!(status == 400 || status == 404);
+
+    // Закрепы: общий в канале и личный в «Избранном».
+    let first = say(
+        &server,
+        &token,
+        &format!("/api/channels/{channel}/messages"),
+        "правила",
+    )
+    .await;
+    let pin_path = format!("/api/rustspace/pins/channel/{channel}/{first}");
+    let (status, _) = server
+        .call(
+            reqwest::Method::PUT,
+            &pin_path,
+            &token,
+            Some(json!({"shared": true})),
+        )
+        .await;
+    assert_eq!(status, 200);
+    let (_, pins) = get(format!("/api/rustspace/pins/channel/{channel}")).await;
+    assert_eq!(pins[0]["shared"], true);
+    assert_eq!(pins[0]["message"]["content"], "правила");
+    let (_, _) = server
+        .call(
+            reqwest::Method::PUT,
+            &format!("/api/rustspace/pins/dm/{saved_id}/{note}"),
+            &token,
+            Some(json!({"shared": false})),
+        )
+        .await;
+    let (_, pins) = get(format!("/api/rustspace/pins/dm/{saved_id}")).await;
+    assert_eq!(pins[0]["shared"], false);
+    let (status, _) = server
+        .call(reqwest::Method::DELETE, &pin_path, &token, None)
+        .await;
+    assert_eq!(status, 200);
+    let (_, pins) = get(format!("/api/rustspace/pins/channel/{channel}")).await;
+    assert_eq!(pins.as_array().unwrap().len(), 0);
+    // Сообщение из другого чата закрепить нельзя.
+    let (status, _) = server
+        .call(
+            reqwest::Method::PUT,
+            &format!("/api/rustspace/pins/channel/{channel}/{note}"),
+            &token,
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(status, 404);
+
+    // Закладки (#474): 201, повтор — 200, ключи, страницы, правка оригинала.
+    let path = format!("/api/bookmarks/channel/{first}");
+    let (status, mark) = server.call(reqwest::Method::PUT, &path, &token, None).await;
+    assert_eq!(status, 201, "{mark}");
+    assert_eq!(mark["status"], "ok");
+    assert_eq!(mark["channelName"], "general");
+    let (status, _) = server.call(reqwest::Method::PUT, &path, &token, None).await;
+    assert_eq!(status, 200);
+    let (status, _) = server
+        .call(
+            reqwest::Method::PUT,
+            &format!("/api/bookmarks/dm/{note}"),
+            &token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 201);
+    let (_, keys) = get(format!(
+        "/api/bookmarks/keys?kind=channel&channelId={channel}"
+    ))
+    .await;
+    assert_eq!(keys, json!([first.clone()]));
+    let (_, page) = get("/api/bookmarks?limit=1".to_owned()).await;
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    let cursor = page["nextCursor"].as_str().unwrap().to_owned();
+    let (_, rest) = get(format!("/api/bookmarks?limit=1&cursor={cursor}")).await;
+    assert_eq!(rest["items"].as_array().unwrap().len(), 1);
+    assert!(rest["nextCursor"].is_null());
+    let (status, _) = get("/api/bookmarks?cursor=zzz".to_owned()).await;
+    assert_eq!(status, 400);
+    let (_, _) = server
+        .call(
+            reqwest::Method::PATCH,
+            &format!("/api/messages/{first}"),
+            &token,
+            Some(json!({"content": "правила v2"})),
+        )
+        .await;
+    let (_, page) = get("/api/bookmarks".to_owned()).await;
+    let edited = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["messageId"] == first.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(edited["status"], "edited");
+    assert_eq!(edited["content"], "правила");
+    let (status, _) = server
+        .call(reqwest::Method::DELETE, &path, &token, None)
+        .await;
+    assert_eq!(status, 200);
+    let (_, keys) = get(format!(
+        "/api/bookmarks/keys?kind=channel&channelId={channel}"
+    ))
+    .await;
+    assert_eq!(keys, json!([]));
+}

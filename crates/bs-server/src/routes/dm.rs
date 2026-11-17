@@ -445,6 +445,9 @@ pub async fn add_member(
             if !dm::is_member(tx, &id, &user.id)? {
                 return Err(ApiError::forbidden("not_dm_member"));
             }
+            if crate::routes::saved::is_saved(tx, &id)? {
+                return Err(ApiError::bad_request("saved_messages_private"));
+            }
             group_row(tx, &id)?;
             if !dm::are_friends(tx, &user.id, &target_id)? {
                 return Err(ApiError::forbidden("not_a_friend"));

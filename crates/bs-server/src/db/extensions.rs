@@ -87,6 +87,78 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             )",
         ],
     ),
+    (
+        "0006_channel_flags",
+        &["CREATE TABLE bs_channel_flags (
+                channel_id TEXT PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
+                nsfw INTEGER NOT NULL DEFAULT 0
+            )"],
+    ),
+    (
+        "0007_saved_messages",
+        &["CREATE TABLE bs_saved_messages (
+                user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                dm_channel_id TEXT NOT NULL REFERENCES dm_channels(id) ON DELETE CASCADE
+            )"],
+    ),
+    (
+        "0008_pins",
+        &[
+            // user_id = '' — общий закреп, иначе личный (виден только ему).
+            "CREATE TABLE bs_pins (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                pinned_by TEXT NOT NULL,
+                created_at BIGINT NOT NULL,
+                UNIQUE (kind, channel_id, message_id, user_id)
+            )",
+            "CREATE INDEX bs_pins_channel ON bs_pins (kind, channel_id)",
+        ],
+    ),
+    (
+        "0009_bookmarks",
+        &[
+            // Как message_bookmarks из PR оригинала #474, но со своим именем:
+            // если оригинал примет закладки, его миграция не столкнётся с нашей.
+            "CREATE TABLE bs_bookmarks (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                space_id TEXT,
+                content TEXT,
+                author_id TEXT NOT NULL,
+                author_name TEXT NOT NULL,
+                space_name TEXT,
+                channel_name TEXT,
+                instance_origin TEXT NOT NULL,
+                message_created_at BIGINT NOT NULL,
+                created_at BIGINT NOT NULL,
+                UNIQUE (user_id, kind, message_id)
+            )",
+            "CREATE INDEX bs_bookmarks_user_created ON bs_bookmarks (user_id, created_at, id)",
+            "CREATE INDEX bs_bookmarks_user_channel ON bs_bookmarks (user_id, kind, channel_id)",
+            "CREATE TABLE bs_bookmark_attachments (
+                id TEXT PRIMARY KEY,
+                bookmark_id TEXT NOT NULL REFERENCES bs_bookmarks(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                original_name TEXT NOT NULL,
+                mimetype TEXT NOT NULL,
+                size BIGINT NOT NULL,
+                width INTEGER,
+                height INTEGER,
+                duration DOUBLE PRECISION,
+                playable INTEGER,
+                source_filename TEXT NOT NULL,
+                source_thumbnail_filename TEXT
+            )",
+            "CREATE INDEX bs_bookmark_attachments_bookmark ON bs_bookmark_attachments (bookmark_id)",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

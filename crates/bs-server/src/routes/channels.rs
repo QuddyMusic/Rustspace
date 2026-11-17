@@ -1063,3 +1063,56 @@ pub async fn update_layout(
         })
         .await
 }
+
+/// `PUT /api/rustspace/channels/:id/nsfw` `{nsfw}` — канал «18+» (Rustspace).
+/// Перед входом в такой канал клиент спрашивает, есть ли зрителю 18 лет.
+pub async fn set_nsfw(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+    JsonBody(body): JsonBody,
+) -> ApiResult<Json<Value>> {
+    let nsfw = body
+        .get("nsfw")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| ApiError::bad_request("nsfw_invalid"))?;
+    let hub = state.hub.clone();
+    state
+        .run(move |tx, out| {
+            let channel =
+                channel_row(tx, &id)?.ok_or_else(|| ApiError::not_found("channel_not_found"))?;
+            let space_id = channel.text("space_id")?;
+            if !perms::has_channel_permission(
+                tx,
+                &user.id,
+                &space_id,
+                &id,
+                Permissions::MANAGE_CHANNELS,
+            )? {
+                return Err(perms::missing("MANAGE_CHANNELS"));
+            }
+            tx.execute(
+                "DELETE FROM bs_channel_flags WHERE channel_id = ?",
+                params![&id],
+            )?;
+            if nsfw {
+                tx.execute(
+                    "INSERT INTO bs_channel_flags (channel_id, nsfw) VALUES (?, 1)",
+                    params![&id],
+                )?;
+            }
+            let updated = channel_row(tx, &id)?.ok_or_else(ApiError::internal)?;
+            let data = channel_base(&updated)?;
+            broadcast::to_channel(
+                tx,
+                &hub,
+                out,
+                &space_id,
+                &id,
+                &json!({"type": "channel_updated", "channel": data, "spaceId": space_id}),
+                None,
+            )?;
+            Ok(Json(data))
+        })
+        .await
+}

@@ -79,7 +79,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderName, HeaderValue, Method, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, delete, get, patch, post};
+use axum::routing::{any, delete, get, patch, post, put};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
 
@@ -442,6 +442,19 @@ pub fn app(state: AppState) -> Router {
         .route("/api/rustspace/webhooks/{hookId}", delete(routes::webhooks::remove))
         .route("/api/rustspace/channels/{id}/cards", post(routes::webhooks::send_cards))
         .route("/api/webhooks/{hookId}/{token}", post(routes::webhooks::execute))
+        .route("/api/rustspace/channels/{id}/nsfw", put(routes::channels::set_nsfw))
+        .route("/api/rustspace/saved", get(routes::saved::saved))
+        .route("/api/rustspace/pins/{kind}/{channelId}", get(routes::saved::pins))
+        .route(
+            "/api/rustspace/pins/{kind}/{channelId}/{messageId}",
+            put(routes::saved::pin).delete(routes::saved::unpin),
+        )
+        .route("/api/bookmarks", get(routes::saved::bookmarks))
+        .route("/api/bookmarks/keys", get(routes::saved::bookmark_keys))
+        .route(
+            "/api/bookmarks/{kind}/{messageId}",
+            put(routes::saved::bookmark_add).delete(routes::saved::bookmark_remove),
+        )
         .route(
             "/api/rustspace/admin/voice-bitrate",
             get(routes::voice_bitrate::instance_get).put(routes::voice_bitrate::instance_put),
