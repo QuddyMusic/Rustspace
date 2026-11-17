@@ -613,6 +613,10 @@ struct Row {
     top: i64,
     owner: bool,
     me: bool,
+    /// Аватар: картинка, ключ цвета заглушки и выбранный цвет.
+    avatar: Option<String>,
+    face_key: String,
+    color: Option<String>,
 }
 
 fn members(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, bridge: &mut Bridge) {
@@ -637,6 +641,13 @@ fn members(ui: &mut egui::Ui, state: &mut SpaceSettings, rights: Rights, bridge:
                     top: m.roles.iter().map(|r| r.position).max().unwrap_or(0),
                     owner: m.user.id == s.space.owner_id,
                     me: m.user.id == me,
+                    avatar: m.user.avatar.clone(),
+                    face_key: m
+                        .user
+                        .home_user_id
+                        .clone()
+                        .unwrap_or_else(|| m.user.id.clone()),
+                    color: m.user.avatar_color.clone(),
                 })
                 .collect()
         })
@@ -683,7 +694,17 @@ fn member_row(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                theme::avatar(ui, &row.name, 32.0, None, None);
+                theme::avatar(
+                    ui,
+                    theme::Face {
+                        name: &row.name,
+                        key: Some(&row.face_key),
+                        color: row.color.as_deref(),
+                    },
+                    32.0,
+                    None,
+                    row.avatar.as_deref(),
+                );
                 ui.vertical(|ui| {
                     ui.label(RichText::new(&row.name).color(theme::text_bright()));
                     let roles = if row.owner {
