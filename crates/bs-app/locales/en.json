@@ -1449,7 +1449,6 @@
   "уже {d}": "for {d}",
   "К последним сообщениям": "Jump to latest",
   "Неактивен": "Idle",
-  "Не беспокоить — без уведомлений": "Do not disturb — no notifications",
   "Свой статус": "Custom status",
   "Чем заняты?": "What are you up to?",
   "Мой профиль": "My profile",
@@ -1543,5 +1542,8 @@
   "В этом канале может быть откровенный или шокирующий контент. Продолжайте, только если готовы его видеть.": "This channel may contain explicit or shocking content. Continue only if you want to see it.",
   "Кнопка «к последним сообщениям»": "“Jump to latest” button",
   "Справа": "On the right",
-  "По центру": "In the center"
+  "По центру": "In the center",
+  "Аватар ведёт ваш домашний инстанс: меняйте его там.": "Your home instance manages your avatar: change it there.",
+  "Сменить": "Change",
+  "без уведомлений": "no notifications"
 }
