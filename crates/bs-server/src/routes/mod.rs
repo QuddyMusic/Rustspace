@@ -28,3 +28,5 @@ pub mod twofactor;
 pub mod uploads;
 pub mod users;
 pub mod utils;
+pub mod voice_bitrate;
+pub mod webhooks;

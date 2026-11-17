@@ -1,5 +1,5 @@
 //! Таблицы расширений этого сервера, которых нет в схеме оригинала:
-//! двухфакторная аутентификация, ключи сквозного шифрования, мосты.
+//! двухфакторная аутентификация, ключи сквозного шифрования, мосты, вебхуки, битрейт голоса.
 //!
 //! Они лежат в той же базе под именами `bs_*`. Оригинальный сервер их не
 //! замечает, так что файл базы по-прежнему открывается обоими. Описания
@@ -54,6 +54,36 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
                 kind TEXT NOT NULL,
                 external_id TEXT NOT NULL,
                 UNIQUE (kind, external_id)
+            )",
+        ],
+    ),
+    (
+        "0004_webhooks",
+        &[
+            "CREATE TABLE bs_webhooks (
+                id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                avatar TEXT,
+                token TEXT NOT NULL,
+                created_by TEXT,
+                created_at BIGINT NOT NULL
+            )",
+            "CREATE INDEX bs_webhooks_channel ON bs_webhooks (channel_id)",
+        ],
+    ),
+    (
+        "0005_voice_bitrate",
+        &[
+            "CREATE TABLE bs_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )",
+            "CREATE TABLE bs_voice_bitrate (
+                target_id TEXT PRIMARY KEY,
+                kbps INTEGER NOT NULL,
+                set_by TEXT,
+                updated_at BIGINT NOT NULL
             )",
         ],
     ),

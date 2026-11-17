@@ -71,6 +71,7 @@ pub mod twofactor;
 pub mod util;
 pub mod voice;
 pub mod web;
+pub mod webhooks;
 pub mod ws;
 
 use axum::Router;
@@ -434,6 +435,21 @@ pub fn app(state: AppState) -> Router {
             get(routes::bridges::list).post(routes::bridges::create),
         )
         .route("/api/rustspace/bridges/{linkId}", delete(routes::bridges::remove))
+        .route(
+            "/api/rustspace/channels/{id}/webhooks",
+            get(routes::webhooks::list).post(routes::webhooks::create),
+        )
+        .route("/api/rustspace/webhooks/{hookId}", delete(routes::webhooks::remove))
+        .route("/api/rustspace/channels/{id}/cards", post(routes::webhooks::send_cards))
+        .route("/api/webhooks/{hookId}/{token}", post(routes::webhooks::execute))
+        .route(
+            "/api/rustspace/admin/voice-bitrate",
+            get(routes::voice_bitrate::instance_get).put(routes::voice_bitrate::instance_put),
+        )
+        .route(
+            "/api/rustspace/voice-bitrate/{target}",
+            get(routes::voice_bitrate::get).put(routes::voice_bitrate::put),
+        )
         .route("/api/livekit/token", post(routes::livekit::token))
         .route("/ws", get(ws::upgrade))
         // Тело разбирается до обработчика (и до проверки входа), как у Fastify.
