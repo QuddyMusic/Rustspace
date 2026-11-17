@@ -15,6 +15,12 @@ use egui::{Color32, Painter, Pos2, Stroke, Vec2};
 pub(crate) const NAME: &str = "Rustspace";
 /// Репозиторий Rustspace: исходный код, выпуски, сообщения об ошибках.
 pub(crate) const REPOSITORY: &str = "https://github.com/QuddyMusic/Rustspace";
+/// Инстанс, который подставляется на экране входа, пока нет ни одного
+/// своего. Меняется только здесь (или при сборке: `BS_DEFAULT_INSTANCE`).
+pub(crate) const DEFAULT_INSTANCE: &str = match option_env!("BS_DEFAULT_INSTANCE") {
+    Some(domain) => domain,
+    None => "rustspace.duckdns.org",
+};
 /// Тот же репозиторий как `owner/repo` — для проверки обновлений.
 pub(crate) const UPDATE_REPO: &str = "QuddyMusic/Rustspace";
 /// Официальный репозиторий оригинального Backspace, на котором основан
@@ -28,8 +34,9 @@ pub(crate) fn icon_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
         return Some(texture);
     }
     let icon =
-        eframe::icon_data::from_png_bytes(include_bytes!("../../../packaging/linux/rustspace.png"))
-            .ok()?;
+        // Плитка без светлого ободка: на 46 точках он выглядит белой рамкой.
+        // Исходник — `packaging/brand/rustspace/tile.svg`.
+        eframe::icon_data::from_png_bytes(include_bytes!("../assets/brand-tile.png")).ok()?;
     let size = [
         usize::try_from(icon.width).ok()?,
         usize::try_from(icon.height).ok()?,

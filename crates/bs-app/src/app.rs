@@ -57,6 +57,9 @@ impl BackspaceApp {
         {
             login.base = base;
             login.allow_insecure = insecure;
+        } else if crate::prefs::get().recent_instances.is_empty() {
+            // Ни одного входа и ни одного инстанса: свой по умолчанию.
+            crate::brand::DEFAULT_INSTANCE.clone_into(&mut login.base);
         }
         Self {
             screen: Screen::Login,

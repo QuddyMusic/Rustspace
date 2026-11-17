@@ -141,7 +141,7 @@ impl ChatScreen {
         let Some(selected) = self.selected_channel.clone() else {
             return;
         };
-        let content = outgoing.content;
+        let mut content = outgoing.content;
         if let Some(card) = outgoing.card {
             if selected.kind == ChannelKind::Space {
                 let text = content.trim();
@@ -150,13 +150,10 @@ impl ChatScreen {
                     (!text.is_empty()).then(|| text.to_owned()),
                     card,
                 );
-            } else {
-                self.toast = Some((
-                    tr("Карточки можно отправлять только в каналах пространств").to_owned(),
-                    now + 4.0,
-                ));
+                return;
             }
-            return;
+            // В личных сообщениях карточек нет: та же карточка разметкой.
+            content = bs_api::card_as_markdown(Some(&content), &card);
         }
         if !outgoing.keep_draft
             && let Some(edit) = self.edit.take()
@@ -311,6 +308,7 @@ impl ChatScreen {
                 let mut retry = false;
                 let mut edit_request = None;
 
+                let jump_bottom = std::mem::take(&mut self.jump_bottom);
                 let output = egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .stick_to_bottom(true)
@@ -339,6 +337,9 @@ impl ChatScreen {
                             prev = Some(row);
                         }
                         ui.add_space(8.0);
+                        if jump_bottom {
+                            ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
+                        }
                     });
                 if let Some((id, content)) = edit_request {
                     self.begin_edit(id, &content);
@@ -346,6 +347,11 @@ impl ChatScreen {
 
                 // Подгрузка старых сообщений при прокрутке к верху ленты.
                 let offset = output.state.clamped_offset().y;
+                let below = output.content_size.y - output.inner_rect.height() - offset;
+                if below > 400.0 && jump_button(ui, output.inner_rect) {
+                    self.jump_bottom = true;
+                    ui.ctx().request_repaint();
+                }
                 if offset >= crate::logic::LOAD_OLDER_THRESHOLD_PX {
                     self.was_scrolled_down = true;
                 }
@@ -993,4 +999,46 @@ fn translate_items(ui: &mut egui::Ui, bridge: &Bridge, row: &MessageRow) {
         crate::translate::request(&bridge.runtime(), ui.ctx(), &row.id, &row.body);
         ui.close();
     }
+}
+
+/// Круглая кнопка со стрелкой вниз над полем ввода: к последним сообщениям.
+fn jump_button(ui: &egui::Ui, area: egui::Rect) -> bool {
+    let center = egui::pos2(area.right() - 34.0, area.bottom() - 30.0);
+    let rect = egui::Rect::from_center_size(center, egui::Vec2::splat(38.0));
+    let response = ui
+        .interact(rect, ui.scope_id().with("jump_bottom"), Sense::click())
+        .on_hover_text(tr("К последним сообщениям"))
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let painter = ui.painter();
+    let fill = if response.hovered() {
+        theme::bg_hover()
+    } else {
+        theme::bg_sidebar()
+    };
+    painter.circle_filled(
+        center + egui::vec2(0.0, 2.0),
+        19.0,
+        egui::Color32::from_black_alpha(60),
+    );
+    painter.circle(center, 19.0, fill, egui::Stroke::new(1.0, theme::border()));
+    let stroke = egui::Stroke::new(2.0, theme::text_bright());
+    painter.line_segment(
+        [
+            center + egui::vec2(0.0, -7.0),
+            center + egui::vec2(0.0, 7.0),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            center + egui::vec2(-6.0, 1.0),
+            center + egui::vec2(0.0, 7.0),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [center + egui::vec2(6.0, 1.0), center + egui::vec2(0.0, 7.0)],
+        stroke,
+    );
+    response.clicked()
 }

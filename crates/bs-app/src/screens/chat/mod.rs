@@ -111,6 +111,10 @@ pub(super) const FLASH_SECONDS: f64 = 2.5;
 
 /// Состояние экрана чата.
 #[derive(Debug, Default)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "флаги состояния экрана, не настройки"
+)]
 pub(crate) struct ChatScreen {
     /// Запрос на звонок из шапки: беседа, федеративный id и имя собеседника.
     pub(crate) pending_call: Option<(String, Option<String>, String)>,
@@ -172,6 +176,8 @@ pub(crate) struct ChatScreen {
     scroll_anchor: Option<String>,
     /// Листали ли ленту текущего канала вниз (см. `should_load_older`).
     was_scrolled_down: bool,
+    /// Нажали «к последним сообщениям»: прокрутить в самый низ.
+    jump_bottom: bool,
     /// Канал, для которого относятся `scroll_anchor` и `was_scrolled_down`.
     scroll_key: Option<String>,
     /// Картинка под курсором при открытии меню: сообщение и значение поля.

@@ -215,3 +215,41 @@ impl ApiClient {
         Ok(())
     }
 }
+
+/// Карточка как обычное сообщение с разметкой — для серверов без карточек
+/// и для личных сообщений: заголовок (ссылкой, если есть), текст, картинка.
+#[must_use]
+pub fn card_as_markdown(content: Option<&str>, card: &CardDraft) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(content) = content.map(str::trim).filter(|c| !c.is_empty()) {
+        lines.push(content.to_owned());
+    }
+    match (card.title.as_deref(), card.url.as_deref()) {
+        (Some(title), Some(url)) => lines.push(format!("### [{title}]({url})")),
+        (Some(title), None) => lines.push(format!("### {title}")),
+        (None, Some(url)) => lines.push(url.to_owned()),
+        (None, None) => {}
+    }
+    if let Some(description) = card.description.as_deref() {
+        lines.push(description.to_owned());
+    }
+    if let Some(image) = &card.image {
+        lines.push(image.url.clone());
+    }
+    lines.join("\n")
+}
+
+#[cfg(test)]
+mod card_tests {
+    use super::*;
+
+    #[test]
+    fn cards_fall_back_to_markdown() {
+        let card = CardDraft {
+            title: Some("Правила".into()),
+            description: Some("Без ссылки".into()),
+            ..CardDraft::default()
+        };
+        assert_eq!(card_as_markdown(None, &card), "### Правила\nБез ссылки");
+    }
+}

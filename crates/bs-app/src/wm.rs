@@ -27,9 +27,23 @@ fn wants_lua(reply: Option<&str>) -> bool {
     reply.is_some_and(|text| text.contains("hl.dispatch") || text.contains("lua"))
 }
 
-/// Lua для `eval`: перенести окна процесса `pid` на `workspace`, не
-/// переключаясь туда, и при `focus` дать им фокус.
-fn lua_move(pid: u32, workspace: &str, focus: bool) -> String {
+/// Куда переносить окно.
+#[derive(Debug, Clone, Copy)]
+enum Target<'a> {
+    /// Спецворкспейс (спрятать).
+    Hidden,
+    /// Текущий стол (показать); в классическом режиме — по номеру.
+    Active(Option<&'a str>),
+}
+
+/// Lua для `eval`: перенести окна процесса `pid` на стол, не переключаясь
+/// туда, и при `focus` дать им фокус. Текущий стол Lua берёт сам —
+/// `hl.get_active_workspace()`; строка с номером («3») там была бы именем.
+fn lua_move(pid: u32, target: Target<'_>, focus: bool) -> String {
+    let workspace = match target {
+        Target::Hidden => format!("\"{SPECIAL}\""),
+        Target::Active(_) => "hl.get_active_workspace()".to_owned(),
+    };
     let focus = if focus {
         " hl.dispatch(hl.dsp.focus({ window = w }))"
     } else {
@@ -37,16 +51,27 @@ fn lua_move(pid: u32, workspace: &str, focus: bool) -> String {
     };
     format!(
         "for _, w in ipairs(hl.get_windows() or {{}}) do if w.pid == {pid} then \
-         hl.dispatch(hl.dsp.window.move({{ workspace = \"{workspace}\", follow = false, window = w }}))\
+         hl.dispatch(hl.dsp.window.move({{ workspace = {workspace}, follow = false, window = w }}))\
          {focus} end end"
     )
 }
 
 /// Перенести окна процесса на рабочий стол: классическим `dispatch`, а у
 /// Lua-конфига — через `eval`.
-fn hypr_move(socket: &PathBuf, pid: u32, workspace: &str, focus: bool) -> (bool, Option<String>) {
+fn hypr_move(
+    socket: &PathBuf,
+    pid: u32,
+    target: Target<'_>,
+    focus: bool,
+) -> (bool, Option<String>) {
     use std::sync::atomic::Ordering;
-    if !HYPR_LUA.load(Ordering::Relaxed) {
+    let classic = match target {
+        Target::Hidden => Some(SPECIAL),
+        Target::Active(number) => number,
+    };
+    if !HYPR_LUA.load(Ordering::Relaxed)
+        && let Some(workspace) = classic
+    {
         let reply = hypr(
             socket,
             &format!("dispatch movetoworkspacesilent {workspace},pid:{pid}"),
@@ -63,7 +88,7 @@ fn hypr_move(socket: &PathBuf, pid: u32, workspace: &str, focus: bool) -> (bool,
         tracing::info!("Hyprland с Lua-конфигом: команды окна идут через eval");
         HYPR_LUA.store(true, Ordering::Relaxed);
     }
-    let reply = hypr(socket, &format!("eval {}", lua_move(pid, workspace, focus)));
+    let reply = hypr(socket, &format!("eval {}", lua_move(pid, target, focus)));
     (hypr_ok(reply.as_deref()), reply)
 }
 
@@ -110,7 +135,7 @@ impl Wm {
         let pid = std::process::id();
         let done = match self {
             Self::Hyprland(socket) => {
-                let (ok, reply) = hypr_move(socket, pid, SPECIAL, false);
+                let (ok, reply) = hypr_move(socket, pid, Target::Hidden, false);
                 if !ok {
                     tracing::warn!(?reply, pid, "Hyprland не спрятал окно");
                 }
@@ -127,14 +152,21 @@ impl Wm {
         let pid = std::process::id();
         match self {
             Self::Hyprland(socket) => {
-                let Some(workspace) = hypr(socket, "j/activeworkspace")
-                    .and_then(|reply| serde_json::from_str::<serde_json::Value>(&reply).ok())
-                    .and_then(|value| value.get("id").and_then(serde_json::Value::as_i64))
-                else {
-                    return false;
+                use std::sync::atomic::Ordering;
+                // Классическому `dispatch` нужен номер стола; Lua узнаёт его сам.
+                let number = if HYPR_LUA.load(Ordering::Relaxed) {
+                    None
+                } else {
+                    hypr(socket, "j/activeworkspace")
+                        .and_then(|reply| serde_json::from_str::<serde_json::Value>(&reply).ok())
+                        .and_then(|value| value.get("id").and_then(serde_json::Value::as_i64))
+                        .map(|id| id.to_string())
                 };
-                let (moved, reply) = hypr_move(socket, pid, &workspace.to_string(), true);
-                if !moved {
+                let (moved, reply) =
+                    hypr_move(socket, pid, Target::Active(number.as_deref()), true);
+                if moved {
+                    tracing::info!("Hyprland: окно возвращено");
+                } else {
                     tracing::warn!(?reply, pid, "Hyprland не вернул окно");
                 }
                 moved
@@ -258,14 +290,19 @@ mod tests {
 
     #[test]
     fn hyprland_lua_command() {
-        let lua = lua_move(42, SPECIAL, false);
+        let lua = lua_move(42, Target::Hidden, false);
         assert!(lua.contains("w.pid == 42"), "{lua}");
         assert!(
             lua.contains(r#"hl.dsp.window.move({ workspace = "special:rustspace", follow = false, window = w })"#),
             "{lua}"
         );
         assert!(!lua.contains("focus("), "{lua}");
-        assert!(lua_move(42, "3", true).contains("hl.dsp.focus({ window = w })"));
+        let back = lua_move(42, Target::Active(Some("3")), true);
+        assert!(back.contains("hl.dsp.focus({ window = w })"), "{back}");
+        assert!(
+            back.contains("workspace = hl.get_active_workspace()"),
+            "{back}"
+        );
         assert!(wants_lua(Some(
             "error: [string \"return hl.dispatch(movetoworkspacesilent spec...\"]:1: ')' expected"
         )));

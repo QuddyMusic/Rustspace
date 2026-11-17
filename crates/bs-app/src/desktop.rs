@@ -137,8 +137,10 @@ pub(crate) struct Desktop {
     /// Тайлинговый композитор, умеющий прятать окно по IPC.
     #[cfg(target_os = "linux")]
     wm: Option<crate::wm::Wm>,
-    /// Окно спрятано через IPC композитора (не свёрнуто).
-    wm_hidden: bool,
+    /// Окно спрятано через IPC композитора (не свёрнуто). Общий с треем:
+    /// спрятанное окно не получает кадров, и «Показать» обрабатывается
+    /// прямо в обработчике трея.
+    wm_hidden: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl std::fmt::Debug for Desktop {
@@ -266,7 +268,8 @@ impl Desktop {
         // Под Wayland свёрнутое окно возвращают с панели задач, не из трея.
         if self.hidden && is_wayland() && ctx.input(|i| i.viewport().focused == Some(true)) {
             self.hidden = false;
-            self.wm_hidden = false;
+            self.wm_hidden
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
         let close = ctx.input(|i| i.viewport().close_requested());
         if close {
@@ -287,7 +290,9 @@ impl Desktop {
     fn show(&mut self, ctx: &egui::Context) {
         self.hidden = false;
         #[cfg(target_os = "linux")]
-        if std::mem::take(&mut self.wm_hidden)
+        if self
+            .wm_hidden
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
             && let Some(wm) = &self.wm
             && wm.show()
         {
@@ -309,7 +314,8 @@ impl Desktop {
         if let Some(wm) = &self.wm
             && wm.hide()
         {
-            self.wm_hidden = true;
+            self.wm_hidden
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             return;
         }
         if is_wayland() {
@@ -324,7 +330,24 @@ impl Desktop {
 
     #[cfg(feature = "tray")]
     fn start_tray(&mut self, ctx: &egui::Context) {
-        tray::install_menu_handler(&self.queue, ctx);
+        #[cfg(target_os = "linux")]
+        let wm = self.wm.clone();
+        #[cfg(not(target_os = "linux"))]
+        let wm: Option<()> = None;
+        let hidden = Arc::clone(&self.wm_hidden);
+        // Спрятанное через композитор окно не рисуется, а значит, очередь
+        // команд не разбирается: вернуть его надо отсюда же.
+        let reveal = move || {
+            if hidden.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                #[cfg(target_os = "linux")]
+                if let Some(wm) = &wm {
+                    wm.show();
+                }
+                #[cfg(not(target_os = "linux"))]
+                let _ = &wm;
+            }
+        };
+        tray::install_menu_handler(&self.queue, ctx, Box::new(reveal));
         #[cfg(target_os = "linux")]
         {
             // GTK живёт в своём потоке: winit на Linux не крутит цикл GTK.
@@ -377,12 +400,19 @@ mod tray {
     const QUIT: &str = "quit";
 
     /// Пункты меню трея → команды окну.
-    pub(super) fn install_menu_handler(queue: &Queue, ctx: &egui::Context) {
+    pub(super) fn install_menu_handler(
+        queue: &Queue,
+        ctx: &egui::Context,
+        reveal: Box<dyn Fn() + Send + Sync>,
+    ) {
         let queue = std::sync::Arc::clone(queue);
         let ctx = ctx.clone();
         MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
             let command = match event.id.as_ref() {
-                SHOW => Command::Show,
+                SHOW => {
+                    reveal();
+                    Command::Show
+                }
                 HIDE => Command::Hide,
                 MUTE => Command::ToggleMute,
                 DEAFEN => Command::ToggleDeafen,

@@ -32,13 +32,18 @@ pub(crate) struct UpdatePrefs {
     pub(crate) skipped: Option<String>,
 }
 
+/// Репозиторий выпусков по умолчанию.
+pub(crate) fn default_repo() -> String {
+    option_env!("BS_UPDATE_REPO")
+        .unwrap_or(crate::brand::UPDATE_REPO)
+        .to_owned()
+}
+
 impl Default for UpdatePrefs {
     fn default() -> Self {
         Self {
             enabled: true,
-            repo: option_env!("BS_UPDATE_REPO")
-                .unwrap_or(crate::brand::UPDATE_REPO)
-                .to_owned(),
+            repo: default_repo(),
             prereleases: false,
             skipped: None,
         }

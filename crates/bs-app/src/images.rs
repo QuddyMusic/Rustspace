@@ -24,7 +24,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::bridge::{BridgeRequest, DownloadState};
 
 /// Сколько байт текстур держим в памяти до вытеснения.
-const TEXTURE_BUDGET: usize = 96 * 1024 * 1024;
+const TEXTURE_BUDGET: usize = 256 * 1024 * 1024;
 
 /// Условный «адрес» для файлов не с инстанса (GIF с CDN).
 pub(crate) const EXTERNAL: &str = "external";
@@ -570,15 +570,21 @@ fn blur_small(width: u32, height: u32, rgba: &[u8]) -> Option<(usize, usize, Vec
 }
 
 /// Вытесняет давно не использованные картинки, пока бюджет превышен.
-/// Картинки, показанные в текущем кадре, не трогаем.
+///
+/// Картинки принимаются в начале кадра, до рисования, поэтому «показана в
+/// этом кадре» здесь ещё ничего не значит: вытеснять можно только то, что не
+/// показывалось и в последних кадрах. Иначе видимые аватарки вытесняются,
+/// грузятся заново, вытесняют другие — и лента дёргается по кругу. Если
+/// всё нужное не влезает в бюджет, бюджет на время превышается.
 fn evict(inner: &mut Inner) {
+    const RECENT_FRAMES: u64 = 3;
     while inner.bytes > TEXTURE_BUDGET {
-        let tick = inner.tick;
+        let fresh = inner.tick.saturating_sub(RECENT_FRAMES);
         let victim = inner
             .entries
             .iter()
             .filter_map(|(path, entry)| match entry {
-                Entry::Ready { last_used, .. } if *last_used < tick => {
+                Entry::Ready { last_used, .. } if *last_used < fresh => {
                     Some((path.clone(), *last_used))
                 }
                 _ => None,
@@ -669,6 +675,33 @@ pub(crate) fn paint_blurred(
 
 /// Рисует картинку по значению поля, если она уже загружена.
 /// Возвращает `true`, если нарисовала (иначе вызывающий рисует заглушку).
+/// Картинка файла инстанса `origin`: через сессию, если он подключён, иначе
+/// анонимно (только `https` и только `/api/uploads/…`) — для карточек
+/// общего каталога.
+pub(crate) fn paint_from(
+    painter: &egui::Painter,
+    rect: Rect,
+    origin: &str,
+    value: &str,
+    radius: impl Into<CornerRadius>,
+) -> bool {
+    let Some(hub) = ImageHub::of(painter.ctx()) else {
+        return false;
+    };
+    let full = absolute(origin, value);
+    let key = hub.resolve(&full).or_else(|| {
+        bs_api::AssetPath::public(origin, value).map(|path| (EXTERNAL.to_owned(), path))
+    });
+    let Some(key) = key else { return false };
+    match hub.state_for(&key) {
+        ImageState::Ready(image) => {
+            paint_cover(painter, rect, &image, radius, false, Color32::WHITE);
+            true
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn paint_value(
     painter: &egui::Painter,
     rect: Rect,

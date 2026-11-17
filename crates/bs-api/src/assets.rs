@@ -106,6 +106,19 @@ impl AssetPath {
         allowed.then(|| Self(url.to_string()))
     }
 
+    /// Открытый файл чужого инстанса из общего каталога (иконка, баннер
+    /// пространства): `https://<инстанс>/api/uploads/<имя>`, без токена.
+    #[must_use]
+    pub fn public(origin: &str, value: &str) -> Option<Self> {
+        let base = Url::parse(origin).ok()?;
+        if base.scheme() != "https" || base.host_str().is_none() {
+            return None;
+        }
+        let path = resolve_asset(origin, value)?;
+        let url = base.join(path.as_str()).ok()?;
+        Some(Self(url.to_string()))
+    }
+
     /// Это внешняя ссылка, а не путь на инстансе.
     #[must_use]
     pub fn is_external(&self) -> bool {

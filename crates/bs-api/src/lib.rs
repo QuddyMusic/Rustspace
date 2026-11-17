@@ -88,7 +88,9 @@ pub use space_manage::{
     RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input,
 };
 pub use twofactor::{E2eeKey, TwoFactorSetup, TwoFactorStatus};
-pub use webhooks::{CardDraft, CardImage, InstanceVoiceBitrate, VoiceBitrate, Webhook};
+pub use webhooks::{
+    CardDraft, CardImage, InstanceVoiceBitrate, VoiceBitrate, Webhook, card_as_markdown,
+};
 pub use write::{
     CreateDmRequest, FriendRequestDecision, MessageSearchQuery, SEARCH_LIMIT_DEFAULT,
     SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN, SendFriendRequest,

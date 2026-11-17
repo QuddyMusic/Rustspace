@@ -1260,13 +1260,36 @@ pub(super) async fn handle_request(
             channel_id,
             content,
             card,
-        } => match client
-            .send_cards(&channel_id, content.as_deref(), std::slice::from_ref(&card))
-            .await
-        {
-            Ok(()) => BridgeResponse::Done,
-            Err(err) => BridgeResponse::Compose(ComposeEvent::SendFailed(upload_message(&err))),
-        },
+        } => {
+            let sent = client
+                .send_cards(&channel_id, content.as_deref(), std::slice::from_ref(&card))
+                .await;
+            // Сервер без карточек (оригинал или старая сборка) отвечает
+            // 404 без кода: карточка уходит обычным сообщением с разметкой.
+            let result = match sent {
+                Err(bs_api::ApiError::Server { status, body })
+                    if status == reqwest::StatusCode::NOT_FOUND && body.code.is_none() =>
+                {
+                    let body = bs_api::card_as_markdown(content.as_deref(), &card);
+                    client
+                        .send_channel_message(
+                            &channel_id,
+                            &bs_api::SendMessageBody {
+                                content: body,
+                                attachments: Vec::new(),
+                                reply_to_id: None,
+                            },
+                        )
+                        .await
+                        .map(|_| ())
+                }
+                other => other,
+            };
+            match result {
+                Ok(()) => BridgeResponse::Done,
+                Err(err) => BridgeResponse::Compose(ComposeEvent::SendFailed(upload_message(&err))),
+            }
+        }
         BridgeRequest::SendRest { channel_id, body } => {
             match client.send_channel_message(&channel_id, &body).await {
                 Ok(_) => BridgeResponse::Done,

@@ -301,6 +301,8 @@ struct Store {
     shown: HashMap<String, u64>,
     /// Где перевод скрыли: автоперевод их больше не трогает.
     dismissed: std::collections::HashSet<String>,
+    /// Переведены автоматически: ошибку под ними не показываем.
+    automatic: std::collections::HashSet<String>,
 }
 
 static STORE: Mutex<Option<Store>> = Mutex::new(None);
@@ -323,9 +325,13 @@ fn key_of(prefs: &TranslatePrefs, target: &str, text: &str) -> u64 {
 
 /// Перевод сообщения, если его просили показать.
 pub(crate) fn shown(message_id: &str) -> Option<Translation> {
-    store()
-        .as_ref()
-        .and_then(|store| store.results.get(store.shown.get(message_id)?).cloned())
+    store().as_ref().and_then(|store| {
+        let result = store.results.get(store.shown.get(message_id)?)?;
+        if matches!(result, Translation::Failed(_)) && store.automatic.contains(message_id) {
+            return None;
+        }
+        Some(result.clone())
+    })
 }
 
 /// Скрыть перевод (показать оригинал).
@@ -351,10 +357,14 @@ pub(crate) fn auto(
     if let Some(store) = store().as_ref()
         && (store.shown.contains_key(message_id) || store.dismissed.contains(message_id))
     {
+        // Уже переводили (в том числе неудачно): повторит только «Перевести».
         return;
     }
     if worth_translating(text, &prefs.target_language()) {
         request(runtime, ctx, message_id, text);
+        if let Some(store) = store().as_mut() {
+            store.automatic.insert(message_id.to_owned());
+        }
     }
 }
 
@@ -603,6 +613,7 @@ fn begin(message_id: &str, key: u64) -> bool {
     let mut guard = store();
     let store = guard.get_or_insert_with(Store::default);
     store.dismissed.remove(message_id);
+    store.automatic.remove(message_id);
     store.shown.insert(message_id.to_owned(), key);
     if matches!(
         store.results.get(&key),

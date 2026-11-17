@@ -267,6 +267,10 @@ impl Prefs {
         self.appearance.radius = self.appearance.radius.min(20);
         self.voice.sanitize();
         self.recent_instances.truncate(RECENT_INSTANCES);
+        // Пустой репозиторий остался от версий, где умолчания не было.
+        if self.updates.repo.trim().is_empty() {
+            self.updates.repo = crate::updates::default_repo();
+        }
         self
     }
 }

@@ -609,7 +609,15 @@ fn space_card(
             ui.vertical(|ui| {
                 ui.set_min_height(210.0);
                 ui.spacing_mut().item_spacing.y = 4.0;
-                card_banner(ui, space, joined);
+                card_banner(
+                    ui,
+                    space,
+                    joined,
+                    origin
+                        .map(str::to_owned)
+                        .or_else(|| bridge.base_at(0).map(str::to_owned))
+                        .as_deref(),
+                );
                 ui.add_space(32.0);
                 ui.horizontal(|ui| {
                     ui.add_space(14.0);
@@ -634,7 +642,7 @@ fn space_card(
 }
 
 /// Баннер карточки с меткой и плиткой пространства.
-fn card_banner(ui: &mut egui::Ui, space: &ExploreSpace, joined: bool) {
+fn card_banner(ui: &mut egui::Ui, space: &ExploreSpace, joined: bool, origin: Option<&str>) {
     let gradient = theme::space_gradient(&space.id, space.avatar_color.as_deref());
     let color = gradient.from.lerp_to_gamma(gradient.to, 0.5);
     let (banner, _) = ui.allocate_exact_size(egui::vec2(CARD_WIDTH, 76.0), Sense::hover());
@@ -649,6 +657,17 @@ fn card_banner(ui: &mut egui::Ui, space: &ExploreSpace, joined: bool) {
         },
         color.gamma_multiply(0.55),
     );
+    let corners = CornerRadius {
+        nw: top,
+        ne: top,
+        sw: 0,
+        se: 0,
+    };
+    if let (Some(origin), Some(banner_file)) =
+        (origin, space.banner.as_deref().filter(|b| !b.is_empty()))
+    {
+        crate::images::paint_from(ui.painter(), banner, origin, banner_file, corners);
+    }
     let tag = match (joined, space.visibility) {
         (true, _) => tr("В ПРОСТРАНСТВАХ"),
         (false, SpaceVisibility::Public) => tr("ОТКРЫТОЕ"),
@@ -670,20 +689,27 @@ fn card_banner(ui: &mut egui::Ui, space: &ExploreSpace, joined: bool) {
         crate::theme::rounded(17),
         theme::bg_sidebar(),
     );
-    theme::fill_gradient(
-        ui.painter(),
-        tile,
-        f32::from(crate::theme::rounded(14).nw),
-        gradient,
-        1.0,
-    );
-    ui.painter().text(
-        tile.center(),
-        egui::Align2::CENTER_CENTER,
-        theme::first_letter(&space.name),
-        egui::FontId::new(20.0, theme::bold_family()),
-        egui::Color32::WHITE,
-    );
+    let icon = origin
+        .zip(space.icon.as_deref().filter(|i| !i.is_empty()))
+        .is_some_and(|(origin, icon)| {
+            crate::images::paint_from(ui.painter(), tile, origin, icon, crate::theme::rounded(14))
+        });
+    if !icon {
+        theme::fill_gradient(
+            ui.painter(),
+            tile,
+            f32::from(crate::theme::rounded(14).nw),
+            gradient,
+            1.0,
+        );
+        ui.painter().text(
+            tile.center(),
+            egui::Align2::CENTER_CENTER,
+            theme::first_letter(&space.name),
+            egui::FontId::new(20.0, theme::bold_family()),
+            egui::Color32::WHITE,
+        );
+    }
 }
 
 /// Название, описание, число участников и адрес чужого инстанса.

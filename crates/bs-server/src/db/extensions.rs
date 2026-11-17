@@ -176,6 +176,16 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             )",
         ],
     ),
+    (
+        "0011_instance_name",
+        &[
+            // Инстанс, перешедший с оригинала, назывался «Backspace» по
+            // умолчанию схемы. Один раз переименовываем в «Rustspace»; своё
+            // имя администратора не трогаем, сменить обратно можно в панели.
+            "UPDATE instance_settings SET instance_name = 'Rustspace' \
+             WHERE id = 1 AND (instance_name IS NULL OR instance_name = '' OR instance_name = 'Backspace')",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.
