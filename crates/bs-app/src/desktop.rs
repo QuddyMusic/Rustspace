@@ -399,6 +399,22 @@ mod tray {
     const DEAFEN: &str = "deafen";
     const QUIT: &str = "quit";
 
+    /// Выход из трея при спрятанном окне: спрятанное окно не получает
+    /// кадров, и команда «закрыть» ждала бы, пока его развернут. Если за
+    /// полторы секунды приложение само не закрылось, сохраняем настройки,
+    /// гасим локальный переводчик и выходим.
+    fn quit_watchdog() {
+        let _ = std::thread::Builder::new()
+            .name("bs-quit".into())
+            .spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                tracing::info!("окно не закрылось само — выходим из трея напрямую");
+                crate::prefs::flush(true);
+                crate::local_llm::stop();
+                std::process::exit(0);
+            });
+    }
+
     /// Пункты меню трея → команды окну.
     pub(super) fn install_menu_handler(
         queue: &Queue,
@@ -416,7 +432,10 @@ mod tray {
                 HIDE => Command::Hide,
                 MUTE => Command::ToggleMute,
                 DEAFEN => Command::ToggleDeafen,
-                QUIT => Command::Quit,
+                QUIT => {
+                    quit_watchdog();
+                    Command::Quit
+                }
                 _ => return,
             };
             lock(&queue).push_back(command);
