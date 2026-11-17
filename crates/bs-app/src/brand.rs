@@ -21,6 +21,25 @@ pub(crate) const UPDATE_REPO: &str = "QuddyMusic/Rustspace";
 /// Rustspace.
 pub(crate) const UPSTREAM: &str = "https://github.com/TheZwiss/backspace";
 
+/// Значок приложения (PNG 256×256) как текстура; грузится один раз.
+pub(crate) fn icon_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let id = egui::Id::unique("rustspace_icon_texture");
+    if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id)) {
+        return Some(texture);
+    }
+    let icon =
+        eframe::icon_data::from_png_bytes(include_bytes!("../../../packaging/linux/rustspace.png"))
+            .ok()?;
+    let size = [
+        usize::try_from(icon.width).ok()?,
+        usize::try_from(icon.height).ok()?,
+    ];
+    let image = egui::ColorImage::from_rgba_unmultiplied(size, &icon.rgba);
+    let texture = ctx.load_texture("rustspace_icon", image, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|data| data.insert_temp(id, texture.clone()));
+    Some(texture)
+}
+
 /// Рамка «R» в координатах значка 256×256 (с учётом толщины штриха).
 const VIEW_X: f32 = 82.0;
 const VIEW_Y: f32 = 46.0;

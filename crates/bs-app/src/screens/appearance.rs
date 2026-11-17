@@ -14,8 +14,19 @@ use crate::widgets;
 
 /// Быстрый выбор акцента.
 #[allow(clippy::unreadable_literal, reason = "цвета записаны как #rrggbb")]
-const ACCENTS: [u32; 8] = [
-    0x7c6cf6, 0x5865f2, 0x3ba55d, 0x14b8a6, 0xf59e0b, 0xf97316, 0xec4899, 0xef4444,
+const ACCENTS: [u32; 10] = [
+    0xe8743b, 0xf0a050, 0x7c6cf6, 0x5865f2, 0x3ba55d, 0x14b8a6, 0xf59e0b, 0xf97316, 0xec4899,
+    0xef4444,
+];
+
+/// Готовые пары цветов свечения: (название, сверху, снизу).
+#[allow(clippy::unreadable_literal, reason = "цвета записаны как #rrggbb")]
+const GLOWS: [(&str, u32, u32); 5] = [
+    ("Оксид", 0x7c6cf6, 0xe8743b),
+    ("Море", 0x38bdf8, 0x14b8a6),
+    ("Закат", 0xec4899, 0xf59e0b),
+    ("Лес", 0x3ba55d, 0x14b8a6),
+    ("Без цвета", 0x8a8399, 0x5b5468),
 ];
 
 /// Состояние страницы между кадрами.
@@ -46,6 +57,8 @@ pub(crate) fn page(ui: &mut egui::Ui, state: &mut AppearanceState) {
         ui.add_space(6.0);
         accent_row(ui, &mut appearance);
     });
+    ui.add_space(10.0);
+    card(ui, |ui| glass_card(ui, &mut appearance));
     ui.add_space(10.0);
     card(ui, |ui| {
         widgets::section_label(ui, tr("Форма и плотность"));
@@ -122,19 +135,33 @@ fn presets(ui: &mut egui::Ui, appearance: &mut Appearance) {
 fn preset_card(ui: &mut egui::Ui, preset: Preset, selected: bool) -> egui::Response {
     let p = preset.palette();
     let (rect, response) = ui.allocate_exact_size(egui::vec2(150.0, 104.0), Sense::click());
-    let painter = ui.painter();
+    let painter = ui.painter_at(rect);
     let radius = crate::theme::rounded(10);
-    painter.rect_filled(rect, radius, p.bg_chat);
+    // Стеклянная тема: подложка со свечением, панели полупрозрачные.
+    let panel = |color: Color32| {
+        if p.glass {
+            theme::with_alpha(color, p.glass_opacity)
+        } else {
+            color
+        }
+    };
+    if p.glass {
+        painter.rect_filled(rect, radius, p.bg_rail);
+        theme::paint_glows(&painter, rect, &p);
+        painter.rect_filled(rect, radius, panel(p.bg_chat));
+    } else {
+        painter.rect_filled(rect, radius, p.bg_chat);
+    }
     // Мини-раскладка: рейл, боковая панель, «сообщения», акцентная кнопка.
     let inner = rect.shrink(8.0);
     let rail = egui::Rect::from_min_size(inner.min, egui::vec2(14.0, 56.0));
-    painter.rect_filled(rail, CornerRadius::same(4), p.bg_rail);
+    painter.rect_filled(rail, CornerRadius::same(4), panel(p.bg_rail));
     painter.circle_filled(rail.center_top() + egui::vec2(0.0, 9.0), 5.0, p.accent);
     let side = egui::Rect::from_min_size(
         rail.right_top() + egui::vec2(4.0, 0.0),
         egui::vec2(34.0, 56.0),
     );
-    painter.rect_filled(side, CornerRadius::same(4), p.bg_sidebar);
+    painter.rect_filled(side, CornerRadius::same(4), panel(p.bg_sidebar));
     for i in 0..3_u8 {
         let y = f32::from(i).mul_add(12.0, side.top() + 10.0);
         painter.rect_filled(
@@ -212,6 +239,112 @@ fn accent_row(ui: &mut egui::Ui, appearance: &mut Appearance) {
         palette.on_accent = readable_on(palette.accent);
         appearance.custom = Some(palette);
     }
+}
+
+/// «Стекло»: полупрозрачные панели и свечение за ними.
+fn glass_card(ui: &mut egui::Ui, appearance: &mut Appearance) {
+    widgets::section_label(ui, tr("Стекло"));
+    ui.add_space(6.0);
+    let mut palette = appearance.palette();
+    let before = palette;
+    setting_row(
+        ui,
+        tr("Полупрозрачные панели"),
+        tr("Панели окна пропускают мягкое свечение фона, окна и меню — тоже."),
+        &mut palette.glass,
+    );
+    ui.add_enabled_ui(palette.glass, |ui| {
+        ui.add_space(8.0);
+        egui::Grid::new("appearance_glass")
+            .num_columns(2)
+            .spacing(egui::vec2(16.0, 10.0))
+            .show(ui, |ui| {
+                ui.spacing_mut().slider_width = 220.0;
+                ui.label(tr("Непрозрачность панелей"));
+                ui.add(egui::Slider::new(&mut palette.glass_opacity, 40..=100).suffix(" %"));
+                ui.end_row();
+                ui.label(tr("Свечение"));
+                ui.add(egui::Slider::new(&mut palette.glow, 0..=40).suffix(" %"));
+                ui.end_row();
+                ui.label(tr("Цвета свечения"));
+                ui.horizontal(|ui| {
+                    egui::color_picker::color_edit_button_srgba(
+                        ui,
+                        &mut palette.glow_a,
+                        egui::color_picker::Alpha::Opaque,
+                    );
+                    egui::color_picker::color_edit_button_srgba(
+                        ui,
+                        &mut palette.glow_b,
+                        egui::color_picker::Alpha::Opaque,
+                    );
+                });
+                ui.end_row();
+            });
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            for (name, top, bottom) in GLOWS {
+                let (top, bottom) = (hex_color(top), hex_color(bottom));
+                let chosen = palette.glow_a == top && palette.glow_b == bottom;
+                if glow_chip(ui, tr(name), top, bottom, chosen).clicked() {
+                    palette.glow_a = top;
+                    palette.glow_b = bottom;
+                    if palette.glow == 0 {
+                        palette.glow = 16;
+                    }
+                }
+            }
+        });
+    });
+    if palette != before {
+        appearance.custom = Some(palette);
+    }
+}
+
+/// Кнопка готовой пары свечения: два кружка и название.
+fn glow_chip(
+    ui: &mut egui::Ui,
+    name: &str,
+    top: Color32,
+    bottom: Color32,
+    chosen: bool,
+) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(
+        name.to_owned(),
+        egui::FontId::proportional(13.0),
+        theme::text(),
+    );
+    let size = egui::vec2(galley.size().x + 52.0, 32.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let painter = ui.painter();
+    let fill = if chosen || response.hovered() {
+        theme::bg_active()
+    } else {
+        theme::bg_hover()
+    };
+    painter.rect_filled(rect, crate::theme::rounded(16), fill);
+    if chosen {
+        painter.rect_stroke(
+            rect,
+            crate::theme::rounded(16),
+            Stroke::new(1.5, theme::accent()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let left = rect.left_center() + egui::vec2(16.0, 0.0);
+    painter.circle_filled(left, 7.0, top);
+    painter.circle_filled(left + egui::vec2(10.0, 0.0), 7.0, bottom);
+    painter.galley(
+        egui::pos2(left.x + 22.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        theme::text(),
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+#[allow(clippy::cast_possible_truncation, reason = "байты цвета из #rrggbb")]
+const fn hex_color(hex: u32) -> Color32 {
+    Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
 /// Белый или чёрный текст — что читается на фоне лучше.
@@ -308,7 +441,7 @@ fn import_export(ui: &mut egui::Ui, state: &mut AppearanceState, appearance: &mu
 
 fn export(palette: &Palette) -> (bool, String) {
     let Some(path) = rfd::FileDialog::new()
-        .set_file_name("backspace-theme.json")
+        .set_file_name("rustspace-theme.json")
         .add_filter(tr("Тема (JSON)"), &["json"])
         .save_file()
     else {
@@ -361,6 +494,16 @@ mod tests {
         let palette = parse_theme(br##"{"accent": "#ff0000"}"##).unwrap();
         assert_eq!(palette.accent, egui::Color32::from_rgb(255, 0, 0));
         assert_eq!(palette.bg_chat, Palette::AETHER.bg_chat);
+        // Темы, сохранённые до стекла, остаются без него.
+        assert!(!palette.glass);
+    }
+
+    #[test]
+    fn glass_settings_travel_with_the_theme() {
+        let json = serde_json::to_string(&Palette::OXIDE).unwrap();
+        assert!(json.contains("\"glass\":true") && json.contains("\"glowA\":\"#7c6cf6\""));
+        let back = parse_theme(json.as_bytes()).unwrap();
+        assert_eq!((back.glass_opacity, back.glow), (62, 16));
     }
 
     #[test]

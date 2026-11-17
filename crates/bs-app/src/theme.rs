@@ -92,9 +92,23 @@ pub(crate) struct Palette {
     /// Офлайн.
     #[serde(with = "hex")]
     pub(crate) gray: Color32,
+    /// Стекло: модули окна полупрозрачные, за ними — мягкое свечение.
+    pub(crate) glass: bool,
+    /// Непрозрачность стеклянных панелей, % (40–100).
+    pub(crate) glass_opacity: u8,
+    /// Сила свечения за панелями, % (0–40).
+    pub(crate) glow: u8,
+    /// Цвет свечения сверху справа.
+    #[serde(with = "hex")]
+    pub(crate) glow_a: Color32,
+    /// Цвет свечения снизу слева.
+    #[serde(with = "hex")]
+    pub(crate) glow_b: Color32,
 }
 
 impl Default for Palette {
+    // Недостающие поля старого файла темы берутся отсюда: у тем до
+    // появления стекла его нет.
     fn default() -> Self {
         Self::AETHER
     }
@@ -133,6 +147,80 @@ impl Palette {
         sky: rgb(0x7dd3fc),
         red: rgb(0xf87171),
         gray: rgb(0x6d6d7c),
+        glass: false,
+        glass_opacity: 100,
+        glow: 0,
+        glow_a: rgb(0x7c6cf6),
+        glow_b: rgb(0xe8743b),
+    };
+
+    /// «Оксид» — тёмное стекло Rustspace: чернильно-фиолетовая основа,
+    /// ржавый акцент, полупрозрачные панели на мягком свечении.
+    pub(crate) const OXIDE: Self = Self {
+        dark: true,
+        bg_rail: rgb(0x100d17),
+        bg_sidebar: rgb(0x1e192a),
+        bg_chat: rgb(0x181422),
+        bg_input: rgb(0x120f1a),
+        bg_bubble: rgb(0x241e32),
+        bg_hover: rgb(0x2a2438),
+        bg_active: rgb(0x322a44),
+        widget_hover: rgb(0x3a3150),
+        border: rgb(0x2e2740),
+        text: rgb(0xece8f5),
+        text_muted: rgb(0xb6aecb),
+        text_faint: rgb(0x8d86a0),
+        text_bright: rgb(0xffffff),
+        channel_text: rgb(0x9c95ad),
+        accent: rgb(0xe8743b),
+        on_accent: rgb(0xffffff),
+        mint: rgb(0x86efac),
+        mint_bg: rgb(0x173b21),
+        rose: rgb(0xfda4af),
+        amber: rgb(0xf5b94a),
+        green: rgb(0x6fe0a6),
+        sky: rgb(0x8ab4ff),
+        red: rgb(0xf06a6f),
+        gray: rgb(0x6f6884),
+        glass: true,
+        glass_opacity: 62,
+        glow: 16,
+        glow_a: rgb(0x7c6cf6),
+        glow_b: rgb(0xe8743b),
+    };
+
+    /// «Оксид светлая» — то же стекло на тёплом светлом фоне.
+    pub(crate) const OXIDE_LIGHT: Self = Self {
+        dark: false,
+        bg_rail: rgb(0xece7e0),
+        bg_sidebar: rgb(0xfbf9f6),
+        bg_chat: rgb(0xffffff),
+        bg_input: rgb(0xf3eee8),
+        bg_bubble: rgb(0xffffff),
+        bg_hover: rgb(0xf0ebe4),
+        bg_active: rgb(0xf0dccd),
+        widget_hover: rgb(0xe9e2d8),
+        border: rgb(0xddd5ca),
+        text: rgb(0x221d2b),
+        text_muted: rgb(0x4f4860),
+        text_faint: rgb(0x6b6479),
+        text_bright: rgb(0x1a1622),
+        channel_text: rgb(0x655e72),
+        accent: rgb(0xc75a22),
+        on_accent: rgb(0xffffff),
+        mint: rgb(0x23784a),
+        mint_bg: rgb(0xdff3e6),
+        rose: rgb(0xc2334d),
+        amber: rgb(0xa86a12),
+        green: rgb(0x2f9e62),
+        sky: rgb(0x2b6cb0),
+        red: rgb(0xc53030),
+        gray: rgb(0x8a8298),
+        glass: true,
+        glass_opacity: 72,
+        glow: 14,
+        glow_a: rgb(0xb8a9ff),
+        glow_b: rgb(0xf2a77a),
     };
 
     /// «Полночь» — глубокий чёрный для OLED-экранов.
@@ -178,6 +266,11 @@ impl Palette {
         sky: rgb(0x81a1c1),
         red: rgb(0xbf616a),
         gray: rgb(0x7b8394),
+        glass: false,
+        glass_opacity: 100,
+        glow: 0,
+        glow_a: rgb(0x7c6cf6),
+        glow_b: rgb(0xe8743b),
     };
 
     /// «Сумерки» — фиолетовая тёмная тема с розовыми акцентами.
@@ -207,6 +300,11 @@ impl Palette {
         sky: rgb(0x8be9fd),
         red: rgb(0xff5555),
         gray: rgb(0x7d7392),
+        glass: false,
+        glass_opacity: 100,
+        glow: 0,
+        glow_a: rgb(0x7c6cf6),
+        glow_b: rgb(0xe8743b),
     };
 
     /// «Дневная» — светлая тема.
@@ -236,6 +334,11 @@ impl Palette {
         sky: rgb(0x0369a1),
         red: rgb(0xdc2626),
         gray: rgb(0x9ca3af),
+        glass: false,
+        glass_opacity: 100,
+        glow: 0,
+        glow_a: rgb(0x7c6cf6),
+        glow_b: rgb(0xe8743b),
     };
 
     /// «Высокий контраст» — максимальная читаемость.
@@ -265,10 +368,15 @@ impl Palette {
         sky: rgb(0x4dd2ff),
         red: rgb(0xff4040),
         gray: rgb(0xbdbdbd),
+        glass: false,
+        glass_opacity: 100,
+        glow: 0,
+        glow_a: rgb(0x7c6cf6),
+        glow_b: rgb(0xe8743b),
     };
 
     /// Цвета для редактора темы: подпись и ссылка на поле.
-    pub(crate) fn fields_mut(&mut self) -> [(&'static str, &mut Color32); 24] {
+    pub(crate) fn fields_mut(&mut self) -> [(&'static str, &mut Color32); 26] {
         [
             (tr("Фон рейла пространств"), &mut self.bg_rail),
             (tr("Боковые панели"), &mut self.bg_sidebar),
@@ -294,6 +402,8 @@ impl Palette {
             (tr("Ссылки"), &mut self.sky),
             (tr("Опасные действия"), &mut self.red),
             (tr("Не в сети"), &mut self.gray),
+            (tr("Свечение сверху"), &mut self.glow_a),
+            (tr("Свечение снизу"), &mut self.glow_b),
         ]
     }
 }
@@ -302,6 +412,10 @@ impl Palette {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum Preset {
+    /// Тёмное стекло Rustspace.
+    Oxide,
+    /// Светлое стекло Rustspace.
+    OxideLight,
     /// Тема оригинального клиента.
     Aether,
     /// Чёрная для OLED.
@@ -318,7 +432,9 @@ pub(crate) enum Preset {
 
 impl Preset {
     /// Все встроенные темы в порядке показа.
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 8] = [
+        Self::Oxide,
+        Self::OxideLight,
         Self::Aether,
         Self::Midnight,
         Self::Nord,
@@ -330,6 +446,8 @@ impl Preset {
     /// Название для интерфейса.
     pub(crate) fn title(self) -> &'static str {
         match self {
+            Self::Oxide => tr("Оксид"),
+            Self::OxideLight => tr("Оксид светлая"),
             Self::Aether => "Aether Drift",
             Self::Midnight => tr("Полночь"),
             Self::Nord => "Nord",
@@ -342,6 +460,8 @@ impl Preset {
     /// Палитра темы.
     pub(crate) const fn palette(self) -> Palette {
         match self {
+            Self::Oxide => Palette::OXIDE,
+            Self::OxideLight => Palette::OXIDE_LIGHT,
             Self::Aether => Palette::AETHER,
             Self::Midnight => Palette::MIDNIGHT,
             Self::Nord => Palette::NORD,
@@ -369,9 +489,9 @@ pub(crate) struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            preset: Preset::Aether,
+            preset: Preset::Oxide,
             custom: None,
-            radius: 8,
+            radius: 12,
             compact: false,
         }
     }
@@ -385,7 +505,7 @@ impl Appearance {
 }
 
 /// Текущая палитра.
-static CURRENT: std::sync::RwLock<Palette> = std::sync::RwLock::new(Palette::AETHER);
+static CURRENT: std::sync::RwLock<Palette> = std::sync::RwLock::new(Palette::OXIDE);
 /// Скругление и плотность ленты.
 static SHAPE: std::sync::RwLock<(u8, bool)> = std::sync::RwLock::new((8, false));
 
@@ -481,28 +601,211 @@ pub(crate) fn rounded(base: u8) -> CornerRadius {
 /// Зазор между модулями окна: при прямых углах модули стоят вплотную.
 #[must_use]
 pub(crate) fn module_gap() -> i8 {
-    if radius() == 0 { 0 } else { 6 }
+    match (radius(), glass()) {
+        (0, _) => 0,
+        (_, true) => 8,
+        _ => 6,
+    }
+}
+
+/// Включено ли стекло в текущей теме.
+#[must_use]
+pub(crate) fn glass() -> bool {
+    current().glass
+}
+
+/// Заливка панели: при стекле — полупрозрачная, сквозь неё видно свечение.
+#[must_use]
+pub(crate) fn surface(fill: Color32) -> Color32 {
+    let p = current();
+    if !p.glass {
+        return fill;
+    }
+    with_alpha(fill, p.glass_opacity.clamp(30, 100))
+}
+
+/// Цвет с непрозрачностью `percent` %.
+#[must_use]
+pub(crate) fn with_alpha(color: Color32, percent: u8) -> Color32 {
+    let alpha = u8::try_from(u16::from(percent.min(100)) * 255 / 100).unwrap_or(u8::MAX);
+    let [r, g, b, _] = color.to_srgba_unmultiplied();
+    Color32::from_rgba_unmultiplied(r, g, b, alpha)
+}
+
+/// Кромка стекла: светлая на тёмной теме, тёмная на светлой.
+#[must_use]
+pub(crate) fn glass_stroke() -> Stroke {
+    glass_stroke_for(is_dark())
+}
+
+fn glass_stroke_for(dark: bool) -> Stroke {
+    if dark {
+        Stroke::new(1.0, Color32::from_white_alpha(22))
+    } else {
+        Stroke::new(1.0, Color32::from_black_alpha(20))
+    }
+}
+
+/// Утопленная подложка внутри панели (плашка пользователя, вставки).
+#[must_use]
+pub(crate) fn inset() -> Color32 {
+    match (glass(), is_dark()) {
+        (true, true) => Color32::from_black_alpha(46),
+        (true, false) => Color32::from_white_alpha(150),
+        (false, _) => bg_rail(),
+    }
+}
+
+/// Рамка плавающего элемента (поле ввода, меню, панели поверх ленты):
+/// при стекле — полупрозрачная, с кромкой и мягкой тенью.
+pub(crate) fn floating(fill: Color32, base_radius: u8) -> egui::Frame {
+    let frame = egui::Frame::new().corner_radius(rounded(base_radius));
+    if glass() {
+        frame
+            .fill(with_alpha(
+                fill,
+                current().glass_opacity.saturating_add(18).min(96),
+            ))
+            .stroke(glass_stroke())
+            .shadow(egui::epaint::Shadow {
+                offset: [0, 6],
+                blur: 22,
+                spread: 0,
+                color: Color32::from_black_alpha(if is_dark() { 70 } else { 22 }),
+            })
+    } else {
+        frame.fill(fill).stroke(Stroke::new(1.0, border()))
+    }
 }
 
 /// Рамка модуля главного окна (боковая панель, чат, участники…):
 /// своя подложка, скругление из настроек и зазор вокруг.
 pub(crate) fn module(fill: Color32) -> egui::Frame {
     let gap = module_gap();
-    egui::Frame::new()
-        .fill(fill)
+    let frame = egui::Frame::new()
+        .fill(surface(fill))
         .corner_radius(rounded(12))
         .outer_margin(Margin {
             left: 0,
             right: gap,
             top: gap,
             bottom: gap,
-        })
+        });
+    if glass() {
+        frame.stroke(glass_stroke())
+    } else {
+        frame
+    }
 }
 
-/// Подложка под модулями окна — цвет зазоров между ними.
+/// Рамка колонки пространств: при стекле — такой же модуль, как остальные.
+pub(crate) fn rail_frame() -> egui::Frame {
+    if glass() {
+        let gap = module_gap();
+        module(bg_sidebar())
+            .outer_margin(Margin {
+                left: gap,
+                right: gap,
+                top: gap,
+                bottom: gap,
+            })
+            .inner_margin(Margin::symmetric(0, 10))
+    } else {
+        egui::Frame::new()
+            .fill(bg_rail())
+            .inner_margin(Margin::symmetric(0, 10))
+    }
+}
+
+/// Подложка под модулями окна — цвет зазоров между ними, а при стекле
+/// ещё и мягкое свечение, которое просвечивает сквозь панели.
 pub(crate) fn paint_backdrop(ui: &egui::Ui) {
-    ui.painter()
-        .rect_filled(ui.max_rect(), CornerRadius::ZERO, bg_rail());
+    let rect = ui.max_rect();
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::ZERO, bg_rail());
+    paint_glows(painter, rect, &current());
+}
+
+/// Два пятна свечения палитры `p` в прямоугольнике `rect` (для фона окна и
+/// миниатюр тем). Без стекла или при нулевой силе ничего не рисует.
+pub(crate) fn paint_glows(painter: &egui::Painter, rect: egui::Rect, p: &Palette) {
+    if !p.glass || p.glow == 0 {
+        return;
+    }
+    let strength = f32::from(p.glow.min(60)) / 100.0;
+    let (w, h) = (rect.width(), rect.height());
+    paint_glow(
+        painter,
+        rect.min + egui::vec2(w * 0.78, h * 0.08),
+        egui::vec2(w * 0.47, h * 0.53),
+        p.glow_a,
+        strength,
+    );
+    paint_glow(
+        painter,
+        rect.min + egui::vec2(w * 0.30, h),
+        egui::vec2(w * 0.55, h * 0.62),
+        p.glow_b,
+        strength,
+    );
+}
+
+/// Мягкое эллиптическое пятно цвета `color`: к краю прозрачность плавно
+/// растёт до нуля (как `radial-gradient(… , transparent 70%)`).
+fn paint_glow(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    radii: egui::Vec2,
+    color: Color32,
+    strength: f32,
+) {
+    const RINGS: u32 = 24;
+    const SEGMENTS: u32 = 72;
+    let [red, green, blue, _] = color.to_srgba_unmultiplied();
+    let tint = |t: f32| {
+        // Плавный спад: полная сила в центре, ноль на 70 % радиуса.
+        let x = (t / 0.7).min(1.0);
+        let smooth = x * x * 2.0f32.mul_add(-x, 3.0);
+        let falloff = (1.0 - smooth).max(0.0);
+        let alpha = (strength * falloff * 255.0).round().clamp(0.0, 255.0);
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "alpha в пределах 0..=255"
+        )]
+        Color32::from_rgba_unmultiplied(red, green, blue, alpha as u8)
+    };
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(center, tint(0.0));
+    for ring in 1..=RINGS {
+        #[allow(clippy::cast_precision_loss, reason = "малые числа")]
+        let t = ring as f32 / RINGS as f32;
+        for segment in 0..SEGMENTS {
+            #[allow(clippy::cast_precision_loss, reason = "малые числа")]
+            let angle = segment as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+            let offset = egui::vec2(angle.cos() * radii.x, angle.sin() * radii.y) * t;
+            mesh.colored_vertex(center + offset, tint(t));
+        }
+    }
+    let at = |ring: u32, segment: u32| {
+        if ring == 0 {
+            0
+        } else {
+            1 + (ring - 1) * SEGMENTS + segment % SEGMENTS
+        }
+    };
+    for segment in 0..SEGMENTS {
+        mesh.add_triangle(at(0, 0), at(1, segment), at(1, segment + 1));
+    }
+    for ring in 1..RINGS {
+        for segment in 0..SEGMENTS {
+            let (inner, inner_next) = (at(ring, segment), at(ring, segment + 1));
+            let (outer, outer_next) = (at(ring + 1, segment), at(ring + 1, segment + 1));
+            mesh.add_triangle(inner, outer, outer_next);
+            mesh.add_triangle(inner, outer_next, inner_next);
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 /// Включена ли компактная лента.
@@ -615,7 +918,13 @@ pub(crate) fn install(ctx: &egui::Context) {
 
 /// Применяет оформление: палитру, скругления и стили `egui`.
 pub(crate) fn apply(ctx: &egui::Context, appearance: &Appearance) {
-    let palette = appearance.palette();
+    let mut palette = appearance.palette();
+    if palette.glass {
+        // Наведение и выделение на стекле — тоже полупрозрачные.
+        palette.bg_hover = with_alpha(palette.bg_hover, 62);
+        palette.bg_active = with_alpha(palette.bg_active, 78);
+        palette.widget_hover = with_alpha(palette.widget_hover, 82);
+    }
     if let Ok(mut current) = CURRENT.write() {
         *current = palette;
     }
@@ -629,7 +938,11 @@ pub(crate) fn apply(ctx: &egui::Context, appearance: &Appearance) {
         egui::Visuals::light()
     };
     visuals.panel_fill = p.bg_chat;
-    visuals.window_fill = p.bg_bubble;
+    visuals.window_fill = if p.glass {
+        with_alpha(p.bg_bubble, p.glass_opacity.saturating_add(26).min(96))
+    } else {
+        p.bg_bubble
+    };
     visuals.extreme_bg_color = p.bg_input;
     visuals.faint_bg_color = p.bg_sidebar;
     visuals.code_bg_color = p.bg_input;
@@ -639,7 +952,11 @@ pub(crate) fn apply(ctx: &egui::Context, appearance: &Appearance) {
     visuals.error_fg_color = p.red;
     visuals.selection.bg_fill = p.accent.gamma_multiply(if p.dark { 0.85 } else { 0.35 });
     visuals.selection.stroke = Stroke::new(1.0, p.text_bright);
-    visuals.window_stroke = Stroke::new(1.0, p.border);
+    visuals.window_stroke = if p.glass {
+        glass_stroke_for(p.dark)
+    } else {
+        Stroke::new(1.0, p.border)
+    };
     visuals.window_corner_radius = rounded(12);
     visuals.menu_corner_radius = rounded(10);
     visuals.window_shadow = egui::epaint::Shadow {
@@ -965,8 +1282,23 @@ pub(crate) fn rail_home(ui: &mut egui::Ui, selected: bool, unread: bool) -> egui
         16
     };
     let painter = ui.painter();
-    painter.rect_filled(icon, CornerRadius::same(radius), accent());
-    crate::brand::paint(painter, icon.center(), 26.0, on_accent());
+    if let Some(texture) = crate::brand::icon_texture(ui.ctx()) {
+        // Значок Rustspace: на наведении чуть крупнее, как у пространств.
+        let icon = if selected || response.hovered() {
+            icon.expand(1.0)
+        } else {
+            icon
+        };
+        painter.image(
+            texture.id(),
+            icon,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+    } else {
+        painter.rect_filled(icon, CornerRadius::same(radius), accent());
+        crate::brand::paint(painter, icon.center(), 26.0, on_accent());
+    }
     paint_rail_pill(painter, rect, selected, response.hovered(), unread);
     response
 }

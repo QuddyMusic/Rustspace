@@ -225,11 +225,7 @@ impl ChatScreen {
             .exact_size(72.0)
             .resizable(false)
             .show_separator_line(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::bg_rail())
-                    .inner_margin(Margin::symmetric(0, 10)),
-            )
+            .frame(theme::rail_frame())
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("rail_scroll")
@@ -661,8 +657,12 @@ impl ChatScreen {
             .frame(egui::Frame::new().inner_margin(Margin::symmetric(10, 8)))
             .show(ui, |ui| {
                 egui::Frame::new()
-                    .fill(theme::bg_rail())
-                    .stroke(egui::Stroke::new(1.0, theme::border()))
+                    .fill(theme::inset())
+                    .stroke(if theme::glass() {
+                        theme::glass_stroke()
+                    } else {
+                        egui::Stroke::new(1.0, theme::border())
+                    })
                     .corner_radius(crate::theme::rounded(12))
                     .inner_margin(Margin::symmetric(10, 0))
                     .show(ui, |ui| {

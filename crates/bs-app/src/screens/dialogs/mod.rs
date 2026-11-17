@@ -465,15 +465,32 @@ fn show_settings_inner(
         (outer.width() * 0.05).clamp(8.0, 56.0),
         (outer.height() * 0.07).clamp(8.0, 50.0),
     ));
-    ui.painter()
-        .rect_filled(outer, 0.0, Color32::from_rgb(0x08, 0x08, 0x0c));
-    ui.painter().rect(
-        window,
-        crate::theme::rounded(16),
-        theme::bg_rail(),
-        egui::Stroke::new(1.0, theme::border()),
-        egui::StrokeKind::Inside,
-    );
+    if theme::glass() {
+        // Стекло: за окном та же подложка со свечением, слегка затемнённая.
+        theme::paint_backdrop(ui);
+        ui.painter()
+            .rect_filled(outer, 0.0, Color32::from_black_alpha(70));
+        let frame = theme::floating(theme::bg_sidebar(), 16);
+        ui.painter()
+            .add(frame.shadow.as_shape(window, frame.corner_radius));
+        ui.painter().rect(
+            window,
+            frame.corner_radius,
+            frame.fill,
+            frame.stroke,
+            egui::StrokeKind::Inside,
+        );
+    } else {
+        ui.painter()
+            .rect_filled(outer, 0.0, Color32::from_rgb(0x08, 0x08, 0x0c));
+        ui.painter().rect(
+            window,
+            crate::theme::rounded(16),
+            theme::bg_rail(),
+            egui::Stroke::new(1.0, theme::border()),
+            egui::StrokeKind::Inside,
+        );
+    }
     let mut ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(window.shrink(1.0))
@@ -530,8 +547,12 @@ fn show_settings_inner(
 fn nav_profile(ui: &mut egui::Ui, me: &User) {
     let name = user_display_name(me.display_name.as_deref(), &me.username);
     egui::Frame::new()
-        .fill(theme::bg_sidebar())
-        .stroke(egui::Stroke::new(1.0, theme::border()))
+        .fill(theme::surface(theme::bg_sidebar()))
+        .stroke(if theme::glass() {
+            theme::glass_stroke()
+        } else {
+            egui::Stroke::new(1.0, theme::border())
+        })
         .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::symmetric(12, 10))
         .show(ui, |ui| {
@@ -616,8 +637,12 @@ fn settings_nav(
     nav_profile(ui, me);
     ui.add_space(10.0);
     egui::Frame::new()
-        .fill(theme::bg_sidebar())
-        .stroke(egui::Stroke::new(1.0, theme::border()))
+        .fill(theme::surface(theme::bg_sidebar()))
+        .stroke(if theme::glass() {
+            theme::glass_stroke()
+        } else {
+            egui::Stroke::new(1.0, theme::border())
+        })
         .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::symmetric(8, 12))
         .show(ui, |ui| {
@@ -706,8 +731,16 @@ fn sidebar_item(ui: &mut egui::Ui, label: &str, color: egui::Color32) -> egui::R
 /// Карточка раздела: подложка с тонкой рамкой.
 pub(super) fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
-        .fill(theme::bg_sidebar())
-        .stroke(egui::Stroke::new(1.0, theme::border()))
+        .fill(if theme::glass() {
+            theme::inset()
+        } else {
+            theme::bg_sidebar()
+        })
+        .stroke(if theme::glass() {
+            theme::glass_stroke()
+        } else {
+            egui::Stroke::new(1.0, theme::border())
+        })
         .corner_radius(crate::theme::rounded(10))
         .inner_margin(Margin::same(16))
         .show(ui, |ui| {

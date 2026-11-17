@@ -735,17 +735,13 @@ impl Composer {
         let row = self.row_state(draft, enabled, editing);
         let mut outgoing = None;
         let mut anchors = (None, None);
-        egui::Frame::new()
-            .fill(theme::bg_bubble())
-            .stroke(egui::Stroke::new(
-                1.0,
-                if dragging {
-                    theme::mint()
-                } else {
-                    theme::border()
-                },
-            ))
-            .corner_radius(crate::theme::rounded(16))
+        let frame = theme::floating(theme::bg_bubble(), 16);
+        let frame = if dragging {
+            frame.stroke(egui::Stroke::new(1.0, theme::mint()))
+        } else {
+            frame
+        };
+        frame
             .inner_margin(Margin::symmetric(14, 10))
             .show(ui, |ui| {
                 self.frame_notes(ui, dragging, editing);
@@ -1005,10 +1001,7 @@ impl Composer {
             .fixed_pos(anchor.left_top() - Vec2::new(0.0, 8.0))
             .pivot(Align2::LEFT_BOTTOM)
             .show(ctx, |ui| {
-                egui::Frame::new()
-                    .fill(theme::bg_sidebar())
-                    .stroke(egui::Stroke::new(1.0, theme::border()))
-                    .corner_radius(crate::theme::rounded(12))
+                theme::floating(theme::bg_sidebar(), 12)
                     .inner_margin(Margin::same(6))
                     .show(ui, |ui| {
                         ui.set_width(220.0);
@@ -1065,10 +1058,7 @@ impl Composer {
             .fixed_pos(pos)
             .pivot(Align2::RIGHT_BOTTOM)
             .show(ctx, |ui| {
-                egui::Frame::new()
-                    .fill(theme::bg_sidebar())
-                    .stroke(egui::Stroke::new(1.0, theme::border()))
-                    .corner_radius(crate::theme::rounded(14))
+                theme::floating(theme::bg_sidebar(), 14)
                     .inner_margin(Margin::same(10))
                     .show(ui, |ui| {
                         ui.set_min_size(PICKER_SIZE);

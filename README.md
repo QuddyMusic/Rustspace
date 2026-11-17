@@ -90,9 +90,12 @@ every WebSocket frame and REST response the client receives.
   key release) on X11, Windows and macOS, and on Wayland through the XDG GlobalShortcuts
   portal (shortcuts are assigned in the system settings); inside the window the hotkeys
   always work.
-- **Look and feel.** Six built-in themes, custom accent, editing any colour, corner radius
-  (the whole window is made of rounded modules that follow it), compact mode, JSON theme
-  import/export, UI scale. Interface sounds from the original.
+- **Look and feel.** Eight built-in themes; the default, **Oxide**, and **Oxide Light** are
+  *glass* themes: translucent panels over a soft two-colour glow, glass composer, menus and
+  dialogs. Glass is part of the theme — panel opacity, glow strength and glow colours (with
+  ready-made pairs) are set in *Appearance* and travel with the theme's JSON file. Also: custom
+  accent, editing any colour, corner radius (the whole window is made of rounded modules that
+  follow it), compact mode, JSON theme import/export, UI scale. Interface sounds from the original.
   System notifications by the original's rules (levels, mutes, DND, mentions).
 - **Languages.** Russian and English built in, switchable live; any other language can be
   added as a JSON catalog in `<config dir>/locales/<code>.json` (see *Settings → Language*).
@@ -121,7 +124,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
 | `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, system audio, data-channel signals | 68 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 241 |
+| `bs-app` | The GUI and its entry point | 242 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
 | `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 128 |
