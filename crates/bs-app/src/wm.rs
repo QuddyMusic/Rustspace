@@ -1,0 +1,193 @@
+//! Как спрятать окно под тайлинговыми композиторами Wayland.
+//!
+//! Протокол Wayland не умеет прятать окно, а «свернуть» тайлинговые
+//! композиторы (Hyprland, Sway) просто игнорируют. Зато у них есть IPC:
+//! окно можно убрать на скрытый спецворкспейс Hyprland или в scratchpad Sway
+//! и вернуть обратно на текущий рабочий стол. Окно ищем по PID процесса.
+
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
+use std::time::Duration;
+
+/// Спецворкспейс Hyprland, куда прячется окно.
+const SPECIAL: &str = "special:rustspace";
+
+/// Композитор, которому можно приказать спрятать окно.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Wm {
+    /// Hyprland: путь к командному сокету.
+    Hyprland(PathBuf),
+    /// Sway: путь к сокету i3-IPC.
+    Sway(PathBuf),
+}
+
+impl Wm {
+    /// Композитор текущего сеанса, если он из поддерживаемых.
+    pub(crate) fn detect() -> Option<Self> {
+        let env = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+        if let Some(signature) = env("HYPRLAND_INSTANCE_SIGNATURE") {
+            // Новые версии держат сокет в XDG_RUNTIME_DIR, старые — в /tmp.
+            let mut candidates = Vec::new();
+            if let Some(runtime) = env("XDG_RUNTIME_DIR") {
+                candidates.push(PathBuf::from(runtime).join("hypr"));
+            }
+            candidates.push(PathBuf::from("/tmp/hypr"));
+            return candidates
+                .into_iter()
+                .map(|dir| dir.join(&signature).join(".socket.sock"))
+                .find(|path| path.exists())
+                .map(Self::Hyprland);
+        }
+        env("SWAYSOCK").map(|path| Self::Sway(PathBuf::from(path)))
+    }
+
+    /// Спрятать окно этого процесса. `false` — не вышло.
+    pub(crate) fn hide(&self) -> bool {
+        let pid = std::process::id();
+        match self {
+            Self::Hyprland(socket) => hypr(
+                socket,
+                &format!("dispatch movetoworkspacesilent {SPECIAL},pid:{pid}"),
+            )
+            .is_some_and(|reply| reply.trim() == "ok"),
+            Self::Sway(socket) => sway_ok(socket, &format!("[pid={pid}] move scratchpad")),
+        }
+    }
+
+    /// Вернуть окно на текущий рабочий стол и дать ему фокус.
+    pub(crate) fn show(&self) -> bool {
+        let pid = std::process::id();
+        match self {
+            Self::Hyprland(socket) => {
+                let Some(workspace) = hypr(socket, "j/activeworkspace")
+                    .and_then(|reply| serde_json::from_str::<serde_json::Value>(&reply).ok())
+                    .and_then(|value| value.get("id").and_then(serde_json::Value::as_i64))
+                else {
+                    return false;
+                };
+                let moved = hypr(
+                    socket,
+                    &format!("dispatch movetoworkspacesilent {workspace},pid:{pid}"),
+                )
+                .is_some_and(|reply| reply.trim() == "ok");
+                let _ = hypr(socket, &format!("dispatch focuswindow pid:{pid}"));
+                moved
+            }
+            // `scratchpad show` у окна в scratchpad показывает его поверх
+            // текущего стола; `floating disable` возвращает в раскладку.
+            Self::Sway(socket) => sway_ok(
+                socket,
+                &format!("[pid={pid}] scratchpad show, floating disable, focus"),
+            ),
+        }
+    }
+}
+
+/// Одна команда в сокет Hyprland: ответ целиком.
+fn hypr(socket: &PathBuf, command: &str) -> Option<String> {
+    let mut stream = UnixStream::connect(socket).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .ok()?;
+    stream.write_all(command.as_bytes()).ok()?;
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply).ok()?;
+    Some(reply)
+}
+
+/// Тип сообщения i3-IPC «выполнить команду».
+const I3_RUN_COMMAND: u32 = 0;
+const I3_MAGIC: &[u8; 6] = b"i3-ipc";
+
+/// Сообщение i3-IPC: магия, длина и тип (native-endian), тело.
+fn i3_frame(kind: u32, body: &str) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(14 + body.len());
+    frame.extend_from_slice(I3_MAGIC);
+    frame.extend_from_slice(&u32::try_from(body.len()).unwrap_or(0).to_ne_bytes());
+    frame.extend_from_slice(&kind.to_ne_bytes());
+    frame.extend_from_slice(body.as_bytes());
+    frame
+}
+
+/// Команда Sway; `true`, если все её части выполнились.
+fn sway_ok(socket: &PathBuf, command: &str) -> bool {
+    let reply = (|| {
+        let mut stream = UnixStream::connect(socket).ok()?;
+        stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+        stream.write_all(&i3_frame(I3_RUN_COMMAND, command)).ok()?;
+        let mut header = [0_u8; 14];
+        stream.read_exact(&mut header).ok()?;
+        if &header[..6] != I3_MAGIC {
+            return None;
+        }
+        let length = u32::from_ne_bytes(header[6..10].try_into().ok()?);
+        let mut body = vec![0_u8; usize::try_from(length).ok()?];
+        stream.read_exact(&mut body).ok()?;
+        serde_json::from_slice::<Vec<serde_json::Value>>(&body).ok()
+    })();
+    reply.is_some_and(|results| {
+        !results.is_empty()
+            && results
+                .iter()
+                .all(|result| result.get("success") == Some(&serde_json::Value::Bool(true)))
+    })
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "тесты")]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+
+    #[test]
+    fn i3_frame_layout() {
+        let frame = i3_frame(0, "nop");
+        assert_eq!(&frame[..6], b"i3-ipc");
+        assert_eq!(u32::from_ne_bytes(frame[6..10].try_into().expect("len")), 3);
+        assert_eq!(&frame[14..], b"nop");
+    }
+
+    /// Поддельный Hyprland: записывает команды и отвечает как настоящий.
+    #[test]
+    fn hyprland_hide_and_show() {
+        let dir = std::env::temp_dir().join(format!("rs-wm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join(".socket.sock");
+        let listener = UnixListener::bind(&path).expect("bind");
+        let server = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for _ in 0..4 {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut buf = [0_u8; 256];
+                let n = stream.read(&mut buf).expect("read");
+                let command = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let reply = if command == "j/activeworkspace" {
+                    r#"{"id": 3, "name": "3"}"#
+                } else {
+                    "ok"
+                };
+                stream.write_all(reply.as_bytes()).expect("write");
+                seen.push(command);
+            }
+            seen
+        });
+        let wm = Wm::Hyprland(path);
+        assert!(wm.hide());
+        assert!(wm.show());
+        let seen = server.join().expect("join");
+        let pid = std::process::id();
+        assert_eq!(
+            seen,
+            [
+                format!("dispatch movetoworkspacesilent special:rustspace,pid:{pid}"),
+                "j/activeworkspace".to_owned(),
+                format!("dispatch movetoworkspacesilent 3,pid:{pid}"),
+                format!("dispatch focuswindow pid:{pid}"),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

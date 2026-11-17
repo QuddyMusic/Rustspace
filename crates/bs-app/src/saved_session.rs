@@ -26,8 +26,51 @@ pub(crate) struct SavedSession {
     pub(crate) transport: TransportPolicy,
 }
 
+/// Имя каталога настроек.
+const DIR_NAME: &str = "rustspace";
+/// Имя каталога настроек до переименования в Rustspace.
+const LEGACY_DIR_NAME: &str = "backspace-rs";
+
 /// Каталог настроек приложения (`None`, если домашний каталог неизвестен).
 pub(crate) fn config_dir() -> Option<PathBuf> {
+    config_base().map(|base| base.join(DIR_NAME))
+}
+
+/// Каталог настроек со старым именем.
+fn legacy_config_dir() -> Option<PathBuf> {
+    config_base().map(|base| base.join(LEGACY_DIR_NAME))
+}
+
+/// Переносит настройки из каталога со старым именем, если нового ещё нет.
+pub(crate) fn migrate_legacy_dir() {
+    let (Some(new), Some(old)) = (config_dir(), legacy_config_dir()) else {
+        return;
+    };
+    if new.exists() || !old.is_dir() {
+        return;
+    }
+    match std::fs::rename(&old, &new) {
+        Ok(()) => {
+            tracing::info!(from = %old.display(), to = %new.display(), "настройки перенесены");
+        }
+        Err(err) => {
+            tracing::warn!(%err, "не удалось перенести настройки из старого каталога");
+        }
+    }
+}
+
+/// Запись хранилища ключей со старым именем каталога в пути (`None` — путь
+/// не из каталога настроек).
+#[cfg_attr(test, allow(dead_code, reason = "keyring в тестах отключён"))]
+fn legacy_account(account: &str) -> Option<String> {
+    let new = config_dir()?.display().to_string();
+    let old = legacy_config_dir()?.display().to_string();
+    account
+        .contains(&new)
+        .then(|| account.replacen(&new, &old, 1))
+}
+
+fn config_base() -> Option<PathBuf> {
     let var = |name: &str| {
         std::env::var_os(name)
             .filter(|v| !v.is_empty())
@@ -40,7 +83,7 @@ pub(crate) fn config_dir() -> Option<PathBuf> {
     } else {
         var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|h| h.join(".config")))?
     };
-    Some(base.join("backspace-rs"))
+    Some(base)
 }
 
 /// Путь к файлу сессии по умолчанию.
@@ -160,13 +203,27 @@ fn session_account(path: &Path) -> String {
 /// В тестах отключено: они не должны трогать настоящий keyring пользователя,
 /// поэтому всегда идёт запасной путь — файл.
 pub(crate) mod keystore {
-    const SERVICE: &str = "backspace-rs";
+    const SERVICE: &str = "rustspace";
+    /// Имя службы до переименования: секреты оттуда переезжают при чтении.
+    #[cfg(not(test))]
+    const LEGACY_SERVICE: &str = "backspace-rs";
 
     #[cfg(not(test))]
     fn entry(account: &str) -> Option<keyring::Entry> {
         keyring::Entry::new(SERVICE, account)
             .map_err(|err| tracing::debug!(%err, "keyring недоступен"))
             .ok()
+    }
+
+    /// Секрет, сохранённый до переименования; переносится под новое имя.
+    #[cfg(not(test))]
+    fn take_legacy(account: &str) -> Option<zeroize::Zeroizing<String>> {
+        let old = keyring::Entry::new(LEGACY_SERVICE, &super::legacy_account(account)?).ok()?;
+        let secret = zeroize::Zeroizing::new(old.get_password().ok()?);
+        if set(account, &secret) {
+            let _ = old.delete_credential();
+        }
+        Some(secret)
     }
 
     /// Сохраняет секрет; `false` — хранилища нет, нужен запасной путь.
@@ -184,11 +241,13 @@ pub(crate) mod keystore {
     /// Читает секрет.
     #[cfg(not(test))]
     pub(crate) fn get(account: &str) -> Option<zeroize::Zeroizing<String>> {
-        entry(account)?
-            .get_password()
-            .map(zeroize::Zeroizing::new)
-            .map_err(|err| tracing::warn!(%err, "секрет в keyring не найден"))
-            .ok()
+        match entry(account)?.get_password() {
+            Ok(secret) => Some(zeroize::Zeroizing::new(secret)),
+            Err(err) => take_legacy(account).or_else(|| {
+                tracing::warn!(%err, "секрет в keyring не найден");
+                None
+            }),
+        }
     }
 
     /// Стирает секрет.

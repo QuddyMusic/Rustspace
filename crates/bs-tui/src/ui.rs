@@ -55,7 +55,7 @@ fn instance_label(origin: &Origin) -> String {
 
 /// Верхняя строка: название и подключённый инстанс (он всегда один).
 fn header_line(app: &App) -> Line<'static> {
-    let mut spans: Vec<Span<'static>> = vec![Span::raw("backspace-rs TUI")];
+    let mut spans: Vec<Span<'static>> = vec![Span::raw("rustspace TUI")];
     if app.has_instances() {
         spans.push(Span::raw(" — "));
         spans.push(Span::styled(

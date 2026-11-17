@@ -14,9 +14,9 @@ use egui::{Color32, Painter, Pos2, Stroke, Vec2};
 /// Название продукта.
 pub(crate) const NAME: &str = "Rustspace";
 /// Репозиторий Rustspace: исходный код, выпуски, сообщения об ошибках.
-pub(crate) const REPOSITORY: &str = "https://github.com/QuddyMusic/backspace-rs";
+pub(crate) const REPOSITORY: &str = "https://github.com/QuddyMusic/Rustspace";
 /// Тот же репозиторий как `owner/repo` — для проверки обновлений.
-pub(crate) const UPDATE_REPO: &str = "QuddyMusic/backspace-rs";
+pub(crate) const UPDATE_REPO: &str = "QuddyMusic/Rustspace";
 /// Официальный репозиторий оригинального Backspace, на котором основан
 /// Rustspace.
 pub(crate) const UPSTREAM: &str = "https://github.com/TheZwiss/backspace";

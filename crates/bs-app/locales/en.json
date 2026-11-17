@@ -1116,7 +1116,6 @@
   "Этот сервер": "This server",
   "Доступна версия {version}": "Version {version} is available",
   "Не удалось проверить: {err}": "Check failed: {err}",
-  "Нужен вид owner/repo, например owner/backspace-rs": "Use the owner/repo form, e.g. owner/backspace-rs",
   "Предварительные версии": "Pre-releases",
   "Предлагать и бета-выпуски.": "Offer beta releases too.",
   "Проверить сейчас": "Check now",
@@ -1211,5 +1210,6 @@
   "Переписка не зашифрована: её может прочитать администратор сервера. Шифрование можно включить.": "This conversation is not encrypted: the server admin can read it. You can turn encryption on.",
   "Переписка не зашифрована: у собеседника с другого инстанса нет ключа — его сервер или клиент, похоже, не поддерживает шифрование.": "This conversation is not encrypted: the other person is on another instance and has no key — their server or client probably does not support encryption.",
   "Переписка не зашифрована: собеседник ещё не опубликовал ключ шифрования.": "This conversation is not encrypted: the other person has not published an encryption key yet.",
-  "Репозиторий Backspace": "Backspace repository"
+  "Репозиторий Backspace": "Backspace repository",
+  "Нужен вид owner/repo, например owner/rustspace": "Use the owner/repo form, e.g. owner/rustspace"
 }

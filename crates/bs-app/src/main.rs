@@ -19,6 +19,8 @@ mod brand;
 mod bridge;
 mod clipboard;
 mod desktop;
+#[cfg(target_os = "linux")]
+mod desktop_entry;
 mod dmcall;
 mod download;
 mod emoji_data;
@@ -51,10 +53,12 @@ mod video_media;
 mod voice;
 mod voice_media;
 mod widgets;
+#[cfg(target_os = "linux")]
+mod wm;
 
 /// Идентификатор приложения: app_id окна Wayland, имя .desktop-файла и имя
 /// для порталов (без точек портал его не примет).
-pub(crate) const APP_ID: &str = "dev.backspace_rs.BackspaceRs";
+pub(crate) const APP_ID: &str = "io.github.quddymusic.Rustspace";
 
 fn main() -> eframe::Result {
     tracing_subscriber::fmt()
@@ -68,6 +72,9 @@ fn main() -> eframe::Result {
             }),
         )
         .init();
+    saved_session::migrate_legacy_dir();
+    #[cfg(target_os = "linux")]
+    desktop_entry::ensure();
 
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
@@ -84,7 +91,7 @@ fn main() -> eframe::Result {
         // Совпадает с StartupWMClass в .desktop: окно получает иконку панели.
         .with_app_id(APP_ID);
     match eframe::icon_data::from_png_bytes(include_bytes!(
-        "../../../packaging/linux/backspace-rs.png"
+        "../../../packaging/linux/rustspace.png"
     )) {
         Ok(icon) => viewport = viewport.with_icon(icon),
         Err(err) => tracing::warn!(%err, "иконка окна не загружена"),

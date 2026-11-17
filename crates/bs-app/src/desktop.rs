@@ -134,6 +134,11 @@ pub(crate) struct Desktop {
     keys: Option<global::Keys>,
     #[cfg(all(feature = "tray", not(target_os = "linux")))]
     _icon: Option<tray_icon::TrayIcon>,
+    /// Тайлинговый композитор, умеющий прятать окно по IPC.
+    #[cfg(target_os = "linux")]
+    wm: Option<crate::wm::Wm>,
+    /// Окно спрятано через IPC композитора (не свёрнуто).
+    wm_hidden: bool,
 }
 
 impl std::fmt::Debug for Desktop {
@@ -150,6 +155,10 @@ impl Desktop {
     pub(crate) fn start(ctx: &egui::Context) -> Self {
         #[allow(unused_mut, reason = "без настольных флагов менять нечего")]
         let mut desktop = Self::default();
+        #[cfg(target_os = "linux")]
+        {
+            desktop.wm = crate::wm::Wm::detect();
+        }
         #[cfg(feature = "tray")]
         desktop.start_tray(ctx);
         #[cfg(all(feature = "global-hotkeys", target_os = "linux"))]
@@ -257,6 +266,7 @@ impl Desktop {
         // Под Wayland свёрнутое окно возвращают с панели задач, не из трея.
         if self.hidden && is_wayland() && ctx.input(|i| i.viewport().focused == Some(true)) {
             self.hidden = false;
+            self.wm_hidden = false;
         }
         let close = ctx.input(|i| i.viewport().close_requested());
         if close && self.tray && close_to_tray && !self.quitting {
@@ -268,6 +278,13 @@ impl Desktop {
 
     fn show(&mut self, ctx: &egui::Context) {
         self.hidden = false;
+        #[cfg(target_os = "linux")]
+        if std::mem::take(&mut self.wm_hidden)
+            && let Some(wm) = &self.wm
+            && wm.show()
+        {
+            return;
+        }
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -278,9 +295,17 @@ impl Desktop {
             return;
         }
         self.hidden = true;
+        // Тайлинговые композиторы не сворачивают окна: прячем через их IPC.
+        #[cfg(target_os = "linux")]
+        if let Some(wm) = &self.wm
+            && wm.hide()
+        {
+            self.wm_hidden = true;
+            return;
+        }
         if is_wayland() {
             // Протокол Wayland не умеет прятать окно (winit игнорирует
-            // Visible(false)), поэтому окно сворачивается, а Backspace
+            // Visible(false)), поэтому окно сворачивается, а Rustspace
             // продолжает работать.
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         } else {
@@ -361,7 +386,7 @@ mod tray {
     }
 
     pub(super) fn build() -> Result<TrayIcon, String> {
-        let png = include_bytes!("../../../packaging/linux/backspace-rs.png");
+        let png = include_bytes!("../../../packaging/linux/rustspace.png");
         let data = eframe::icon_data::from_png_bytes(png).map_err(|err| err.to_string())?;
         let icon =
             Icon::from_rgba(data.rgba, data.width, data.height).map_err(|err| err.to_string())?;

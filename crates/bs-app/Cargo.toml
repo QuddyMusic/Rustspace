@@ -5,13 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Rustspace — неофициальный клиент на Rust, совместимый с Backspace (GUI)"
-homepage = "https://github.com/QuddyMusic/backspace-rs"
+homepage = "https://github.com/QuddyMusic/Rustspace"
 
 [lints]
 workspace = true
 
 [[bin]]
-name = "backspace-rs"
+name = "rustspace"
 path = "src/main.rs"
 
 # Упаковка: `cargo packager --release -p bs-app --formats deb,appimage`
@@ -19,20 +19,20 @@ path = "src/main.rs"
 [package.metadata.packager]
 product-name = "Rustspace"
 authors = ["Rustspace contributors"]
-identifier = "io.github.quddymusic.backspace-rs"
+identifier = "io.github.quddymusic.rustspace"
 category = "SocialNetworking"
 description = "Rustspace: неофициальный клиент, совместимый с Backspace (чат, ЛС, пространства и голос)"
-icons = ["../../packaging/linux/backspace-rs.png"]
+icons = ["../../packaging/linux/rustspace.png"]
 before-packaging-command = "cargo build --release -p bs-app --features voice"
 out-dir = "../../target/packages"
-binaries = [{ path = "backspace-rs", main = true }]
+binaries = [{ path = "rustspace", main = true }]
 
 [package.metadata.packager.deb]
 # libasound — звук, libdbus — хранилище ключей и уведомления, libxkbcommon/
 # libwayland/libGL — окно. libwebrtc вшита статически.
 depends = ["libasound2 | libasound2t64", "libdbus-1-3", "libxkbcommon0", "libwayland-client0", "libgl1"]
 section = "net"
-desktop-template = "../../packaging/linux/dev.backspace_rs.BackspaceRs.desktop"
+desktop-template = "../../packaging/linux/io.github.quddymusic.Rustspace.desktop"
 
 [package.metadata.packager.appimage]
 bins = []

@@ -200,7 +200,7 @@ struct GhAsset {
 
 async fn fetch(repo: &str, prereleases: bool) -> Result<Option<Release>, String> {
     let client = reqwest::Client::builder()
-        .user_agent(concat!("backspace-rs/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("rustspace/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|err| err.to_string())?;
@@ -294,7 +294,9 @@ fn asset_for_this_system(assets: &[GhAsset]) -> Option<String> {
                 .extension()
                 .and_then(std::ffi::OsStr::to_str)
                 .unwrap_or_default();
+            // В тех же релизах лежат архивы сервера — они не для клиента.
             !matches!(extension, "sha256" | "sig" | "asc")
+                && !name.contains("server")
                 && os_words.iter().any(|w| name.contains(w))
                 && !foreign_arch.iter().any(|w| name.contains(w))
         })
@@ -337,6 +339,7 @@ mod tests {
     #[test]
     fn repo_must_be_owner_slash_name() {
         assert!(valid_repo("quddy/backspace-rs"));
+        assert!(valid_repo("QuddyMusic/rustspace"));
         assert!(!valid_repo("quddy"));
         assert!(!valid_repo("a/b/c"));
         assert!(!valid_repo("https://github.com/a/b"));
@@ -372,17 +375,18 @@ mod tests {
             "v1.0.0",
             false,
             &[
-                "backspace-rs-1.0.0-windows-x86_64.zip",
-                "backspace-rs-1.0.0-macos-aarch64.dmg",
-                "backspace-rs-1.0.0-linux-x86_64.tar.gz",
-                "backspace-rs-1.0.0-linux-aarch64.tar.gz",
-                "backspace-rs-1.0.0-linux-x86_64.tar.gz.sha256",
+                "rustspace-server-1.0.0-linux-x86_64-musl.tar.gz",
+                "rustspace-1.0.0-windows-x86_64.zip",
+                "rustspace-1.0.0-macos-aarch64.dmg",
+                "rustspace-1.0.0-linux-x86_64.tar.gz",
+                "rustspace-1.0.0-linux-aarch64.tar.gz",
+                "rustspace-1.0.0-linux-x86_64.tar.gz.sha256",
             ],
         )
         .assets;
         let picked = asset_for_this_system(&assets).expect("файл");
         if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            assert!(picked.ends_with("linux-x86_64.tar.gz"));
+            assert!(picked.ends_with("rustspace-1.0.0-linux-x86_64.tar.gz"));
         }
     }
 }

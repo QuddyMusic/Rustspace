@@ -378,7 +378,7 @@ impl ChatScreen {
                 ));
             }
             Nav::Settings => {
-                if let Some(cache) = bridge.cache() {
+                if let Some(cache) = bridge.cache_at(0) {
                     self.settings = Some(SettingsState::from_user(cache.me()));
                 }
             }
@@ -602,7 +602,15 @@ impl ChatScreen {
         }
 
         if let Some(state) = self.settings.as_mut() {
-            match dialogs::show_settings(ui, state, bridge, &mut self.voice) {
+            // Профиль и настройки аккаунта живут на домашнем инстансе: на
+            // остальных учётная запись — федеративная копия, и сервер там
+            // отказывает в правке имени (`profile_managed_by_home`). Домашний
+            // сервер сам разошлёт изменения копиям.
+            let focus = bridge.focus_index();
+            bridge.focus_on(0);
+            let outcome = dialogs::show_settings(ui, state, bridge, &mut self.voice);
+            bridge.focus_on(focus);
+            match outcome {
                 SettingsAction::None => {}
                 SettingsAction::Close => self.settings = None,
                 SettingsAction::Logout => {

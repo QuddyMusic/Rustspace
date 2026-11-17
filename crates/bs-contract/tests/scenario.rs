@@ -785,7 +785,7 @@ async fn full_client_scenario_against_real_server() {
 }
 
 fn render(findings: &Findings) -> String {
-    let mut out = String::from("Контрактный отчёт backspace-rs\n\n");
+    let mut out = String::from("Контрактный отчёт Rustspace\n\n");
     section(&mut out, "Ошибки разбора", findings.parse_errors.iter());
     section(
         &mut out,

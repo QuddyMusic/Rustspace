@@ -20,7 +20,7 @@ use crate::error::ApiError;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// User-Agent, которым клиент представляется серверу.
-pub const USER_AGENT: &str = concat!("backspace-rs/", env!("CARGO_PKG_VERSION"));
+pub const USER_AGENT: &str = concat!("rustspace/", env!("CARGO_PKG_VERSION"));
 
 /// Максимальный размер тела ответа, который клиент согласен прочитать.
 ///

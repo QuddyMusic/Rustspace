@@ -197,7 +197,7 @@ pub(crate) fn about(ui: &mut egui::Ui, bridge: &crate::fleet::Bridge) {
         let repo = prefs.repo.trim();
         if !repo.is_empty() && !updates::valid_repo(repo) {
             ui.label(
-                theme::muted(tr("Нужен вид owner/repo, например owner/backspace-rs"))
+                theme::muted(tr("Нужен вид owner/repo, например owner/rustspace"))
                     .color(theme::rose()),
             );
         }
