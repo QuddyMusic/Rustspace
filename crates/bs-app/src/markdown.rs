@@ -421,10 +421,12 @@ impl Inline<'_> {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
         let name = valid.then(|| (self.name_of)(id)).flatten()?;
-        Some((
-            end + 3,
-            vec![Span::of(format!("@{name}"), Kind::Mention, self.style)],
-        ))
+        let mut span = Span::of(format!("@{name}"), Kind::Mention, self.style);
+        // Упоминание человека (не роли) можно открыть щелчком.
+        if !id.starts_with('&') {
+            span.url = Some(format!("user:{id}"));
+        }
+        Some((end + 3, vec![span]))
     }
 
     /// `@everyone` и `@here` отдельным словом.

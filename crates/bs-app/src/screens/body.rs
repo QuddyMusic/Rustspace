@@ -109,12 +109,15 @@ fn show_span(ui: &mut egui::Ui, salt: &str, index: usize, span: &Span, look: Loo
             .on_hover_text(url);
         }
         Kind::Mention => {
-            ui.label(
+            let response = ui.label(
                 RichText::new(&span.text)
                     .color(theme::text_bright())
                     .family(theme::bold_family())
                     .background_color(theme::accent().gamma_multiply(0.45)),
             );
+            if let Some(user) = span.url.as_deref().and_then(|u| u.strip_prefix("user:")) {
+                remember_mention(ui.ctx(), response.rect, user);
+            }
         }
         Kind::Spoiler => {
             let id = ui.make_persistent_id((salt, index, "spoiler"));
@@ -137,6 +140,33 @@ fn show_span(ui: &mut egui::Ui, salt: &str, index: usize, span: &Span, look: Loo
             }
         }
     }
+}
+
+fn mention_id() -> egui::Id {
+    egui::Id::unique("mention_hits")
+}
+
+/// Где на экране в этом кадре нарисованы упоминания людей. Строку
+/// сообщения перекрывает её собственный отклик, поэтому щелчок по
+/// упоминанию разбирает лента — по этим прямоугольникам.
+fn remember_mention(ctx: &egui::Context, rect: egui::Rect, user: &str) {
+    let frame = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| {
+        let list = d.get_temp_mut_or_default::<(u64, Vec<(egui::Rect, String)>)>(mention_id());
+        if list.0 != frame {
+            *list = (frame, Vec::new());
+        }
+        list.1.push((rect, user.to_owned()));
+    });
+}
+
+/// Упоминание человека под точкой `pos` (в этом или прошлом кадре).
+#[must_use]
+pub(crate) fn mention_at(ctx: &egui::Context, pos: egui::Pos2) -> Option<(egui::Rect, String)> {
+    ctx.data(|d| {
+        d.get_temp::<(u64, Vec<(egui::Rect, String)>)>(mention_id())
+            .and_then(|(_, list)| list.into_iter().find(|(rect, _)| rect.contains(pos)))
+    })
 }
 
 /// Делит отрезки по переводам строк.

@@ -617,10 +617,11 @@ impl ChatScreen {
         }
         self.jump_and_flash(ui, &response, rect, &row.id, flash_slot);
         if let Some(pos) = response.hover_pos()
-            && hits
+            && (hits
                 .reply
                 .as_ref()
                 .is_some_and(|(quote, _)| quote.contains(pos))
+                || crate::screens::body::mention_at(ui.ctx(), pos).is_some())
         {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
@@ -736,6 +737,21 @@ impl ChatScreen {
     ) {
         if let Some((_, id)) = hits.reply.as_ref().filter(|(rect, _)| rect.contains(pos)) {
             self.reply_jump = Some(id.clone());
+            return;
+        }
+        // @упоминание: профиль рядом с ним, повторный щелчок закрывает.
+        if let Some((rect, user)) = crate::screens::body::mention_at(ui.ctx(), pos) {
+            if self.profile.as_ref().is_some_and(|p| p.is_of(&user)) {
+                self.profile = None;
+            } else {
+                let name = self.names.get(&user).cloned().unwrap_or_default();
+                self.profile = Some(crate::screens::profile::ProfileState::open_at(
+                    bridge,
+                    &user,
+                    &name,
+                    crate::screens::profile::Anchor::Beside(rect),
+                ));
+            }
             return;
         }
         if let Some((_, click)) = hits.downloads.iter().find(|(rect, _)| rect.contains(pos)) {
