@@ -68,6 +68,10 @@ original server.
 - **Chat header**: channel notification settings and a downloads list; attachment previews
   and retry before sending; pinned messages with previews and a list of all pins; bookmarks
   across instances (kept on the device where the server has none).
+- **Server admin**: live CPU, memory and load, disks with free space, backups with sizes,
+  on-demand backups, backups and user files on another disk (local, NFS, SMB, WebDAV mounts);
+  polled only while the section is open. Roles in the mini-profile, account-wide favourites,
+  frequent emoji.
 - **Releases**: Windows 10/11, Linux (tar.gz, deb, AppImage, Arch package), macOS (Apple
   Silicon and Intel, dmg), static server builds that the server's updater picks up; CI green
   on Linux, Windows and macOS.

@@ -107,7 +107,8 @@ every WebSocket frame and REST response the client receives.
   next message.
 - **Files and media.** Uploads with progress, a preview of every staged picture and **Retry**
   for a failed upload, image viewer, downloading attachments (one or all; the **Downloads**
-  button in the chat header lists them with progress and *Open folder*), avatars, banners, stickers and sticker packs (make your own, fill and reorder them, add
+  button in the chat header lists them with progress and thumbnails, opens a file on click and
+  can *Show in folder*), avatars, banners, stickers and sticker packs (make your own, fill and reorder them, add
   someone's open pack from a sticker in chat), GIFs (Klipy search, favourites). An attachment can be
   hidden under a **spoiler** (the eye on the staged file): the picture is blurred until
   clicked. The mark travels as Discord's `SPOILER_` file-name prefix, so it works on any
@@ -586,6 +587,17 @@ systemd or the `rustspace-updater` service on OpenRC) then:
    otherwise it puts back the old binary and the database.
 
 The client shows each step. `setup.sh --no-updater` leaves the helper out.
+
+The same section shows the server's state while it is open (nothing is polled otherwise):
+CPU, memory, load, users online, database size, every disk with free space and what lives
+there, and the backups with their sizes. The helper takes more requests
+(`job-request.json`): back up now (database without stopping the server, optionally with user
+files), delete a backup, keep backups in another folder, and — from *Settings → Storage* —
+move user files to another disk (the server stops for the copy; the old files are deleted only
+after it starts again, otherwise everything is put back). Network storage (NFS, SMB, WebDAV)
+is mounted in the OS, e.g. in `/etc/fstab`; the client only picks the mount point. The helper
+re-checks every path and only creates its own `rustspace-backups` / `rustspace-uploads`
+folders. Re-running `setup.sh` keeps the chosen folders.
 
 ### Saved Messages, pins, bookmarks and NSFW
 
