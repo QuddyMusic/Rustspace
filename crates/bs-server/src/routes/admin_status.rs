@@ -27,7 +27,9 @@ type Outcome = Result<Response, ApiError>;
 /// Выпуски Rustspace: версия сервера — своя, обновления — оттуда же.
 const RELEASES_API: &str = "https://api.github.com/repos/QuddyMusic/Rustspace/releases/latest";
 const UPSTREAM_SOURCE: &str = crate::config::SOURCE_URL;
-const CACHE_TTL_MS: i64 = 6 * 3_600_000;
+/// Ответ GitHub держится 15 минут: свежий выпуск виден почти сразу, а
+/// без ключа GitHub даёт 60 запросов в час.
+const CACHE_TTL_MS: i64 = 15 * 60_000;
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 
 /// `[major, minor, patch]` из начала строки версии.

@@ -366,7 +366,7 @@ impl Session {
             }
             // `ready` после реконнекта пересобирает кэш без сообщений:
             // историю надо загрузить заново.
-            ServerEvent::Ready(_) => self.history.clear(),
+            ServerEvent::Ready(_) => self.after_ready(),
             ServerEvent::MessageCreated { message } => {
                 self.new_messages.push(NewMessage {
                     dm: false,
@@ -1144,6 +1144,16 @@ impl Session {
     /// Общий каталог других инстансов, если пришёл.
     pub(crate) fn directory(&self) -> Option<&Result<Vec<bs_api::DirectoryEntry>, String>> {
         self.directory.as_ref()
+    }
+
+    /// После `ready` (и реконнекта) история загружается заново, а сведения
+    /// об инстансе — тоже: сервер мог перезапуститься с новой версией
+    /// (обновление), и страница Rustspace должна её показать.
+    fn after_ready(&mut self) {
+        self.history.clear();
+        if self.instance_info.is_some() {
+            self.instance_info_asked = self.request(BridgeRequest::InstanceInfo);
+        }
     }
 
     /// Запрашивает сведения об инстансе один раз за сессию.

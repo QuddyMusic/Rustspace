@@ -300,8 +300,9 @@ fn forward_event(
     }
 }
 
-/// Картинки, скачивания, загрузки файлов идут параллельно в `jobs`.
-/// Остальные запросы возвращаются для обработки по очереди.
+/// Картинки, скачивания, загрузки файлов, настройки и прочие независимые
+/// чтения идут параллельно в `jobs`. Остальные запросы (сообщения, правки —
+/// там важен порядок) возвращаются для обработки по очереди.
 fn spawn_job(
     request: BridgeRequest,
     client: &bs_api::ApiClient,
@@ -382,6 +383,22 @@ fn spawn_job(
         BridgeRequest::SetImage { kind, name, bytes } => {
             jobs.spawn(async move {
                 let response = set_profile_image(&client, kind, &name, &bytes).await;
+                let _ = tx.send(response);
+            });
+        }
+        // Чтения и настройки, от которых ничего не ждёт очередь: не стоят
+        // за медленным запросом (проверка обновлений, мосты, история) —
+        // разделы настроек открываются сразу.
+        request @ (BridgeRequest::Admin(_)
+        | BridgeRequest::Extras(_)
+        | BridgeRequest::InstanceInfo
+        | BridgeRequest::Directory(_)
+        | BridgeRequest::GifEnabled
+        | BridgeRequest::Gifs { .. }
+        | BridgeRequest::Stickers
+        | BridgeRequest::Profile(_)) => {
+            jobs.spawn(async move {
+                let response = handle_request(&client, request).await;
                 let _ = tx.send(response);
             });
         }
