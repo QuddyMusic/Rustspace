@@ -220,6 +220,74 @@ pub fn post(
     Ok(message)
 }
 
+/// Записывает сообщение с карточками в личную переписку и рассылает его.
+///
+/// Только для переписок, которые не уходят наружу: через федерацию и личные
+/// мосты карточки не доходят, там клиент пишет их разметкой
+/// (`cards_unsupported`).
+///
+/// # Errors
+/// Не участник, переписка не годится, ошибка базы.
+pub fn post_dm(
+    tx: &mut dyn Tx,
+    out: &mut Outbox,
+    state: &AppState,
+    channel: &str,
+    author: &str,
+    content: Option<&str>,
+    cards: &[Card],
+) -> ApiResult<Value> {
+    if !crate::dm::is_member(tx, channel, author)? {
+        return Err(ApiError::forbidden("not_dm_member"));
+    }
+    if crate::dm::is_dead_one_on_one(tx, channel, author)? {
+        return Err(ApiError::forbidden("recipient_deleted"));
+    }
+    let outside = tx
+        .query_one(
+            "SELECT 1 AS one FROM dm_channels WHERE id = ? AND federated_id IS NOT NULL",
+            params![channel],
+        )?
+        .is_some()
+        || tx
+            .query_one(
+                "SELECT 1 AS one FROM bs_personal_chats WHERE dm_channel_id = ?",
+                params![channel],
+            )?
+            .is_some();
+    if outside {
+        return Err(ApiError::conflict("cards_unsupported"));
+    }
+    let id = state.ids.next();
+    let created = now_ms();
+    tx.execute(
+        "INSERT INTO dm_messages (id, dm_channel_id, user_id, content, created_at) \
+         VALUES (?, ?, ?, ?, ?)",
+        params![&id, channel, author, content.map(str::to_owned), created],
+    )?;
+    for card in cards {
+        tx.execute(
+            "INSERT INTO embeds (id, message_id, dm_message_id, url, embed_type, provider, title, \
+             description, image, embed_url, width, height, color, created_at) \
+             VALUES (?, NULL, ?, ?, 'generic', NULL, ?, ?, ?, NULL, NULL, NULL, ?, ?)",
+            params![
+                state.ids.next(),
+                &id,
+                card.url.clone().unwrap_or_default(),
+                &card.title,
+                &card.description,
+                &card.image,
+                &card.color,
+                created
+            ],
+        )?;
+    }
+    let row = crate::dm::message_row(tx, &id)?.ok_or_else(ApiError::internal)?;
+    let message = crate::dm::message_json(tx, &row)?.ok_or_else(ApiError::internal)?;
+    crate::dm::broadcast_message(tx, out, channel, &message)?;
+    Ok(message)
+}
+
 /// Пользователь-марионетка вебхука с именем `name`: находит или заводит,
 /// обновляя аватар. Под ним нельзя войти (пароль «!»).
 ///

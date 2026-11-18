@@ -26,7 +26,7 @@ use crate::messages::channel_space;
 use crate::ratelimit::Limit;
 use crate::state::{AppState, now_ms};
 use crate::util::str_field;
-use crate::webhooks::{cards, content, hook_json, new_token, post, puppet};
+use crate::webhooks::{cards, content, hook_json, new_token, post, post_dm, puppet};
 use crate::{params, perms};
 
 /// Вебхук — не больше 5 сообщений за 2 секунды с адреса (как у Discord).
@@ -258,5 +258,37 @@ pub async fn send_cards(
         .await?;
     let id = message["id"].as_str().unwrap_or_default().to_owned();
     crate::bridges::notify(&state, &id);
+    Ok((StatusCode::CREATED, Json(message)))
+}
+
+/// `POST /api/rustspace/dm/:id/cards` `{content?, embeds}` — сообщение с
+/// карточками в личной переписке (в том числе в «Избранном»).
+pub async fn send_dm_cards(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ClientIp(ip): ClientIp,
+    Path(channel): Path<String>,
+    JsonBody(body): JsonBody,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    state.limiter.check(HOOK_LIMIT, ip)?;
+    let content = content(&body)?;
+    let cards = cards(&body)?;
+    if cards.is_empty() {
+        return Err(ApiError::bad_request("message_empty"));
+    }
+    let app = state.clone();
+    let message = state
+        .run(move |tx, out| {
+            post_dm(
+                tx,
+                out,
+                &app,
+                &channel,
+                &user.id,
+                content.as_deref(),
+                &cards,
+            )
+        })
+        .await?;
     Ok((StatusCode::CREATED, Json(message)))
 }

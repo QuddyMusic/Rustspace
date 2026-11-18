@@ -143,17 +143,27 @@ impl ChatScreen {
         };
         let mut content = outgoing.content;
         if let Some(card) = outgoing.card {
-            if selected.kind == ChannelKind::Space {
+            let dm = selected.kind == ChannelKind::Dm;
+            // Зашифрованная переписка: карточка уходит разметкой обычным
+            // сообщением, иначе сервер увидел бы её открытым текстом.
+            if dm
+                && bridge
+                    .e2ee_status(selected.origin, &selected.channel)
+                    .enabled
+            {
+                content = bs_api::card_as_markdown(Some(&content), &card);
+            } else {
+                // Карточка идёт отдельным запросом и в канал, и в личную
+                // переписку; где сервер не умеет, мост пришлёт её разметкой.
                 let text = content.trim();
                 bridge.send_card(
                     selected.channel,
+                    dm,
                     (!text.is_empty()).then(|| text.to_owned()),
                     card,
                 );
                 return;
             }
-            // В личных сообщениях карточек нет: та же карточка разметкой.
-            content = bs_api::card_as_markdown(Some(&content), &card);
         }
         if !outgoing.keep_draft
             && let Some(edit) = self.edit.take()

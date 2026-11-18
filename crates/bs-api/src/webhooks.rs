@@ -111,6 +111,28 @@ impl ApiClient {
         .await?;
         Ok(())
     }
+
+    /// `POST /api/rustspace/dm/:id/cards` — карточки в личной переписке.
+    ///
+    /// # Errors
+    /// Не участник; переписка уходит наружу (409 `cards_unsupported`); сервер без
+    /// карточек в ЛС (404).
+    pub async fn send_dm_cards(
+        &self,
+        channel_id: &str,
+        content: Option<&str>,
+        cards: &[CardDraft],
+    ) -> Result<(), ApiError> {
+        self.post_json::<serde_json::Value, _>(
+            &format!("/api/rustspace/dm/{channel_id}/cards"),
+            &CardMessage {
+                content,
+                embeds: cards,
+            },
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 /// Битрейт голоса звонка (`GET /api/rustspace/voice-bitrate/:target`).
@@ -220,23 +242,33 @@ impl ApiClient {
 /// и для личных сообщений: заголовок (ссылкой, если есть), текст, картинка.
 #[must_use]
 pub fn card_as_markdown(content: Option<&str>, card: &CardDraft) -> String {
-    let mut lines: Vec<String> = Vec::new();
+    let mut out: Vec<String> = Vec::new();
     if let Some(content) = content.map(str::trim).filter(|c| !c.is_empty()) {
-        lines.push(content.to_owned());
+        out.push(content.to_owned());
     }
+    // Карточка — цитатой: так у неё остаётся полоса слева и в нашем клиенте,
+    // и в веб-клиенте оригинала (цвет полосы разметкой не передать).
+    let mut card_lines: Vec<String> = Vec::new();
     match (card.title.as_deref(), card.url.as_deref()) {
-        (Some(title), Some(url)) => lines.push(format!("### [{title}]({url})")),
-        (Some(title), None) => lines.push(format!("### {title}")),
-        (None, Some(url)) => lines.push(url.to_owned()),
+        (Some(title), Some(url)) => card_lines.push(format!("**[{title}]({url})**")),
+        (Some(title), None) => card_lines.push(format!("**{title}**")),
+        (None, Some(url)) => card_lines.push(url.to_owned()),
         (None, None) => {}
     }
     if let Some(description) = card.description.as_deref() {
-        lines.push(description.to_owned());
+        card_lines.extend(description.lines().map(str::to_owned));
     }
     if let Some(image) = &card.image {
-        lines.push(image.url.clone());
+        card_lines.push(image.url.clone());
     }
-    lines.join("\n")
+    out.extend(card_lines.into_iter().map(|line| {
+        if line.trim().is_empty() {
+            ">".to_owned()
+        } else {
+            format!("> {line}")
+        }
+    }));
+    out.join("\n")
 }
 
 #[cfg(test)]
@@ -250,6 +282,16 @@ mod card_tests {
             description: Some("Без ссылки".into()),
             ..CardDraft::default()
         };
-        assert_eq!(card_as_markdown(None, &card), "### Правила\nБез ссылки");
+        assert_eq!(card_as_markdown(None, &card), "> **Правила**\n> Без ссылки");
+        let card = CardDraft {
+            title: Some("Сборка".into()),
+            url: Some("https://ci.example/1".into()),
+            description: Some("прошла\n\nза 3 мин".into()),
+            ..CardDraft::default()
+        };
+        assert_eq!(
+            card_as_markdown(Some("Готово"), &card),
+            "Готово\n> **[Сборка](https://ci.example/1)**\n> прошла\n>\n> за 3 мин"
+        );
     }
 }

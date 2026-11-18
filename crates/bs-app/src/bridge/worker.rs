@@ -1509,30 +1509,41 @@ pub(super) async fn handle_request(
         | BridgeRequest::StickerPacks(_)) => sticker_request(client, request).await,
         BridgeRequest::SendCards {
             channel_id,
+            dm,
             content,
             card,
         } => {
-            let sent = client
-                .send_cards(&channel_id, content.as_deref(), std::slice::from_ref(&card))
-                .await;
-            // Сервер без карточек (оригинал или старая сборка) отвечает
-            // 404 без кода: карточка уходит обычным сообщением с разметкой.
+            let cards = std::slice::from_ref(&card);
+            let sent = if dm {
+                client
+                    .send_dm_cards(&channel_id, content.as_deref(), cards)
+                    .await
+            } else {
+                client
+                    .send_cards(&channel_id, content.as_deref(), cards)
+                    .await
+            };
+            // Сервер без карточек (оригинал или старая сборка) отвечает 404
+            // без кода, а переписка, которая уходит через федерацию или мост, —
+            // `cards_unsupported`: тогда карточка уходит разметкой.
             let result = match sent {
                 Err(bs_api::ApiError::Server { status, body })
-                    if status == reqwest::StatusCode::NOT_FOUND && body.code.is_none() =>
+                    if (status == reqwest::StatusCode::NOT_FOUND && body.code.is_none())
+                        || body.code.as_deref() == Some("cards_unsupported") =>
                 {
-                    let body = bs_api::card_as_markdown(content.as_deref(), &card);
-                    client
-                        .send_channel_message(
-                            &channel_id,
-                            &bs_api::SendMessageBody {
-                                content: body,
-                                attachments: Vec::new(),
-                                reply_to_id: None,
-                            },
-                        )
-                        .await
-                        .map(|_| ())
+                    let body = bs_api::SendMessageBody {
+                        content: bs_api::card_as_markdown(content.as_deref(), &card),
+                        attachments: Vec::new(),
+                        reply_to_id: None,
+                    };
+                    if dm {
+                        client.send_dm_message(&channel_id, &body).await.map(drop)
+                    } else {
+                        client
+                            .send_channel_message(&channel_id, &body)
+                            .await
+                            .map(drop)
+                    }
                 }
                 other => other,
             };

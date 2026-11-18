@@ -1035,11 +1035,13 @@ impl Session {
     pub(crate) fn send_card(
         &self,
         channel_id: String,
+        dm: bool,
         content: Option<String>,
         card: bs_api::CardDraft,
     ) {
         self.request(BridgeRequest::SendCards {
             channel_id,
+            dm,
             content,
             card,
         });

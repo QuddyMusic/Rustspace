@@ -360,8 +360,10 @@ pub(crate) enum BridgeRequest {
     Extras(super::extras::ExtrasOp),
     /// Отправить сообщение с карточкой в канал пространства.
     SendCards {
-        /// Канал.
+        /// Канал или личная переписка.
         channel_id: String,
+        /// `channel_id` — личная переписка.
+        dm: bool,
         /// Текст над карточкой.
         content: Option<String>,
         /// Карточка.

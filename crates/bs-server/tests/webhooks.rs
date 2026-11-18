@@ -948,3 +948,57 @@ async fn rust_bot_answers_and_reacts_over_the_gateway() {
         .await;
     assert!(matches!(rejected, Err(bs_bot::BotError::Rejected(_))));
 }
+
+#[tokio::test]
+async fn cards_in_saved_messages_keep_their_colour() {
+    let server = start_with(&[]).await;
+    let (token, _) = user_with_channel(&server).await;
+    let (_, saved) = server
+        .call(reqwest::Method::GET, "/api/rustspace/saved", &token, None)
+        .await;
+    let saved = saved["id"].as_str().unwrap().to_owned();
+    let (status, message) = server
+        .call(
+            reqwest::Method::POST,
+            &format!("/api/rustspace/dm/{saved}/cards"),
+            &token,
+            Some(json!({"embeds": [{"title": "Test card", "description": "test", "color": "#e67e22"}]})),
+        )
+        .await;
+    assert_eq!(status, 201, "{message}");
+    assert_eq!(message["dmChannelId"], saved.as_str());
+    assert_eq!(message["embeds"][0]["color"], "#e67e22");
+    let (_, history) = server
+        .call(
+            reqwest::Method::GET,
+            &format!("/api/dm/{saved}/messages"),
+            &token,
+            None,
+        )
+        .await;
+    assert!(
+        history
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["embeds"][0]["title"] == "Test card")
+    );
+    // Чужая переписка — нельзя.
+    let (_, other) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/auth/register",
+            "",
+            Some(json!({"username": "stranger", "password": "password123"})),
+        )
+        .await;
+    let (status, _) = server
+        .call(
+            reqwest::Method::POST,
+            &format!("/api/rustspace/dm/{saved}/cards"),
+            other["token"].as_str().unwrap(),
+            Some(json!({"embeds": [{"title": "x"}]})),
+        )
+        .await;
+    assert_eq!(status, 403);
+}
