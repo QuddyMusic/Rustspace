@@ -1660,5 +1660,9 @@
   "Сообщение не найдено": "Message not found",
   "Добавлено в закладки (этот сервер их не хранит — они на этом устройстве)": "Bookmarked (this server doesn't store bookmarks — they're kept on this device)",
   "Спойлер": "Spoiler",
-  "Загрузить ещё раз": "Upload again"
+  "Загрузить ещё раз": "Upload again",
+  "Все закреплённые сообщения": "All pinned messages",
+  "Фото": "Photo",
+  "Файл: {a0}": "File: {a0}",
+  "Закреплено: {a0}": "Pinned: {a0}"
 }

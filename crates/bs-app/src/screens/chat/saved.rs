@@ -237,7 +237,8 @@ impl ChatScreen {
         })
     }
 
-    /// Панель закрепов над лентой: последний закреп, по щелчку — следующий.
+    /// Панель закрепов над лентой: последний закреп, по щелчку — следующий;
+    /// справа — список всех закрепов чата.
     pub(super) fn show_pins_bar(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
         let Some(selected) = self.selected_channel.clone() else {
             return;
@@ -253,74 +254,68 @@ impl ChatScreen {
         if pins.is_empty() {
             return;
         }
+        let base = bridge.base_at(selected.origin).map(str::to_owned);
         let index = self.pin_index % pins.len();
         let pin = &pins[index];
-        let author = pin.message["user"]["displayName"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .or_else(|| pin.message["user"]["username"].as_str())
-            .unwrap_or_default();
-        let text = pin.message["content"]
-            .as_str()
-            .filter(|s| !s.trim().is_empty())
-            .map_or_else(|| tr("Вложение").to_owned(), |t| t.replace('\n', " "));
-        let frame = egui::Frame::new()
+        let (author, text) = pin_line(pin);
+        let thumb = pin_thumb(pin, base.as_deref());
+        let mut jump = None;
+        ui.horizontal(|ui| {
+            let list_width = 44.0;
+            let title = {
+                let title = if pins.len() > 1 {
+                    crate::tf!(
+                        "Закреплено {n} из {total}",
+                        n = index + 1,
+                        total = pins.len()
+                    )
+                } else {
+                    tr("Закреплённое сообщение").to_owned()
+                };
+                if pin.shared {
+                    title
+                } else {
+                    format!("{title} · {}", tr("только для вас"))
+                }
+            };
+            let frame = pin_card(
+                ui,
+                &title,
+                &format!("{author}: {text}"),
+                thumb.as_deref(),
+                list_width,
+            );
+            let response = ui.interact(
+                frame.response.rect,
+                ui.scope_id().with("pins_bar"),
+                Sense::click(),
+            );
+            if response.clicked() {
+                jump = Some(pin.message_id.clone());
+                self.pin_index = (index + 1) % pins.len();
+            }
+            response.on_hover_text(tr("Щёлкните: к сообщению, затем к следующему закрепу"));
+            let button = egui::Button::new(
+                RichText::new(format!("▾ {}", pins.len()))
+                    .size(13.0)
+                    .color(theme::text_muted()),
+            )
+            .min_size(Vec2::new(list_width, frame.response.rect.height()))
             .fill(theme::bg_input())
-            .corner_radius(crate::theme::rounded(10))
-            .inner_margin(Margin::symmetric(12, 6))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                    crate::icons::paint(
-                        ui.painter(),
-                        rect.center(),
-                        16.0,
-                        Icon::Pin,
-                        theme::accent(),
-                    );
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        let title = if pins.len() > 1 {
-                            crate::tf!(
-                                "Закреплено {n} из {total}",
-                                n = index + 1,
-                                total = pins.len()
-                            )
-                        } else {
-                            tr("Закреплённое сообщение").to_owned()
-                        };
-                        let title = if pin.shared {
-                            title
-                        } else {
-                            format!("{title} · {}", tr("только для вас"))
-                        };
-                        ui.label(
-                            RichText::new(title)
-                                .size(11.5)
-                                .family(theme::bold_family())
-                                .color(theme::accent()),
-                        );
-                        theme::label_fit(
-                            ui,
-                            RichText::new(format!("{author}: {text}"))
-                                .size(13.0)
-                                .color(theme::text()),
-                            ui.available_width() - 30.0,
-                        );
-                    });
-                });
+            .corner_radius(crate::theme::rounded(10));
+            let list = ui
+                .add(button)
+                .on_hover_text(tr("Все закреплённые сообщения"));
+            egui::Popup::menu(&list).width(360.0).show(|ui| {
+                if let Some(id) = pins_list(ui, &pins, base.as_deref()) {
+                    jump = Some(id);
+                    ui.close();
+                }
             });
-        let response = ui.interact(
-            frame.response.rect,
-            ui.scope_id().with("pins_bar"),
-            Sense::click(),
-        );
-        if response.clicked() {
-            self.pending_jump = Some((selected, pin.message_id.clone()));
-            self.pin_index = (index + 1) % pins.len();
+        });
+        if let Some(message) = jump {
+            self.pending_jump = Some((selected, message));
         }
-        response.on_hover_text(tr("Щёлкните: к сообщению, затем к следующему закрепу"));
         ui.add_space(4.0);
     }
 
@@ -723,4 +718,177 @@ fn bookmark_row(ui: &mut egui::Ui, bookmark: &Bookmark) -> Option<RowClick> {
     }
     ui.add_space(4.0);
     click
+}
+
+/// Карточка закрепа в панели: значок, миниатюра, заголовок и строка.
+fn pin_card(
+    ui: &mut egui::Ui,
+    title: &str,
+    line: &str,
+    thumb: Option<&str>,
+    reserve: f32,
+) -> egui::InnerResponse<()> {
+    egui::Frame::new()
+        .fill(theme::bg_input())
+        .corner_radius(crate::theme::rounded(10))
+        .inner_margin(Margin::symmetric(12, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width() - reserve - 24.0);
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                crate::icons::paint(
+                    ui.painter(),
+                    rect.center(),
+                    16.0,
+                    Icon::Pin,
+                    theme::accent(),
+                );
+                if let Some(value) = thumb {
+                    pin_preview(ui, value, 34.0);
+                }
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.label(
+                        RichText::new(title)
+                            .size(11.5)
+                            .family(theme::bold_family())
+                            .color(theme::accent()),
+                    );
+                    theme::label_fit(
+                        ui,
+                        RichText::new(line).size(13.0).color(theme::text()),
+                        ui.available_width() - 8.0,
+                    );
+                });
+            });
+        })
+}
+
+/// Автор и текст закрепа; без текста — что во вложении.
+fn pin_line(pin: &bs_api::Pin) -> (String, String) {
+    let author = pin.message["user"]["displayName"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .or_else(|| pin.message["user"]["username"].as_str())
+        .unwrap_or_default()
+        .to_owned();
+    let text = pin.message["content"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .map_or_else(
+            || {
+                let first = &pin.message["attachments"][0];
+                let mime = first["mimetype"].as_str().unwrap_or_default();
+                if mime.starts_with("image/") {
+                    tr("Фото").to_owned()
+                } else if mime.starts_with("video/") {
+                    tr("Видео").to_owned()
+                } else if let Some(name) = first["originalName"].as_str() {
+                    crate::tf!("Файл: {a0}", a0 = name)
+                } else {
+                    tr("Вложение").to_owned()
+                }
+            },
+            |t| t.replace('\n', " "),
+        );
+    (author, text)
+}
+
+/// Миниатюра первого фото или видео закрепа (полным адресом инстанса).
+fn pin_thumb(pin: &bs_api::Pin, base: Option<&str>) -> Option<String> {
+    let attachment = pin.message["attachments"].as_array()?.iter().find(|a| {
+        let mime = a["mimetype"].as_str().unwrap_or_default();
+        mime.starts_with("image/") || mime.starts_with("video/")
+    })?;
+    let value = attachment["thumbnailFilename"]
+        .as_str()
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            attachment["mimetype"]
+                .as_str()
+                .filter(|m| m.starts_with("image/"))
+                .and_then(|_| attachment["filename"].as_str())
+        })?;
+    // Спойлер не раскрываем в миниатюре.
+    if crate::media::is_spoiler_name(attachment["originalName"].as_str().unwrap_or_default()) {
+        return None;
+    }
+    Some(base.map_or_else(
+        || value.to_owned(),
+        |base| crate::images::absolute(base, value),
+    ))
+}
+
+/// Квадратная миниатюра.
+fn pin_preview(ui: &mut egui::Ui, value: &str, side: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, crate::theme::rounded(6), theme::bg_hover());
+    crate::images::paint_value(
+        ui.painter(),
+        rect,
+        value,
+        crate::theme::rounded(6),
+        false,
+        egui::Color32::WHITE,
+    );
+}
+
+/// Список всех закрепов чата; возвращает сообщение, к которому перейти.
+fn pins_list(ui: &mut egui::Ui, pins: &[bs_api::Pin], base: Option<&str>) -> Option<String> {
+    let mut chosen = None;
+    ui.label(
+        RichText::new(crate::tf!("Закреплено: {a0}", a0 = pins.len()))
+            .size(12.0)
+            .family(theme::bold_family())
+            .color(theme::text_muted()),
+    );
+    egui::ScrollArea::vertical()
+        .max_height(380.0)
+        .show(ui, |ui| {
+            for pin in pins {
+                let (author, text) = pin_line(pin);
+                let row = ui.horizontal(|ui| {
+                    ui.set_width(ui.available_width());
+                    if let Some(value) = pin_thumb(pin, base) {
+                        pin_preview(ui, &value, 40.0);
+                    }
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        let mut head = author.clone();
+                        if !pin.shared {
+                            head = format!("{head} · {}", tr("только для вас"));
+                        }
+                        ui.label(
+                            RichText::new(head)
+                                .size(12.5)
+                                .family(theme::bold_family())
+                                .color(theme::text_bright()),
+                        );
+                        theme::label_fit(
+                            ui,
+                            RichText::new(text).size(12.5).color(theme::text()),
+                            ui.available_width() - 4.0,
+                        );
+                    });
+                });
+                let response = ui.interact(
+                    row.response.rect,
+                    ui.scope_id().with(("pin_row", &pin.message_id)),
+                    Sense::click(),
+                );
+                if response.hovered() {
+                    ui.painter().rect_filled(
+                        row.response.rect.expand(2.0),
+                        crate::theme::rounded(6),
+                        theme::bg_hover().gamma_multiply(0.5),
+                    );
+                }
+                if response.clicked() {
+                    chosen = Some(pin.message_id.clone());
+                }
+                ui.add_space(4.0);
+            }
+        });
+    chosen
 }
