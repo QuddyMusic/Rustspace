@@ -151,6 +151,19 @@ fn hub_id() -> Id {
     Id::unique("bs_image_hub")
 }
 
+/// Скачивание в списке «Загрузки».
+#[derive(Debug, Clone)]
+pub(crate) struct DownloadEntry {
+    /// Значение поля (по нему же грузится миниатюра).
+    pub(crate) value: String,
+    /// Имя файла.
+    pub(crate) label: String,
+    /// Куда сохранено.
+    pub(crate) dest: std::path::PathBuf,
+    /// Ход.
+    pub(crate) state: Download,
+}
+
 /// Состояние скачивания вложения на диск.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Download {
@@ -294,21 +307,24 @@ impl ImageHub {
         self.lock().downloads.get(value).cloned()
     }
 
-    /// Скачивания этого запуска, новые сверху: подпись, куда, состояние.
-    pub(crate) fn downloads(&self) -> Vec<(String, std::path::PathBuf, Download)> {
+    /// Скачивания этого запуска, новые сверху.
+    pub(crate) fn downloads(&self) -> Vec<DownloadEntry> {
         let inner = self.lock();
         inner
             .download_history
             .iter()
             .rev()
             .filter_map(|(value, dest)| {
-                let state = inner.downloads.get(value)?.clone();
-                let label = inner
-                    .download_labels
-                    .get(value)
-                    .cloned()
-                    .unwrap_or_default();
-                Some((label, dest.clone(), state))
+                Some(DownloadEntry {
+                    value: value.clone(),
+                    label: inner
+                        .download_labels
+                        .get(value)
+                        .cloned()
+                        .unwrap_or_default(),
+                    dest: dest.clone(),
+                    state: inner.downloads.get(value)?.clone(),
+                })
             })
             .collect()
     }
@@ -808,8 +824,8 @@ mod tests {
         hub.accept_download(first, crate::bridge::DownloadState::Done);
         let list = hub.downloads();
         assert_eq!(list.len(), 2);
-        assert_eq!(list[0].0, "b.png");
-        assert!(matches!(list[1].2, super::Download::Done));
+        assert_eq!(list[0].label, "b.png");
+        assert!(matches!(list[1].state, super::Download::Done));
         hub.clear_finished_downloads();
         assert_eq!(hub.downloads().len(), 1);
     }

@@ -59,6 +59,8 @@ desktop = ["global-hotkeys", "tray", "presence"]
 fxtranslate = { version = "0.5", features = ["icu-segmenter"] }
 ruzstd = "0.9.1"
 whatlang = "0.18"
+# Открыть скачанный файл или показать его в файловом менеджере (MIT/Apache-2.0).
+opener = { version = "0.9", features = ["reveal"] }
 bs-voice = { workspace = true, optional = true }
 rodio = { version = "0.23", default-features = false, features = ["playback", "vorbis"], optional = true }
 serde = { workspace = true }
