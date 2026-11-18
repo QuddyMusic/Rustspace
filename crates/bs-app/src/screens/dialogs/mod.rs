@@ -380,8 +380,10 @@ pub(crate) enum SettingsSection {
     Activity,
     /// Личные мосты: свои аккаунты Matrix и Telegram.
     Bridges,
-    /// Свои боты.
+    /// Свои боты (видны в режиме разработчика).
     Bots,
+    /// Режим разработчика.
+    Developer,
     /// Версия клиента и проверка его обновлений.
     About,
     /// Приватность.
@@ -419,6 +421,7 @@ impl SettingsSection {
             Self::Activity => tr("Активность"),
             Self::Bridges => tr("Мосты"),
             Self::Bots => tr("Боты"),
+            Self::Developer => tr("Для разработчиков"),
             Self::About => tr("О клиенте"),
             Self::Privacy => tr("Приватность"),
             Self::Connections => tr("Подключения"),
@@ -427,7 +430,7 @@ impl SettingsSection {
             Self::Storage => tr("Хранилище"),
             Self::Registration => tr("Регистрация"),
             Self::Federation => tr("Федерация"),
-            Self::Streaming => tr("Стриминг"),
+            Self::Streaming => tr("Качество звонков"),
             Self::Telemetry => tr("Телеметрия"),
             Self::Updates => tr("Обновления"),
         }
@@ -836,7 +839,6 @@ fn settings_nav(
                     SettingsSection::Privacy,
                     SettingsSection::Activity,
                     SettingsSection::Bridges,
-                    SettingsSection::Bots,
                 ],
                 &mut state.section,
             );
@@ -849,10 +851,21 @@ fn settings_nav(
                     SettingsSection::Language,
                     SettingsSection::Translate,
                     SettingsSection::Connections,
+                    SettingsSection::Developer,
                     SettingsSection::About,
                 ],
                 &mut state.section,
             );
+            if crate::prefs::get().developer_mode {
+                nav_group(
+                    ui,
+                    tr("Для разработчиков"),
+                    &[SettingsSection::Bots],
+                    &mut state.section,
+                );
+            } else if state.section == SettingsSection::Bots {
+                state.section = SettingsSection::Developer;
+            }
             if !state.admin_slots.is_empty() {
                 admin_slot_picker(ui, state);
                 nav_group(
@@ -963,6 +976,7 @@ fn section_content(
             super::personal_bridges::page(ui, &mut state.extra.personal, bridge);
         }
         SettingsSection::Bots => super::bots::page(ui, &mut state.extra.bots, bridge),
+        SettingsSection::Developer => super::settings_app::developer(ui),
         SettingsSection::Translate => {
             super::translate_settings::page(ui, &mut state.translate, &bridge.runtime());
         }

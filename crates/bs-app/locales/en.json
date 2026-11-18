@@ -407,7 +407,7 @@
   "Хранилище": "Storage",
   "Регистрация": "Registration",
   "Федерация": "Federation",
-  "Стриминг": "Streaming",
+  "Качество звонков": "Call quality",
   "Телеметрия": "Telemetry",
   "Обновления": "Updates",
   "домашний": "home",
@@ -1652,5 +1652,9 @@
   "модель перевода не найдена": "translation model not found",
   "список моделей недоступен: {a0}": "model list unavailable: {a0}",
   "нет модели {a0} → {a1}": "no model for {a0} → {a1}",
-  "нет словаря {a0} → {a1}": "no vocabulary for {a0} → {a1}"
+  "нет словаря {a0} → {a1}": "no vocabulary for {a0} → {a1}",
+  "Демонстрация экрана и камера": "Screen sharing and camera",
+  "Для разработчиков": "For developers",
+  "Режим разработчика": "Developer mode",
+  "Показывает раздел «Боты»: свои боты, их токены и пространства. Ботов пишут на Rust (библиотека bs-bot), JavaScript, TypeScript и других языках — см. docs/bots.ru.md.": "Shows the Bots section: your bots, their tokens and spaces. Bots are written in Rust (the bs-bot library), JavaScript, TypeScript and other languages — see docs/bots.md."
 }

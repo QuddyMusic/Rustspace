@@ -386,3 +386,25 @@ fn portal_note(ui: &mut egui::Ui) {
     ui.add_space(6.0);
     ui.label(theme::muted(text).size(12.5));
 }
+
+/// Раздел «Для разработчиков»: включает инструменты для тех, кто пишет
+/// программы для Rustspace.
+pub(crate) fn developer(ui: &mut egui::Ui) {
+    page_title(ui, tr("Для разработчиков"));
+    let before = crate::prefs::get().developer_mode;
+    let mut on = before;
+    card(ui, |ui| {
+        setting_row(
+            ui,
+            tr("Режим разработчика"),
+            tr(
+                "Показывает раздел «Боты»: свои боты, их токены и пространства. Ботов пишут на Rust \
+                 (библиотека bs-bot), JavaScript, TypeScript и других языках — см. docs/bots.ru.md.",
+            ),
+            &mut on,
+        );
+    });
+    if on != before {
+        crate::prefs::update(|p| p.developer_mode = on);
+    }
+}

@@ -1,4 +1,4 @@
-//! Админские разделы «Стриминг», «Телеметрия» и «Обновления».
+//! Админские разделы «Качество звонков», «Телеметрия» и «Обновления».
 
 use bs_api::{
     ApprovalRequest, InstanceSettingsPatch, Peer, StreamingLimits, StreamingPatch, TelemetryStatus,
@@ -178,9 +178,9 @@ fn combo(ui: &mut egui::Ui, id: &str, value: &mut u32, options: &[u32], suffix: 
         });
 }
 
-/// «Стриминг»: пределы качества демонстрации экрана и камеры.
+/// «Качество звонков»: битрейт голоса и пределы демонстрации экрана и камеры.
 pub(crate) fn streaming_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridge) {
-    page_title(ui, tr("Стриминг"));
+    page_title(ui, tr("Качество звонков"));
     voice_card(ui, more, bridge);
     ui.add_space(10.0);
     if !more.streaming_asked {
@@ -273,6 +273,8 @@ fn voice_card(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridge) {
 /// Битрейт, свой битрейт и предельные разрешение и частота.
 fn streaming_limits(ui: &mut egui::Ui, edit: &mut StreamingLimits) {
     card(ui, |ui| {
+        widgets::section_label(ui, tr("Демонстрация экрана и камера"));
+        ui.add_space(4.0);
         number_row(
             ui,
             tr("Максимальный битрейт, кбит/с"),

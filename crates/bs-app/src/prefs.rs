@@ -206,6 +206,8 @@ pub(crate) struct Prefs {
     pub(crate) columns: crate::columns::Widths,
     /// Картинки превью ссылок грузятся с сайтов напрямую (сайт видит IP).
     pub(crate) preview_images: bool,
+    /// Режим разработчика: показывает раздел «Боты».
+    pub(crate) developer_mode: bool,
 }
 
 /// Инстанс, в который входили с этого устройства.
@@ -258,6 +260,7 @@ impl Default for Prefs {
             activity: crate::presence::ActivityPrefs::default(),
             columns: crate::columns::Widths::default(),
             preview_images: true,
+            developer_mode: false,
             recent_instances: Vec::new(),
         }
     }
