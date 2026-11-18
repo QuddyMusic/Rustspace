@@ -42,7 +42,11 @@ enum Target<'a> {
 fn lua_move(pid: u32, target: Target<'_>, focus: bool) -> String {
     let workspace = match target {
         Target::Hidden => format!("\"{SPECIAL}\""),
-        Target::Active(_) => "hl.get_active_workspace()".to_owned(),
+        // Номер текущего стола: сам объект стола принимают не все версии.
+        Target::Active(_) => "(function() local ws = hl.get_active_workspace() \
+             if type(ws) == \"table\" or type(ws) == \"userdata\" then return ws.id or ws.name end \
+             return ws end)()"
+            .to_owned(),
     };
     let focus = if focus {
         " hl.dispatch(hl.dsp.focus({ window = w }))"
@@ -299,10 +303,8 @@ mod tests {
         assert!(!lua.contains("focus("), "{lua}");
         let back = lua_move(42, Target::Active(Some("3")), true);
         assert!(back.contains("hl.dsp.focus({ window = w })"), "{back}");
-        assert!(
-            back.contains("workspace = hl.get_active_workspace()"),
-            "{back}"
-        );
+        assert!(back.contains("hl.get_active_workspace()"), "{back}");
+        assert!(back.contains("ws.id or ws.name"), "{back}");
         assert!(wants_lua(Some(
             "error: [string \"return hl.dispatch(movetoworkspacesilent spec...\"]:1: ')' expected"
         )));

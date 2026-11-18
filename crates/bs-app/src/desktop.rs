@@ -266,10 +266,14 @@ impl Desktop {
             }
         }
         // Под Wayland свёрнутое окно возвращают с панели задач, не из трея.
-        if self.hidden && is_wayland() && ctx.input(|i| i.viewport().focused == Some(true)) {
+        // Окно, убранное через композитор, этим путём не вернуть: сразу после
+        // скрытия оно ещё числится в фокусе, и сброс флага ломал «Показать».
+        if self.hidden
+            && is_wayland()
+            && !self.wm_hidden.load(std::sync::atomic::Ordering::SeqCst)
+            && ctx.input(|i| i.viewport().focused == Some(true))
+        {
             self.hidden = false;
-            self.wm_hidden
-                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
         let close = ctx.input(|i| i.viewport().close_requested());
         if close {

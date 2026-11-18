@@ -579,9 +579,29 @@ fn free_port() -> Result<u16, String> {
         .map_err(|e| e.to_string())
 }
 
-fn spawn_server(server: &Path, model: &Path, port: u16, gpu: bool) -> Result<Child, String> {
+fn spawn_server(
+    server: &Path,
+    model: &Path,
+    port: u16,
+    gpu: bool,
+    bundled: bool,
+) -> Result<Child, String> {
     let dir = server.parent().unwrap_or_else(|| Path::new("."));
-    let log = std::fs::File::create(dir.join("server.log")).map_err(|e| e.to_string())?;
+    // Журнал — в своём каталоге: у llama-server из пакетов системы каталог
+    // программы (/usr/bin) закрыт на запись.
+    let log_path = root().map_or_else(
+        || std::env::temp_dir().join("llama-server.log"),
+        |r| r.join("llama-server.log"),
+    );
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let log = std::fs::File::create(&log_path).map_err(|e| {
+        crate::tf!(
+            "не удалось открыть журнал llama-server: {e}",
+            e = e.to_string()
+        )
+    })?;
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get().clamp(2, 8));
     let mut command = Command::new(server);
     command
@@ -597,12 +617,15 @@ fn spawn_server(server: &Path, model: &Path, port: u16, gpu: bool) -> Result<Chi
         ])
         .args(["-t", &threads.to_string()])
         .args(["-ngl", if gpu { "99" } else { "0" }])
-        .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(log);
-    #[cfg(target_os = "linux")]
-    command.env("LD_LIBRARY_PATH", dir);
+    // Своя сборка ищет библиотеки рядом с собой; системной это не нужно.
+    if bundled {
+        command.current_dir(dir);
+        #[cfg(target_os = "linux")]
+        command.env("LD_LIBRARY_PATH", dir);
+    }
     command
         .spawn()
         .map_err(|e| crate::tf!("не удалось запустить llama-server: {e}", e = e.to_string()))
@@ -610,7 +633,12 @@ fn spawn_server(server: &Path, model: &Path, port: u16, gpu: bool) -> Result<Chi
 
 /// Порт сервера с этой моделью: уже работающего (`true`) или только что
 /// запущенного (`false` — ещё грузит модель).
-fn start_or_reuse(server: &Path, model: &Path, gpu: bool) -> Result<(u16, bool), String> {
+fn start_or_reuse(
+    server: &Path,
+    model: &Path,
+    gpu: bool,
+    bundled: bool,
+) -> Result<(u16, bool), String> {
     let mut guard = running();
     if let Some(current) = guard.as_mut() {
         let alive = matches!(current.child.try_wait(), Ok(None));
@@ -623,7 +651,7 @@ fn start_or_reuse(server: &Path, model: &Path, gpu: bool) -> Result<(u16, bool),
         *guard = None;
     }
     let port = free_port()?;
-    let child = spawn_server(server, model, port, gpu)?;
+    let child = spawn_server(server, model, port, gpu, bundled)?;
     *guard = Some(Running {
         child,
         port,
@@ -646,12 +674,15 @@ pub(crate) async fn ensure(prefs: &LocalPrefs) -> Result<String, String> {
     let model = have.model.ok_or_else(|| {
         tr("локальная модель не установлена — установите её в настройках перевода").to_owned()
     })?;
-    let server = find_file(&root.join("engine"), server_name())
-        .or_else(system_server)
-        .ok_or_else(|| {
-            tr("llama.cpp не установлен — установите его в настройках перевода").to_owned()
-        })?;
-    let (port, ready) = start_or_reuse(&server, &model, have.gpu)?;
+    let bundled = find_file(&root.join("engine"), server_name());
+    let is_bundled = bundled.is_some();
+    let server = bundled.or_else(system_server).ok_or_else(|| {
+        tr("llama.cpp не установлен — установите его в настройках перевода").to_owned()
+    })?;
+    // Системная сборка: видеокарта — как выбрано в настройках (у сборки без
+    // неё llama.cpp просто посчитает на процессоре).
+    let gpu = if is_bundled { have.gpu } else { prefs.gpu };
+    let (port, ready) = start_or_reuse(&server, &model, gpu, is_bundled)?;
     if ready {
         return Ok(format!("http://127.0.0.1:{port}/v1"));
     }
@@ -673,7 +704,7 @@ pub(crate) async fn ensure(prefs: &LocalPrefs) -> Result<String, String> {
         if exited {
             stop();
             return Err(
-                tr("llama-server завершился — подробности в llama/engine/server.log").to_owned(),
+                tr("llama-server завершился — подробности в llama/llama-server.log").to_owned(),
             );
         }
         if started.elapsed() > START_TIMEOUT {
