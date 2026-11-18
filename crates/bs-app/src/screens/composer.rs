@@ -85,8 +85,88 @@ struct Staged {
     size: u64,
     origin: usize,
     state: StagedState,
-    /// Содержимое: чтобы перезалить под другим именем (спойлер).
+    /// Содержимое: чтобы перезалить под другим именем (спойлер) или ещё раз.
     bytes: Arc<Vec<u8>>,
+    /// Миниатюра картинки.
+    preview: Preview,
+}
+
+/// Миниатюра выбранной картинки: декодируется в фоне.
+#[derive(Default)]
+enum Preview {
+    /// Не картинка или не разобралась.
+    #[default]
+    None,
+    /// Декодируется.
+    Pending(std::sync::mpsc::Receiver<Option<egui::ColorImage>>),
+    /// Готова.
+    Ready(egui::TextureHandle),
+}
+
+impl std::fmt::Debug for Preview {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::None => "None",
+            Self::Pending(_) => "Pending",
+            Self::Ready(_) => "Ready",
+        })
+    }
+}
+
+/// Миниатюра для показа: уменьшенная копия, если есть; иначе первый кадр
+/// (маленькая картинка или GIF).
+fn preview_image(bytes: &[u8]) -> Option<egui::ColorImage> {
+    let decoded = bs_media::decode(bytes, &bs_media::Limits::default()).ok()?;
+    if let Some(thumb) = decoded.thumbs.into_iter().next() {
+        return Some(egui::ColorImage::from_rgba_unmultiplied(
+            [thumb.width as usize, thumb.height as usize],
+            &thumb.rgba,
+        ));
+    }
+    let frame = decoded.frames.into_iter().next()?;
+    Some(egui::ColorImage::from_rgba_unmultiplied(
+        [decoded.width as usize, decoded.height as usize],
+        &frame.rgba,
+    ))
+}
+
+impl Preview {
+    /// Начинает декодировать картинку в фоне.
+    fn start(name: &str, bytes: &Arc<Vec<u8>>) -> Self {
+        if !mime_for(name).starts_with("image/") {
+            return Self::None;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let bytes = Arc::clone(bytes);
+        std::thread::spawn(move || {
+            let image = preview_image(&bytes);
+            let _ = tx.send(image);
+        });
+        Self::Pending(rx)
+    }
+
+    /// Текстура, когда готова.
+    fn texture(&mut self, ctx: &egui::Context, id: u64) -> Option<&egui::TextureHandle> {
+        if let Self::Pending(rx) = self {
+            match rx.try_recv() {
+                Ok(Some(image)) => {
+                    *self = Self::Ready(ctx.load_texture(
+                        format!("staged-{id}"),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    ));
+                }
+                Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => *self = Self::None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                }
+            }
+        }
+        match self {
+            Self::Ready(texture) => Some(texture),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -475,6 +555,83 @@ fn paint_gif_fallback(ui: &egui::Ui, rect: Rect, item: &GifItem) -> (bool, Optio
     (painted, Some(message))
 }
 
+/// Что нажали у выбранного файла.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StagedAction {
+    Remove(u64),
+    Spoiler(u64),
+    Retry(u64),
+}
+
+/// Миниатюра выбранной картинки (под спойлером — размытая пометка).
+fn staged_thumb(ui: &mut egui::Ui, texture: &egui::TextureHandle, item: &Staged) {
+    let size = Vec2::new(ui.available_width(), 96.0);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let [w, h] = texture.size().map(|v| v as f32);
+    let uv = crate::images::cover_uv([w, h], [rect.width(), rect.height()]);
+    let tint = if crate::media::is_spoiler_name(&item.name) {
+        Color32::from_gray(70)
+    } else {
+        Color32::WHITE
+    };
+    ui.painter().add(
+        egui::epaint::RectShape::filled(rect, crate::theme::rounded(8), tint)
+            .with_texture(texture.id(), uv),
+    );
+    if crate::media::is_spoiler_name(&item.name) {
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            tr("Спойлер"),
+            egui::FontId::new(12.0, theme::bold_family()),
+            Color32::WHITE,
+        );
+    }
+}
+
+/// Кнопки справа: убрать, спойлер, повторить.
+fn staged_buttons(ui: &mut egui::Ui, item: &Staged) -> Option<StagedAction> {
+    let mut action = ui
+        .add(widgets::flat_icon(Icon::Close, 12.0, theme::text_faint()))
+        .on_hover_text(tr("Убрать"))
+        .clicked()
+        .then_some(StagedAction::Remove(item.id));
+    if matches!(item.state, StagedState::Failed(_)) {
+        if ui
+            .add(egui::Button::new(RichText::new(tr("Повторить")).size(12.0)).small())
+            .on_hover_text(tr("Загрузить ещё раз"))
+            .clicked()
+        {
+            action = Some(StagedAction::Retry(item.id));
+        }
+        return action;
+    }
+    let is_media =
+        mime_for(&item.name).starts_with("image/") || mime_for(&item.name).starts_with("video/");
+    let on = crate::media::is_spoiler_name(&item.name);
+    if is_media
+        && ui
+            .add(widgets::flat_icon(
+                Icon::Eye,
+                13.0,
+                if on {
+                    theme::accent()
+                } else {
+                    theme::text_faint()
+                },
+            ))
+            .on_hover_text(if on {
+                tr("Спойлер: снять")
+            } else {
+                tr("Спрятать под спойлер")
+            })
+            .clicked()
+    {
+        action = Some(StagedAction::Spoiler(item.id));
+    }
+    action
+}
+
 /// Под именем выбранного файла: ход загрузки, размер или ошибка.
 fn staged_status(ui: &mut egui::Ui, item: &Staged) {
     match &item.state {
@@ -622,6 +779,7 @@ impl Composer {
                         sent: 0,
                         total: bytes.len() as u64,
                     },
+                    preview: Preview::start(&file.name, &bytes),
                     bytes: Arc::clone(&bytes),
                 });
                 let mime = mime_for(&file.name).to_owned();
@@ -641,15 +799,22 @@ impl Composer {
     /// Помечает вложение спойлером (имя `SPOILER_…`) или снимает пометку.
     /// Имя хранит сервер, поэтому файл заливается заново под новым именем.
     fn toggle_spoiler(&mut self, bridge: &Bridge, id: u64) {
+        if let Some(item) = self.staged.iter_mut().find(|s| s.id == id) {
+            item.name = if crate::media::is_spoiler_name(&item.name) {
+                item.name[8..].to_owned()
+            } else {
+                format!("SPOILER_{}", item.name)
+            };
+        }
+        self.reupload(bridge, id);
+    }
+
+    /// Заливает файл заново (после смены имени или неудачи).
+    fn reupload(&mut self, bridge: &Bridge, id: u64) {
         self.next_id += 1;
         let fresh = self.next_id;
         let Some(item) = self.staged.iter_mut().find(|s| s.id == id) else {
             return;
-        };
-        item.name = if crate::media::is_spoiler_name(&item.name) {
-            item.name[8..].to_owned()
-        } else {
-            format!("SPOILER_{}", item.name)
         };
         item.id = fresh;
         item.state = StagedState::Uploading {
@@ -898,8 +1063,12 @@ impl Composer {
 
     /// Вложения, ошибка и подсказка про перетаскивание над полем.
     fn frame_notes(&mut self, ui: &mut egui::Ui, bridge: &Bridge, dragging: bool, editing: bool) {
-        if !editing && let Some(id) = self.show_staged(ui) {
-            self.toggle_spoiler(bridge, id);
+        if !editing {
+            match self.show_staged(ui) {
+                Some(StagedAction::Spoiler(id)) => self.toggle_spoiler(bridge, id),
+                Some(StagedAction::Retry(id)) => self.reupload(bridge, id),
+                Some(StagedAction::Remove(_)) | None => {}
+            }
         }
         if let Some(note) = self.note.clone() {
             ui.horizontal(|ui| {
@@ -1023,80 +1192,58 @@ impl Composer {
         };
     }
 
-    /// Выбранные файлы; возвращает файл, у которого переключили «спойлер».
-    fn show_staged(&mut self, ui: &mut egui::Ui) -> Option<u64> {
+    /// Выбранные файлы: миниатюры, ход загрузки, «спойлер», «повторить».
+    fn show_staged(&mut self, ui: &mut egui::Ui) -> Option<StagedAction> {
         if self.staged.is_empty() {
             return None;
         }
-        let mut remove = None;
-        let mut spoiler = None;
+        let mut action = None;
+        let ctx = ui.ctx().clone();
         ui.horizontal_wrapped(|ui| {
-            for item in &self.staged {
+            for item in &mut self.staged {
+                let id = item.id;
+                let texture = item.preview.texture(&ctx, id).cloned();
                 egui::Frame::new()
                     .fill(theme::bg_hover())
                     .corner_radius(crate::theme::rounded(10))
-                    .inner_margin(Margin::symmetric(10, 7))
+                    .inner_margin(Margin::symmetric(8, 7))
                     .show(ui, |ui| {
-                        ui.set_width(190.0);
+                        ui.set_width(if texture.is_some() { 150.0 } else { 190.0 });
+                        if let Some(texture) = &texture {
+                            staged_thumb(ui, texture, item);
+                            ui.add_space(4.0);
+                        }
                         ui.horizontal(|ui| {
-                            let (rect, _) =
-                                ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
-                            let icon = if mime_for(&item.name).starts_with("image/") {
-                                Icon::Image
-                            } else {
-                                Icon::File
-                            };
-                            crate::icons::paint(
-                                ui.painter(),
-                                rect.center(),
-                                18.0,
-                                icon,
-                                theme::sky(),
-                            );
+                            if texture.is_none() {
+                                let (rect, _) =
+                                    ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
+                                let icon = if mime_for(&item.name).starts_with("image/") {
+                                    Icon::Image
+                                } else {
+                                    Icon::File
+                                };
+                                crate::icons::paint(
+                                    ui.painter(),
+                                    rect.center(),
+                                    18.0,
+                                    icon,
+                                    theme::sky(),
+                                );
+                            }
                             ui.vertical(|ui| {
                                 ui.label(
-                                    RichText::new(theme::truncate_chars(&item.name, 22))
+                                    RichText::new(theme::truncate_chars(&item.name, 18))
                                         .color(theme::text())
                                         .size(13.0),
-                                );
+                                )
+                                .on_hover_text(&item.name);
                                 staged_status(ui, item);
                             });
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    if ui
-                                        .add(widgets::flat_icon(
-                                            Icon::Close,
-                                            12.0,
-                                            theme::text_faint(),
-                                        ))
-                                        .on_hover_text(tr("Убрать"))
-                                        .clicked()
-                                    {
-                                        remove = Some(item.id);
-                                    }
-                                    let is_image = mime_for(&item.name).starts_with("image/")
-                                        || mime_for(&item.name).starts_with("video/");
-                                    let on = crate::media::is_spoiler_name(&item.name);
-                                    if is_image
-                                        && ui
-                                            .add(widgets::flat_icon(
-                                                Icon::Eye,
-                                                13.0,
-                                                if on {
-                                                    theme::accent()
-                                                } else {
-                                                    theme::text_faint()
-                                                },
-                                            ))
-                                            .on_hover_text(if on {
-                                                tr("Спойлер: снять")
-                                            } else {
-                                                tr("Спрятать под спойлер")
-                                            })
-                                            .clicked()
-                                    {
-                                        spoiler = Some(item.id);
+                                    if let Some(chosen) = staged_buttons(ui, item) {
+                                        action = Some(chosen);
                                     }
                                 },
                             );
@@ -1104,10 +1251,11 @@ impl Composer {
                     });
             }
         });
-        if let Some(id) = remove {
+        if let Some(StagedAction::Remove(id)) = action {
             self.staged.retain(|s| s.id != id);
+            return None;
         }
-        spoiler
+        action
     }
 
     fn show_plus_menu(&mut self, ctx: &egui::Context, anchor: Rect) {
@@ -1584,7 +1732,15 @@ fn menu_row(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::mime_for;
+    use super::{mime_for, preview_image};
+
+    #[test]
+    fn pictures_get_a_small_preview() {
+        let png = include_bytes!("../../../../packaging/linux/rustspace.png");
+        let image = preview_image(png).expect("значок разбирается");
+        assert!(image.size[0] > 0 && image.size[0] <= 512);
+        assert!(preview_image(b"not an image").is_none());
+    }
 
     #[test]
     fn mime_by_extension() {

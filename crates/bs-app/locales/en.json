@@ -1658,5 +1658,7 @@
   "Режим разработчика": "Developer mode",
   "Показывает раздел «Боты»: свои боты, их токены и пространства. Ботов пишут на Rust (библиотека bs-bot), JavaScript, TypeScript и других языках — см. docs/bots.ru.md.": "Shows the Bots section: your bots, their tokens and spaces. Bots are written in Rust (the bs-bot library), JavaScript, TypeScript and other languages — see docs/bots.md.",
   "Сообщение не найдено": "Message not found",
-  "Добавлено в закладки (этот сервер их не хранит — они на этом устройстве)": "Bookmarked (this server doesn't store bookmarks — they're kept on this device)"
+  "Добавлено в закладки (этот сервер их не хранит — они на этом устройстве)": "Bookmarked (this server doesn't store bookmarks — they're kept on this device)",
+  "Спойлер": "Spoiler",
+  "Загрузить ещё раз": "Upload again"
 }
