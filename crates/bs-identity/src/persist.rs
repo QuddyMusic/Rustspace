@@ -92,10 +92,10 @@ impl CredentialStore {
     /// На Unix итоговый файл получает права `0600`; каталог создаётся, если
     /// его нет.
     pub async fn save_to_path(&self, path: &Path) -> Result<(), PersistError> {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                tokio::fs::create_dir_all(parent).await?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            tokio::fs::create_dir_all(parent).await?;
         }
         let json = zeroize::Zeroizing::new(serde_json::to_vec_pretty(&self.to_json())?);
         // Имя временного файла непредсказуемо, а сам файл создаётся сразу

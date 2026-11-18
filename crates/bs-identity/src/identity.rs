@@ -95,10 +95,10 @@ pub fn home_host_of(value: &str) -> String {
     } else {
         format!("https://{s}")
     };
-    if let Ok(u) = url::Url::parse(&with_scheme) {
-        if let Some(h) = u.host_str() {
-            return h.to_ascii_lowercase();
-        }
+    if let Ok(u) = url::Url::parse(&with_scheme)
+        && let Some(h) = u.host_str()
+    {
+        return h.to_ascii_lowercase();
     }
     // Fallback: ручное разделение, если URL не разобрался.
     let s = s

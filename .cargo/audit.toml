@@ -1,0 +1,7 @@
+# Настройки cargo audit.
+[advisories]
+# quick-xml 0.38 остаётся только через zbus_xml (accesskit → atspi → zbus-lockstep,
+# доступность на Linux из eframe): он разбирает XML-описания интерфейсов D-Bus
+# локальной сессии, а не данные из сети. Уйдёт с обновлением eframe/accesskit;
+# сам Rustspace quick-xml не использует (plist уже на исправленной 0.42).
+ignore = ["RUSTSEC-2026-0194", "RUSTSEC-2026-0195"]

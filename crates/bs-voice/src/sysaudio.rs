@@ -19,7 +19,9 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+#[cfg(target_os = "linux")]
+use tracing::debug;
+use tracing::{info, warn};
 
 use crate::error::{VoiceError, VoiceResult};
 use crate::mixer::to_i16;

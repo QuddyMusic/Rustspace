@@ -29,10 +29,10 @@ impl CallIdentity {
     pub fn matches(&self, other: &Self) -> bool {
         // Если оба события знают свой инстанс, разные origin никогда не совпадают.
         // Отсутствующий origin допустим для серверных событий старого формата.
-        if let (Some(a), Some(b)) = (&self.origin, &other.origin) {
-            if a != b {
-                return false;
-            }
+        if let (Some(a), Some(b)) = (&self.origin, &other.origin)
+            && a != b
+        {
+            return false;
         }
         let mut comparable = false;
         if let (Some(a), Some(b)) = (&self.dm_channel_id, &other.dm_channel_id) {

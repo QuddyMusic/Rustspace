@@ -174,13 +174,13 @@ fn lines(spans: &[Span]) -> Vec<Vec<Span>> {
     let mut out: Vec<Vec<Span>> = vec![Vec::new()];
     for span in spans {
         let mut parts = span.text.split('\n');
-        if let Some(first) = parts.next() {
-            if let Some(line) = out.last_mut() {
-                line.push(Span {
-                    text: first.to_owned(),
-                    ..span.clone()
-                });
-            }
+        if let Some(first) = parts.next()
+            && let Some(line) = out.last_mut()
+        {
+            line.push(Span {
+                text: first.to_owned(),
+                ..span.clone()
+            });
         }
         for part in parts {
             out.push(vec![Span {

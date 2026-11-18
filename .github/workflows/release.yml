@@ -22,11 +22,11 @@ env:
 jobs:
   version:
     name: тег = версия в Cargo.toml
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
       - id: check
@@ -53,7 +53,7 @@ jobs:
     env:
       TARGET: ${{ matrix.arch }}-unknown-linux-musl
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
       # Статическая сборка (musl): один файл для Debian, Ubuntu и Alpine.
@@ -81,7 +81,7 @@ jobs:
           tar czf "dist/$name.tar.gz" -C stage .
           (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
           file "stage/rustspace-server"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: server-${{ matrix.arch }}
           path: dist/*
@@ -100,11 +100,13 @@ jobs:
           - name: linux-aarch64
             runner: ubuntu-22.04-arm
           - name: windows-x86_64
-            runner: windows-latest
+            runner: windows-2025
           - name: macos-aarch64
-            runner: macos-14
+            runner: macos-15
+          - name: macos-x86_64
+            runner: macos-15-intel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
       # libwebrtc (голос) требует clang 21+, а трей, звук и захват — системные
@@ -219,6 +221,14 @@ jobs:
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" dist
           cp target/release/rustspace "$app/Contents/MacOS/"
           cp LICENSE NOTICE "$app/Contents/Resources/"
+          # Значок приложения из того же PNG, что для Linux.
+          mkdir -p Rustspace.iconset
+          for size in 16 32 128 256; do
+            sips -z $size $size packaging/linux/rustspace.png --out "Rustspace.iconset/icon_${size}x${size}.png" >/dev/null
+            double=$((size * 2))
+            sips -z $double $double packaging/linux/rustspace.png --out "Rustspace.iconset/icon_${size}x${size}@2x.png" >/dev/null
+          done
+          iconutil -c icns Rustspace.iconset -o "$app/Contents/Resources/Rustspace.icns"
           cat > "$app/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -228,6 +238,8 @@ jobs:
             <key>CFBundleIdentifier</key><string>io.github.quddymusic.rustspace</string>
             <key>CFBundleExecutable</key><string>rustspace</string>
             <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleIconFile</key><string>Rustspace</string>
+            <key>LSApplicationCategoryType</key><string>public.app-category.social-networking</string>
             <key>CFBundleShortVersionString</key><string>$version</string>
             <key>CFBundleVersion</key><string>$version</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
@@ -238,9 +250,12 @@ jobs:
           EOF
           # Подпись без сертификата (ad-hoc): без неё arm64 не запустит бинарник.
           codesign --force --deep --sign - "$app"
+          # zip — для самообновления клиента, dmg — для установки руками.
           ditto -c -k --keepParent "$app" "dist/$name.zip"
-          (cd dist && shasum -a 256 "$name.zip" > "$name.zip.sha256")
-      - uses: actions/upload-artifact@v4
+          ln -s /Applications stage/Applications
+          hdiutil create -volname Rustspace -srcfolder stage -ov -format UDZO "dist/$name.dmg"
+          (cd dist && shasum -a 256 "$name.zip" > "$name.zip.sha256" && shasum -a 256 "$name.dmg" > "$name.dmg.sha256")
+      - uses: actions/upload-artifact@v6
         with:
           name: client-${{ matrix.name }}
           path: dist/*
@@ -249,15 +264,15 @@ jobs:
   arch:
     name: пакет Arch Linux
     needs: [version, client]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: archlinux:latest
     steps:
       - name: base-devel
         run: pacman -Syu --noconfirm --needed base-devel git
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: client-linux-x86_64
           path: client
@@ -275,7 +290,7 @@ jobs:
           su builder -c "cd build && makepkg --nodeps --noconfirm"
           cp build/*.pkg.tar.zst dist/
           cd dist && for f in *.pkg.tar.zst; do sha256sum "$f" > "$f.sha256"; done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: arch
           path: dist/*
@@ -284,12 +299,12 @@ jobs:
     name: черновик релиза
     needs: [version, server, client, arch]
     if: ${{ !cancelled() && needs.version.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
@@ -311,7 +326,7 @@ jobs:
           | Arch Linux | \`sudo pacman -U rustspace-bin-*-x86_64.pkg.tar.zst\` или \`packaging/arch/PKGBUILD\`: \`makepkg -si\` |
           | Linux, архив | \`rustspace-linux-*.tar.gz\` — распакуйте и запустите \`install.sh\` или сам \`rustspace\` |
           | Windows 10 и 11 (x86_64) | \`rustspace-setup-x86_64.exe\` — установщик; \`rustspace-windows-x86_64.zip\` — без установки |
-          | macOS (Apple Silicon) | \`rustspace-macos-aarch64.zip\` — сборка без сертификата Apple: первый запуск через «Открыть» в контекстном меню |
+          | macOS 11+ | \`rustspace-macos-aarch64.dmg\` (Apple Silicon) или \`rustspace-macos-x86_64.dmg\` (Intel): перетащите Rustspace в «Программы». Сборка без сертификата Apple — первый запуск через «Открыть» в контекстном меню (или \`xattr -dr com.apple.quarantine /Applications/Rustspace.app\`) |
 
           ## Сервер
 

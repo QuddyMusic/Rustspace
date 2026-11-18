@@ -341,12 +341,12 @@ pub(crate) fn show_create_space(
                         tr("Создать")
                     }),
                 );
-                if create.clicked() || (enter && !busy) {
-                    if let Some(request) = request {
-                        form.submitted = true;
-                        let icon = form.icon.as_ref().map(|(icon, _)| icon.clone());
-                        bridge.request(BridgeRequest::CreateSpace(request, icon));
-                    }
+                if (create.clicked() || (enter && !busy))
+                    && let Some(request) = request
+                {
+                    form.submitted = true;
+                    let icon = form.icon.as_ref().map(|(icon, _)| icon.clone());
+                    bridge.request(BridgeRequest::CreateSpace(request, icon));
                 }
                 if ui.button(tr("Отмена")).clicked() {
                     keep_open = false;

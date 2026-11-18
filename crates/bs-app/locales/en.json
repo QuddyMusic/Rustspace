@@ -1645,5 +1645,12 @@
   "Картинка…": "Image…",
   "Картинка недоступна": "Image unavailable",
   "Картинки в превью ссылок": "Images in link previews",
-  "Загружаются прямо с сайта, на который ведёт ссылка, — как в веб-клиенте. Сайт увидит ваш IP-адрес.": "Loaded straight from the linked site, as in the web client. The site will see your IP address."
+  "Загружаются прямо с сайта, на который ведёт ссылка, — как в веб-клиенте. Сайт увидит ваш IP-адрес.": "Loaded straight from the linked site, as in the web client. The site will see your IP address.",
+  "файл модели слишком большой": "model file is too large",
+  "файл модели повреждён (не сошлась контрольная сумма)": "model file is corrupted (checksum mismatch)",
+  "модель не сохранилась": "the model wasn't saved",
+  "модель перевода не найдена": "translation model not found",
+  "список моделей недоступен: {a0}": "model list unavailable: {a0}",
+  "нет модели {a0} → {a1}": "no model for {a0} → {a1}",
+  "нет словаря {a0} → {a1}": "no vocabulary for {a0} → {a1}"
 }

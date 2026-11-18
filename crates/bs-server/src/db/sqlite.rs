@@ -86,11 +86,8 @@ pub(super) struct SqliteTx<'a>(pub(super) &'a rusqlite::Transaction<'a>);
 impl Tx for SqliteTx<'_> {
     fn query(&mut self, sql: &str, params: &[Value]) -> DbResult<Vec<Row>> {
         let mut statement = self.0.prepare_cached(sql)?;
-        let columns: std::sync::Arc<[String]> = statement
-            .column_names()
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
+        let columns: std::sync::Arc<[String]> =
+            statement.column_names().map(str::to_owned).collect();
         let count = columns.len();
         let mut rows = statement.query(rusqlite::params_from_iter(params))?;
         let mut out = Vec::new();

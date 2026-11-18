@@ -223,7 +223,7 @@ impl VideoStage {
             while let Some(frame) = frames.recv().await {
                 let mut i420 = frame.i420;
                 // Предпросмотр себе — маленький и не на каждом кадре.
-                if count % PREVIEW_EVERY == 0 {
+                if count.is_multiple_of(PREVIEW_EVERY) {
                     let Some(stage) = stage.upgrade() else {
                         break;
                     };
