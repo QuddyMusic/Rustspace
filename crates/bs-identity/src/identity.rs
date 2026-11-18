@@ -322,6 +322,7 @@ mod tests {
             show_activity: None,
             federation_home_orphaned: None,
             detached_home_instance: None,
+            bot: false,
         }
     }
 

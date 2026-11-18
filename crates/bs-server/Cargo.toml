@@ -57,5 +57,6 @@ grammers-client = { version = "0.12", default-features = false }
 grammers-session = { version = "0.12", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
+bs-bot = { workspace = true }
 tempfile = "3"
 wiremock = "0.6"

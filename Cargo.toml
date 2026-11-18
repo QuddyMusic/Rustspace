@@ -5,6 +5,7 @@ members = [
     "crates/bs-permissions",
     "crates/bs-api",
     "crates/bs-ws",
+    "crates/bs-bot",
     "crates/bs-instances",
     "crates/bs-identity",
     "crates/bs-voice",
@@ -32,6 +33,7 @@ bs-types = { path = "crates/bs-types" }
 bs-permissions = { path = "crates/bs-permissions" }
 bs-api = { path = "crates/bs-api" }
 bs-ws = { path = "crates/bs-ws" }
+bs-bot = { path = "crates/bs-bot" }
 bs-instances = { path = "crates/bs-instances" }
 bs-identity = { path = "crates/bs-identity" }
 bs-voice = { path = "crates/bs-voice" }

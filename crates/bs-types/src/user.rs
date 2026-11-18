@@ -52,6 +52,9 @@ pub struct User {
     /// Self-view: прежний домашний инстанс отсоединённого аккаунта.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detached_home_instance: Option<String>,
+    /// Бот (Rustspace): пишет программа, а не человек.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bot: bool,
 }
 
 /// Запись о репликации аккаунта на другом инстансе.

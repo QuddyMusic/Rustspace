@@ -964,6 +964,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bs-bot"
+version = "0.1.0"
+dependencies = [
+ "bs-api",
+ "bs-types",
+ "bs-ws",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "bs-contract"
 version = "0.1.0"
 dependencies = [
@@ -1070,6 +1082,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bcrypt",
+ "bs-bot",
  "bs-permissions",
  "chacha20poly1305",
  "futures-util",

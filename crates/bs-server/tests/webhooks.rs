@@ -844,3 +844,107 @@ async fn bots_post_with_their_token_and_stay_out_of_accounts() {
         .await;
     assert_eq!(status, 401);
 }
+
+#[tokio::test]
+async fn rust_bot_answers_and_reacts_over_the_gateway() {
+    use bs_bot::{Bot, Context, ServerEvent};
+
+    let server = start_with(&[]).await;
+    let (token, channel) = user_with_channel(&server).await;
+    let (_, created) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/rustspace/bots",
+            &token,
+            Some(json!({"username": "pinger"})),
+        )
+        .await;
+    let bot_id = created["bot"]["id"].as_str().unwrap().to_owned();
+    let bot_token = created["token"].as_str().unwrap().to_owned();
+    let (_, spaces) = server
+        .call(reqwest::Method::GET, "/api/spaces", &token, None)
+        .await;
+    let space = spaces[0]["id"].as_str().unwrap().to_owned();
+    server
+        .call(
+            reqwest::Method::PUT,
+            &format!("/api/rustspace/spaces/{space}/bots/{bot_id}"),
+            &token,
+            None,
+        )
+        .await;
+
+    let bot = Bot::new(&server.base, &bot_token).unwrap();
+    let (ready_tx, mut ready_rx) = tokio::sync::mpsc::channel::<()>(1);
+    tokio::spawn(bot.run(move |ctx: Context, event: ServerEvent| {
+        let ready_tx = ready_tx.clone();
+        async move {
+            match event {
+                ServerEvent::Ready(_) => {
+                    let _ = ready_tx.send(()).await;
+                }
+                ServerEvent::MessageCreated { message }
+                    if !ctx.is_me(&message.user)
+                        && message.message.content.as_deref() == Some("!ping") =>
+                {
+                    ctx.react(&message.message.id, "👍").await.unwrap();
+                    ctx.reply(&message, "pong").await.unwrap();
+                }
+                _ => {}
+            }
+        }
+    }));
+    tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx.recv())
+        .await
+        .expect("бот подключился");
+
+    let asked = say(
+        &server,
+        &token,
+        &format!("/api/channels/{channel}/messages"),
+        "!ping",
+    )
+    .await;
+    let mut answered = false;
+    for _ in 0..50 {
+        let (_, history) = server
+            .call(
+                reqwest::Method::GET,
+                &format!("/api/channels/{channel}/messages"),
+                &token,
+                None,
+            )
+            .await;
+        let messages = history.as_array().cloned().unwrap_or_default();
+        let reply = messages.iter().find(|m| m["content"] == "pong");
+        let reacted = messages
+            .iter()
+            .find(|m| m["id"] == asked.as_str())
+            .is_some_and(|m| m["reactions"].as_array().is_some_and(|r| !r.is_empty()));
+        if let Some(reply) = reply
+            && reacted
+        {
+            assert_eq!(reply["replyToId"], asked.as_str());
+            assert_eq!(reply["user"]["bot"], true);
+            answered = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(answered, "бот не ответил");
+
+    // Удалённый бот не переподключается.
+    server
+        .call(
+            reqwest::Method::DELETE,
+            &format!("/api/rustspace/bots/{bot_id}"),
+            &token,
+            None,
+        )
+        .await;
+    let rejected = Bot::new(&server.base, &bot_token)
+        .unwrap()
+        .run(|_: Context, _: ServerEvent| async {})
+        .await;
+    assert!(matches!(rejected, Err(bs_bot::BotError::Rejected(_))));
+}
