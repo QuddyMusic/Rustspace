@@ -324,24 +324,19 @@ impl ChatScreen {
         ui.add_space(4.0);
     }
 
-    /// Окно закладок.
+    /// Окно закладок: со всех подключённых инстансов сразу.
     pub(super) fn show_bookmarks(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
         let Some(state) = self.bookmarks.as_mut() else {
             return;
         };
-        let Some(session) = bridge.session_at_mut(0) else {
-            return;
-        };
-        if !session.extras().bookmarks_loaded && session.extras().bookmarks_error.is_none() {
-            session.load_bookmarks(false);
-        }
-        let extras = session.extras();
-        let mut list: Vec<Bookmark> = extras
-            .bookmarks
-            .iter()
-            .filter(|b| !state.media || !b.attachments.is_empty())
-            .filter(|b| {
-                let query = state.query.trim().to_lowercase();
+        let origins = bridge.live_origins();
+        let (mut all, error, more, loaded) = gather_bookmarks(bridge, &origins);
+        all.sort_by_key(|(_, b)| std::cmp::Reverse(b.created_at));
+        let query = state.query.trim().to_lowercase();
+        let mut shown: Vec<(usize, Bookmark)> = all
+            .into_iter()
+            .filter(|(_, b)| !state.media || !b.attachments.is_empty())
+            .filter(|(_, b)| {
                 query.is_empty()
                     || b.content
                         .as_deref()
@@ -355,14 +350,17 @@ impl ChatScreen {
                         .to_lowercase()
                         .contains(&query)
             })
-            .cloned()
             .collect();
         if state.oldest_first {
-            list.reverse();
+            shown.reverse();
         }
-        let error = extras.bookmarks_error.clone();
-        let more = extras.bookmarks_next.is_some();
-        let loaded = extras.bookmarks_loaded;
+        let list: Vec<Bookmark> = shown.iter().map(|(_, b)| b.clone()).collect();
+        let origin_of = |bookmark: &Bookmark| {
+            shown
+                .iter()
+                .find(|(_, b)| b.id == bookmark.id && b.message_id == bookmark.message_id)
+                .map_or(0, |(origin, _)| *origin)
+        };
         let mut clicks = Clicks::default();
         let modal = egui::Modal::new(egui::Id::unique("bookmarks")).show(ctx, |ui| {
             bookmarks_body(
@@ -385,9 +383,17 @@ impl ChatScreen {
         } = clicks;
         let mut close = closed;
         if load_more {
-            session.load_bookmarks(true);
+            for &origin in &origins {
+                if let Some(session) = bridge.session_at_mut(origin)
+                    && session.extras().bookmarks_next.is_some()
+                {
+                    session.load_bookmarks(true);
+                }
+            }
         }
-        if let Some(bookmark) = remove {
+        if let Some(bookmark) = remove
+            && let Some(session) = bridge.session_at_mut(origin_of(&bookmark))
+        {
             session.set_bookmark(
                 bookmark.kind,
                 &bookmark.channel_id,
@@ -397,7 +403,7 @@ impl ChatScreen {
         }
         if let Some(bookmark) = open {
             let target = SelectedChannel {
-                origin: 0,
+                origin: origin_of(&bookmark),
                 channel: bookmark.channel_id.clone(),
                 kind: match bookmark.kind {
                     ChatKind::Channel => ChannelKind::Space,
@@ -412,6 +418,35 @@ impl ChatScreen {
             self.bookmarks = None;
         }
     }
+}
+
+/// Закладки всех инстансов: список, ошибка домашнего, есть ли ещё, загружено ли.
+fn gather_bookmarks(
+    bridge: &mut Bridge,
+    origins: &[usize],
+) -> (Vec<(usize, Bookmark)>, Option<String>, bool, bool) {
+    let mut all = Vec::new();
+    let mut error = None;
+    let mut more = false;
+    let mut loaded = true;
+    for &origin in origins {
+        let Some(session) = bridge.session_at_mut(origin) else {
+            continue;
+        };
+        if !session.extras().bookmarks_loaded && session.extras().bookmarks_error.is_none() {
+            session.load_bookmarks(false);
+        }
+        let extras = session.extras();
+        // Ошибку показываем только домашнего инстанса: чужой может быть
+        // недоступен, остальные закладки от этого не пропадают.
+        if origin == 0 {
+            error.clone_from(&extras.bookmarks_error);
+        }
+        more |= extras.bookmarks_next.is_some();
+        loaded &= extras.bookmarks_loaded || extras.bookmarks_error.is_some();
+        all.extend(extras.bookmarks.iter().cloned().map(|b| (origin, b)));
+    }
+    (all, error, more, loaded)
 }
 
 /// Что щёлкнули в окне закладок.

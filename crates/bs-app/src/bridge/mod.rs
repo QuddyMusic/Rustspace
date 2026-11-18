@@ -20,6 +20,7 @@
 
 pub(crate) mod e2ee;
 pub(crate) mod extras;
+mod local_bookmarks;
 mod protocol;
 mod responses;
 mod session;

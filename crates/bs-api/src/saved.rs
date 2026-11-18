@@ -46,7 +46,7 @@ pub struct Pin {
 }
 
 /// Состояние оригинала закладки.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BookmarkStatus {
     /// Есть и не менялся.
@@ -60,7 +60,7 @@ pub enum BookmarkStatus {
 }
 
 /// Вложение закладки.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BookmarkAttachment {
     /// Имя файла у отправителя.
@@ -76,7 +76,7 @@ pub struct BookmarkAttachment {
 }
 
 /// Закладка: копия сообщения со ссылкой на оригинал.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Bookmark {
     /// Идентификатор.

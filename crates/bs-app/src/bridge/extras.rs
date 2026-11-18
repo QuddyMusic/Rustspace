@@ -73,6 +73,8 @@ pub(crate) enum ExtrasEvent {
     Done(Result<Option<String>, String>),
     /// Иконка игры загружена (ссылка) или нет.
     GameIcon(String, Result<String, String>),
+    /// Сервер не знает закладок (оригинал): они хранятся на устройстве.
+    Unsupported(ExtrasOp),
 }
 
 /// Состояние одной сессии.
@@ -104,6 +106,8 @@ pub(crate) struct Extras {
     /// Ошибка загрузки закладок.
     pub(crate) bookmarks_error: Option<String>,
     bookmarks_loading: bool,
+    /// Закладки этого инстанса хранятся на устройстве (сервер их не знает).
+    pub(crate) local_bookmarks: bool,
     /// Что сказать пользователю.
     pub(crate) notices: Vec<Result<String, String>>,
     /// Итоги загрузки иконок игр (их забирает движок активности).
@@ -114,8 +118,10 @@ impl Extras {
     /// Забыть всё (после переподключения часть событий могла потеряться).
     pub(crate) fn reset(&mut self) {
         let saved = self.saved.take();
+        let local_bookmarks = self.local_bookmarks;
         *self = Self {
             saved,
+            local_bookmarks,
             ..Self::default()
         };
     }
@@ -153,7 +159,8 @@ impl Extras {
                 }
             }
             ExtrasEvent::Done(Ok(Some(text))) => self.notices.push(Ok(text)),
-            ExtrasEvent::Done(Ok(None)) => {}
+            // `Unsupported` разбирает сессия: ей нужны адрес инстанса и кэш.
+            ExtrasEvent::Done(Ok(None)) | ExtrasEvent::Unsupported(_) => {}
             ExtrasEvent::Done(Err(err)) => self.notices.push(Err(err)),
             ExtrasEvent::GameIcon(name, result) => self.game_icons.push((name, result)),
         }
@@ -234,6 +241,14 @@ impl Session {
     /// Загрузить закладки чата, если их нет.
     pub(crate) fn ensure_marks(&mut self, kind: ChatKind, channel: &str) {
         let key = (kind, channel.to_owned());
+        if self.extras.local_bookmarks && !self.extras.marks_asked.contains(&key) {
+            let ids = super::local_bookmarks::keys(self.base().unwrap_or_default(), kind, channel);
+            self.extras
+                .marks
+                .insert(key.clone(), ids.into_iter().collect());
+            self.extras.marks_asked.insert(key);
+            return;
+        }
         if !self.extras.marks_asked.contains(&key)
             && self.request(BridgeRequest::Extras(ExtrasOp::Marks(
                 kind,
@@ -247,6 +262,10 @@ impl Session {
     /// Загрузить закладки: первую страницу (`more = false`) или следующую.
     pub(crate) fn load_bookmarks(&mut self, more: bool) {
         if self.extras.bookmarks_loading {
+            return;
+        }
+        if self.extras.local_bookmarks {
+            self.load_local_bookmarks();
             return;
         }
         let cursor = if more {
@@ -282,12 +301,79 @@ impl Session {
             set.remove(message);
             self.extras.bookmarks.retain(|b| b.message_id != message);
         }
+        if self.extras.local_bookmarks {
+            self.set_local_bookmark(kind, channel, message, on);
+            return;
+        }
         self.request(BridgeRequest::Extras(ExtrasOp::Bookmark {
             kind,
             channel: channel.to_owned(),
             message: message.to_owned(),
             on,
         }));
+    }
+}
+
+impl Session {
+    /// Сервер не знает закладок: дальше они на этом устройстве.
+    pub(crate) fn bookmarks_unsupported(&mut self, op: ExtrasOp) {
+        self.extras.local_bookmarks = true;
+        self.extras.bookmarks_loading = false;
+        match op {
+            ExtrasOp::Marks(kind, channel) => {
+                self.extras.marks_asked.remove(&(kind, channel.clone()));
+                self.ensure_marks(kind, &channel);
+            }
+            ExtrasOp::Bookmarks(_) => self.load_local_bookmarks(),
+            ExtrasOp::Bookmark {
+                kind,
+                channel,
+                message,
+                on,
+            } => self.set_local_bookmark(kind, &channel, &message, on),
+            _ => {}
+        }
+    }
+
+    fn load_local_bookmarks(&mut self) {
+        self.extras.bookmarks = super::local_bookmarks::list(self.base().unwrap_or_default());
+        self.extras.bookmarks_next = None;
+        self.extras.bookmarks_loaded = true;
+        self.extras.bookmarks_error = None;
+    }
+
+    fn set_local_bookmark(&mut self, kind: ChatKind, channel: &str, message: &str, on: bool) {
+        let base = self.base().unwrap_or_default().to_owned();
+        if !on {
+            super::local_bookmarks::remove(&base, message);
+            return;
+        }
+        let Some(bookmark) = self
+            .cache()
+            .and_then(|cache| super::local_bookmarks::snapshot(cache, kind, channel, message))
+        else {
+            self.extras
+                .notices
+                .push(Err(crate::i18n::tr("Сообщение не найдено").to_owned()));
+            return;
+        };
+        self.extras.bookmarks.insert(0, bookmark.clone());
+        super::local_bookmarks::add(&base, bookmark);
+        self.extras.notices.push(Ok(crate::i18n::tr(
+            "Добавлено в закладки (этот сервер их не хранит — они на этом устройстве)",
+        )
+        .to_owned()));
+    }
+}
+
+/// Сервер не знает этого запроса (404 без кода — сервер оригинала).
+fn missing(err: &bs_api::ApiError) -> bool {
+    match err {
+        bs_api::ApiError::Server { status, body } => {
+            *status == reqwest::StatusCode::NOT_FOUND && body.code.is_none()
+        }
+        bs_api::ApiError::Unexpected { status, .. } => *status == reqwest::StatusCode::NOT_FOUND,
+        _ => false,
     }
 }
 
@@ -320,22 +406,22 @@ pub(super) async fn run(client: &bs_api::ApiClient, op: ExtrasOp) -> ExtrasEvent
             };
             ExtrasEvent::Done(result.map(|()| None).map_err(text))
         }
-        ExtrasOp::Marks(kind, channel) => {
-            let ids = client
-                .bookmark_keys(kind, &channel)
-                .await
-                .unwrap_or_default();
-            ExtrasEvent::Marks((kind, channel), ids)
-        }
+        ExtrasOp::Marks(kind, channel) => match client.bookmark_keys(kind, &channel).await {
+            Err(err) if missing(&err) => ExtrasEvent::Unsupported(ExtrasOp::Marks(kind, channel)),
+            result => ExtrasEvent::Marks((kind, channel), result.unwrap_or_default()),
+        },
         ExtrasOp::Bookmarks(cursor) => {
             let first = cursor.is_none();
-            ExtrasEvent::Bookmarks(
-                first,
-                client.bookmarks(cursor.as_deref()).await.map_err(text),
-            )
+            match client.bookmarks(cursor.as_deref()).await {
+                Err(err) if missing(&err) => ExtrasEvent::Unsupported(ExtrasOp::Bookmarks(cursor)),
+                result => ExtrasEvent::Bookmarks(first, result.map_err(text)),
+            }
         }
         ExtrasOp::Bookmark {
-            kind, message, on, ..
+            kind,
+            channel,
+            message,
+            on,
         } => {
             let result = if on {
                 client
@@ -345,7 +431,15 @@ pub(super) async fn run(client: &bs_api::ApiClient, op: ExtrasOp) -> ExtrasEvent
             } else {
                 client.remove_bookmark(kind, &message).await.map(|()| None)
             };
-            ExtrasEvent::Done(result.map_err(text))
+            match result {
+                Err(err) if missing(&err) => ExtrasEvent::Unsupported(ExtrasOp::Bookmark {
+                    kind,
+                    channel,
+                    message,
+                    on,
+                }),
+                result => ExtrasEvent::Done(result.map_err(text)),
+            }
         }
         ExtrasOp::GameIcon { name, image } => {
             ExtrasEvent::GameIcon(name, client.upload_game_icon(&image).await.map_err(text))

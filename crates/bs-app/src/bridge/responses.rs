@@ -188,6 +188,9 @@ impl Session {
             BridgeResponse::UserProfile(event) => self.profile_in.push(event),
             BridgeResponse::VoiceToken(event) => self.voice_in.push(event),
             BridgeResponse::VoiceBitrate(target, result) => self.bitrate_in.push((target, result)),
+            BridgeResponse::Extras(super::extras::ExtrasEvent::Unsupported(op)) => {
+                self.bookmarks_unsupported(op);
+            }
             BridgeResponse::Extras(event) => self.extras.apply(event),
             BridgeResponse::SpaceAction(event) => self.apply_space_event(event),
             BridgeResponse::Directory(result) => self.directory = Some(result),
