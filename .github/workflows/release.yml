@@ -77,8 +77,10 @@ jobs:
           name="rustspace-server-linux-${{ matrix.arch }}"
           mkdir -p stage dist
           cp "target/$TARGET/release/rustspace-server" stage/
-          cp packaging/server/setup.sh LICENSE NOTICE README.md stage/
-          tar czf "dist/$name.tar.gz" -C stage .
+          cp packaging/server/setup.sh packaging/server/rustspace-update.sh LICENSE NOTICE README.md stage/
+          # Имена в архиве без «./»: старые rustspace-update.sh достают файл
+          # ровно по имени rustspace-server.
+          tar czf "dist/$name.tar.gz" -C stage rustspace-server setup.sh rustspace-update.sh LICENSE NOTICE README.md
           (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
           file "stage/rustspace-server"
       - uses: actions/upload-artifact@v6

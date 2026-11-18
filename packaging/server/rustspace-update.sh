@@ -140,10 +140,23 @@ run_update() {
         status failed "$wanted" checksum
         return 0
     fi
-    if ! tar xzf "$tmp/$asset" -C "$tmp" rustspace-server || [ ! -s "$tmp/rustspace-server" ]; then
+    # Архив распаковывается целиком: имя файла внутри бывает и
+    # «rustspace-server», и «./rustspace-server» (выпуск 0.1.1).
+    mkdir "$tmp/x"
+    found=""
+    if tar xzf "$tmp/$asset" -C "$tmp/x"; then
+        for candidate in "$tmp/x/rustspace-server" "$tmp/x"/*/rustspace-server; do
+            if [ -f "$candidate" ] && [ -s "$candidate" ]; then
+                found=$candidate
+                break
+            fi
+        done
+    fi
+    if [ -z "$found" ]; then
         status failed "$wanted" no-binary
         return 0
     fi
+    mv "$found" "$tmp/rustspace-server"
     stamp=$(date +%Y%m%d-%H%M%S)
     backup="$BACKUPS/$APP-$stamp-update"
     mkdir -m 700 "$backup"
@@ -159,6 +172,10 @@ run_update() {
     status running "$wanted" starting
     service start || true
     if wait_version "$wanted"; then
+        # Помощник обновляет и себя — из того же проверенного архива.
+        if [ -s "$tmp/x/rustspace-update.sh" ] && sh -n "$tmp/x/rustspace-update.sh"; then
+            install -m 755 -o root -g root "$tmp/x/rustspace-update.sh" "$(readlink -f "$0")" || true
+        fi
         status "done" "$wanted" updated "$backup"
     else
         service stop || true
