@@ -1027,7 +1027,7 @@ impl ChatScreen {
         }
     }
 
-    /// Канал с деликатным контентом, в который ещё не соглашались войти: вместо ленты —
+    /// Канал NSFW, в который ещё не соглашались войти: вместо ленты —
     /// предупреждение. `true` — показано предупреждение.
     pub(super) fn show_nsfw_gate(
         &self,
@@ -1057,7 +1057,7 @@ impl ChatScreen {
             ));
             ui.add_space(6.0);
             ui.label(
-                RichText::new(tr("Деликатный контент"))
+                RichText::new(tr("NSFW"))
                     .size(20.0)
                     .family(theme::bold_family())
                     .color(theme::text_bright()),

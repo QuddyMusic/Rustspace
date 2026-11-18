@@ -905,7 +905,7 @@ pub(crate) enum SpaceOp {
     DeleteCategory(String),
     /// Загрузить переопределения прав.
     ListOverrides(bs_api::OverrideScope),
-    /// Канал с деликатным контентом (сервер Rustspace).
+    /// Канал NSFW (сервер Rustspace).
     SetNsfw(String, bool),
     /// Загрузить мосты канала.
     ListBridges(String),

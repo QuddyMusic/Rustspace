@@ -519,7 +519,18 @@ pub(crate) fn show_reactions(
                 rect.left_center() + Vec2::new(8.0, -9.0),
                 Vec2::splat(18.0),
             );
-            if !crate::screens::composer::paint_glyph(ui, icon, &group.emoji) {
+            // Стикер в реакции (`sticker:<ссылка>`, как в оригинале) — картинкой,
+            // а не текстом ссылки.
+            if crate::media::sticker_of(&group.emoji).is_some() {
+                crate::images::paint_value(
+                    ui.painter(),
+                    icon,
+                    &group.emoji,
+                    crate::theme::rounded(3),
+                    false,
+                    egui::Color32::WHITE,
+                );
+            } else if !crate::screens::composer::paint_glyph(ui, icon, &group.emoji) {
                 ui.painter().text(
                     icon.center(),
                     egui::Align2::CENTER_CENTER,

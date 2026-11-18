@@ -192,7 +192,7 @@ pub(crate) struct Prefs {
     pub(crate) recent_instances: Vec<RecentInstance>,
     /// Личные переписки, где закрыли предупреждение «не зашифровано».
     pub(crate) plaintext_dismissed: std::collections::BTreeSet<String>,
-    /// Каналы с деликатным контентом, в которые согласились войти.
+    /// Каналы NSFW, в которые согласились войти.
     #[serde(default)]
     pub(crate) nsfw_allowed: std::collections::BTreeSet<String>,
     /// Перевод сообщений.

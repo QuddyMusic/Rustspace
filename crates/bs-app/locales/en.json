@@ -1536,7 +1536,7 @@
   "из системы": "from the system",
   "в последних выпусках llama.cpp нет архива {name}; поставьте llama.cpp из пакетов системы — Rustspace возьмёт его llama-server": "recent llama.cpp releases have no {name} archive; install llama.cpp from your system packages — Rustspace will use its llama-server",
   "Если llama.cpp уже стоит из пакетов системы (например, llama.cpp-vulkan в AUR), Rustspace возьмёт его llama-server и скачает только модель.": "If llama.cpp is already installed from system packages (for example, llama.cpp-vulkan from the AUR), Rustspace uses its llama-server and downloads only the model.",
-  "Деликатный контент": "Sensitive content",
+  "NSFW": "NSFW",
   "Откровенный или шокирующий контент: перед входом каждый подтверждает, что готов его видеть. Нужен сервер Rustspace.": "Explicit or shocking content: everyone confirms they want to see it before entering. Needs a Rustspace server.",
   "В этом канале может быть откровенный или шокирующий контент. Продолжайте, только если готовы его видеть.": "This channel may contain explicit or shocking content. Continue only if you want to see it.",
   "Кнопка «к последним сообщениям»": "“Jump to latest” button",

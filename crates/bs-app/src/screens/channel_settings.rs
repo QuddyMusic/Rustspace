@@ -484,7 +484,7 @@ fn overview(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
 }
 
 /// Закрытость — запрет `VIEW_CHANNEL` для `@everyone`; роль `@everyone` имеет id пространства.
-/// Переключатель «Деликатный контент»: применяется сразу.
+/// Переключатель «NSFW»: применяется сразу.
 fn nsfw_row(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge) {
     let Target::Channel(id) = state.target.clone() else {
         return;
@@ -498,7 +498,7 @@ fn nsfw_row(ui: &mut egui::Ui, state: &mut ChannelSettings, bridge: &mut Bridge)
         ui.vertical(|ui| {
             ui.set_max_width(ui.available_width() - 60.0);
             ui.label(
-                RichText::new(tr("Деликатный контент"))
+                RichText::new(tr("NSFW"))
                     .family(theme::bold_family())
                     .color(theme::text_bright()),
             );
