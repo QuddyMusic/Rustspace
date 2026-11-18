@@ -403,6 +403,8 @@ pub(crate) struct MemberRow {
     pub(crate) activity: Option<(crate::icons::Icon, String, egui::Color32)>,
     /// Старшая роль в пространстве (по ней группа и цвет имени).
     pub(crate) role: Option<TopRole>,
+    /// Бот.
+    pub(crate) bot: bool,
 }
 
 /// Старшая роль участника.
@@ -564,6 +566,7 @@ pub(crate) fn member_rows(cache: &Cache, space_id: &str) -> Vec<MemberRow> {
             face: face_of(&m.user),
             activity: crate::screens::activity_view::summary(cache.user_activities(&m.user.id)),
             role: top_role(&m.roles),
+            bot: m.user.bot,
         })
         .collect();
     rows.sort_by(|a, b| {
@@ -591,6 +594,7 @@ pub(crate) fn group_member_rows(cache: &Cache, dm: &bs_types::DmChannel) -> Vec<
             face: face_of(user),
             activity: crate::screens::activity_view::summary(cache.user_activities(&user.id)),
             role: None,
+            bot: user.bot,
         })
         .collect();
     rows.sort_by(|a, b| {
@@ -629,6 +633,8 @@ pub(super) struct MessageRow {
     pub(super) system: Option<SystemLine>,
     /// Цвет имени автора (старшая роль в пространстве).
     pub(super) name_color: Option<egui::Color32>,
+    /// Автор — бот.
+    pub(super) bot: bool,
 }
 
 /// Содержимое системного сообщения.
@@ -767,6 +773,7 @@ pub(super) fn message_rows(
                 created_at: msg.message.created_at,
                 avatar: msg.user.avatar.clone(),
                 face: face_of(&msg.user),
+                bot: msg.user.bot,
                 attachments: msg
                     .attachments
                     .iter()
@@ -795,6 +802,7 @@ pub(super) fn message_rows(
                 created_at: msg.message.created_at,
                 avatar: msg.user.avatar.clone(),
                 face: face_of(&msg.user),
+                bot: msg.user.bot,
                 attachments: msg
                     .attachments
                     .iter()

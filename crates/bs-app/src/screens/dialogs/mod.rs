@@ -380,6 +380,8 @@ pub(crate) enum SettingsSection {
     Activity,
     /// Личные мосты: свои аккаунты Matrix и Telegram.
     Bridges,
+    /// Свои боты.
+    Bots,
     /// Версия клиента и проверка его обновлений.
     About,
     /// Приватность.
@@ -416,6 +418,7 @@ impl SettingsSection {
             Self::Translate => tr("Перевод"),
             Self::Activity => tr("Активность"),
             Self::Bridges => tr("Мосты"),
+            Self::Bots => tr("Боты"),
             Self::About => tr("О клиенте"),
             Self::Privacy => tr("Приватность"),
             Self::Connections => tr("Подключения"),
@@ -825,6 +828,7 @@ fn settings_nav(
                     SettingsSection::Privacy,
                     SettingsSection::Activity,
                     SettingsSection::Bridges,
+                    SettingsSection::Bots,
                 ],
                 &mut state.section,
             );
@@ -950,6 +954,7 @@ fn section_content(
         SettingsSection::Bridges => {
             super::personal_bridges::page(ui, &mut state.extra.personal, bridge);
         }
+        SettingsSection::Bots => super::bots::page(ui, &mut state.extra.bots, bridge),
         SettingsSection::Translate => {
             super::translate_settings::page(ui, &mut state.translate, &bridge.runtime());
         }

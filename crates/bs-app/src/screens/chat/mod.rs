@@ -1125,6 +1125,7 @@ mod tests {
             reply: None,
             system: None,
             name_color: None,
+            bot: false,
         }
     }
 

@@ -4,6 +4,7 @@ pub(crate) mod activity_settings;
 pub(crate) mod activity_view;
 pub(crate) mod appearance;
 pub(crate) mod body;
+pub(crate) mod bots;
 pub(crate) mod channel_settings;
 pub(crate) mod chat;
 pub(crate) mod composer;

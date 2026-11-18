@@ -1686,6 +1686,37 @@ pub(crate) fn section_title(text: &str) -> egui::RichText {
         .color(text_faint())
 }
 
+fn bot_badge_galley(ui: &egui::Ui) -> std::sync::Arc<egui::Galley> {
+    ui.painter().layout_no_wrap(
+        crate::i18n::tr("БОТ").to_owned(),
+        FontId::new(10.0, bold_family()),
+        on_accent(),
+    )
+}
+
+/// Размер метки «БОТ».
+pub(crate) fn bot_badge_size(ui: &egui::Ui) -> egui::Vec2 {
+    bot_badge_galley(ui).size() + egui::vec2(10.0, 4.0)
+}
+
+/// Рисует метку «БОТ»; `pos` — левый край по центру строки.
+pub(crate) fn paint_bot_badge(ui: &egui::Ui, pos: egui::Pos2) {
+    let galley = bot_badge_galley(ui);
+    let size = galley.size() + egui::vec2(10.0, 4.0);
+    let rect = egui::Rect::from_min_size(egui::pos2(pos.x, pos.y - size.y / 2.0), size);
+    ui.painter().rect_filled(rect, rounded(4), accent());
+    ui.painter()
+        .galley(rect.min + egui::vec2(5.0, 2.0), galley, on_accent());
+}
+
+/// Метка «БОТ» в строке рядом с именем.
+pub(crate) fn bot_badge(ui: &mut egui::Ui) -> egui::Response {
+    let size = bot_badge_size(ui);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    paint_bot_badge(ui, rect.left_center());
+    response.on_hover_text(crate::i18n::tr("Бот: пишет программа"))
+}
+
 /// Участник в правой панели: аватар со статусом и имя; офлайн — приглушён.
 pub(crate) fn member_row<'a>(
     ui: &mut egui::Ui,
@@ -1694,6 +1725,7 @@ pub(crate) fn member_row<'a>(
     name_color: Option<Color32>,
     image: Option<&str>,
     activity: Option<(crate::icons::Icon, &str, Color32)>,
+    bot: bool,
 ) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), Sense::click());
@@ -1722,7 +1754,8 @@ pub(crate) fn member_row<'a>(
     } else {
         rect.center().y
     };
-    text_fit(
+    let badge = if bot { bot_badge_size(ui).x + 6.0 } else { 0.0 };
+    let name_width = text_fit(
         ui.painter(),
         egui::pos2(left, name_y),
         name,
@@ -1734,8 +1767,11 @@ pub(crate) fn member_row<'a>(
             (None, true) => text_faint(),
             (None, false) => text(),
         },
-        width,
+        width - badge,
     );
+    if bot {
+        paint_bot_badge(ui, egui::pos2(left + name_width + 6.0, name_y));
+    }
     // Вторая строка: во что играет или что слушает.
     if let Some((icon, line, color)) = activity {
         let y = rect.center().y + 9.0;
@@ -1762,12 +1798,14 @@ pub(crate) fn text_fit(
     font: FontId,
     color: Color32,
     max_width: f32,
-) {
+) -> f32 {
     let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
     job.wrap = egui::text::TextWrapping::truncate_at_width(max_width.max(1.0));
     let galley = painter.layout_job(job);
     let top = egui::pos2(pos.x, pos.y - galley.size().y / 2.0);
+    let width = galley.size().x;
     painter.galley(top, galley, color);
+    width
 }
 
 /// Подпись, обрезанная многоточием по ширине `width` (а не по числу букв).

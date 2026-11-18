@@ -190,6 +190,8 @@ pub(crate) struct ExtraUi {
     pub(crate) admin: AdminUi,
     /// Личные мосты.
     pub(crate) personal: super::personal_bridges::PersonalUi,
+    /// Боты.
+    pub(crate) bots: super::bots::BotsUi,
 }
 
 impl ExtraUi {
@@ -208,6 +210,7 @@ impl ExtraUi {
                 }
                 AdminEvent::TwoFactor(result) => self.account.two_factor.apply(result),
                 AdminEvent::Personal(event) => self.personal.apply(event),
+                AdminEvent::Bots(event) => self.bots.apply(event),
                 other => self.admin.apply(other),
             }
         }

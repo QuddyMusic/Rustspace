@@ -452,6 +452,8 @@ pub(crate) enum ImageKind {
 pub(crate) enum AdminRequest {
     /// Личные мосты: свои аккаунты Matrix и Telegram.
     Personal(PersonalOp),
+    /// Свои боты.
+    Bots(BotOp),
     /// Прочитать настройки инстанса.
     LoadSettings,
     /// Сохранить настройки инстанса.
@@ -594,6 +596,59 @@ pub(crate) struct TwoFactorView {
     pub(crate) codes: Option<Vec<String>>,
 }
 
+/// Действие со своими ботами.
+#[derive(Debug, Clone)]
+pub(crate) enum BotOp {
+    /// Список.
+    Load,
+    /// Новый бот.
+    Create {
+        /// Имя для входа.
+        username: String,
+        /// Отображаемое имя.
+        display_name: String,
+        /// Описание.
+        description: String,
+    },
+    /// Изменить имя и описание.
+    Update {
+        /// Бот.
+        id: String,
+        /// Отображаемое имя (пустое — убрать).
+        display_name: String,
+        /// Описание (пустое — убрать).
+        description: String,
+    },
+    /// Новый токен.
+    Regenerate(String),
+    /// Удалить.
+    Delete(String),
+    /// Добавить в пространство.
+    AddToSpace {
+        /// Бот.
+        bot: String,
+        /// Пространство.
+        space: String,
+    },
+}
+
+/// Ответы о ботах.
+#[derive(Debug)]
+pub(crate) enum BotEvent {
+    /// Список; `Err(None)` — сервер ботов не знает.
+    Loaded(Result<Vec<bs_api::Bot>, Option<String>>),
+    /// Действие удалось, список свежий; токен — если выдан новый
+    /// (бот, токен).
+    Done {
+        /// Боты (если список прочитался).
+        bots: Option<Vec<bs_api::Bot>>,
+        /// Новый токен.
+        token: Option<(String, String)>,
+    },
+    /// Действие не удалось.
+    Failed(String),
+}
+
 /// Действие с личными мостами.
 #[derive(Debug, Clone)]
 pub(crate) enum PersonalOp {
@@ -683,6 +738,8 @@ pub(crate) enum PersonalEvent {
 pub(crate) enum AdminEvent {
     /// Личные мосты.
     Personal(PersonalEvent),
+    /// Боты.
+    Bots(BotEvent),
     /// Двухфакторная защита: состояние или текст ошибки.
     TwoFactor(Result<TwoFactorView, String>),
     /// Настройки инстанса.

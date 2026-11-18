@@ -190,6 +190,7 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-permissions` | Permission bits, role hierarchy, overrides | 11 |
 | `bs-api` | REST client (`/api/*`), Bearer JWT, uploads and downloads, coded errors | 110 |
 | `bs-ws` | WebSocket client: heartbeat, reconnect, event parsing | 11 |
+| `bs-bot` | Bots in Rust: HTTP API and gateway events, reconnects, short actions (see "Bots") | end-to-end in `bs-server` |
 | `bs-instances` | Connection to one instance: dispatcher, reconnect, password and token sign-in | 14 |
 | `bs-identity` | Login and registration, token storage, per-remote credentials, `UserKey` | 31 |
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
@@ -538,6 +539,16 @@ curl -H 'Content-Type: application/json' \
 `?wait=true` returns the created message. The address is a secret: delete the webhook if it
 leaks. Managing webhooks needs "Manage channels". Cards are stored as ordinary embeds, so the
 original web client shows their title and text too.
+
+### Bots
+
+*(bs-server)* Settings → **Bots** creates a bot: a member whose messages come from your
+program, with its own token and a **BOT** badge. Add it to a space where you have "Manage
+space", then run the program with the token. Bots use the same HTTP API and WebSocket events
+as clients (`Authorization: Bot rsb_…`), so they can be written in any language: Rust has the
+`bs-bot` crate, JavaScript and TypeScript need nothing but `fetch` and `WebSocket`. Bots
+cannot touch accounts, friends, other bots or the admin API. Details and examples:
+[docs/bots.md](docs/bots.md).
 
 ### Activity and game icons
 

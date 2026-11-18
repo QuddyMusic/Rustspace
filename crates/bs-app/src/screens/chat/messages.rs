@@ -676,6 +676,9 @@ impl ChatScreen {
                                 .color(row.name_color.unwrap_or_else(theme::text_bright)),
                         ));
                         hits.profile.push(name.rect);
+                        if row.bot {
+                            theme::bot_badge(ui);
+                        }
                         ui.label(theme::muted(theme::stamp(row.created_at, now_ms())).size(11.5));
                     });
                 }

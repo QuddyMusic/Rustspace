@@ -865,6 +865,7 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
     let text = |err: &bs_api::ApiError| upload_message(err);
     match request {
         AdminRequest::Personal(op) => AdminEvent::Personal(personal_op(client, op).await),
+        AdminRequest::Bots(op) => AdminEvent::Bots(bot_op(client, op).await),
         AdminRequest::LoadInvites { archived } => AdminEvent::Invites(
             client
                 .invites(archived)
@@ -976,6 +977,79 @@ fn personal_message(err: &bs_api::ApiError) -> String {
         }
     }
     err.to_string()
+}
+
+/// Текст ошибки действия с ботом.
+fn bot_message(err: &bs_api::ApiError) -> String {
+    if let bs_api::ApiError::Server { body, .. } = err {
+        match body.code.as_deref() {
+            Some("bot_username_invalid") => {
+                return tr("Имя бота: 2–32 латинские буквы, цифры, «_», «.» или «-»").to_owned();
+            }
+            Some("bot_limit") => return tr("Ботов слишком много").to_owned(),
+            Some("username_taken") => return tr("Это имя уже занято").to_owned(),
+            Some("already_member") => return tr("Бот уже в этом пространстве").to_owned(),
+            Some("user_banned") => return tr("Бот заблокирован в этом пространстве").to_owned(),
+            _ => {}
+        }
+        if err.status() == Some(reqwest::StatusCode::FORBIDDEN) {
+            return tr("Нужно право «Управление пространством»").to_owned();
+        }
+    }
+    err.to_string()
+}
+
+/// Действие со своими ботами.
+async fn bot_op(client: &bs_api::ApiClient, op: BotOp) -> BotEvent {
+    let token = match op {
+        BotOp::Load => {
+            return BotEvent::Loaded(client.bots().await.map_err(|err| {
+                (err.status() != Some(reqwest::StatusCode::NOT_FOUND)).then(|| bot_message(&err))
+            }));
+        }
+        BotOp::Create {
+            username,
+            display_name,
+            description,
+        } => {
+            let blank = |s: &str| (!s.trim().is_empty()).then(|| s.trim().to_owned());
+            client
+                .create_bot(
+                    username.trim(),
+                    blank(&display_name).as_deref(),
+                    blank(&description).as_deref(),
+                )
+                .await
+                .map(|made| Some((made.bot.id, made.token)))
+        }
+        BotOp::Update {
+            id,
+            display_name,
+            description,
+        } => {
+            let patch = bs_api::BotPatch {
+                display_name: Some(display_name),
+                description: Some(description),
+            };
+            client.update_bot(&id, &patch).await.map(|_| None)
+        }
+        BotOp::Regenerate(id) => client
+            .regenerate_bot_token(&id)
+            .await
+            .map(|token| Some((id, token))),
+        BotOp::Delete(id) => client.delete_bot(&id).await.map(|()| None),
+        BotOp::AddToSpace { bot, space } => {
+            client.add_bot_to_space(&space, &bot).await.map(|()| None)
+        }
+    };
+    match token {
+        // Список мог не прочитаться, но новый токен терять нельзя.
+        Ok(token) => BotEvent::Done {
+            bots: client.bots().await.ok(),
+            token,
+        },
+        Err(err) => BotEvent::Failed(bot_message(&err)),
+    }
 }
 
 /// Свежий список личных мостов (`Err(None)` — сервер их не знает).

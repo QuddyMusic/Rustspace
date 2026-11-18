@@ -883,6 +883,7 @@ impl ChatScreen {
                                 row.activity
                                     .as_ref()
                                     .map(|(icon, text, color)| (*icon, text.as_str(), *color)),
+                                row.bot,
                             )
                             .clicked()
                             {
