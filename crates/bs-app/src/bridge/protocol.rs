@@ -525,6 +525,16 @@ pub(crate) enum AdminRequest {
     LoadUpdates(bool),
     /// Обновить сервер (последний выпуск).
     UpdateServer,
+    /// Нагрузка, диски и резервные копии сервера.
+    LoadServer,
+    /// Заявка помощнику на сервере: `backup`, `delete`, `backup-dir`,
+    /// `upload-dir`, `scan` и её аргумент.
+    ServerJob {
+        /// Что сделать.
+        job: String,
+        /// С чем.
+        arg: String,
+    },
     /// Удалить свой аккаунт.
     DeleteAccount {
         /// Пароль.
@@ -777,6 +787,8 @@ pub(crate) enum AdminEvent {
     TelemetryPreview(Result<String, String>),
     /// Состояние обновлений.
     Updates(Result<Box<bs_api::UpdateStatus>, String>),
+    /// Нагрузка, диски и резервные копии сервера.
+    Server(Result<Box<bs_api::ServerState>, String>),
     /// Итог очистки.
     Cleaned(Result<bs_api::CleanupResult, String>),
     /// Итог простого действия: текст успеха или ошибки.

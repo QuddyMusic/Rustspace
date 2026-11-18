@@ -937,6 +937,10 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
             AdminEvent::Updates(updates(client, refresh, false).await)
         }
         AdminRequest::UpdateServer => AdminEvent::Updates(updates(client, false, true).await),
+        AdminRequest::LoadServer => AdminEvent::Server(server_state(client, None).await),
+        AdminRequest::ServerJob { job, arg } => {
+            AdminEvent::Server(server_state(client, Some((&job, &arg))).await)
+        }
         AdminRequest::LoadSettings => {
             AdminEvent::Settings(client.instance_settings().await.map_err(|e| text(&e)))
         }
@@ -1145,6 +1149,34 @@ async fn updates(
     }
     client
         .update_status(refresh)
+        .await
+        .map(Box::new)
+        .map_err(|e| upload_message(&e))
+}
+
+/// Состояние сервера; `job` — сначала отдать заявку помощнику.
+async fn server_state(
+    client: &bs_api::ApiClient,
+    job: Option<(&str, &str)>,
+) -> Result<Box<bs_api::ServerState>, String> {
+    if let Some((job, arg)) = job {
+        client
+            .server_job(job, arg)
+            .await
+            .map_err(|e| match e.code() {
+                Some("helper_busy") => {
+                    tr("Помощник занят — дождитесь окончания прошлой заявки").to_owned()
+                }
+                Some("updater_outdated") => {
+                    tr("Помощник на сервере устарел — выполните на сервере sudo sh setup.sh")
+                        .to_owned()
+                }
+                Some("updater_unavailable") => tr("Помощник на сервере не поставлен").to_owned(),
+                _ => upload_message(&e),
+            })?;
+    }
+    client
+        .server_state()
         .await
         .map(Box::new)
         .map_err(|e| upload_message(&e))

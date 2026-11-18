@@ -1061,6 +1061,7 @@ pub(crate) fn storage_panel(ui: &mut egui::Ui, extra: &mut ExtraUi, bridge: &Bri
     };
     storage_summary(ui, &stats);
     storage_cleanup(ui, admin, &stats, bridge);
+    super::settings_server::uploads_card(ui, &mut admin.more.server, bridge);
 }
 
 /// Размер файлов по-человечески.

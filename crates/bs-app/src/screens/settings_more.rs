@@ -53,6 +53,8 @@ pub(crate) struct MoreUi {
     confirm: Option<PeerOp>,
     show_revoked: bool,
     intervals: std::collections::HashMap<String, u32>,
+    /// Нагрузка, диски и резервные копии.
+    pub(crate) server: super::settings_server::ServerUi,
 }
 
 impl MoreUi {
@@ -108,7 +110,7 @@ impl MoreUi {
                 }
                 Err(message) => self.updates_note = Some(fail(message)),
             },
-            other => return Some(other),
+            other => return self.server.accept(other),
         }
         None
     }
@@ -454,6 +456,7 @@ pub(crate) fn updates_panel(ui: &mut egui::Ui, more: &mut MoreUi, bridge: &Bridg
         };
         ui.label(theme::muted(hint).size(12.5));
     });
+    super::settings_server::server_section(ui, &mut more.server, bridge);
 }
 
 /// Шаг помощника обновления понятными словами.

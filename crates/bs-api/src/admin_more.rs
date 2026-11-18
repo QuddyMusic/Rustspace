@@ -133,6 +133,124 @@ pub struct SelfUpdate {
     pub backup: String,
 }
 
+/// Состояние сервера для администратора (`GET /api/rustspace/admin/server`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ServerState {
+    /// Нагрузка.
+    pub health: ServerHealth,
+    /// Сколько пользователей в сети.
+    pub online: u64,
+    /// База данных.
+    pub database: DatabaseInfo,
+    /// Где лежат файлы пользователей.
+    pub upload_dir: String,
+    /// Диски (точки монтирования).
+    pub disks: Vec<DiskInfo>,
+    /// Резервные копии.
+    pub backups: Backups,
+    /// Когда собраны сведения (мс).
+    pub at: i64,
+}
+
+/// Нагрузка на сервер.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ServerHealth {
+    /// Загрузка процессора, % (нет у первого опроса).
+    pub cpu: Option<f32>,
+    /// Ядер.
+    pub cores: u32,
+    /// Средняя загрузка за 1, 5 и 15 минут (не у Windows).
+    pub load: Option<[f64; 3]>,
+    /// Память всего, байт.
+    pub memory_total: u64,
+    /// Занято, байт.
+    pub memory_used: u64,
+    /// Память процесса сервера, байт.
+    pub process_memory: Option<u64>,
+    /// Процессор процесса сервера, % одного ядра.
+    pub process_cpu: Option<f32>,
+    /// Сколько работает сервер, с.
+    pub uptime: Option<u64>,
+    /// Сколько работает система, с.
+    pub system_uptime: u64,
+}
+
+/// База данных.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DatabaseInfo {
+    /// `sqlite` или `postgres`.
+    pub kind: String,
+    /// Размер, байт.
+    pub size: Option<u64>,
+}
+
+/// Диск сервера.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DiskInfo {
+    /// Точка монтирования.
+    pub mount: String,
+    /// Файловая система (`ext4`, `nfs4`, `cifs`, `fuse.davfs`…).
+    pub fs: String,
+    /// Устройство или источник.
+    pub name: String,
+    /// Всего, байт.
+    pub total: u64,
+    /// Свободно, байт.
+    pub available: u64,
+    /// Что здесь лежит: `server`, `database`, `uploads`, `backups`.
+    pub roles: Vec<String>,
+}
+
+/// Резервные копии (их ведёт помощник на сервере).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Backups {
+    /// Помощник поставлен.
+    pub available: bool,
+    /// Помощник умеет заявки (иначе его надо обновить через `setup.sh`).
+    pub supported: bool,
+    /// Каталог копий.
+    pub dir: String,
+    /// Копии, новые сверху.
+    pub items: Vec<BackupItem>,
+    /// Всего занято, байт.
+    pub total: u64,
+    /// Последняя заявка и её ход.
+    pub job: Option<HelperJob>,
+    /// Заявка ждёт помощника.
+    pub pending: bool,
+}
+
+/// Резервная копия.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BackupItem {
+    /// Имя каталога копии.
+    pub name: String,
+    /// Размер, байт.
+    pub size: u64,
+    /// Когда сделана (мс).
+    pub at: i64,
+}
+
+/// Заявка помощнику и её ход.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HelperJob {
+    /// `backup`, `delete`, `backup-dir`, `upload-dir`, `scan`.
+    pub job: String,
+    /// `running`, `done`, `failed`.
+    pub state: String,
+    /// Шаг или причина (код).
+    pub step: String,
+    /// Когда (мс).
+    pub at: i64,
+}
+
 #[derive(Serialize)]
 struct Enabled {
     enabled: bool,
@@ -195,6 +313,27 @@ impl ApiClient {
         self.post_json(
             "/api/rustspace/admin/update",
             &serde_json::json!({ "version": version }),
+        )
+        .await
+    }
+
+    /// `GET /api/rustspace/admin/server` — нагрузка, диски и резервные копии.
+    ///
+    /// # Errors
+    /// Ошибки запроса.
+    pub async fn server_state(&self) -> Result<ServerState, ApiError> {
+        self.get_json("/api/rustspace/admin/server").await
+    }
+
+    /// `POST /api/rustspace/admin/server/job` — заявка помощнику: `backup`
+    /// (`arg` `files` — и файлы), `delete`, `backup-dir`, `upload-dir`, `scan`.
+    ///
+    /// # Errors
+    /// Ошибки запроса (409 — помощник занят, не поставлен или устарел).
+    pub async fn server_job(&self, job: &str, arg: &str) -> Result<Backups, ApiError> {
+        self.post_json(
+            "/api/rustspace/admin/server/job",
+            &serde_json::json!({ "job": job, "arg": arg }),
         )
         .await
     }

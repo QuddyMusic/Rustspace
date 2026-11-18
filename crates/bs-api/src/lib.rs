@@ -51,7 +51,8 @@ pub use admin::{
     PasswordReset, StorageBreakdown, StorageStats,
 };
 pub use admin_more::{
-    CurrentVersion, LatestRelease, SelfUpdate, StreamingLimits, StreamingPatch, TelemetryStatus,
+    BackupItem, Backups, CurrentVersion, DatabaseInfo, DiskInfo, HelperJob, LatestRelease,
+    SelfUpdate, ServerHealth, ServerState, StreamingLimits, StreamingPatch, TelemetryStatus,
     UpdateStatus,
 };
 pub use assets::{

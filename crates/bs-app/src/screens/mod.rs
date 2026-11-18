@@ -28,6 +28,7 @@ pub(crate) mod settings_app;
 pub(crate) mod settings_extra;
 pub(crate) mod settings_invites;
 pub(crate) mod settings_more;
+pub(crate) mod settings_server;
 pub(crate) mod space_dialogs;
 pub(crate) mod space_settings;
 pub(crate) mod sticker_packs;

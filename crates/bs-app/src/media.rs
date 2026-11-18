@@ -110,8 +110,15 @@ pub(crate) fn human_size(bytes: i64) -> String {
         crate::tf!("{bytes} Б", bytes = bytes)
     } else if b < KIB * KIB {
         crate::tf!("{a0} КБ", a0 = format!("{:.0}", b / KIB))
-    } else {
+    } else if b < KIB * KIB * KIB {
         crate::tf!("{a0} МБ", a0 = format!("{:.1}", b / (KIB * KIB)))
+    } else if b < KIB * KIB * KIB * KIB {
+        crate::tf!("{a0} ГБ", a0 = format!("{:.1}", b / (KIB * KIB * KIB)))
+    } else {
+        crate::tf!(
+            "{a0} ТБ",
+            a0 = format!("{:.1}", b / (KIB * KIB * KIB * KIB))
+        )
     }
 }
 
