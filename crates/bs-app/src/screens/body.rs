@@ -363,6 +363,22 @@ fn embed_site(url: &str) -> Option<&str> {
     (!host.is_empty()).then_some(host)
 }
 
+/// Значение картинки карточки для загрузки: файлы инстанса и GIF-сервисов —
+/// как есть, картинка с другого сайта — с пометкой [`bs_api::PREVIEW_PREFIX`]
+/// (если в настройках не выключено).
+fn preview_image(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if !value.starts_with("https://") || bs_api::AssetPath::external(value).is_some() {
+        return Some(value.to_owned());
+    }
+    crate::prefs::get()
+        .preview_images
+        .then(|| format!("{}{value}", bs_api::PREVIEW_PREFIX))
+}
+
 /// Карточка под сообщением: превью ссылки или карточка вебхука — полоса
 /// цвета, сайт, заголовок-ссылка, текст с разметкой и картинка. Возвращает
 /// картинку для просмотрщика, если она показана.
@@ -377,9 +393,14 @@ pub(crate) fn show_embed(
         .description
         .as_deref()
         .filter(|t| !t.trim().is_empty());
-    let image = embed.image.as_deref().filter(|t| !t.is_empty());
+    let image = embed
+        .image
+        .as_deref()
+        .filter(|t| !t.is_empty())
+        .and_then(preview_image);
     if embed.embed_type == bs_types::EmbedType::Image {
-        return crate::media::show_gif(ui, image.unwrap_or(&embed.url));
+        return preview_image(embed.image.as_deref().unwrap_or(&embed.url))
+            .and_then(|value| crate::media::show_image_link(ui, &value));
     }
     if title.is_none() && description.is_none() {
         return None;
@@ -420,7 +441,7 @@ pub(crate) fn show_embed(
             }
             if let Some(image) = image {
                 ui.add_space(4.0);
-                hit = crate::media::show_gif(ui, image);
+                hit = crate::media::show_image_link(ui, &image);
             }
         });
     let rect = frame.response.rect;

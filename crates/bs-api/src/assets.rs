@@ -21,6 +21,11 @@ const STICKERS: &str = "/api/stickers/assets/";
 const GAME_ICONS: &str = "/api/game-icons/assets/";
 /// Префикс токена стикера в тексте сообщения.
 pub const STICKER_PREFIX: &str = "sticker:";
+/// Префикс картинки превью ссылки: клиент сам помечает так `image` карточки,
+/// чтобы её можно было скачать с любого сайта (см. [`AssetPath::preview`]).
+pub const PREVIEW_PREFIX: &str = "preview:";
+/// Самая длинная ссылка на картинку превью.
+const MAX_PREVIEW_LEN: usize = 2048;
 /// Самое длинное допустимое значение поля с файлом.
 const MAX_VALUE_LEN: usize = 512;
 /// Самое длинное допустимое имя файла.
@@ -61,7 +66,11 @@ const MAX_EXTERNAL_LEN: usize = 300;
 /// Проверенный путь к файлу: на своём инстансе (`/api/uploads/…`) или
 /// полная ссылка `https` на хост из [`GIF_HOSTS`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AssetPath(String);
+pub struct AssetPath {
+    path: String,
+    /// Картинка превью ссылки с произвольного сайта.
+    preview: bool,
+}
 
 impl AssetPath {
     /// Разбирает путь вида `/api/uploads/<имя>` или `/api/stickers/assets/<имя>`.
@@ -78,13 +87,16 @@ impl AssetPath {
             && name
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
-        valid.then(|| Self(path.to_owned()))
+        valid.then(|| Self::plain(path.to_owned()))
     }
 
     /// Разбирает ссылку на GIF: только `https`, только хосты из
     /// [`GIF_HOSTS`], без логина, порта, параметров и фрагмента.
     #[must_use]
     pub fn external(value: &str) -> Option<Self> {
+        if let Some(link) = value.trim().strip_prefix(PREVIEW_PREFIX) {
+            return Self::preview(link);
+        }
         let value = value.trim();
         if value.is_empty() || value.len() > MAX_EXTERNAL_LEN {
             return None;
@@ -103,7 +115,48 @@ impl AssetPath {
             && url.path().bytes().all(|b| {
                 b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'_' | b'-' | b'%' | b'~')
             });
-        allowed.then(|| Self(url.to_string()))
+        allowed.then(|| Self::plain(url.to_string()))
+    }
+
+    fn plain(path: String) -> Self {
+        Self {
+            path,
+            preview: false,
+        }
+    }
+
+    /// Картинка превью ссылки (`og:image`) с любого сайта, как в веб-клиенте
+    /// оригинала: только `https`, только доменное имя (не IP-адрес и не
+    /// локальное имя), порт по умолчанию, без логина. Параметры запроса
+    /// допустимы — без них такие картинки часто не отдаются.
+    #[must_use]
+    pub fn preview(value: &str) -> Option<Self> {
+        let value = value.trim();
+        if value.is_empty() || value.len() > MAX_PREVIEW_LEN {
+            return None;
+        }
+        let mut url = Url::parse(value).ok()?;
+        let domain = match url.host()? {
+            url::Host::Domain(domain) => domain.to_ascii_lowercase(),
+            url::Host::Ipv4(_) | url::Host::Ipv6(_) => return None,
+        };
+        let local = !domain.contains('.')
+            || [".local", ".localhost", ".internal", ".lan", ".home.arpa"]
+                .iter()
+                .any(|suffix| domain.ends_with(suffix));
+        if url.scheme() != "https"
+            || local
+            || url.port().is_some_and(|p| p != 443)
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return None;
+        }
+        url.set_fragment(None);
+        Some(Self {
+            path: url.to_string(),
+            preview: true,
+        })
     }
 
     /// Открытый файл чужого инстанса из общего каталога (иконка, баннер
@@ -116,19 +169,19 @@ impl AssetPath {
         }
         let path = resolve_asset(origin, value)?;
         let url = base.join(path.as_str()).ok()?;
-        Some(Self(url.to_string()))
+        Some(Self::plain(url.to_string()))
     }
 
     /// Это внешняя ссылка, а не путь на инстансе.
     #[must_use]
     pub fn is_external(&self) -> bool {
-        self.0.starts_with("https://")
+        self.path.starts_with("https://")
     }
 
     /// Путь для запроса.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.path
     }
 }
 
@@ -156,6 +209,29 @@ fn external_client() -> Result<&'static reqwest::Client, ApiError> {
     Ok(CLIENT.get_or_init(|| client))
 }
 
+/// Клиент для картинок превью: перенаправления — только на адреса, которые
+/// прошли бы [`AssetPath::preview`].
+fn preview_client() -> Result<&'static reqwest::Client, ApiError> {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .user_agent(crate::client::USER_AGENT)
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() < 5 && AssetPath::preview(attempt.url().as_str()).is_some()
+            {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
+        .https_only(true)
+        .build()?;
+    Ok(CLIENT.get_or_init(|| client))
+}
+
 /// Скачивает внешний файл (GIF), но не больше `limit` байт.
 ///
 /// Принимает только пути, прошедшие [`AssetPath::external`]: никакого токена,
@@ -167,7 +243,12 @@ pub async fn fetch_external(asset: &AssetPath, limit: usize) -> Result<Vec<u8>, 
     if !asset.is_external() {
         return Err(ApiError::Url(url::ParseError::RelativeUrlWithoutBase));
     }
-    let response = external_client()?
+    let client = if asset.preview {
+        preview_client()?
+    } else {
+        external_client()?
+    };
+    let response = client
         .get(asset.as_str())
         .header(
             header::ACCEPT,
@@ -321,6 +402,23 @@ mod tests {
     fn gif_links_only_from_allowed_hosts_over_https() {
         let ok = AssetPath::external("https://static.klipy.com/ii/abc/def.gif");
         assert!(ok.is_some_and(|p| p.is_external()));
+        let preview = AssetPath::external("preview:https://equixly.com/og.png?v=2#x");
+        assert_eq!(
+            preview.as_ref().map(AssetPath::as_str),
+            Some("https://equixly.com/og.png?v=2")
+        );
+        for bad in [
+            "preview:http://equixly.com/og.png",
+            "preview:https://192.168.1.1/a.png",
+            "preview:https://router.local/a.png",
+            "preview:https://localhost/a.png",
+            "preview:https://user:pw@equixly.com/a.png",
+            "preview:https://equixly.com:8443/a.png",
+            // Без пометки произвольный сайт по-прежнему не годится.
+            "https://equixly.com/og.png",
+        ] {
+            assert!(AssetPath::external(bad).is_none(), "{bad}");
+        }
         assert!(AssetPath::external("https://media.tenor.com/xyz/cat.gif").is_some());
         for bad in [
             "http://static.klipy.com/a.gif",

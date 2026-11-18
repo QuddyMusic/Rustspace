@@ -204,6 +204,8 @@ pub(crate) struct Prefs {
     /// Ширина левой и правой колонок.
     #[serde(default)]
     pub(crate) columns: crate::columns::Widths,
+    /// Картинки превью ссылок грузятся с сайтов напрямую (сайт видит IP).
+    pub(crate) preview_images: bool,
 }
 
 /// Инстанс, в который входили с этого устройства.
@@ -255,6 +257,7 @@ impl Default for Prefs {
             translate: crate::translate::TranslatePrefs::default(),
             activity: crate::presence::ActivityPrefs::default(),
             columns: crate::columns::Widths::default(),
+            preview_images: true,
             recent_instances: Vec::new(),
         }
     }

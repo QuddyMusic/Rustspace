@@ -1641,5 +1641,9 @@
   "Модели — Firefox Translations (Mozilla, проект Bergamot), движок — fxtranslate (MPL-2.0). Скачиваются с серверов Mozilla.": "Models: Firefox Translations (Mozilla, Project Bergamot); engine: fxtranslate (MPL-2.0). Downloaded from Mozilla's servers.",
   "Скачано: {a0} ({a1} МБ)": "Downloaded: {a0} ({a1} MB)",
   "Скачать для языка «{a0}»": "Download for “{a0}”",
-  "Скачиваю модель {a0}…": "Downloading model {a0}…"
+  "Скачиваю модель {a0}…": "Downloading model {a0}…",
+  "Картинка…": "Image…",
+  "Картинка недоступна": "Image unavailable",
+  "Картинки в превью ссылок": "Images in link previews",
+  "Загружаются прямо с сайта, на который ведёт ссылка, — как в веб-клиенте. Сайт увидит ваш IP-адрес.": "Loaded straight from the linked site, as in the web client. The site will see your IP address."
 }

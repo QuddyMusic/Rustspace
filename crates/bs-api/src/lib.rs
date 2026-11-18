@@ -54,7 +54,9 @@ pub use admin_more::{
     CurrentVersion, LatestRelease, SelfUpdate, StreamingLimits, StreamingPatch, TelemetryStatus,
     UpdateStatus,
 };
-pub use assets::{AssetPath, GIF_HOSTS, STICKER_PREFIX, fetch_external, resolve_asset};
+pub use assets::{
+    AssetPath, GIF_HOSTS, PREVIEW_PREFIX, STICKER_PREFIX, fetch_external, resolve_asset,
+};
 pub use auth::AuthResponse;
 pub use bots::{Bot, BotPatch, BotSpace, BotWithToken};
 pub use bridges::{BridgeLink, ChannelBridges};

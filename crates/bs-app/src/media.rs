@@ -453,6 +453,15 @@ pub(crate) fn show_sticker(ui: &mut egui::Ui, value: &str) -> Option<Hit> {
 
 /// GIF-сообщение в ленте.
 pub(crate) fn show_gif(ui: &mut egui::Ui, url: &str) -> Option<Hit> {
+    show_remote(ui, url, "GIF…", tr("GIF недоступен"))
+}
+
+/// Картинка карточки (превью ссылки, карточка вебхука).
+pub(crate) fn show_image_link(ui: &mut egui::Ui, url: &str) -> Option<Hit> {
+    show_remote(ui, url, tr("Картинка…"), tr("Картинка недоступна"))
+}
+
+fn show_remote(ui: &mut egui::Ui, url: &str, loading: &str, failed: &str) -> Option<Hit> {
     let state = ImageHub::of(ui.ctx()).map_or(ImageState::Absent, |h| h.state(url));
     let size = match &state {
         ImageState::Ready(image) => fit(image.size_f32(), MAX_BOX),
@@ -472,8 +481,8 @@ pub(crate) fn show_gif(ui: &mut egui::Ui, url: &str) -> Option<Hit> {
                 Color32::WHITE,
             );
         }
-        ImageState::Loading => placeholder(ui, rect, "GIF…"),
-        _ => placeholder(ui, rect, tr("GIF недоступен")),
+        ImageState::Loading => placeholder(ui, rect, loading),
+        _ => placeholder(ui, rect, failed),
     }
     if ready && response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

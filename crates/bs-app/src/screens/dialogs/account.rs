@@ -187,6 +187,28 @@ pub(super) fn privacy(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, b
             ui.add_space(10.0);
         }
     });
+    ui.add_space(10.0);
+    card(ui, |ui| {
+        let mut images = crate::prefs::get().preview_images;
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width() - 60.0);
+                ui.label(RichText::new(tr("Картинки в превью ссылок")).color(theme::text_bright()));
+                ui.label(
+                    theme::muted(tr(
+                        "Загружаются прямо с сайта, на который ведёт ссылка, — как в веб-клиенте. \
+                         Сайт увидит ваш IP-адрес.",
+                    ))
+                    .size(12.5),
+                );
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if widgets::toggle(ui, &mut images) {
+                    crate::prefs::update(|p| p.preview_images = images);
+                }
+            });
+        });
+    });
     save_bar(ui, state, me, bridge);
 }
 
