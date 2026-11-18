@@ -1043,6 +1043,24 @@ impl Bridge {
         self.slots.get(index).map(|slot| &slot.session)
     }
 
+    /// Запрос к домашнему инстансу, какой бы чат ни был открыт: личное
+    /// (стикеры, паки) принадлежит аккаунту, а не пространству.
+    pub(crate) fn request_home(&self, request: crate::bridge::BridgeRequest) -> bool {
+        self.session_at(0)
+            .is_some_and(|session| session.request(request))
+    }
+
+    /// Личные события композера домашнего инстанса (стикеры и паки), когда
+    /// открыт чужой: остальное (загрузки файлов) остаётся своей сессии.
+    pub(crate) fn take_home_sticker_events(&mut self) -> Vec<crate::bridge::ComposeEvent> {
+        if self.focus_index() == 0 {
+            return Vec::new();
+        }
+        self.session_at_mut(0)
+            .map(crate::bridge::Session::take_sticker_events)
+            .unwrap_or_default()
+    }
+
     /// Сессия инстанса по номеру (для запросов к нему).
     pub(crate) fn session_at_mut(&mut self, index: usize) -> Option<&mut crate::bridge::Session> {
         self.slots.get_mut(index).map(|slot| &mut slot.session)

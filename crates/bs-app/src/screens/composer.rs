@@ -224,10 +224,12 @@ pub(crate) struct Composer {
     card: Option<crate::screens::format_bar::CardForm>,
 }
 
-/// Ключ аккаунта для избранных GIF: инстанс + пользователь.
-fn favorite_key(bridge: &Bridge, origin: Option<usize>) -> Option<String> {
-    let base = bridge.base_at(origin.unwrap_or(0))?;
-    let user = bridge.cache_at(origin.unwrap_or(0))?.me().id.clone();
+/// Ключ аккаунта для избранных GIF: домашний инстанс + пользователь. Избранное
+/// принадлежит аккаунту, поэтому одно и то же в любом пространстве, в том
+/// числе на чужих инстансах.
+fn favorite_key(bridge: &Bridge, _origin: Option<usize>) -> Option<String> {
+    let base = bridge.base_at(0)?;
+    let user = bridge.cache_at(0)?.me().id.clone();
     Some(crate::gif_favorites::account_key(base, &user))
 }
 
@@ -668,7 +670,9 @@ impl Composer {
     /// Забирает события моста и результаты выбора файлов.
     pub(crate) fn poll(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
         self.now = ctx.input(|i| i.time);
-        for event in bridge.take_compose_events() {
+        let mut events = bridge.take_compose_events();
+        events.extend(bridge.take_home_sticker_events());
+        for event in events {
             match event {
                 ComposeEvent::Progress { id, sent, total } => {
                     if let Some(item) = self.staged.iter_mut().find(|s| s.id == id) {
@@ -725,8 +729,9 @@ impl Composer {
                 ComposeEvent::StickerChanged(result) => match result {
                     Ok(()) => {
                         self.stickers.error = None;
-                        bridge.request(BridgeRequest::Stickers);
-                        bridge.request(BridgeRequest::StickerPacks(crate::bridge::PackOp::List));
+                        bridge.request_home(BridgeRequest::Stickers);
+                        bridge
+                            .request_home(BridgeRequest::StickerPacks(crate::bridge::PackOp::List));
                     }
                     Err(message) => self.stickers.error = Some(message),
                 },
@@ -760,7 +765,7 @@ impl Composer {
                     .chars()
                     .take(32)
                     .collect();
-                bridge.request(BridgeRequest::UploadSticker {
+                bridge.request_home(BridgeRequest::UploadSticker {
                     name,
                     bytes: Arc::new(bytes),
                     pack: self.stickers.upload_into.take(),
@@ -1492,7 +1497,7 @@ impl Composer {
 
     fn sticker_tab(&mut self, ui: &mut egui::Ui, bridge: &Bridge) -> Option<Outgoing> {
         if !self.stickers.asked {
-            self.stickers.asked = bridge.request(BridgeRequest::Stickers);
+            self.stickers.asked = bridge.request_home(BridgeRequest::Stickers);
         }
         self.stickers.packs.tabs(ui, bridge);
         let chosen = if self.stickers.packs.on_mine() {
@@ -1563,7 +1568,7 @@ impl Composer {
             self.start_pick(ui.ctx(), PickMode::Sticker);
         }
         if let Some(id) = delete {
-            bridge.request(BridgeRequest::DeleteSticker(id));
+            bridge.request_home(BridgeRequest::DeleteSticker(id));
         }
         chosen
     }

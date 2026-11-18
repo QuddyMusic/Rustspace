@@ -1026,6 +1026,23 @@ impl Session {
         std::mem::take(&mut self.profile_in)
     }
 
+    /// Забирает только события стикеров и паков.
+    pub(crate) fn take_sticker_events(&mut self) -> Vec<ComposeEvent> {
+        let (stickers, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.compose_in)
+            .into_iter()
+            .partition(|event| {
+                matches!(
+                    event,
+                    ComposeEvent::Stickers(_)
+                        | ComposeEvent::StickerChanged(_)
+                        | ComposeEvent::StickerPacks(_)
+                        | ComposeEvent::PacksWith(_)
+                )
+            });
+        self.compose_in = rest;
+        stickers
+    }
+
     /// Забирает накопленные события композера.
     pub(crate) fn take_compose_events(&mut self) -> Vec<ComposeEvent> {
         std::mem::take(&mut self.compose_in)

@@ -168,17 +168,17 @@ impl Packs {
             loading: true,
             ..Found::default()
         });
-        bridge.request(BridgeRequest::StickerPacks(PackOp::With(id.to_owned())));
+        bridge.request_home(BridgeRequest::StickerPacks(PackOp::With(id.to_owned())));
     }
 
     fn ensure(&mut self, bridge: &Bridge) {
         if !self.asked {
-            self.asked = bridge.request(BridgeRequest::StickerPacks(PackOp::List));
+            self.asked = bridge.request_home(BridgeRequest::StickerPacks(PackOp::List));
         }
     }
 
     fn op(bridge: &Bridge, op: PackOp) {
-        bridge.request(BridgeRequest::StickerPacks(op));
+        bridge.request_home(BridgeRequest::StickerPacks(op));
     }
 
     /// Открыты личные стикеры?
