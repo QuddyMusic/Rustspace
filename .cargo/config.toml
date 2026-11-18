@@ -12,3 +12,19 @@ incremental = true
 
 [net]
 retry = 3
+
+# libwebrtc (голос, LiveKit) собран со статической CRT: без этого на Windows
+# не сходится компоновка, а на чистой Windows 10 не хватило бы VC++ Redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# Категории Objective-C из libwebrtc иначе не загружаются, и программа падает
+# при запуске (так же настроен livekit/rust-sdks).
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-args=-ObjC"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-args=-ObjC"]

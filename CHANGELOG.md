@@ -51,6 +51,12 @@
 - Установщики: `install.sh`, AppImage, `.deb`, PKGBUILD, установщик Windows;
   обновление изнутри с проверкой контрольной суммы.
 
+### Сборки
+
+- Windows 10 и 11 (установщик и zip), Linux (tar.gz, deb, AppImage, пакет Arch Linux), macOS;
+  сервер — статические сборки для Linux x86_64 и aarch64. Клиент и сервер обновляются из
+  опубликованных релизов.
+
 ### Сервер (`rustspace-server`)
 
 - Боты (`/api/rustspace/bots…`): токен `rsb_…`, тот же API и WebSocket, что у клиентов, без

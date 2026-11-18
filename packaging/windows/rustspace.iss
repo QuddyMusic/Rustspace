@@ -29,6 +29,8 @@ UninstallDisplayIcon={app}\rustspace.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; Windows 10 и 11.
+MinVersion=10.0
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=force
