@@ -499,6 +499,8 @@ pub fn app(state: AppState) -> Router {
         .route("/api/admin/telemetry/preview", get(routes::admin_status::telemetry_preview))
         .route("/api/admin/instance/update-status", get(routes::admin_status::update_status))
         .route("/api/rustspace/admin/update", post(routes::admin_status::request_update))
+        .route("/api/rustspace/admin/server", get(routes::admin_server::server_state))
+        .route("/api/rustspace/admin/server/job", post(routes::admin_server::request_job))
         .route("/api/auth/2fa", get(routes::twofactor::status))
         .route("/api/auth/2fa/setup", post(routes::twofactor::setup))
         .route("/api/auth/2fa/enable", post(routes::twofactor::enable))

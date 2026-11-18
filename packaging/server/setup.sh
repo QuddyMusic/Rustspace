@@ -70,6 +70,11 @@ LK_BIN=/usr/local/bin/livekit-server
 BUILD=/opt/rustspace-build
 LOG_DIR=/var/log/rustspace
 BACKUPS=/var/backups/rustspace
+# Каталог копий, выбранный администратором в клиенте, сохраняется.
+if [ -r "$ETC/updater.conf" ]; then
+    prev_backups=$(sed -n "s/^BACKUPS='\(.*\)'$/\1/p" "$ETC/updater.conf")
+    [ -n "$prev_backups" ] && [ -d "$prev_backups" ] && BACKUPS=$prev_backups
+fi
 DB_FILE=$DATA/data/rustspace.db
 
 # Установка до переименования в Rustspace.
@@ -679,9 +684,11 @@ elif [ -n "$OWN_SQLITE" ] || { [ "$DB_CHOICE" = sqlite ] && [ -f "$DB_FILE" ]; }
         fi
     done
 fi
-# Хранятся пять последних копий.
-# shellcheck disable=SC2012
-ls -1t "$BACKUPS" 2>/dev/null | tail -n +6 | while read -r old; do rm -rf "${BACKUPS:?}/$old"; done
+# Хранятся пять последних копий; сделанные вручную (…-manual) — пока их
+# не удалит администратор.
+# shellcheck disable=SC2010
+ls -1t "$BACKUPS" 2>/dev/null | grep -v -- '-manual$' | tail -n +6 \
+    | while read -r old; do rm -rf "${BACKUPS:?}/$old"; done
 
 # ─── Пользователь, каталоги, перенос со старых имён ─────────────────────────
 
@@ -711,12 +718,18 @@ if [ "$LEGACY" = 1 ] && [ -d "$OLD_DATA" ] && [ ! -e "$DATA" ]; then
     fi
 fi
 mkdir -p "$ETC" "$DATA/data/uploads" "$LOG_DIR"
+# Файлы, перенесённые администратором на другой диск (из клиента), остаются там.
+UPLOADS=$DATA/data/uploads
+prev_uploads=$(carried UPLOAD_DIR)
+case "$prev_uploads" in
+    /*/rustspace-uploads) [ -d "$prev_uploads" ] && UPLOADS=$prev_uploads ;;
+esac
 chown -R "$APP:$APP" "$DATA/data" "$LOG_DIR"
 chown "$APP:$APP" "$DATA"
 chmod 750 "$DATA"
 
 # Копия данных сервера, запущенного вручную, или из --data-from.
-if [ -n "$SRC_UPLOADS" ] && [ -d "$SRC_UPLOADS" ]; then
+if [ -n "$SRC_UPLOADS" ] && [ -d "$SRC_UPLOADS" ] && [ "$SRC_UPLOADS" != "$UPLOADS" ]; then
     if [ -n "$(ls -A "$DATA/data/uploads" 2>/dev/null)" ]; then
         warn "в $DATA/data/uploads уже есть файлы — копирование $SRC_UPLOADS пропущено"
     else
@@ -787,7 +800,7 @@ NEW_ENV=$(mktemp)
         echo "# setup: --sqlite"
         echo "DB_PATH='$DB_FILE'"
     fi
-    echo "UPLOAD_DIR='$DATA/data/uploads'"
+    echo "UPLOAD_DIR='$UPLOADS'"
     # Каталог заявок на обновление из клиента (см. rustspace-update.sh).
     [ "$WITH_UPDATER" = 0 ] || [ -z "$RUST_ARCH" ] || echo "BS_UPDATER_DIR='$DATA/updater'"
     [ -z "$WEB_DIR" ] || echo "BS_WEB_DIST='$WEB_DIR'"
@@ -1044,6 +1057,7 @@ Description=Rustspace: watch for update requests
 
 [Path]
 PathExists=$DATA/updater/request.json
+PathExists=$DATA/updater/job-request.json
 
 [Install]
 WantedBy=multi-user.target
@@ -1065,6 +1079,8 @@ EOF
     fi
     touch "$DATA/updater/enabled"
     chown "$APP:$APP" "$DATA/updater/enabled"
+    # Список резервных копий для клиента.
+    "$UPDATER" --scan || warn "помощник не составил список резервных копий"
 fi
 
 # ─── Уборка старых имён ─────────────────────────────────────────────────────
