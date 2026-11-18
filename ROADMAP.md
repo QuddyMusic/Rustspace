@@ -56,6 +56,22 @@ original server.
   of other instances (`GET /api/directory`) with "connect and join / request".
 - **Refactoring.** `chat.rs`, `bridge.rs` and `dialogs.rs` are split into modules.
 
+### Versions 0.1.0 and 0.1.1
+- **Bot API** in pure Rust: bot accounts with `rsb_…` tokens on `bs-server`, the same REST and
+  WebSocket as clients, the `bs-bot` crate (event loop, reconnects, short actions), *Settings →
+  For developers → Bots*, a BOT badge; JavaScript and TypeScript bots need no packages
+  ([docs/bots.md](docs/bots.md)).
+- **Personal bridges** (own Matrix and Telegram accounts in DMs), invite to a space from the
+  friend and DM menu (Backspace PR #485), resizable columns (Backspace PR #477).
+- **Translation without an AI model** (Firefox Translations models, fxtranslate engine).
+- **Cards in DMs and Saved Messages**, link preview images from any site (can be turned off).
+- **Chat header**: channel notification settings and a downloads list; attachment previews
+  and retry before sending; pinned messages with previews and a list of all pins; bookmarks
+  across instances (kept on the device where the server has none).
+- **Releases**: Windows 10/11, Linux (tar.gz, deb, AppImage, Arch package), macOS (Apple
+  Silicon and Intel, dmg), static server builds that the server's updater picks up; CI green
+  on Linux, Windows and macOS.
+
 ### This iteration
 - **Screen sharing rebuilt.** Capture now uses libwebrtc's own desktop capturer instead of
   xcap: on Wayland it goes through the ScreenCast portal (the system dialog picks the screen
@@ -96,29 +112,16 @@ original server.
   virtual PulseAudio/PipeWire devices and a local LiveKit, Wayland capture and the
   GlobalShortcuts portal with a headless compositor and a fake portal; the camera only builds.
   Needs a run on a real machine (GNOME/KDE on Wayland, Windows, macOS).
-- The client's GitHub repository for update checks has to be set (in the settings or with
-  `BS_UPDATE_REPO`) until the owner names it.
 - **TUI** lags behind the GUI (no DM feed, groups, space settings or voice UI). Postponed by
   the owner's decision.
 
 ## Next
-- **Invite to a space from the friend and DM menu** (as in Backspace PR #485 by
-  bonderaustria) and **resizable sidebar and member columns** (Backspace PR #477 by
-  QuddyMusic).
 - **Media on Windows and macOS.** Games and Rich Presence already work there (process list,
   named pipes); "listening" needs the Windows media session (SMTC) and macOS notifications,
   written in Rust and tried on real machines.
-- **Bot API**, compatible and pure Rust:
-  1. Bot accounts on `bs-server`: a user row with a `bot` flag, an owner and a token
-     (`Bot <token>` in `Authorization`), created and reset in *Settings → Bots*; bots join a
-     space through the usual invite and get roles like anyone else.
-  2. The same REST and WebSocket as clients, so `bs-api`/`bs-core` already are the SDK; plus
-     a small `bs-bot` crate: an event loop over `bs-core`, typed handlers, reconnects, rate
-     limits, and slash commands later.
-  3. Interactions in messages: buttons and selects on webhook/bot cards, delivered to the bot
-     as events; original clients see the card without them.
-  4. Compatibility: messages from bots are ordinary messages with a `bot` author flag that
-     original clients ignore; nothing in the original protocol changes.
+- **Bot interactions**: buttons and selects on webhook and bot cards, delivered to the bot as
+  events; original clients see the card without them. Slash commands in `bs-bot`.
+- **Python wrapper** for bots over the same HTTP and WebSocket protocol.
 
 ## Server stage (in progress)
 1. **Security audit.** Client: done. Server: runs alongside the port: 22 findings (S1–S22),

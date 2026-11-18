@@ -46,18 +46,19 @@ The script asks before installing build packages (pacman, apt, dnf or zypper) an
 Rust via rustup; it fetches the sources into `~/.local/src/rustspace`, builds the client and
 puts it into `~/.local/bin` with a menu entry (`--system` — into `/usr/local`). Voice and camera
 need clang 21+; without it the client is built without them and the script says what to
-install. To update, run it again. Options: `--ref v0.1.0`, `--no-voice`, `--uninstall`,
+install. To update, run it again. Options: `--ref v0.1.1`, `--no-voice`, `--uninstall`,
 `--help`. The build needs about 10 GB of disk and a few minutes.
 
-Once there are releases, ready builds will be on the [releases page](https://github.com/QuddyMusic/Rustspace/releases):
+Ready builds are on the [releases page](https://github.com/QuddyMusic/Rustspace/releases):
 
 | System | How |
 |---|---|
 | Linux, AppImage | `Rustspace-x86_64.AppImage`: make it executable and run |
 | Debian / Ubuntu | `sudo apt install ./rustspace-linux-x86_64.deb` |
-| Arch | `cd packaging/arch && makepkg -si` (`rustspace-bin`, the release binary) |
-| Windows | `rustspace-setup-x86_64.exe` — installs for the current user, no admin rights |
-| macOS (Apple Silicon) | `rustspace-macos-aarch64.zip` — unsigned: first launch via *Open* in the context menu |
+| Arch Linux | `sudo pacman -U rustspace-bin-*-x86_64.pkg.tar.zst`, or `cd packaging/arch && makepkg -si` |
+| Linux, archive | `rustspace-linux-x86_64.tar.gz` (also aarch64): unpack and run `install.sh` or `rustspace` |
+| Windows 10 and 11 | `rustspace-setup-x86_64.exe` — installs for the current user, no admin rights; `rustspace-windows-x86_64.zip` — portable |
+| macOS 11+ | `rustspace-macos-aarch64.dmg` (Apple Silicon) or `rustspace-macos-x86_64.dmg` (Intel): drag Rustspace to Applications. Unsigned: first launch via *Open* in the context menu |
 
 **Updates from inside.** When a new release is out, a strip at the top offers **Update**: the
 client downloads the file for its system, checks it against the release's `.sha256`, installs
@@ -91,7 +92,7 @@ every WebSocket frame and REST response the client receives.
   person has a key at all); it closes with one click and stays closed for that conversation.
 - **Spaces.** Channels and categories, roles and permissions, per-channel overrides, members,
   bans, invites, join requests, the instance directory, notification settings per space and
-  per channel (including timed mute).
+  per channel (including timed mute; the bell in the channel header opens them).
 - **Formatting and cards.** Markdown like the original web client: headings `#`–`###`, lists
   (`-`, `1.`, nested by indent), `---` rules, quotes `>` and `>>>`, `-#` small text, links
   `[text](url)`. The **Aa** button above the composer adds a toolbar (bold, italic, code,
@@ -104,18 +105,20 @@ every WebSocket frame and REST response the client receives.
   server limit (4000 characters) is sent as several messages in a row; a code block cut at
   the break is closed with ` ``` ` and reopened with the same fence (and language) in the
   next message.
-- **Files and media.** Uploads with progress, image viewer, downloading attachments (one or
-  all), avatars, banners, stickers and sticker packs (make your own, fill and reorder them, add
+- **Files and media.** Uploads with progress, a preview of every staged picture and **Retry**
+  for a failed upload, image viewer, downloading attachments (one or all; the **Downloads**
+  button in the chat header lists them with progress and *Open folder*), avatars, banners, stickers and sticker packs (make your own, fill and reorder them, add
   someone's open pack from a sticker in chat), GIFs (Klipy search, favourites). An attachment can be
   hidden under a **spoiler** (the eye on the staged file): the picture is blurred until
   clicked. The mark travels as Discord's `SPOILER_` file-name prefix, so it works on any
   server and through the bridges.
 - **Saved Messages, pins and bookmarks** (needs `bs-server`). *Saved Messages* is a chat with
   yourself for notes, links and files; any message can be forwarded there from its menu.
-  Pinned messages show in a bar above the chat (click — to the message, then to the next
-  one): in a one-to-one conversation for yourself or for both, in channels and group DMs for
-  everyone (with "Manage messages"). **Bookmarks** are one list across all chats and
-  instances, with search and grouping by date, person or chat, a "with media" filter and
+  Pinned messages show in a bar above the chat with a photo or video preview (click — to the
+  message, then to the next one; the button next to it lists all pins of the chat): in a
+  one-to-one conversation for yourself or for both, in channels and group DMs for everyone
+  (with "Manage messages"). **Bookmarks** are one list across all chats and instances (on an
+  instance without bookmarks, such as the original server, they are kept on this device), with search and grouping by date, person or chat, a "with media" filter and
   jumping to the original.
 - **Translation**, open projects only. "Translate" in the message menu, or automatic
   translation of other people's messages that are not in your language. By default it runs
@@ -199,10 +202,10 @@ Security notes and known limitations are in [AUDIT.md](AUDIT.md) (Russian).
 | `bs-media` | Image and GIF decoding with size and pixel limits | 13 |
 | `bs-voice` | Voice and video over LiveKit: own audio pipeline (cpal), mixer, video stage, camera, screen capture, system audio, data-channel signals | 68 |
 | `bs-core` | Instance state and cache, event application, notification rules | 72 |
-| `bs-app` | The GUI and its entry point | 254 |
+| `bs-app` | The GUI and its entry point | 283 |
 | `bs-tui` | Terminal client (`ratatui`), one instance | 35 |
 | `bs-contract` | Contract tests against a real Backspace server | 2 |
-| `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 144 |
+| `bs-server` | The Rust server: the original's REST API and WebSocket gateway over the same database, see "Server" | 163 |
 | `bs-e2ee` | End-to-end encryption for DMs: X25519, HKDF-SHA256, XChaCha20-Poly1305, safety number | 7 |
 | `xtask` | `cargo xtask contract`: starts the original server and runs the contract tests | — |
 
@@ -305,7 +308,7 @@ To release, bump the version, add its section to `CHANGELOG.md` (it becomes the 
 commit, and push a tag with the same number:
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.1.1 && git push origin v0.1.1
 ```
 
 `.github/workflows/release.yml` checks that the tag matches `Cargo.toml`, builds the server
@@ -549,7 +552,7 @@ original web client shows their title and text too.
 
 ### Bots
 
-*(bs-server)* Settings → **Bots** creates a bot: a member whose messages come from your
+*(bs-server)* Settings → **For developers** → *Developer mode* → **Bots** creates a bot: a member whose messages come from your
 program, with its own token and a **BOT** badge. Add it to a space where you have "Manage
 space", then run the program with the token. Bots use the same HTTP API and WebSocket events
 as clients (`Authorization: Bot rsb_…`), so they can be written in any language: Rust has the

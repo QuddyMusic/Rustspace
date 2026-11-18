@@ -1,6 +1,6 @@
 [package]
 name = "bs-server"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 description = "Сервер Rustspace на Rust, совместимый с оригинальным Backspace (клиенты, база, федерация)"

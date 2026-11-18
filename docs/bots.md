@@ -11,7 +11,7 @@ Clients of the original Backspace show bots as ordinary members.
 
 ## Creating a bot
 
-1. **Settings → Bots → Create bot.** Pick a username (2–32 Latin letters, digits, `_`, `.`
+1. **Settings → For developers**, turn on *Developer mode*, then **Bots → Create bot**. Pick a username (2–32 Latin letters, digits, `_`, `.`
    or `-`), a display name and a description.
 2. Copy the token. It is shown once; the server keeps only its SHA-256. **New token** issues
    another one and the old one stops working.
