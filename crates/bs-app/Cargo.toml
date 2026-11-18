@@ -55,6 +55,9 @@ presence = ["dep:zbus"]
 desktop = ["global-hotkeys", "tray", "presence"]
 
 [dependencies]
+# Перевод без LLM: модели Firefox Translations на Rust (MPL-2.0) и определение языка (MIT).
+fxtranslate = { version = "0.5", features = ["net", "icu-segmenter"] }
+whatlang = "0.18"
 bs-voice = { workspace = true, optional = true }
 rodio = { version = "0.23", default-features = false, features = ["playback", "vorbis"], optional = true }
 serde = { workspace = true }

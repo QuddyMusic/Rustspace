@@ -123,7 +123,10 @@ every WebSocket frame and REST response the client receives.
   (Apache-2.0) with one button — CPU or GPU (Vulkan, Metal on macOS) — and the client starts
   and stops `llama-server` itself; no keys, the text never leaves the machine. Your own
   LibreTranslate server or any OpenAI-compatible model server (llama-server, vLLM) work too.
-  Code, links and mentions are not translated and come back unchanged.
+  For weak computers there is translation without a language model: the small Firefox
+  Translations models (about 30 MB per direction, CPU only, offline after download) run by
+  [fxtranslate](https://github.com/gregtatum/translations), a Rust engine (MPL-2.0); the
+  message language is detected by whatlang. Code, links and mentions are not translated and come back unchanged.
 - **Activity (Rich Presence).** Members show what they play, listen to or watch: under the
   name in the member list and as cards with cover art, timers and track progress in the
   profile. The client finds running games itself — the Backspace game dictionary, Steam,

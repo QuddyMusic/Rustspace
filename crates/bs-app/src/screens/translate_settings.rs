@@ -149,8 +149,10 @@ fn engine_fields(ui: &mut egui::Ui, prefs: &mut TranslatePrefs, runtime: &tokio:
                 .margin(egui::vec2(10.0, 6.0)),
         );
     };
+    let target = prefs.target_language();
     match prefs.engine {
         Engine::Local => local_fields(ui, &mut prefs.local, runtime),
+        Engine::Offline => offline_fields(ui, &target, runtime),
         Engine::Libre => {
             field(
                 ui,
@@ -327,4 +329,94 @@ fn progress_line(ui: &mut egui::Ui, status: crate::local_llm::Progress) {
         }
         Progress::Done | Progress::Idle => {}
     }
+}
+
+/// Итог загрузки моделей Firefox Translations: `None` — идёт.
+type Prefetch = std::sync::Arc<std::sync::Mutex<Option<Result<(), String>>>>;
+
+/// Перевод без языковой модели: что скачано, скачать для своего языка.
+fn offline_fields(ui: &mut egui::Ui, target: &str, runtime: &tokio::runtime::Handle) {
+    ui.label(
+        theme::muted(tr(
+            "Обычный машинный переводчик, как в Firefox: маленькие модели (около 30 МБ на \
+             направление), работает на процессоре и на слабых компьютерах, без сети после \
+             загрузки. Языки — через английский. Качество ниже, чем у llama.cpp.",
+        ))
+        .size(12.0),
+    );
+    ui.add_space(6.0);
+    let installed = crate::offline_mt::installed();
+    if installed.is_empty() {
+        ui.label(theme::muted(tr(
+            "Модели ещё не скачаны: нужная скачается при первом переводе.",
+        )));
+    } else {
+        let total: u64 = installed.iter().map(|(_, bytes)| bytes).sum();
+        let names: Vec<&str> = installed.iter().map(|(name, _)| name.as_str()).collect();
+        ui.label(
+            RichText::new(crate::tf!(
+                "Скачано: {a0} ({a1} МБ)",
+                a0 = names.join(", "),
+                a1 = total / 1_000_000
+            ))
+            .color(theme::text()),
+        );
+    }
+    let id = egui::Id::unique("offline_prefetch");
+    let pending: Option<Prefetch> = ui.data(|d| d.get_temp(id));
+    let state = pending.as_ref().and_then(|p| {
+        p.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    });
+    let busy = pending.is_some() && state.is_none();
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(
+                !busy,
+                theme::primary_button(crate::tf!("Скачать для языка «{a0}»", a0 = target)),
+            )
+            .clicked()
+        {
+            let slot: Prefetch = std::sync::Arc::default();
+            let done = std::sync::Arc::clone(&slot);
+            let ctx = ui.ctx().clone();
+            let target = target.to_owned();
+            runtime.spawn(async move {
+                let result = crate::offline_mt::prefetch(target).await;
+                *done
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
+                ctx.request_repaint();
+            });
+            ui.data_mut(|d| d.insert_temp(id, slot));
+        }
+        if !installed.is_empty()
+            && ui
+                .add_enabled(!busy, egui::Button::new(tr("Удалить модели")))
+                .clicked()
+        {
+            let result = crate::offline_mt::remove_all();
+            let slot: Prefetch = std::sync::Arc::new(std::sync::Mutex::new(Some(result)));
+            ui.data_mut(|d| d.insert_temp(id, slot));
+        }
+    });
+    if busy {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            let now = crate::offline_mt::status().unwrap_or_default();
+            ui.label(theme::muted(crate::tf!("Скачиваю модель {a0}…", a0 = now)));
+        });
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(300));
+    } else if let Some(Err(err)) = state {
+        ui.label(RichText::new(err).color(theme::rose()).size(12.5));
+    }
+    ui.label(
+        theme::muted(tr(
+            "Модели — Firefox Translations (Mozilla, проект Bergamot), движок — fxtranslate \
+             (MPL-2.0). Скачиваются с серверов Mozilla.",
+        ))
+        .size(12.0),
+    );
 }

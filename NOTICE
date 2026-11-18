@@ -92,6 +92,16 @@ Notable components and their authors
   Qwen      Translation models, downloaded at the user's request from
             Hugging Face (not bundled); Qwen team, Alibaba Cloud,
             Apache-2.0 (see each model card)
+  fxtranslate
+            Translator without a language model (Rust engine for Firefox
+            Translations models); Greg Tatum and Mozilla, MPL-2.0,
+            https://github.com/gregtatum/translations
+  Firefox Translations models
+            Downloaded at the user's request from Mozilla's servers (not
+            bundled); Mozilla and Project Bergamot,
+            https://github.com/mozilla/translations
+  whatlang  Language detection; Serhii Potapov and contributors, MIT,
+            https://github.com/greyblake/whatlang-rs
   Rich Presence / activity
             Based on Backspace PR #482 by QuddyMusic and cirzear.
 

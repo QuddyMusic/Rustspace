@@ -2,7 +2,8 @@
 //!
 //! Только открытые проекты. По умолчанию — llama.cpp с открытой моделью на
 //! этом компьютере: ставится из настроек одной кнопкой, без ключей, текст
-//! никуда не уходит. Можно указать свой сервер LibreTranslate или свой
+//! никуда не уходит. Для слабых компьютеров — перевод без языковой модели:
+//! маленькие модели Firefox Translations (см. `offline_mt`). Можно указать свой сервер LibreTranslate или свой
 //! сервер модели с OpenAI-совместимым API (llama.cpp `llama-server`, vLLM).
 //!
 //! Перед отправкой код, ссылки и упоминания заменяются метками `⟦0⟧` и
@@ -25,6 +26,8 @@ pub(crate) enum Engine {
     #[default]
     #[serde(alias = "google", alias = "lingva", alias = "deepl")]
     Local,
+    /// Без языковой модели: Firefox Translations на этом компьютере.
+    Offline,
     /// LibreTranslate — свой сервер.
     Libre,
     /// Свой сервер модели с OpenAI-совместимым API.
@@ -33,12 +36,13 @@ pub(crate) enum Engine {
 
 impl Engine {
     /// Все варианты для выбора.
-    pub(crate) const ALL: [Self; 3] = [Self::Local, Self::Libre, Self::Llm];
+    pub(crate) const ALL: [Self; 4] = [Self::Local, Self::Offline, Self::Libre, Self::Llm];
 
     /// Подпись.
     pub(crate) fn title(self) -> &'static str {
         match self {
             Self::Local => tr("На этом компьютере — llama.cpp"),
+            Self::Offline => tr("На этом компьютере — без ИИ-модели (Firefox Translations)"),
             Self::Libre => tr("Свой сервер LibreTranslate"),
             Self::Llm => tr("Свой сервер модели (OpenAI-совместимый API)"),
         }
@@ -102,6 +106,7 @@ impl TranslatePrefs {
     fn signature(&self) -> String {
         match self.engine {
             Engine::Local => format!("local|{}", self.local.model),
+            Engine::Offline => "offline".to_owned(),
             Engine::Llm => format!("llm|{}|{}", self.llm_url, self.llm_model),
             Engine::Libre => format!("libre|{}", self.libre_url),
         }
@@ -384,6 +389,7 @@ pub(crate) fn request(
 fn engine_label(engine: Engine) -> &'static str {
     match engine {
         Engine::Local => "llama.cpp",
+        Engine::Offline => "Firefox Translations",
         Engine::Libre => "LibreTranslate",
         Engine::Llm => "LLM",
     }
@@ -417,6 +423,7 @@ pub(crate) async fn translate(
             let base = crate::local_llm::ensure(&prefs.local).await?;
             llm(&client, &base, "local", "", target, &protected).await
         }
+        Engine::Offline => crate::offline_mt::translate(target, &protected).await,
         Engine::Libre => libre(&client, prefs, target, &protected).await,
         Engine::Llm => {
             if prefs.llm_url.trim().is_empty() {

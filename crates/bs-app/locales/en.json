@@ -1629,5 +1629,17 @@
   "Ботов слишком много": "Too many bots",
   "Бот уже в этом пространстве": "The bot is already in this space",
   "Бот заблокирован в этом пространстве": "The bot is banned from this space",
-  "Нужно право «Управление пространством»": "You need the “Manage space” permission"
+  "Нужно право «Управление пространством»": "You need the “Manage space” permission",
+  "не найден каталог настроек": "settings folder not found",
+  "не удалось определить язык сообщения": "couldn't detect the message language",
+  "переводчик остановился": "the translator stopped",
+  "модель перевода {a0} → {a1} недоступна: {a2}": "translation model {a0} → {a1} is unavailable: {a2}",
+  "На этом компьютере — без ИИ-модели (Firefox Translations)": "On this computer — no AI model (Firefox Translations)",
+  "Обычный машинный переводчик, как в Firefox: маленькие модели (около 30 МБ на направление), работает на процессоре и на слабых компьютерах, без сети после загрузки. Языки — через английский. Качество ниже, чем у llama.cpp.": "A regular machine translator, as in Firefox: small models (about 30 MB per direction), runs on the CPU and on weak computers, offline after download. Other languages go through English. Quality is lower than llama.cpp.",
+  "Модели ещё не скачаны: нужная скачается при первом переводе.": "No models downloaded yet: the needed one downloads on first translation.",
+  "Удалить модели": "Remove models",
+  "Модели — Firefox Translations (Mozilla, проект Bergamot), движок — fxtranslate (MPL-2.0). Скачиваются с серверов Mozilla.": "Models: Firefox Translations (Mozilla, Project Bergamot); engine: fxtranslate (MPL-2.0). Downloaded from Mozilla's servers.",
+  "Скачано: {a0} ({a1} МБ)": "Downloaded: {a0} ({a1} MB)",
+  "Скачать для языка «{a0}»": "Download for “{a0}”",
+  "Скачиваю модель {a0}…": "Downloading model {a0}…"
 }
