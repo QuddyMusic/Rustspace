@@ -93,6 +93,7 @@ pub(crate) fn to_activity(track: &Track, start: i64, now: i64) -> Activity {
     clippy::too_many_lines,
     reason = "таблица сервисов, по ветке на каждый"
 )]
+#[cfg(any(all(target_os = "linux", feature = "presence"), test))]
 /// Ссылка на трек — только у известных сервисов и в каноническом виде, без
 /// лишних параметров (в них бывают идентификаторы сессии).
 pub(crate) fn sanitize_track_url(raw: &str) -> Option<String> {

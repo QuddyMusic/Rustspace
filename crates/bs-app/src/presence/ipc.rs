@@ -543,6 +543,10 @@ pub(crate) async fn start(out: watch::Sender<Option<IpcPush>>) -> Option<Server>
 
 /// Запустить сервер на всех свободных именованных каналах.
 #[cfg(windows)]
+#[allow(
+    clippy::unused_async,
+    reason = "та же подпись, что у версии для Unix, где ожидание есть"
+)]
 pub(crate) async fn start(out: watch::Sender<Option<IpcPush>>) -> Option<Server> {
     use tokio::net::windows::named_pipe::ServerOptions;
     let shared = Arc::new(Mutex::new(Shared::default()));

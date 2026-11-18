@@ -32,6 +32,7 @@ fn base_name(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn is_windows_path(token: &str) -> bool {
     let t = token.trim_start_matches('"').as_bytes();
     t.len() >= 3 && t[0].is_ascii_alphabetic() && t[1] == b':' && (t[2] == b'\\' || t[2] == b'/')
@@ -56,6 +57,7 @@ pub(crate) fn pick_name(
     comm.filter(|c| !c.is_empty()).map(str::to_owned)
 }
 
+#[cfg(any(target_os = "linux", test))]
 /// Программы, которые запускает любой префикс Wine, и обработчики сбоев
 /// игр: это никогда не игра. Прокладка Proton `steam.exe` — исключение,
 /// когда больше ничего не названо.
@@ -78,6 +80,7 @@ const WINE_PLUMBING: &[&str] = &[
     "microsoftedgeupdate.exe",
 ];
 
+#[cfg(any(target_os = "linux", test))]
 fn is_wine_plumbing(name: &str) -> bool {
     let lower = name.to_lowercase();
     WINE_PLUMBING
@@ -85,6 +88,7 @@ fn is_wine_plumbing(name: &str) -> bool {
         .any(|p| *p == lower || (lower.chars().count() == COMM_MAX && p.starts_with(&lower)))
 }
 
+#[cfg(any(target_os = "linux", test))]
 /// Все «<имя>.exe» в командной строке, каким бы разделителем ни шло перед ними.
 fn exe_names(cmdline: &str) -> Vec<String> {
     let lower = cmdline.to_lowercase();
@@ -108,6 +112,7 @@ fn exe_names(cmdline: &str) -> Vec<String> {
     found
 }
 
+#[cfg(any(target_os = "linux", test))]
 /// Windows-программы процесса Wine (самые точные — первыми) или пусто для
 /// любого другого. Процесс Wine узнаётся по загрузчику (`wine`,
 /// `wine64-preloader`, сборки Proton и Bottles) или по командной строке в

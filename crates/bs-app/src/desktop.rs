@@ -39,6 +39,7 @@ pub(crate) enum Command {
     /// Глобальная клавиша: действие и «нажата» (`false` — отпущена).
     Key(Action, bool),
     /// То же от портала Wayland: сочетание назначила система.
+    #[cfg(all(feature = "global-hotkeys", target_os = "linux"))]
     PortalKey(Action, bool),
 }
 
@@ -132,8 +133,9 @@ pub(crate) struct Desktop {
     global_enabled: bool,
     #[cfg(feature = "global-hotkeys")]
     keys: Option<global::Keys>,
+    /// Значок в трее: живёт, пока хранится здесь.
     #[cfg(all(feature = "tray", not(target_os = "linux")))]
-    _icon: Option<tray_icon::TrayIcon>,
+    tray_icon: Option<tray_icon::TrayIcon>,
     /// Тайлинговый композитор, умеющий прятать окно по IPC.
     #[cfg(target_os = "linux")]
     wm: Option<crate::wm::Wm>,
@@ -258,6 +260,7 @@ impl Desktop {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 Command::Key(action, pressed) => input.keys.push((action, pressed)),
+                #[cfg(all(feature = "global-hotkeys", target_os = "linux"))]
                 Command::PortalKey(action, pressed) => {
                     if global_enabled {
                         input.keys.push((action, pressed));
@@ -381,7 +384,7 @@ impl Desktop {
         #[cfg(not(target_os = "linux"))]
         match tray::build() {
             Ok(icon) => {
-                self._icon = Some(icon);
+                self.tray_icon = Some(icon);
                 self.tray = true;
             }
             Err(err) => tracing::warn!(%err, "значок в трее не создан"),
