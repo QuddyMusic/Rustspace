@@ -19,6 +19,8 @@ use egui::{Color32, Painter, Pos2, Shape, Stroke, Vec2};
 pub(crate) enum Icon {
     /// Крестик.
     Close,
+    /// Колокольчик (уведомления).
+    Bell,
     /// Галочка.
     Check,
     /// Замок.
@@ -112,6 +114,7 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
         | Icon::Join
         | Icon::User
         | Icon::Download
+        | Icon::Bell
         | Icon::Search => paint_shapes(painter, center, size, icon, color),
         Icon::Users
         | Icon::Speaker
@@ -208,6 +211,18 @@ fn paint_shapes(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: C
         Icon::Search => {
             painter.circle_stroke(p(10.5, 10.5), 6.0 * unit, stroke);
             line(vec![p(15.0, 15.0), p(20.5, 20.5)]);
+        }
+        Icon::Bell => {
+            // Купол: боковины, дуга сверху, поля внизу; язычок под ним.
+            let mut dome = vec![p(5.0, 17.0), p(6.5, 15.0), p(6.5, 10.5)];
+            for step in 0..=12 {
+                let angle = std::f32::consts::PI * (1.0 + step as f32 / 12.0);
+                dome.push(p(12.0 + 5.5 * angle.cos(), 10.5 + 5.5 * angle.sin()));
+            }
+            dome.extend([p(17.5, 15.0), p(19.0, 17.0), p(5.0, 17.0)]);
+            line(dome);
+            line(vec![p(10.0, 19.5), p(12.0, 20.5), p(14.0, 19.5)]);
+            line(vec![p(12.0, 3.0), p(12.0, 5.0)]);
         }
         _ => {}
     }

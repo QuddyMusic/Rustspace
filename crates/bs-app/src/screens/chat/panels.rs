@@ -979,6 +979,7 @@ impl ChatScreen {
                 ));
             }
         }
+        self.notification_button(ui, bridge, &selected);
         let color = if self.search.open {
             theme::text_bright()
         } else {
@@ -990,6 +991,39 @@ impl ChatScreen {
             .clicked()
         {
             self.search.toggle();
+        }
+        super::downloads::button(ui);
+    }
+
+    /// Колокольчик: уведомления канала (как в меню канала оригинала).
+    fn notification_button(
+        &mut self,
+        ui: &mut egui::Ui,
+        bridge: &Bridge,
+        selected: &SelectedChannel,
+    ) {
+        if selected.kind != ChannelKind::Space {
+            return;
+        }
+        let Some(space_id) = bridge
+            .cache_at(selected.origin)
+            .and_then(|c| c.channel(&selected.channel))
+            .map(|c| c.space_id.clone())
+        else {
+            return;
+        };
+        if ui
+            .add(widgets::flat_icon(Icon::Bell, 22.0, theme::text_faint()))
+            .on_hover_text(tr("Настройки уведомлений"))
+            .clicked()
+        {
+            self.notification_settings =
+                crate::screens::notification_settings::NotificationSettings::open(
+                    bridge,
+                    selected.origin,
+                    &space_id,
+                    Some(&selected.channel),
+                );
         }
     }
 

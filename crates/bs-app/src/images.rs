@@ -137,6 +137,8 @@ struct Inner {
     download_done: Vec<(String, Result<(), String>)>,
     /// Подписи скачиваний для уведомлений.
     download_labels: HashMap<String, String>,
+    /// Скачивания этого запуска по порядку: значение поля и куда сохранено.
+    download_history: Vec<(String, std::path::PathBuf)>,
     raw_done: Vec<(RawPurpose, Result<Vec<u8>, String>)>,
 }
 
@@ -233,11 +235,13 @@ impl ImageHub {
                 tx.send(BridgeRequest::Download {
                     id,
                     path: key.1.clone(),
-                    dest,
+                    dest: dest.clone(),
                 })
                 .is_ok()
             });
         if sent {
+            inner.download_history.retain(|(v, _)| v != value);
+            inner.download_history.push((value.to_owned(), dest));
             inner.download_ids.insert(id, value.to_owned());
             inner.downloads.insert(
                 value.to_owned(),
@@ -288,6 +292,38 @@ impl ImageHub {
     /// Состояние скачивания файла по значению поля.
     pub(crate) fn download(&self, value: &str) -> Option<Download> {
         self.lock().downloads.get(value).cloned()
+    }
+
+    /// Скачивания этого запуска, новые сверху: подпись, куда, состояние.
+    pub(crate) fn downloads(&self) -> Vec<(String, std::path::PathBuf, Download)> {
+        let inner = self.lock();
+        inner
+            .download_history
+            .iter()
+            .rev()
+            .filter_map(|(value, dest)| {
+                let state = inner.downloads.get(value)?.clone();
+                let label = inner
+                    .download_labels
+                    .get(value)
+                    .cloned()
+                    .unwrap_or_default();
+                Some((label, dest.clone(), state))
+            })
+            .collect()
+    }
+
+    /// Убирает из списка законченные скачивания.
+    pub(crate) fn clear_finished_downloads(&self) {
+        let mut inner = self.lock();
+        let Inner {
+            download_history,
+            downloads,
+            ..
+        } = &mut *inner;
+        download_history
+            .retain(|(value, _)| matches!(downloads.get(value), Some(Download::Running { .. })));
+        drop(inner);
     }
 
     /// Забирает завершённые скачивания (для уведомления).
@@ -755,6 +791,27 @@ mod tests {
             me.banner.as_deref(),
             Some("https://home.example/api/uploads/b.png")
         );
+    }
+
+    #[test]
+    fn downloads_are_listed_newest_first_until_cleared() {
+        let hub = ImageHub::default();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        hub.set_links(vec![("https://home.example".to_owned(), tx)]);
+        hub.set_current(Some("https://home.example"));
+        assert!(hub.request_download("a.png", "/tmp/a.png".into(), "a.png"));
+        assert!(hub.request_download("b.png", "/tmp/b.png".into(), "b.png"));
+        let crate::bridge::BridgeRequest::Download { id: first, .. } = rx.try_recv().unwrap()
+        else {
+            unreachable!()
+        };
+        hub.accept_download(first, crate::bridge::DownloadState::Done);
+        let list = hub.downloads();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].0, "b.png");
+        assert!(matches!(list[1].2, super::Download::Done));
+        hub.clear_finished_downloads();
+        assert_eq!(hub.downloads().len(), 1);
     }
 
     #[test]
