@@ -609,6 +609,10 @@ pub(crate) fn show_settings(
         if let Some(target) = target {
             bridge.focus_on(target);
         }
+    } else {
+        // Свои настройки, мосты и боты — всегда на домашнем инстансе, даже
+        // если в чате открыто пространство другого.
+        bridge.focus_on(0);
     }
     let action = show_settings_inner(ui, state, bridge, voice);
     bridge.focus_on(previous);
@@ -626,7 +630,11 @@ fn show_settings_inner(
     if state.extra.account.logout {
         return SettingsAction::Logout;
     }
-    let Some(me) = bridge.cache().map(|cache| cache.me().clone()) else {
+    let base = bridge.base_at(bridge.focus_index()).map(str::to_owned);
+    let Some(me) = bridge
+        .cache()
+        .map(|cache| crate::images::with_absolute_images(cache.me().clone(), base.as_deref()))
+    else {
         return SettingsAction::Close;
     };
     // Окно с отступом от краёв, как в оригинале: затемнённый фон и скруглённая рамка.

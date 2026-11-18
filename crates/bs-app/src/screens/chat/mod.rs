@@ -365,7 +365,9 @@ impl ChatScreen {
 
     /// Открыть свой профиль тем же окном, что и чужие.
     fn open_own_profile(&mut self, bridge: &Bridge) {
-        if let Some(me) = bridge.cache_at(0).map(|c| c.me().clone()) {
+        // Профиль запрашивается у инстанса, открытого сейчас, — и под его id:
+        // домашний id другой инстанс не знает.
+        if let Some(me) = bridge.cache().map(|c| c.me().clone()) {
             let name = me
                 .display_name
                 .clone()

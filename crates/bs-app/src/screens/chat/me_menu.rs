@@ -32,7 +32,10 @@ pub(super) fn button(
         );
     }
     poll_avatar(ui.ctx(), bridge);
-    if let Some(me) = bridge.cache_at(0).map(|c| c.me().clone()) {
+    if let Some(me) = bridge
+        .cache_at(0)
+        .map(|c| crate::images::with_absolute_images(c.me().clone(), bridge.base_at(0)))
+    {
         menu(&response, bridge, &me, status, nav);
     }
 }

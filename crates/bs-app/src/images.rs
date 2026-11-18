@@ -433,6 +433,17 @@ impl ImageHub {
     }
 }
 
+/// Аватар и баннер пользователя инстанса `base` — полными адресами, чтобы
+/// они показывались, даже когда в чате открыт другой инстанс.
+#[must_use]
+pub(crate) fn with_absolute_images(mut user: bs_types::User, base: Option<&str>) -> bs_types::User {
+    if let Some(base) = base {
+        user.avatar = user.avatar.map(|v| absolute(base, &v));
+        user.banner = user.banner.map(|v| absolute(base, &v));
+    }
+    user
+}
+
 /// Делает значение поля полным адресом на инстансе `base`: так оно однозначно
 /// указывает владельца, даже когда его читает код другого инстанса.
 /// Полные адреса и значения со схемой не трогаются.
@@ -724,7 +735,27 @@ pub(crate) fn paint_value(
 
 #[cfg(test)]
 mod tests {
-    use super::{ImageHub, absolute, cover_uv};
+    use super::{ImageHub, absolute, cover_uv, with_absolute_images};
+
+    #[test]
+    fn own_images_stay_on_the_home_instance() {
+        let me: bs_types::User = serde_json::from_value(serde_json::json!({
+            "id": "1", "username": "quddy", "displayName": null,
+            "avatar": "/api/uploads/a.png", "banner": "b.png", "accentColor": null,
+            "avatarColor": null, "bio": null, "status": "online", "customStatus": null,
+            "isAdmin": false, "createdAt": 0, "homeInstance": null, "homeUserId": null
+        }))
+        .unwrap();
+        let me = with_absolute_images(me, Some("https://home.example"));
+        assert_eq!(
+            me.avatar.as_deref(),
+            Some("https://home.example/api/uploads/a.png")
+        );
+        assert_eq!(
+            me.banner.as_deref(),
+            Some("https://home.example/api/uploads/b.png")
+        );
+    }
 
     #[test]
     fn bare_names_belong_to_the_focused_instance_not_to_a_list_position() {
