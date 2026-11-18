@@ -746,3 +746,101 @@ async fn guest_adds_then_loses_pack(server: &Server, token: &str, pack_id: &str,
         .await;
     assert_eq!(code, 200);
 }
+
+#[tokio::test]
+async fn bots_post_with_their_token_and_stay_out_of_accounts() {
+    let server = start_with(&[]).await;
+    let (token, channel) = user_with_channel(&server).await;
+    let (status, created) = server
+        .call(
+            reqwest::Method::POST,
+            "/api/rustspace/bots",
+            &token,
+            Some(json!({"username": "Echo_Bot", "displayName": "Эхо", "description": "Повторяет"})),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+    let bot_id = created["bot"]["id"].as_str().unwrap().to_owned();
+    let bot_token = created["token"].as_str().unwrap().to_owned();
+    assert!(bot_token.starts_with(&format!("rsb_{bot_id}_")));
+    assert_eq!(created["bot"]["username"], "echo_bot");
+    // Заголовок «Bot …» и «Bearer …» оба годятся.
+    let me = server
+        .http
+        .get(format!("{}/api/users/@me", server.base))
+        .header("Authorization", format!("Bot {bot_token}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(me.status(), 200);
+    let me: Value = me.json().await.unwrap();
+    assert_eq!(me["bot"], true);
+    let (status, _) = server
+        .call(
+            reqwest::Method::GET,
+            "/api/social/friends",
+            &bot_token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 403);
+    // В пространство бота добавляет владелец.
+    let (_, spaces) = server
+        .call(reqwest::Method::GET, "/api/spaces", &token, None)
+        .await;
+    let space = spaces[0]["id"].as_str().unwrap().to_owned();
+    let (status, _) = server
+        .call(
+            reqwest::Method::PUT,
+            &format!("/api/rustspace/spaces/{space}/bots/{bot_id}"),
+            &token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 200);
+    let (status, message) = server
+        .call(
+            reqwest::Method::POST,
+            &format!("/api/channels/{channel}/messages"),
+            &bot_token,
+            Some(json!({"content": "Привет от бота"})),
+        )
+        .await;
+    assert_eq!(status, 201, "{message}");
+    assert_eq!(message["user"]["bot"], true);
+    // Новый токен отменяет старый.
+    let (_, fresh) = server
+        .call(
+            reqwest::Method::POST,
+            &format!("/api/rustspace/bots/{bot_id}/token"),
+            &token,
+            None,
+        )
+        .await;
+    let (status, _) = server
+        .call(reqwest::Method::GET, "/api/users/@me", &bot_token, None)
+        .await;
+    assert_eq!(status, 401);
+    let fresh = fresh["token"].as_str().unwrap();
+    let (status, _) = server
+        .call(reqwest::Method::GET, "/api/users/@me", fresh, None)
+        .await;
+    assert_eq!(status, 200);
+    let (_, list) = server
+        .call(reqwest::Method::GET, "/api/rustspace/bots", &token, None)
+        .await;
+    assert_eq!(list[0]["spaces"][0]["id"], space.as_str());
+    let (status, _) = server
+        .call(
+            reqwest::Method::DELETE,
+            &format!("/api/rustspace/bots/{bot_id}"),
+            &token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 200);
+    let (status, _) = server
+        .call(reqwest::Method::GET, "/api/users/@me", fresh, None)
+        .await;
+    assert_eq!(status, 401);
+}

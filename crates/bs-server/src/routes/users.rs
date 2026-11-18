@@ -72,6 +72,10 @@ pub fn sanitize_user(row: &Row, is_self: bool) -> DbResult<Value> {
         "homeUserId": row.opt_text("home_user_id")?,
         "replicatedInstances": replicated,
     });
+    // Боты Rustspace помечены: клиенты показывают значок «БОТ».
+    if crate::bots::is_bot(&row.text("id")?) {
+        user["bot"] = json!(true);
+    }
     if is_self {
         user["showActivity"] = json!(row.opt_flag("show_activity")? != Some(false));
         user["federationHomeOrphaned"] =

@@ -34,6 +34,7 @@
 )]
 
 pub mod auth;
+pub mod bots;
 pub mod bridges;
 pub mod broadcast;
 pub mod config;
@@ -340,6 +341,22 @@ pub fn app(state: AppState) -> Router {
         .route("/api/game-icons/assets/{filename}", get(routes::game_icons::asset))
         .route("/api/stickers/{id}/collect", post(routes::stickers::collect_existing))
         .route(
+            "/api/rustspace/bots",
+            get(routes::bots::list).post(routes::bots::create),
+        )
+        .route(
+            "/api/rustspace/bots/{id}",
+            patch(routes::bots::update).delete(routes::bots::delete),
+        )
+        .route(
+            "/api/rustspace/bots/{id}/token",
+            post(routes::bots::regenerate),
+        )
+        .route(
+            "/api/rustspace/spaces/{space}/bots/{bot}",
+            put(routes::bots::add_to_space),
+        )
+        .route(
             "/api/rustspace/personal-bridges",
             get(routes::personal_bridges::list),
         )
@@ -562,6 +579,7 @@ pub fn spawn_background(state: &AppState) {
     federation::calls::spawn(state);
     bridges::spawn(state);
     bridges::personal::spawn(state);
+    bots::load(state);
     tokio::spawn(routes::livekit::run_evictions(state.clone()));
     let uploads = state.clone();
     tokio::spawn(async move {

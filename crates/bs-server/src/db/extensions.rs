@@ -247,6 +247,20 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             "CREATE INDEX bs_personal_chats_dm ON bs_personal_chats (dm_channel_id)",
         ],
     ),
+    (
+        "0014_bots",
+        &[
+            // Боты: пользователь-бот, его владелец и хеш секрета токена.
+            "CREATE TABLE bs_bots (
+                user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL,
+                description TEXT,
+                created_at BIGINT NOT NULL
+            )",
+            "CREATE INDEX bs_bots_owner ON bs_bots (owner_id)",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

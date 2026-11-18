@@ -129,6 +129,8 @@ pub struct AuthUser {
     pub username: String,
     /// Домашний инстанс (для реплицированных аккаунтов).
     pub home_instance: Option<String>,
+    /// Вошёл бот (токеном бота, см. [`crate::bots`]).
+    pub bot: bool,
 }
 
 /// Проверяет токен и состояние аккаунта (`verifyJwtAndUser`).
@@ -136,6 +138,9 @@ pub struct AuthUser {
 /// # Errors
 /// Токен недействителен, аккаунт удалён или пароль с тех пор сменили.
 pub fn verify_token(state: &AppState, tx: &mut dyn Tx, token: &str) -> ApiResult<AuthUser> {
+    if crate::bots::looks_like_token(token) {
+        return crate::bots::verify(tx, token);
+    }
     let invalid = || ApiError::unauthorized("unauthorized").text("Invalid or expired token");
     let claims = decode_token(state, token).ok_or_else(invalid)?;
     let row = tx.query_one(
@@ -157,6 +162,7 @@ pub fn verify_token(state: &AppState, tx: &mut dyn Tx, token: &str) -> ApiResult
         id: claims.user_id,
         username: claims.username,
         home_instance: row.opt_text("home_instance")?,
+        bot: false,
     })
 }
 
@@ -171,7 +177,11 @@ impl FromRequestParts<AppState> for AuthUser {
             .headers
             .get(AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("Bearer "))
+            .and_then(|value| {
+                value
+                    .strip_prefix("Bearer ")
+                    .or_else(|| value.strip_prefix("Bot "))
+            })
             .ok_or_else(|| {
                 ApiError::unauthorized("unauthorized")
                     .text("Missing or invalid authorization header")
@@ -179,7 +189,14 @@ impl FromRequestParts<AppState> for AuthUser {
             .to_owned();
         let state = state.clone();
         let db = state.db.clone();
-        db.transaction(move |tx| verify_token(&state, tx, &token))
-            .await
+        let path = parts.uri.path().to_owned();
+        let method = parts.method.clone();
+        let user = db
+            .transaction(move |tx| verify_token(&state, tx, &token))
+            .await?;
+        if user.bot && !crate::bots::allowed(&method, &path) {
+            return Err(ApiError::forbidden("bots_not_allowed"));
+        }
+        Ok(user)
     }
 }
