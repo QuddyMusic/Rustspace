@@ -172,6 +172,9 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(routes::instance::health))
         .route("/api/instance/info", get(routes::instance::info))
+        // Помощник обновления из 0.1.1 спрашивал версию здесь: без этого
+        // обновление с 0.1.1 из клиента откатывалось бы.
+        .route("/api/instance", get(routes::instance::info))
         .route("/api/auth/register", post(routes::auth::register))
         .route("/api/auth/login", post(routes::auth::login))
         .route("/api/auth/check-username", get(routes::auth::check_username_route))

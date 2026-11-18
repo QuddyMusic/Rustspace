@@ -46,7 +46,7 @@ The script asks before installing build packages (pacman, apt, dnf or zypper) an
 Rust via rustup; it fetches the sources into `~/.local/src/rustspace`, builds the client and
 puts it into `~/.local/bin` with a menu entry (`--system` — into `/usr/local`). Voice and camera
 need clang 21+; without it the client is built without them and the script says what to
-install. To update, run it again. Options: `--ref v0.1.1`, `--no-voice`, `--uninstall`,
+install. To update, run it again. Options: `--ref v0.2.0`, `--no-voice`, `--uninstall`,
 `--help`. The build needs about 10 GB of disk and a few minutes.
 
 Ready builds are on the [releases page](https://github.com/QuddyMusic/Rustspace/releases):
@@ -309,7 +309,7 @@ To release, bump the version, add its section to `CHANGELOG.md` (it becomes the 
 commit, and push a tag with the same number:
 
 ```sh
-git tag v0.1.1 && git push origin v0.1.1
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 `.github/workflows/release.yml` checks that the tag matches `Cargo.toml`, builds the server

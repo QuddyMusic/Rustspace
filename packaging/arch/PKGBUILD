@@ -4,7 +4,7 @@
 #   cd packaging/arch && makepkg -si
 # Обновление: поменяйте pkgver (и суммы: updpkgsums) и снова makepkg -si.
 pkgname=rustspace-bin
-pkgver=0.1.1
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Rustspace — неофициальный клиент на Rust, совместимый с Backspace (чат, ЛС, голос)"
 arch=('x86_64' 'aarch64')

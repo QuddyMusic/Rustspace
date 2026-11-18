@@ -56,7 +56,7 @@ original server.
   of other instances (`GET /api/directory`) with "connect and join / request".
 - **Refactoring.** `chat.rs`, `bridge.rs` and `dialogs.rs` are split into modules.
 
-### Versions 0.1.0 and 0.1.1
+### Versions 0.1.0–0.2.0
 - **Bot API** in pure Rust: bot accounts with `rsb_…` tokens on `bs-server`, the same REST and
   WebSocket as clients, the `bs-bot` crate (event loop, reconnects, short actions), *Settings →
   For developers → Bots*, a BOT badge; JavaScript and TypeScript bots need no packages
