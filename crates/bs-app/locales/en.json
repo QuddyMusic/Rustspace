@@ -1677,5 +1677,8 @@
   "Места": "Places",
   "Предметы": "Objects",
   "Символы": "Symbols",
-  "Флаги": "Flags"
+  "Флаги": "Flags",
+  "Снять роль": "Remove role",
+  "Выдать роль": "Give role",
+  "Все роли уже выданы": "All roles are already given"
 }

@@ -150,27 +150,100 @@ fn header(ui: &mut egui::Ui, state: &ProfileState) {
     );
 }
 
-/// Роли пользователя в пространстве, откуда открыт профиль: от старшей.
-fn space_roles(bridge: &Bridge, state: &ProfileState) -> Vec<(String, Color32)> {
+/// Роль в профиле: id, имя, цвет и позиция.
+#[derive(Debug, Clone)]
+struct RoleChip {
+    id: String,
+    name: String,
+    color: Color32,
+    position: i64,
+}
+
+/// Роли пользователя в пространстве, откуда открыт профиль (от старшей), и
+/// все роли пространства — для выбора.
+fn space_roles(bridge: &Bridge, state: &ProfileState) -> (Vec<RoleChip>, Vec<RoleChip>) {
     let Some((origin, space_id)) = &state.space else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let Some(space) = bridge.cache_at(*origin).and_then(|c| c.space(space_id)) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
-    let Some(member) = space.members.iter().find(|m| m.user.id == state.user_id) else {
-        return Vec::new();
+    let chip = |r: &bs_types::Role| RoleChip {
+        id: r.id.clone(),
+        name: r.name.clone(),
+        color: role_color(&r.color),
+        position: r.position,
     };
-    let mut roles: Vec<_> = member
+    let mut all: Vec<RoleChip> = space
         .roles
         .iter()
         .filter(|r| r.is_everyone != Some(true))
+        .map(chip)
         .collect();
-    roles.sort_by_key(|r| std::cmp::Reverse(r.position));
-    roles
-        .into_iter()
-        .map(|r| (r.name.clone(), role_color(&r.color)))
-        .collect()
+    all.sort_by_key(|r| std::cmp::Reverse(r.position));
+    let mut mine: Vec<RoleChip> = space
+        .members
+        .iter()
+        .find(|m| m.user.id == state.user_id)
+        .map(|member| {
+            member
+                .roles
+                .iter()
+                .filter(|r| r.is_everyone != Some(true))
+                .map(chip)
+                .collect()
+        })
+        .unwrap_or_default();
+    mine.sort_by_key(|r| std::cmp::Reverse(r.position));
+    (mine, all)
+}
+
+/// Что можно делать с ролями в этом профиле.
+struct RoleEditor<'a> {
+    bridge: &'a Bridge,
+    origin: usize,
+    space_id: &'a str,
+    user_id: &'a str,
+    standing: bs_permissions::Standing,
+    all: &'a [RoleChip],
+}
+
+impl RoleEditor<'_> {
+    fn allowed(&self, position: i64) -> bool {
+        bs_permissions::can_manage_role_at(self.standing, position)
+    }
+
+    fn set(&self, role: &str, on: bool) {
+        let op = if on {
+            crate::bridge::SpaceOp::AddMemberRole(self.user_id.to_owned(), role.to_owned())
+        } else {
+            crate::bridge::SpaceOp::RemoveMemberRole(self.user_id.to_owned(), role.to_owned())
+        };
+        if let Some(session) = self.bridge.session_at(self.origin) {
+            session.request(BridgeRequest::SpaceAdmin {
+                space_id: self.space_id.to_owned(),
+                op,
+            });
+        }
+    }
+}
+
+/// Редактор ролей, если у открывшего есть право «Управлять ролями».
+fn role_editor<'a>(
+    bridge: &'a Bridge,
+    state: &'a ProfileState,
+    all: &'a [RoleChip],
+) -> Option<RoleEditor<'a>> {
+    let (origin, space_id) = state.space.as_ref()?;
+    let rights = super::space_settings::rights_for(bridge, *origin, space_id)?;
+    rights.manage_roles.then_some(RoleEditor {
+        bridge,
+        origin: *origin,
+        space_id,
+        user_id: &state.user_id,
+        standing: rights.standing,
+        all,
+    })
 }
 
 /// Цвет роли `#rrggbb`; без цвета — приглушённый.
@@ -185,9 +258,10 @@ fn role_color(hex: &str) -> Color32 {
     }
 }
 
-/// Роли плашками с цветной точкой.
-fn roles_section(ui: &mut egui::Ui, roles: &[(String, Color32)]) {
-    if roles.is_empty() {
+/// Роли плашками с цветной точкой; с правом «Управлять ролями» — крестик
+/// у роли и «+» со списком ролей пространства.
+fn roles_section(ui: &mut egui::Ui, roles: &[RoleChip], editor: Option<&RoleEditor<'_>>) {
+    if roles.is_empty() && editor.is_none() {
         return;
     }
     ui.add_space(10.0);
@@ -197,7 +271,7 @@ fn roles_section(ui: &mut egui::Ui, roles: &[(String, Color32)]) {
     )));
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
-        for (name, color) in roles {
+        for role in roles {
             egui::Frame::new()
                 .fill(theme::bg_hover())
                 .corner_radius(theme::rounded(6))
@@ -207,10 +281,53 @@ fn roles_section(ui: &mut egui::Ui, roles: &[(String, Color32)]) {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         let (dot, _) =
                             ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
-                        ui.painter().circle_filled(dot.center(), 4.5, *color);
-                        ui.label(RichText::new(name).size(12.5).color(theme::text()));
+                        ui.painter().circle_filled(dot.center(), 4.5, role.color);
+                        ui.label(RichText::new(&role.name).size(12.5).color(theme::text()));
+                        if let Some(editor) = editor
+                            && editor.allowed(role.position)
+                            && ui
+                                .add(crate::widgets::flat_icon(
+                                    crate::icons::Icon::Close,
+                                    10.0,
+                                    theme::text_faint(),
+                                ))
+                                .on_hover_text(tr("Снять роль"))
+                                .clicked()
+                        {
+                            editor.set(&role.id, false);
+                        }
                     });
                 });
+        }
+        if let Some(editor) = editor {
+            let add = ui
+                .add(egui::Button::new(RichText::new("+").size(13.0)).small())
+                .on_hover_text(tr("Выдать роль"));
+            egui::Popup::menu(&add).width(220.0).show(|ui| {
+                let free: Vec<&RoleChip> = editor
+                    .all
+                    .iter()
+                    .filter(|r| !roles.iter().any(|mine| mine.id == r.id))
+                    .collect();
+                if free.is_empty() {
+                    ui.label(theme::muted(tr("Все роли уже выданы")));
+                }
+                for role in free {
+                    let allowed = editor.allowed(role.position);
+                    let label = RichText::new(&role.name).color(if allowed {
+                        role.color
+                    } else {
+                        theme::text_faint()
+                    });
+                    if ui
+                        .add_enabled(allowed, egui::Button::new(label).frame(false))
+                        .clicked()
+                    {
+                        editor.set(&role.id, true);
+                        ui.close();
+                    }
+                }
+            });
         }
     });
 }
@@ -219,7 +336,8 @@ fn body(
     ui: &mut egui::Ui,
     state: &ProfileState,
     activities: &[bs_types::Activity],
-    roles: &[(String, Color32)],
+    roles: &[RoleChip],
+    editor: Option<&RoleEditor<'_>>,
 ) {
     let Some(user) = state.user.as_deref() else {
         if let Some(error) = &state.error {
@@ -248,7 +366,7 @@ fn body(
         ui.label(theme::muted(crate::tf!("Домашний инстанс: {home}", home = home)).size(12.5));
     }
     super::activity_view::section(ui, &user.id, activities);
-    roles_section(ui, roles);
+    roles_section(ui, roles, editor);
     if let Some(bio) = user.bio.as_deref().filter(|b| !b.trim().is_empty()) {
         ui.add_space(10.0);
         ui.label(theme::section_title(tr("О СЕБЕ")));
@@ -347,8 +465,9 @@ pub(crate) fn show(
                         .cache()
                         .map(|c| c.user_activities(&state.user_id).to_vec())
                         .unwrap_or_default();
-                    let roles = space_roles(bridge, state);
-                    body(ui, state, &activities, &roles);
+                    let (roles, all) = space_roles(bridge, state);
+                    let editor = role_editor(bridge, state, &all);
+                    body(ui, state, &activities, &roles, editor.as_ref());
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
                         if state.user_id != me {
