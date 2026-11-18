@@ -1581,7 +1581,7 @@
   "Зашифрованные комнаты не поддерживаются.": "Encrypted rooms are not supported.",
   "Подключить": "Connect",
   "Номер телефона": "Phone number",
-  "У сервера нет своих ключей приложения Telegram: создайте их на my.telegram.org (API development tools) и впишите сюда.": "The server has no Telegram app keys of its own: create them at my.telegram.org (API development tools) and enter them here.",
+  "Ключи приложения Telegram задаёт администратор сервера — один раз для всех (setup.sh --telegram-app). На этом сервере их пока нет: попросите администратора или впишите свои с my.telegram.org (API development tools).": "Telegram app keys are set by the server admin, once for everyone (setup.sh --telegram-app). This server has none yet: ask the admin or enter your own from my.telegram.org (API development tools).",
   "Получить код": "Get code",
   "Включена двухэтапная проверка: введите облачный пароль Telegram.": "Two-step verification is on: enter your Telegram cloud password.",
   "Облачный пароль": "Cloud password",

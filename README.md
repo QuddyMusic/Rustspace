@@ -512,8 +512,12 @@ In group chats the author's name precedes the text.
   login and password. Encrypted rooms are not supported.
 - **Telegram** — sign in with a phone number and code, plus the cloud password if two-step
   verification is on. It needs an API ID and API hash from
-  [my.telegram.org](https://my.telegram.org): the admin sets `TELEGRAM_API_ID` and
-  `TELEGRAM_API_HASH` in `rustspace.env`, otherwise everyone enters their own when signing in.
+  [my.telegram.org](https://my.telegram.org), one pair for the whole server: the admin sets it
+  during installation (`setup.sh --telegram-app ID:HASH`, i.e. `TELEGRAM_API_ID` and
+  `TELEGRAM_API_HASH` in `rustspace.env`). Releases can be built with default keys: the CI
+  secrets `RUSTSPACE_TELEGRAM_API_ID` and `RUSTSPACE_TELEGRAM_API_HASH` are baked into
+  `rustspace-server`, and then nothing needs configuring. With no keys anywhere, everyone enters
+  their own when signing in.
   The MTProto client is [grammers](https://github.com/Lonami/grammers) (MIT/Apache-2.0,
   Lonami and contributors).
 - **Discord** personal accounts are not supported: signing in as a user breaks Discord's terms.

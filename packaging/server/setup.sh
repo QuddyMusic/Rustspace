@@ -42,6 +42,7 @@ SOURCE_URL=""
 DATA_FROM=""
 DB_CHOICE=""
 EXTERNAL_DB_URL=""
+TELEGRAM_APP=""
 ASSUME_YES=0
 JOBS=""
 LIVEKIT_VERSION="1.13.11"
@@ -125,6 +126,8 @@ usage() {
   --data-from КАТАЛОГ    перенести данные из каталога (*.db и uploads/)
   --livekit-version В    версия LiveKit (1.13.11)
   --no-updater           не ставить помощника обновления из клиента
+  --telegram-app ID:HASH ключи приложения Telegram (my.telegram.org) для личных
+                         мостов — одни на весь сервер, пользователям свои не нужны
   -y, --yes              не задавать вопросов
   -h, --help             эта справка
 EOF
@@ -153,6 +156,7 @@ while [ $# -gt 0 ]; do
         --livekit-version) LIVEKIT_VERSION="${2:-}"; shift 2 ;;
         --jobs) JOBS="${2:-}"; shift 2 ;;
         --no-updater) WITH_UPDATER=0; shift ;;
+        --telegram-app) TELEGRAM_APP="${2:-}"; shift 2 ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Неизвестный параметр: $1" >&2; usage >&2; exit 2 ;;
@@ -745,6 +749,15 @@ fi
 if [ -n "$SOURCE_URL" ]; then
     case "$SOURCE_URL" in http://*|https://*) ;; *) die "--source-url должен начинаться с https://" ;; esac
     printf 'BACKSPACE_SOURCE_URL=%s\n' "$SOURCE_URL" >> "$CARRY"
+fi
+
+if [ -n "$TELEGRAM_APP" ]; then
+    tg_id=${TELEGRAM_APP%%:*}
+    tg_hash=${TELEGRAM_APP#*:}
+    case "$tg_id" in ''|*[!0-9]*) die "--telegram-app: ID — число, например 1234567:0123abcd…" ;; esac
+    printf '%s' "$tg_hash" | grep -Eq '^[0-9a-fA-F]{32}$' \
+        || die "--telegram-app: HASH — 32 шестнадцатеричных символа"
+    printf 'TELEGRAM_API_ID=%s\nTELEGRAM_API_HASH=%s\n' "$tg_id" "$tg_hash" >> "$CARRY"
 fi
 
 # Веб-клиент копируется к данным: служба не видит домашние каталоги.

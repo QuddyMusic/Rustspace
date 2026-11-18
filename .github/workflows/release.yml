@@ -65,7 +65,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: server-${{ matrix.arch }}
+      # Ключи приложения Telegram по умолчанию (секреты репозитория; если их
+      # нет — пусто, и сервер берёт ключи только из своих настроек).
       - name: cargo build
+        env:
+          RUSTSPACE_TELEGRAM_API_ID: ${{ secrets.RUSTSPACE_TELEGRAM_API_ID }}
+          RUSTSPACE_TELEGRAM_API_HASH: ${{ secrets.RUSTSPACE_TELEGRAM_API_HASH }}
         run: cargo build --release --locked -p bs-server --target "$TARGET"
       - name: архив
         run: |

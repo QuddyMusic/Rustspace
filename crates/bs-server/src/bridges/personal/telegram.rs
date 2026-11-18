@@ -549,7 +549,7 @@ pub async fn start_login(
         Ok(token) => token,
         Err(err) => {
             connection.close();
-            return Err(err.to_string());
+            return Err(explain(&err.to_string()));
         }
     };
     let id = uuid::Uuid::new_v4().to_string();
@@ -617,6 +617,42 @@ pub async fn submit_password(
     finish(state, id, login, result, None).await
 }
 
+/// Понятный текст для ошибок входа Telegram (`rpc error 420: FLOOD_WAIT … (value: 3600)`).
+fn explain(error: &str) -> String {
+    let wait = error
+        .rsplit_once("(value: ")
+        .and_then(|(_, rest)| rest.trim_end_matches(')').parse::<u64>().ok());
+    let has = |name: &str| error.contains(name);
+    if has("PHONE_NUMBER_FLOOD") {
+        "Telegram временно не присылает коды на этот номер: их запрашивали слишком часто. \
+         Подождите сутки и не запрашивайте код в это время — каждая попытка продлевает запрет."
+            .to_owned()
+    } else if has("FLOOD_WAIT") || has("FLOOD_PREMIUM_WAIT") {
+        match wait {
+            Some(seconds) if seconds >= 3600 => format!(
+                "Telegram просит подождать {} ч перед следующей попыткой",
+                seconds.div_ceil(3600)
+            ),
+            Some(seconds) => format!(
+                "Telegram просит подождать {} мин перед следующей попыткой",
+                seconds.div_ceil(60).max(1)
+            ),
+            None => "Telegram просит подождать перед следующей попыткой".to_owned(),
+        }
+    } else if has("PHONE_NUMBER_INVALID") {
+        "неверный номер телефона".to_owned()
+    } else if has("PHONE_NUMBER_BANNED") {
+        "этот номер заблокирован в Telegram".to_owned()
+    } else if has("PHONE_CODE_EXPIRED") {
+        "код устарел — начните вход заново".to_owned()
+    } else if has("API_ID_INVALID") || has("API_ID_PUBLISHED_FLOOD") {
+        "Telegram не принял ключи приложения (API ID и hash) — проверьте их на my.telegram.org"
+            .to_owned()
+    } else {
+        error.to_owned()
+    }
+}
+
 async fn finish(
     state: &AppState,
     id: &str,
@@ -644,7 +680,7 @@ async fn finish(
         }
         Err(err) => {
             login.connection.close();
-            return Err(err.to_string());
+            return Err(explain(&err.to_string()));
         }
     };
     let snapshot = login
@@ -704,6 +740,16 @@ mod tests {
         assert_eq!(restored.home_dc, home);
         assert_eq!(restored.dc_options.len(), 5);
         assert!(session.take_snapshot(false).is_none());
+    }
+
+    #[test]
+    fn login_errors_are_explained() {
+        assert!(
+            super::explain("rpc error 420: FLOOD_WAIT caused by auth.sendCode (value: 7200)")
+                .contains("2 ч")
+        );
+        assert!(super::explain("rpc error 400: PHONE_NUMBER_FLOOD").contains("сутки"));
+        assert_eq!(super::explain("что-то ещё"), "что-то ещё");
     }
 
     #[test]

@@ -506,8 +506,11 @@ Matrix: сообщения канала уходят туда, а оттуда �
   логин и пароль. Зашифрованные комнаты не поддерживаются.
 - **Telegram** — вход по номеру и коду, при включённой двухэтапной проверке — с облачным
   паролем. Нужны API ID и API hash приложения с [my.telegram.org](https://my.telegram.org):
-  администратор задаёт `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` в `rustspace.env`, иначе каждый
-  вводит свои при входе. Клиент MTProto — [grammers](https://github.com/Lonami/grammers)
+  одни на весь сервер — администратор задаёт их при установке (`setup.sh --telegram-app
+  ID:HASH`, это `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` в `rustspace.env`). Выпуски можно
+  собрать с ключами по умолчанию: секреты CI `RUSTSPACE_TELEGRAM_API_ID` и
+  `RUSTSPACE_TELEGRAM_API_HASH` вшиваются в `rustspace-server`, и тогда настраивать ничего не
+  нужно. Если ключей нет нигде, каждый вводит свои при входе. Клиент MTProto — [grammers](https://github.com/Lonami/grammers)
   (MIT/Apache-2.0, Lonami и участники).
 - **Discord** личные аккаунты не подключает: вход под ними нарушает правила Discord.
 

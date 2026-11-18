@@ -529,9 +529,22 @@ pub(crate) fn config_from(get: &dyn Fn(&str) -> Option<String>) -> BridgeConfig 
                 "0" | "off" | "false" | "no"
             )
         }),
-        telegram_api_id: non_empty("TELEGRAM_API_ID").and_then(|v| v.parse().ok()),
-        telegram_api_hash: non_empty("TELEGRAM_API_HASH"),
+        telegram_api_id: non_empty("TELEGRAM_API_ID")
+            .or_else(|| built_in(option_env!("RUSTSPACE_TELEGRAM_API_ID")))
+            .and_then(|v| v.parse().ok()),
+        telegram_api_hash: non_empty("TELEGRAM_API_HASH")
+            .or_else(|| built_in(option_env!("RUSTSPACE_TELEGRAM_API_HASH"))),
     }
+}
+
+/// Ключи приложения Telegram, вшитые при сборке выпуска (секреты CI
+/// `RUSTSPACE_TELEGRAM_API_ID`/`_HASH`): с ними личные мосты Telegram работают
+/// на любом сервере без настройки. Переменные окружения сервера важнее.
+fn built_in(value: Option<&'static str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
 }
 
 // ─── Связи (для маршрутов) ──────────────────────────────────────────────────

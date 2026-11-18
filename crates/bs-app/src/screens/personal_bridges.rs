@@ -507,8 +507,9 @@ fn telegram_phone(
     if !server_keys {
         ui.label(
             theme::muted(tr(
-                "У сервера нет своих ключей приложения Telegram: создайте их на \
-                 my.telegram.org (API development tools) и впишите сюда.",
+                "Ключи приложения Telegram задаёт администратор сервера — один раз для всех \
+                 (setup.sh --telegram-app). На этом сервере их пока нет: попросите \
+                 администратора или впишите свои с my.telegram.org (API development tools).",
             ))
             .size(12.0),
         );
