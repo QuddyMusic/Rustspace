@@ -1574,60 +1574,141 @@ impl Composer {
     }
 }
 
-/// Сетка эмодзи с вкладками категорий; возвращает выбранный эмодзи.
-pub(crate) fn emoji_picker(ui: &mut egui::Ui, category: &mut usize) -> Option<&'static str> {
-    let mut chosen = None;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        for (index, (name, tab_glyph, _)) in CATEGORIES.iter().enumerate() {
-            let selected = index == *category;
-            let (rect, response) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
-            if selected {
-                ui.painter()
-                    .rect_filled(rect, crate::theme::rounded(8), theme::bg_active());
-            } else if response.hovered() {
-                ui.painter()
-                    .rect_filled(rect, crate::theme::rounded(8), theme::bg_hover());
-            }
-            paint_emoji(ui, rect.shrink(6.0), tab_glyph, CATEGORIES.get(index));
-            if response.on_hover_text(*name).clicked() {
-                *category = index;
-            }
+/// Сколько эмодзи в «Часто используемых».
+const QUICK_SLOTS: usize = 18;
+/// Чем заполнены «Часто используемые», пока своих мало.
+const QUICK_DEFAULT: [&str; QUICK_SLOTS] = [
+    "👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👀", "🙏", "💯", "😍", "🤔", "👏", "😎", "✅", "💀",
+    "🥲", "😭",
+];
+
+/// «Часто используемые»: свои по частоте, дальше — набор по умолчанию.
+fn quick_emoji() -> Vec<&'static Entry> {
+    let used = crate::prefs::get().emoji_used;
+    let mut ranked: Vec<(&String, &u32)> = used.iter().collect();
+    ranked.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+    let mut out: Vec<&'static Entry> = Vec::with_capacity(QUICK_SLOTS);
+    let glyphs = ranked
+        .into_iter()
+        .map(|(glyph, _)| glyph.as_str())
+        .chain(QUICK_DEFAULT);
+    for glyph in glyphs {
+        if out.len() == QUICK_SLOTS {
+            break;
+        }
+        if let Some(entry) = crate::emoji_data::find(glyph)
+            && !out.iter().any(|e| std::ptr::eq(*e, entry))
+        {
+            out.push(entry);
+        }
+    }
+    out
+}
+
+/// Запоминает выбор для «Часто используемых».
+fn remember_emoji(glyph: &str) {
+    crate::prefs::update(|prefs| {
+        let count = prefs.emoji_used.entry(glyph.to_owned()).or_insert(0);
+        *count = count.saturating_add(1);
+        // Хранится не больше сотни: редкие вытесняются.
+        if prefs.emoji_used.len() > 100
+            && let Some(rare) = prefs
+                .emoji_used
+                .iter()
+                .min_by_key(|(_, n)| **n)
+                .map(|(g, _)| g.clone())
+        {
+            prefs.emoji_used.remove(&rare);
         }
     });
-    ui.add_space(4.0);
-    let (name, _, entries) = CATEGORIES.get(*category)?;
-    ui.label(theme::section_title(name));
-    egui::ScrollArea::vertical()
-        .id_salt("emoji_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            let cell = 38.0;
-            let columns = ((ui.available_width() / cell).floor() as usize).max(1);
-            for row in entries.chunks(columns) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::ZERO;
-                    for entry in row {
-                        let (rect, response) =
-                            ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
-                        if !ui.is_rect_visible(rect) {
-                            continue;
-                        }
-                        if response.hovered() {
-                            ui.painter().rect_filled(
-                                rect,
-                                crate::theme::rounded(8),
-                                theme::bg_active(),
-                            );
-                        }
-                        paint_texture(ui, rect.shrink(5.0), entry);
-                        if response.clicked() {
-                            chosen = Some(entry.glyph);
-                        }
-                    }
-                });
+}
+
+/// Сетка эмодзи по `cell` точек; возвращает выбранный.
+fn emoji_cells<'a>(
+    ui: &mut egui::Ui,
+    entries: impl IntoIterator<Item = &'a Entry>,
+    cell: f32,
+) -> Option<&'static str>
+where
+    'a: 'static,
+{
+    let mut chosen = None;
+    let columns = ((ui.available_width() / cell).floor() as usize).max(1);
+    let entries: Vec<&'static Entry> = entries.into_iter().collect();
+    for row in entries.chunks(columns) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::ZERO;
+            for entry in row {
+                let (rect, response) = ui.allocate_exact_size(Vec2::splat(cell), Sense::click());
+                if !ui.is_rect_visible(rect) {
+                    continue;
+                }
+                if response.hovered() {
+                    ui.painter()
+                        .rect_filled(rect, crate::theme::rounded(8), theme::bg_active());
+                }
+                paint_texture(ui, rect.shrink(5.0), entry);
+                if response.clicked() {
+                    chosen = Some(entry.glyph);
+                }
             }
         });
+    }
+    chosen
+}
+
+/// Выбор эмодзи: категории слева, сверху — «Часто используемые» (18 мест),
+/// под ними — эмодзи выбранной категории. Возвращает выбранный эмодзи.
+pub(crate) fn emoji_picker(ui: &mut egui::Ui, category: &mut usize) -> Option<&'static str> {
+    let mut chosen = None;
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            for (index, (name, tab_glyph, _)) in CATEGORIES.iter().enumerate() {
+                let selected = index == *category;
+                let (rect, response) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::click());
+                if selected {
+                    ui.painter()
+                        .rect_filled(rect, crate::theme::rounded(8), theme::bg_active());
+                } else if response.hovered() {
+                    ui.painter()
+                        .rect_filled(rect, crate::theme::rounded(8), theme::bg_hover());
+                }
+                paint_emoji(ui, rect.shrink(6.0), tab_glyph, CATEGORIES.get(index));
+                if response.on_hover_text(tr(name)).clicked() {
+                    *category = index;
+                }
+            }
+        });
+        ui.separator();
+        ui.vertical(|ui| {
+            let cell = 38.0;
+            ui.label(theme::section_title(tr("Часто используемые")));
+            ui.scope(|ui| {
+                // Ровно 18 мест: две строки по девять, сколько бы ни было ширины.
+                ui.set_max_width(cell * 9.0);
+                if let Some(glyph) = emoji_cells(ui, quick_emoji(), cell) {
+                    chosen = Some(glyph);
+                }
+            });
+            ui.add_space(4.0);
+            let Some((name, _, entries)) = CATEGORIES.get(*category) else {
+                return;
+            };
+            ui.label(theme::section_title(tr(name)));
+            egui::ScrollArea::vertical()
+                .id_salt("emoji_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if let Some(glyph) = emoji_cells(ui, entries.iter(), cell) {
+                        chosen = Some(glyph);
+                    }
+                });
+        });
+    });
+    if let Some(glyph) = chosen {
+        remember_emoji(glyph);
+    }
     chosen
 }
 

@@ -208,6 +208,8 @@ pub(crate) struct Prefs {
     pub(crate) preview_images: bool,
     /// Режим разработчика: показывает раздел «Боты».
     pub(crate) developer_mode: bool,
+    /// Сколько раз выбран каждый эмодзи («Часто используемые»).
+    pub(crate) emoji_used: std::collections::BTreeMap<String, u32>,
 }
 
 /// Инстанс, в который входили с этого устройства.
@@ -261,6 +263,7 @@ impl Default for Prefs {
             columns: crate::columns::Widths::default(),
             preview_images: true,
             developer_mode: false,
+            emoji_used: std::collections::BTreeMap::new(),
             recent_instances: Vec::new(),
         }
     }
