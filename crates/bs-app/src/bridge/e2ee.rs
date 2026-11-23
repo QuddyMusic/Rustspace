@@ -42,6 +42,9 @@ struct Chat {
     old_keys: Vec<String>,
     /// Свой ключ в эту переписку уже отправлен.
     announced: bool,
+    /// Шифрование включал или выключал сам пользователь: тогда оно само не
+    /// включается.
+    chosen: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -78,6 +81,8 @@ pub(crate) struct E2ee {
     /// Ключ лежит в системном хранилище, но сейчас его оттуда не взять:
     /// работает временный ключ, а сохранённое состояние не трогается.
     locked: bool,
+    /// Переписки, для которых в этом сеансе уже спрошен ключ собеседника.
+    probed: std::collections::HashSet<String>,
 }
 
 impl std::fmt::Debug for E2ee {
@@ -162,6 +167,7 @@ impl E2ee {
                 .map(|stored| stored.chats)
                 .unwrap_or_default(),
             outbox: Vec::new(),
+            probed: std::collections::HashSet::new(),
             locked,
         };
         if fresh {
@@ -271,7 +277,9 @@ impl E2ee {
     /// Включает или выключает шифрование исходящих в переписке. При
     /// включении собеседнику один раз отправляется свой открытый ключ.
     pub(crate) fn set_enabled(&mut self, dm_id: &str, enabled: bool) {
-        self.chats.entry(dm_id.to_owned()).or_default().enabled = enabled;
+        let chat = self.chats.entry(dm_id.to_owned()).or_default();
+        chat.enabled = enabled;
+        chat.chosen = true;
         if enabled {
             self.announce(dm_id);
         }
@@ -318,13 +326,30 @@ impl E2ee {
         true
     }
 
-    /// Ключ собеседника из справочника сервера.
+    /// Ключ собеседника из справочника сервера. Если пользователь сам
+    /// шифрование не выключал, оно включается: собеседник его поддерживает.
     pub(crate) fn directory_key(&mut self, dm_id: &str, key: &str) {
-        if let Some(key) = PublicKey::from_wire(key)
-            && self.learn_peer_key(dm_id, key, 0)
-        {
+        let Some(key) = PublicKey::from_wire(key) else {
+            return;
+        };
+        let mut changed = self.learn_peer_key(dm_id, key, 0);
+        let chat = self.chats.entry(dm_id.to_owned()).or_default();
+        if !chat.chosen && !chat.enabled && chat.peer_key.is_some() {
+            chat.enabled = true;
+            self.announce(dm_id);
+            changed = true;
+        }
+        if changed {
             self.save();
         }
+    }
+
+    /// Надо ли спросить ключ собеседника: шифрование ещё не включено, выбора
+    /// пользователя нет, и в этом сеансе не спрашивали.
+    pub(crate) fn wants_probe(&mut self, dm_id: &str) -> bool {
+        let chat = self.chats.get(dm_id);
+        let undecided = chat.is_none_or(|c| !c.enabled && !c.chosen);
+        undecided && self.probed.insert(dm_id.to_owned())
     }
 
     /// Обрабатывает входящее личное сообщение: объявление ключа запоминает,

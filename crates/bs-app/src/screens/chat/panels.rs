@@ -1119,6 +1119,7 @@ impl ChatScreen {
             .members
             .iter()
             .any(|m| Some(&m.id) != me.as_ref() && m.home_instance.is_some());
+        bridge.e2ee_probe(selected.origin, &selected.channel);
         let status = bridge.e2ee_status(selected.origin, &selected.channel);
         let Some(text) = plaintext_notice(&status, remote) else {
             return;

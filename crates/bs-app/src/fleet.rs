@@ -1262,6 +1262,13 @@ impl Bridge {
             .unwrap_or_default()
     }
 
+    /// Открыта переписка: спросить ключ собеседника для автошифрования.
+    pub(crate) fn e2ee_probe(&self, origin: usize, dm_id: &str) {
+        if let Some(slot) = self.slots.get(origin) {
+            slot.session.e2ee_probe(dm_id);
+        }
+    }
+
     /// Включает или выключает шифрование переписки.
     pub(crate) fn set_e2ee(&mut self, origin: usize, dm_id: &str, enabled: bool) {
         if let Some(slot) = self.slots.get_mut(origin) {

@@ -162,7 +162,7 @@ impl Session {
     }
 
     /// Отправляет в переписки свои открытые ключи, которые пора объявить.
-    fn flush_e2ee(&mut self) {
+    pub(super) fn flush_e2ee(&mut self) {
         let pending = self
             .e2ee
             .get_mut()
@@ -208,6 +208,36 @@ impl Session {
             .as_ref()
             .map(|e2ee| e2ee.status(dm_channel_id))
             .unwrap_or_default()
+    }
+
+    /// Открыта переписка один на один: если шифрование в ней ещё не решено,
+    /// спрашивает ключ собеседника — найдётся, и шифрование включится само.
+    pub(crate) fn e2ee_probe(&self, dm_channel_id: &str) {
+        let wants = self
+            .e2ee
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(|e2ee| e2ee.wants_probe(dm_channel_id));
+        if !wants {
+            return;
+        }
+        let peer = self.cache.as_ref().and_then(|cache| {
+            let channel = cache
+                .dm_channel(dm_channel_id)
+                .filter(|channel| e2ee::is_direct(channel))?;
+            let me = cache.me().id.as_str();
+            channel
+                .members
+                .iter()
+                .find(|member| member.id.as_str() != me)
+                .map(|member| member.id.as_str().to_owned())
+        });
+        if let Some(user_id) = peer {
+            self.request(BridgeRequest::E2eePeerKey {
+                dm_channel_id: dm_channel_id.to_owned(),
+                user_id,
+            });
+        }
     }
 
     /// Включает или выключает шифрование переписки один на один.

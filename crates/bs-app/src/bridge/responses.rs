@@ -71,6 +71,8 @@ impl Session {
                 if let Some(e2ee) = self.e2ee.get_mut().as_mut() {
                     e2ee.directory_key(&dm_channel_id, &public_key);
                 }
+                // Шифрование могло включиться само: свой ключ — собеседнику.
+                self.flush_e2ee();
             }
             BridgeResponse::NotificationSettings(list) => {
                 if let Some(cache) = self.cache.as_mut() {

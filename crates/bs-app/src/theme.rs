@@ -949,6 +949,18 @@ fn soften_text(visuals: &mut egui::Visuals, crisp: bool, dark: bool) {
     }
 }
 
+/// Палитра — для обеих тем egui, а тема закреплена за ней: иначе при
+/// светлой системе Windows стандартные поля и кнопки становятся белыми.
+fn set_visuals(ctx: &egui::Context, dark: bool, visuals: egui::Visuals) {
+    ctx.set_theme(if dark {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    });
+    ctx.set_visuals_of(egui::Theme::Dark, visuals.clone());
+    ctx.set_visuals_of(egui::Theme::Light, visuals);
+}
+
 /// Применяет оформление: палитру, скругления и стили `egui`.
 pub(crate) fn apply(ctx: &egui::Context, appearance: &Appearance) {
     let mut palette = appearance.palette();
@@ -1031,9 +1043,9 @@ pub(crate) fn apply(ctx: &egui::Context, appearance: &Appearance) {
     widgets.open.bg_fill = p.bg_active;
     widgets.open.weak_bg_fill = p.bg_active;
     widgets.open.corner_radius = radius;
-    ctx.set_visuals(visuals);
+    set_visuals(ctx, p.dark, visuals);
 
-    ctx.global_style_mut(|style| {
+    ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
         style.spacing.button_padding = egui::vec2(12.0, 6.0);
         style.spacing.window_margin = Margin::same(12);
