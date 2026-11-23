@@ -591,7 +591,7 @@ fn staged_thumb(ui: &mut egui::Ui, texture: &egui::TextureHandle, item: &Staged)
     }
 }
 
-/// Кнопки справа: убрать, спойлер, повторить.
+/// Кнопки справа: убрать и спойлер.
 fn staged_buttons(ui: &mut egui::Ui, item: &Staged) -> Option<StagedAction> {
     let mut action = ui
         .add(widgets::flat_icon(Icon::Close, 12.0, theme::text_faint()))
@@ -599,13 +599,6 @@ fn staged_buttons(ui: &mut egui::Ui, item: &Staged) -> Option<StagedAction> {
         .clicked()
         .then_some(StagedAction::Remove(item.id));
     if matches!(item.state, StagedState::Failed(_)) {
-        if ui
-            .add(egui::Button::new(RichText::new(tr("Повторить")).size(12.0)).small())
-            .on_hover_text(tr("Загрузить ещё раз"))
-            .clicked()
-        {
-            action = Some(StagedAction::Retry(item.id));
-        }
         return action;
     }
     let is_media =
@@ -634,6 +627,57 @@ fn staged_buttons(ui: &mut egui::Ui, item: &Staged) -> Option<StagedAction> {
     action
 }
 
+/// Карточка выбранного файла: миниатюра, имя и состояние, кнопки справа
+/// (на своём месте, поверх текста не ложатся), «Повторить» — строкой ниже.
+fn staged_card(
+    ui: &mut egui::Ui,
+    item: &Staged,
+    texture: Option<&egui::TextureHandle>,
+) -> Option<StagedAction> {
+    let mut action = None;
+    if let Some(texture) = texture {
+        staged_thumb(ui, texture, item);
+        ui.add_space(4.0);
+    }
+    ui.horizontal(|ui| {
+        if texture.is_none() {
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
+            let icon = if mime_for(&item.name).starts_with("image/") {
+                Icon::Image
+            } else {
+                Icon::File
+            };
+            crate::icons::paint(ui.painter(), rect.center(), 18.0, icon, theme::sky());
+        }
+        let text_width = (ui.available_width() - 40.0).max(40.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(text_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(text_width);
+                ui.add(
+                    egui::Label::new(RichText::new(&item.name).color(theme::text()).size(13.0))
+                        .truncate(),
+                )
+                .on_hover_text(&item.name);
+                staged_status(ui, item);
+            },
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            action = staged_buttons(ui, item);
+        });
+    });
+    if matches!(item.state, StagedState::Failed(_))
+        && ui
+            .add(egui::Button::new(RichText::new(tr("Повторить")).size(12.0)).small())
+            .on_hover_text(tr("Загрузить ещё раз"))
+            .clicked()
+    {
+        action = Some(StagedAction::Retry(item.id));
+    }
+    action
+}
+
 /// Под именем выбранного файла: ход загрузки, размер или ошибка.
 fn staged_status(ui: &mut egui::Ui, item: &Staged) {
     match &item.state {
@@ -656,10 +700,8 @@ fn staged_status(ui: &mut egui::Ui, item: &Staged) {
             );
         }
         StagedState::Failed(message) => {
-            ui.label(
-                RichText::new(theme::truncate_chars(message, 30))
-                    .color(theme::rose())
-                    .size(11.5),
+            ui.add(
+                egui::Label::new(RichText::new(message).color(theme::rose()).size(11.5)).truncate(),
             )
             .on_hover_text(message);
         }
@@ -1213,45 +1255,12 @@ impl Composer {
                     .corner_radius(crate::theme::rounded(10))
                     .inner_margin(Margin::symmetric(8, 7))
                     .show(ui, |ui| {
-                        ui.set_width(if texture.is_some() { 150.0 } else { 190.0 });
-                        if let Some(texture) = &texture {
-                            staged_thumb(ui, texture, item);
-                            ui.add_space(4.0);
-                        }
-                        ui.horizontal(|ui| {
-                            if texture.is_none() {
-                                let (rect, _) =
-                                    ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
-                                let icon = if mime_for(&item.name).starts_with("image/") {
-                                    Icon::Image
-                                } else {
-                                    Icon::File
-                                };
-                                crate::icons::paint(
-                                    ui.painter(),
-                                    rect.center(),
-                                    18.0,
-                                    icon,
-                                    theme::sky(),
-                                );
+                        // Рамка в ряду раскладывала бы содержимое в строку.
+                        ui.vertical(|ui| {
+                            ui.set_width(if texture.is_some() { 150.0 } else { 190.0 });
+                            if let Some(chosen) = staged_card(ui, item, texture.as_ref()) {
+                                action = Some(chosen);
                             }
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    RichText::new(theme::truncate_chars(&item.name, 18))
-                                        .color(theme::text())
-                                        .size(13.0),
-                                )
-                                .on_hover_text(&item.name);
-                                staged_status(ui, item);
-                            });
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if let Some(chosen) = staged_buttons(ui, item) {
-                                        action = Some(chosen);
-                                    }
-                                },
-                            );
                         });
                     });
             }
