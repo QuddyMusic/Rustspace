@@ -280,6 +280,42 @@ impl ChatScreen {
         }
     }
 
+    /// Начинает правку: выбранного в меню сообщения или, по ↑, последнего
+    /// своего.
+    fn start_edit(
+        &mut self,
+        ui: &egui::Ui,
+        chosen: Option<(String, String)>,
+        rows: &[MessageRow],
+        me: &str,
+    ) {
+        if let Some((id, content)) = chosen.or_else(|| self.edit_last_on_up(ui, rows, me)) {
+            self.begin_edit(id, &content);
+            ui.memory_mut(|m| m.request_focus(crate::screens::composer::edit_id()));
+        }
+    }
+
+    /// ↑ в пустом поле ввода — правка последнего своего сообщения.
+    fn edit_last_on_up(
+        &self,
+        ui: &egui::Ui,
+        rows: &[MessageRow],
+        me: &str,
+    ) -> Option<(String, String)> {
+        let composer = crate::screens::composer::edit_id();
+        let wanted = !self.is_editing()
+            && self.draft.is_empty()
+            && ui.input(|i| i.modifiers.is_none() && i.key_pressed(egui::Key::ArrowUp))
+            && ui.memory(|m| m.focused().is_none_or(|id| id == composer));
+        if !wanted {
+            return None;
+        }
+        rows.iter()
+            .rev()
+            .find(|row| row.author_id == me)
+            .map(|row| (row.id.clone(), row.body.clone()))
+    }
+
     pub(super) fn show_messages(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) {
         egui::CentralPanel::default()
             .frame(egui::Frame::new())
@@ -351,9 +387,7 @@ impl ChatScreen {
                             ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
                         }
                     });
-                if let Some((id, content)) = edit_request {
-                    self.begin_edit(id, &content);
-                }
+                self.start_edit(ui, edit_request, &rows, &me);
 
                 // Подгрузка старых сообщений при прокрутке к верху ленты.
                 let offset = output.state.clamped_offset().y;

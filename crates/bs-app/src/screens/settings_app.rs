@@ -10,6 +10,7 @@ use super::settings_extra::setting_row;
 use crate::i18n::tr;
 use crate::prefs::Action;
 use crate::theme;
+use crate::widgets;
 
 /// Состояние страницы горячих клавиш.
 #[derive(Debug, Default)]
@@ -18,6 +19,34 @@ pub(crate) struct HotkeysState {
     recording: Option<Action>,
     /// Предупреждение о конфликте.
     conflict: Option<String>,
+}
+
+/// Постоянные сочетания чата.
+fn chat_keys(ui: &mut egui::Ui) {
+    ui.add_space(14.0);
+    widgets::section_label(ui, tr("В чате"));
+    ui.add_space(6.0);
+    card(ui, |ui| {
+        for (keys, what) in [
+            (
+                "↑",
+                tr("Изменить последнее своё сообщение (в пустом поле ввода)"),
+            ),
+            ("Esc", tr("Отменить правку, закрыть окно")),
+            ("Enter", tr("Отправить")),
+            ("Shift+Enter", tr("Новая строка")),
+            ("Ctrl+K", tr("Поиск канала или беседы")),
+            ("Ctrl+V", tr("Вставить картинку из буфера обмена")),
+        ] {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(what).color(theme::text_bright()));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(RichText::new(keys).monospace().color(theme::text_muted()));
+                });
+            });
+            ui.add_space(4.0);
+        }
+    });
 }
 
 /// «Горячие клавиши».
@@ -110,6 +139,7 @@ pub(crate) fn hotkeys(ui: &mut egui::Ui, state: &mut HotkeysState) {
             ui.label(RichText::new(conflict).color(theme::rose()).size(12.5));
         }
     });
+    chat_keys(ui);
 }
 
 /// «Язык»: язык интерфейса и подсказка, как добавить свой перевод.

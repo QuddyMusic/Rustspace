@@ -1749,5 +1749,11 @@
   "Помощник на сервере устарел — выполните на сервере sudo sh setup.sh": "The server helper is outdated — run sudo sh setup.sh on the server",
   "Помощник на сервере не поставлен": "The server helper isn't installed",
   " · {p} % ЦП": " · {p} % CPU",
-  "Копия базы делается без остановки сервера (SQLite без sqlite3 на сервере — с остановкой на пару секунд). Перед каждым обновлением помощник делает свою; из них хранятся пять последних, сделанные вручную — пока вы их не удалите.": "The database is backed up without stopping the server (SQLite without sqlite3 on the server pauses it for a couple of seconds). The helper also makes one before every update; the last five of those are kept, and manual ones stay until you delete them."
+  "Копия базы делается без остановки сервера (SQLite без sqlite3 на сервере — с остановкой на пару секунд). Перед каждым обновлением помощник делает свою; из них хранятся пять последних, сделанные вручную — пока вы их не удалите.": "The database is backed up without stopping the server (SQLite without sqlite3 on the server pauses it for a couple of seconds). The helper also makes one before every update; the last five of those are kept, and manual ones stay until you delete them.",
+  "В чате": "In chat",
+  "Изменить последнее своё сообщение (в пустом поле ввода)": "Edit your last message (in an empty message box)",
+  "Отменить правку, закрыть окно": "Cancel editing, close a window",
+  "Новая строка": "New line",
+  "Поиск канала или беседы": "Find a channel or conversation",
+  "Вставить картинку из буфера обмена": "Paste an image from the clipboard"
 }
