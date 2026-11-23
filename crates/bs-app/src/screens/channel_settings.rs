@@ -762,6 +762,7 @@ fn add_menus(
     };
     ui.horizontal(|ui| {
         ui.menu_button(tr("Добавить роль"), |ui| {
+            crate::widgets::menu_spacing(ui);
             let candidates: Vec<_> = roles.iter().filter(free).collect();
             if candidates.is_empty() {
                 ui.label(
@@ -777,6 +778,7 @@ fn add_menus(
             }
         });
         ui.menu_button(tr("Добавить участника"), |ui| {
+            crate::widgets::menu_spacing(ui);
             widgets::text_field(ui, &mut state.member_search, tr("Поиск участников…"), 64);
             let needle = state.member_search.trim().to_lowercase();
             let candidates: Vec<_> = members

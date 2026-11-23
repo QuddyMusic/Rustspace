@@ -347,7 +347,10 @@ fn tile(
         };
     }
     let prefs = voice.prefs.clone();
-    response.context_menu(|ui| tile_menu(ui, feed, &prefs, watching, actions));
+    response.context_menu(|ui| {
+        crate::widgets::menu_spacing(ui);
+        tile_menu(ui, feed, &prefs, watching, actions);
+    });
 }
 
 /// Контекстное меню плитки.

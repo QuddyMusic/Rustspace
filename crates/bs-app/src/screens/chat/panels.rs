@@ -29,6 +29,7 @@ pub(super) fn channel_menu(
     nav: &mut Option<Nav>,
 ) {
     row.context_menu(|ui| {
+        crate::widgets::menu_spacing(ui);
         if ui.button(tr("Настройки уведомлений")).clicked() {
             *nav = Some(Nav::Notifications {
                 origin: space.origin,
@@ -108,6 +109,7 @@ fn dm_menu(response: &egui::Response, dm: &SidebarDm, nav: &mut Option<Nav>) {
         return;
     }
     response.context_menu(|ui| {
+        crate::widgets::menu_spacing(ui);
         if ui.button(tr("Пригласить в пространство…")).clicked() {
             *nav = Some(Nav::InvitePerson {
                 origin: dm.origin,
@@ -137,7 +139,10 @@ pub(super) fn space_header(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Op
             )
         })
         .inner
-        .context_menu(|ui| space_menu(ui, space, nav));
+        .context_menu(|ui| {
+            crate::widgets::menu_spacing(ui);
+            space_menu(ui, space, nav);
+        });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(10.0);
             if space.rights.invite
@@ -339,7 +344,10 @@ impl ChatScreen {
                                 format!("{} · {owner}", space.name)
                             };
                             let response = response.on_hover_text(hover);
-                            response.context_menu(|ui| space_menu(ui, space, nav));
+                            response.context_menu(|ui| {
+                                crate::widgets::menu_spacing(ui);
+                                space_menu(ui, space, nav);
+                            });
                             if response.clicked() && !selected {
                                 *nav = Some(Nav::Space((space.origin, space.id.clone())));
                             }
@@ -485,6 +493,7 @@ impl ChatScreen {
                     .map(|c| (c.id.clone(), c.name.clone()))
                     .collect();
                 row.context_menu(|ui| {
+                    crate::widgets::menu_spacing(ui);
                     if let Some(audio) = crate::voice::local_audio_menu(
                         ui,
                         &self.voice.prefs,
@@ -544,6 +553,7 @@ impl ChatScreen {
                 }
                 if let Some(id) = group.id.as_ref().filter(|_| space.rights.manage_channels) {
                     header.label.context_menu(|ui| {
+                        crate::widgets::menu_spacing(ui);
                         if ui.button(tr("Настройки категории")).clicked() {
                             *nav = Some(Nav::ChannelSettings {
                                 origin: space.origin,
@@ -593,7 +603,10 @@ impl ChatScreen {
         let rest = ui.available_rect_before_wrap();
         if rest.height() > 4.0 {
             ui.interact(rest, ui.scope_id().with("sidebar_rest"), Sense::click())
-                .context_menu(|ui| space_menu(ui, space, nav));
+                .context_menu(|ui| {
+                    crate::widgets::menu_spacing(ui);
+                    space_menu(ui, space, nav);
+                });
         }
     }
 

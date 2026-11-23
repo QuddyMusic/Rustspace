@@ -307,6 +307,7 @@ impl ChatScreen {
                 .add(button)
                 .on_hover_text(tr("Все закреплённые сообщения"));
             egui::Popup::menu(&list).width(360.0).show(|ui| {
+                crate::widgets::menu_spacing(ui);
                 if let Some(id) = pins_list(ui, &pins, base.as_deref()) {
                     jump = Some(id);
                     ui.close();

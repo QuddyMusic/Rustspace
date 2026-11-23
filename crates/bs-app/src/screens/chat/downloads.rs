@@ -31,6 +31,7 @@ pub(super) fn button(ui: &mut egui::Ui) {
             .request_repaint_after(std::time::Duration::from_millis(250));
     }
     egui::Popup::menu(&button).width(340.0).show(|ui| {
+        crate::widgets::menu_spacing(ui);
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new(tr("Загрузки"))

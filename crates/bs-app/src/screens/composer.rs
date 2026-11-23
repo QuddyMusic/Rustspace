@@ -1562,6 +1562,7 @@ impl Composer {
                             chosen = Some(sticker.token.clone());
                         }
                         response.context_menu(|ui| {
+                            crate::widgets::menu_spacing(ui);
                             packs.mine_menu(ui, bridge, sticker);
                             if ui.button(tr("Удалить стикер")).clicked() {
                                 delete = Some(sticker.id.clone());

@@ -741,6 +741,7 @@ fn member_row(
                     );
                     if rights.manage_roles && outranks {
                         ui.menu_button(tr("Роли"), |ui| {
+                            crate::widgets::menu_spacing(ui);
                             member_roles_menu(ui, state, rights, bridge, row, assignable);
                         });
                     }

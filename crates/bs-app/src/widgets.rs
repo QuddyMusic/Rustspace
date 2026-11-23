@@ -675,3 +675,10 @@ pub(crate) fn origin_badge(ui: &egui::Ui, rect: egui::Rect, host: &str) {
         egui::Color32::BLACK,
     );
 }
+
+/// Отступы пунктов меню: стиль меню egui ставит кнопкам 2×0 пикселей, и
+/// пункты выходят узкими. Вызывается первой строкой в каждом меню.
+pub(crate) fn menu_spacing(ui: &mut egui::Ui) {
+    ui.spacing_mut().button_padding = egui::vec2(10.0, 5.0);
+    ui.set_min_width(180.0);
+}

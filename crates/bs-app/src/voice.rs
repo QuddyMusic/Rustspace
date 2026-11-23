@@ -1007,6 +1007,7 @@ pub(crate) fn moderation_menu(
     );
     if !other_channels.is_empty() {
         ui.menu_button(tr("Переместить в…"), |ui| {
+            crate::widgets::menu_spacing(ui);
             for (id, name) in other_channels {
                 pick(
                     ui.button(name).clicked(),

@@ -604,6 +604,7 @@ pub(crate) fn viewer(ctx: &egui::Context, value: &str) -> bool {
                 close = true;
             }
             backdrop.context_menu(|ui| {
+                crate::widgets::menu_spacing(ui);
                 if ui.button(tr("Копировать картинку")).clicked() {
                     if let Some(hub) = ImageHub::of(ctx) {
                         hub.request_raw(value, crate::images::RawPurpose::Copy);

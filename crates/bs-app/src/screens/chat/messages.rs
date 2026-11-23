@@ -840,6 +840,7 @@ impl ChatScreen {
             .is_some_and(|url| self.composer.is_favorite_gif(bridge, url));
         let mut choice = MenuChoice::default();
         response.context_menu(|ui| {
+            crate::widgets::menu_spacing(ui);
             if let Some(value) = &image {
                 image_menu(
                     ui,

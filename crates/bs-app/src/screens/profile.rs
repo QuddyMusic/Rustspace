@@ -304,6 +304,7 @@ fn roles_section(ui: &mut egui::Ui, roles: &[RoleChip], editor: Option<&RoleEdit
                 .add(egui::Button::new(RichText::new("+").size(13.0)).small())
                 .on_hover_text(tr("Выдать роль"));
             egui::Popup::menu(&add).width(220.0).show(|ui| {
+                crate::widgets::menu_spacing(ui);
                 let free: Vec<&RoleChip> = editor
                     .all
                     .iter()
@@ -438,7 +439,7 @@ pub(crate) fn show(
             }
         }
     };
-    egui::Window::new("profile_window")
+    let window = egui::Window::new("profile_window")
         .title_bar(false)
         .open(&mut open)
         .collapsible(false)
@@ -493,8 +494,29 @@ pub(crate) fn show(
                     });
                 });
         });
-    if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+    // Нажатие мимо окна закрывает его (кроме нажатий во всплывающих меню
+    // самого окна); щелчок, открывший профиль, в первых кадрах не считается.
+    let frame = ctx.cumulative_frame_nr();
+    let opened_at = ctx.data_mut(|d| {
+        *d.get_temp_mut_or_insert_with(egui::Id::unique(("profile_opened", &state.user_id)), || {
+            frame
+        })
+    });
+    let outside = frame > opened_at + 1
+        && window.is_some_and(|w| {
+            ctx.input(|i| {
+                i.pointer.primary_pressed()
+                    && i.pointer
+                        .interact_pos()
+                        .is_some_and(|pos| !w.response.rect.contains(pos))
+            })
+        })
+        && !egui::Popup::is_any_open(ctx);
+    if outside || !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         action = ProfileAction::Close;
+    }
+    if action == ProfileAction::Close {
+        ctx.data_mut(|d| d.remove::<u64>(egui::Id::unique(("profile_opened", &state.user_id))));
     }
     action
 }

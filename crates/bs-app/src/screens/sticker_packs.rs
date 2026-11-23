@@ -234,6 +234,7 @@ impl Packs {
             return;
         };
         ui.menu_button(tr("Добавить в стикерпак"), |ui| {
+            crate::widgets::menu_spacing(ui);
             for pack in &list.own {
                 let inside = pack.stickers.iter().any(|s| s.id == sticker.id);
                 if ui
@@ -334,6 +335,7 @@ impl Packs {
                 }
                 if pack.mine {
                     response.context_menu(|ui| {
+                        crate::widgets::menu_spacing(ui);
                         if index > 0 && ui.button(tr("Сдвинуть влево")).clicked() {
                             moved = Some((index, index - 1));
                             ui.close();
@@ -433,6 +435,7 @@ impl Packs {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if pack.mine {
                     ui.menu_button("⋯", |ui| {
+                        crate::widgets::menu_spacing(ui);
                         if ui.button(tr("Переименовать")).clicked() {
                             self.rename = Some(pack.name.clone());
                             ui.close();
