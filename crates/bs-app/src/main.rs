@@ -5,6 +5,8 @@
 //! состояния и применяет события, пришедшие через канал (см. [`bridge`]).
 
 #![forbid(unsafe_code)]
+// Windows: без окна консоли.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 // Бинарь: `pub` не нужен (unreachable_pub), а `pub(crate)` внутри приватных
 // модулей clippy считает избыточным. Оставляем `pub(crate)` — он честнее.
 #![allow(clippy::redundant_pub_crate)]
@@ -59,6 +61,8 @@ mod video_media;
 mod voice;
 mod voice_media;
 mod widgets;
+#[cfg(windows)]
+mod windows_app;
 #[cfg(target_os = "linux")]
 mod wm;
 
@@ -77,17 +81,28 @@ fn main() -> eframe::Result {
         }
         return Ok(());
     }
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new(
-                    // Штатное закрытие соединения с PulseAudio крейт пишет как
-                    // ERROR, а e2ee LiveKit — служебные INFO на каждый трек.
-                    "info,pulseaudio::client::reactor=off,livekit::room::e2ee=warn",
-                )
-            }),
-        )
-        .init();
+    let logging = tracing_subscriber::fmt().with_env_filter(
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            tracing_subscriber::EnvFilter::new(
+                // Штатное закрытие соединения с PulseAudio крейт пишет как
+                // ERROR, а e2ee LiveKit — служебные INFO на каждый трек.
+                "info,pulseaudio::client::reactor=off,livekit::room::e2ee=warn",
+            )
+        }),
+    );
+    // Windows: консоли нет — журнал в файл.
+    #[cfg(windows)]
+    match windows_app::log_file() {
+        Some(file) => logging
+            .with_ansi(false)
+            .with_writer(std::sync::Mutex::new(file))
+            .init(),
+        None => logging.init(),
+    }
+    #[cfg(not(windows))]
+    logging.init();
+    #[cfg(windows)]
+    windows_app::register();
     saved_session::migrate_legacy_dir();
     #[cfg(target_os = "linux")]
     desktop_entry::ensure();

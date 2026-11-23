@@ -50,8 +50,8 @@ Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\NOTICE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Rustspace"; Filename: "{app}\rustspace.exe"
-Name: "{autodesktop}\Rustspace"; Filename: "{app}\rustspace.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Rustspace"; Filename: "{app}\rustspace.exe"; AppUserModelID: "QuddyMusic.Rustspace"
+Name: "{autodesktop}\Rustspace"; Filename: "{app}\rustspace.exe"; AppUserModelID: "QuddyMusic.Rustspace"; Tasks: desktopicon
 
 [Run]
 ; И после обычной, и после тихой установки (обновление из клиента) — запуск.

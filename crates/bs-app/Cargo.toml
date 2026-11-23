@@ -108,6 +108,10 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # Список процессов для поиска игр на Windows и macOS (на Linux — /proc).
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 
+[target.'cfg(windows)'.dependencies]
+# Имя приложения для уведомлений (AppUserModelID в реестре пользователя).
+winreg = "0.55"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", optional = true }
 # Портал GlobalShortcuts под Wayland.

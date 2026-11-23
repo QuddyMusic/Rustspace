@@ -57,11 +57,15 @@ pub(crate) fn show(toast: Toast) {
     let spawned = std::thread::Builder::new()
         .name("notify".to_owned())
         .spawn(move || {
-            let result = notify_rust::Notification::new()
+            let mut notification = notify_rust::Notification::new();
+            notification
                 .appname(crate::brand::NAME)
                 .summary(&toast.title)
-                .body(&toast.body)
-                .show();
+                .body(&toast.body);
+            // Иначе Windows подписывает уведомление «PowerShell».
+            #[cfg(windows)]
+            notification.app_id(crate::windows_app::AUMID);
+            let result = notification.show();
             if let Err(err) = result {
                 tracing::debug!(%err, "системное уведомление не показано");
             }
