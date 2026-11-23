@@ -216,8 +216,8 @@ pub(crate) enum BridgeRequest {
     DmChannels,
     /// Открыть (или создать) личный канал с пользователем.
     OpenDm(String),
-    /// Отправить заявку в друзья по имени пользователя.
-    SendFriendRequest(String),
+    /// Отправить заявку в друзья (имя или федеративная идентичность).
+    SendFriendRequest(bs_api::SendFriendRequest),
     /// Принять или отклонить входящую заявку.
     RespondFriendRequest(String, bool),
     /// Отозвать свою заявку.

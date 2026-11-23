@@ -1665,8 +1665,7 @@ async fn social_request(
                 Err(err) => BridgeResponse::Failed(err.to_string()),
             }
         }
-        BridgeRequest::SendFriendRequest(username) => {
-            let request = bs_api::SendFriendRequest::username(username);
+        BridgeRequest::SendFriendRequest(request) => {
             match client.send_friend_request(&request).await {
                 Ok(_) => BridgeResponse::Done,
                 Err(err) => BridgeResponse::Failed(err.to_string()),

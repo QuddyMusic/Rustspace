@@ -365,7 +365,13 @@ fn add_friend(ui: &mut egui::Ui, state: &mut HomeState, bridge: &Bridge) {
             },
             |ui| {
                 if !already && ui.add(theme::positive_button(tr("В друзья"))).clicked() {
-                    bridge.request(BridgeRequest::SendFriendRequest(user.id.clone()));
+                    bridge.request(BridgeRequest::SendFriendRequest(
+                        bs_api::SendFriendRequest::for_user(
+                            &user.username,
+                            user.home_user_id.as_deref(),
+                            user.home_instance.as_deref(),
+                        ),
+                    ));
                 }
                 if widgets::icon_button(ui, Icon::Chat, 34.0)
                     .on_hover_text(tr("Написать"))

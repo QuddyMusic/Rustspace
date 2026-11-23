@@ -45,6 +45,27 @@ impl SendFriendRequest {
         }
     }
 
+    /// Заявка найденному пользователю: свой — по имени, с другого инстанса —
+    /// по домашней идентичности (`имя@хост`, как у оригинала).
+    #[must_use]
+    pub fn for_user(
+        username: &str,
+        home_user_id: Option<&str>,
+        home_instance: Option<&str>,
+    ) -> Self {
+        match (home_user_id, home_instance) {
+            (Some(id), Some(host)) if !id.is_empty() && !host.is_empty() => {
+                let base = username.split_once('@').map_or(username, |(name, _)| name);
+                Self {
+                    username: Some(format!("{base}@{host}")),
+                    home_user_id: Some(id.to_owned()),
+                    home_instance: Some(host.to_owned()),
+                }
+            }
+            _ => Self::username(username),
+        }
+    }
+
     /// Заявка по федеративной идентичности.
     #[must_use]
     pub fn identity(home_user_id: impl Into<String>, home_instance: impl Into<String>) -> Self {

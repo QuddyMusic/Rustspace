@@ -479,7 +479,11 @@ pub(crate) fn show(
                                 && ui.button(tr("Добавить в друзья")).clicked()
                             {
                                 bridge.request(BridgeRequest::SendFriendRequest(
-                                    user.username.clone(),
+                                    bs_api::SendFriendRequest::for_user(
+                                        &user.username,
+                                        user.home_user_id.as_deref(),
+                                        user.home_instance.as_deref(),
+                                    ),
                                 ));
                             }
                         }
