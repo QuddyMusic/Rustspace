@@ -90,14 +90,26 @@ fn main() -> eframe::Result {
             )
         }),
     );
-    // Windows: консоли нет — журнал в файл.
+    // Windows: консоли нет — журнал в файл (если не открылся — в stderr).
     #[cfg(windows)]
-    match windows_app::log_file() {
-        Some(file) => logging
-            .with_ansi(false)
-            .with_writer(std::sync::Mutex::new(file))
-            .init(),
-        None => logging.init(),
+    {
+        let (writer, ansi) = windows_app::log_file().map_or_else(
+            || {
+                (
+                    tracing_subscriber::fmt::writer::BoxMakeWriter::new(std::io::stderr),
+                    true,
+                )
+            },
+            |file| {
+                (
+                    tracing_subscriber::fmt::writer::BoxMakeWriter::new(std::sync::Mutex::new(
+                        file,
+                    )),
+                    false,
+                )
+            },
+        );
+        logging.with_ansi(ansi).with_writer(writer).init();
     }
     #[cfg(not(windows))]
     logging.init();
