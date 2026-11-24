@@ -291,7 +291,15 @@ impl ChatScreen {
     ) {
         if let Some((id, content)) = chosen.or_else(|| self.edit_last_on_up(ui, rows, me)) {
             self.begin_edit(id, &content);
-            ui.memory_mut(|m| m.request_focus(crate::screens::composer::edit_id()));
+            let field = crate::screens::composer::edit_id();
+            ui.memory_mut(|m| m.request_focus(field));
+            // Курсор — в конец текста.
+            let mut state = egui::TextEdit::load_state(ui.ctx(), field).unwrap_or_default();
+            let end = egui::text::CCursor::new(content.chars().count());
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::one(end)));
+            state.store(ui.ctx(), field);
         }
     }
 
