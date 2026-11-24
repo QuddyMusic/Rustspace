@@ -627,6 +627,30 @@ fn staged_buttons(ui: &mut egui::Ui, item: &Staged) -> Option<StagedAction> {
     action
 }
 
+/// Перетаскивание карточки вложения: источник и место назначения.
+/// Возвращает, откуда перенесли карточку на эту.
+fn staged_drag(ui: &egui::Ui, rect: Rect, id: u64, index: usize) -> Option<usize> {
+    let response = ui
+        .interact(rect, Id::unique(("staged_drag", id)), Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::Grab);
+    response.dnd_set_drag_payload(index);
+    if response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
+    if response
+        .dnd_hover_payload::<usize>()
+        .is_some_and(|from| *from != index)
+    {
+        ui.painter().rect_stroke(
+            rect,
+            theme::rounded(10),
+            egui::Stroke::new(2.0, theme::accent()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    response.dnd_release_payload::<usize>().map(|from| *from)
+}
+
 /// Карточка выбранного файла: миниатюра, имя и состояние, кнопки справа
 /// (на своём месте, поверх текста не ложатся), «Повторить» — строкой ниже.
 fn staged_card(
@@ -1242,12 +1266,14 @@ impl Composer {
             return None;
         }
         let mut action = None;
+        let mut moved = None;
         let ctx = ui.ctx().clone();
+        let several = self.staged.len() > 1;
         ui.horizontal_wrapped(|ui| {
-            for item in &mut self.staged {
+            for (index, item) in self.staged.iter_mut().enumerate() {
                 let id = item.id;
                 let texture = item.preview.texture(&ctx, id).cloned();
-                egui::Frame::new()
+                let card = egui::Frame::new()
                     .fill(theme::bg_hover())
                     .corner_radius(crate::theme::rounded(10))
                     .inner_margin(Margin::symmetric(8, 7))
@@ -1260,8 +1286,19 @@ impl Composer {
                             }
                         });
                     });
+                // Порядок вложений — перетаскиванием карточки на место другой.
+                if several && let Some(from) = staged_drag(ui, card.response.rect, id, index) {
+                    moved = Some((from, index));
+                }
             }
         });
+        if let Some((from, to)) = moved
+            && from != to
+            && from < self.staged.len()
+        {
+            let item = self.staged.remove(from);
+            self.staged.insert(to.min(self.staged.len()), item);
+        }
         if let Some(StagedAction::Remove(id)) = action {
             self.staged.retain(|s| s.id != id);
             return None;
