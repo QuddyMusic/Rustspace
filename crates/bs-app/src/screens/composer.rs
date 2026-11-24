@@ -1216,16 +1216,13 @@ impl Composer {
             self.toggle_picker(Picker::Emoji);
         }
         if !row.editing {
-            let sticker = ui.add_enabled(
-                row.enabled,
-                widgets::flat_icon(Icon::Sticker, 22.0, theme::text_muted()),
-            );
-            if sticker.on_hover_text(tr("Стикеры")).clicked() {
-                self.toggle_picker(Picker::Sticker);
-            }
+            // GIF и стикеры — одна кнопка, как у оригинала (вкладки внутри).
             let gif = ui.add_enabled(row.enabled, gif_button());
-            if gif.on_hover_text("GIF").clicked() {
-                self.toggle_picker(Picker::Gif);
+            if gif.on_hover_text(tr("GIF и стикеры")).clicked() {
+                self.open = match self.open {
+                    Open::Picker(Picker::Gif | Picker::Sticker) => Open::None,
+                    _ => Open::Picker(Picker::Gif),
+                };
             }
         }
         rect

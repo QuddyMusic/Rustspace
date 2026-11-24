@@ -47,8 +47,6 @@ pub(crate) enum Icon {
     File,
     /// Картинка: рамка, солнце, горы.
     Image,
-    /// Наклейка с загнутым углом и улыбкой.
-    Sticker,
     /// Бумажный самолётик.
     Send,
     /// Микрофон.
@@ -122,7 +120,6 @@ pub(crate) fn paint(painter: &Painter, center: Pos2, size: f32, icon: Icon, colo
         | Icon::File
         | Icon::Lock
         | Icon::Image
-        | Icon::Sticker
         | Icon::Send => paint_objects(painter, center, size, icon, color),
         Icon::Bookmark
         | Icon::Pin
@@ -298,24 +295,6 @@ fn paint_objects(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: 
                 p(16.0, 13.5),
                 p(20.5, 17.5),
             ]);
-        }
-        Icon::Sticker => {
-            ring(vec![
-                p(4.0, 4.0),
-                p(20.0, 4.0),
-                p(20.0, 13.0),
-                p(13.0, 20.0),
-                p(4.0, 20.0),
-            ]);
-            line(vec![
-                p(20.0, 13.0),
-                p(14.0, 13.0),
-                p(13.0, 14.0),
-                p(13.0, 20.0),
-            ]);
-            painter.circle_filled(p(9.0, 9.5), unit * 1.2, color);
-            painter.circle_filled(p(14.5, 9.5), unit * 1.2, color);
-            line(arc(p(11.5, 11.0), 4.0 * unit, 30.0, 150.0, 8));
         }
         Icon::Send => {
             ring(vec![p(3.5, 4.5), p(21.0, 12.0), p(3.5, 19.5), p(6.5, 12.0)]);
