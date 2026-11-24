@@ -238,6 +238,41 @@ impl ApiClient {
     }
 }
 
+/// Невидимая метка карточки, записанной разметкой: за ней — цвет полосы
+/// символами-тегами Unicode (U+E0000 + ASCII), браузер их не показывает.
+pub const CARD_MARK: char = '\u{2060}';
+
+/// Метка карточки с цветом `#rrggbb`.
+fn card_mark(color: Option<&str>) -> String {
+    let hex = color
+        .map(|c| c.trim_start_matches('#'))
+        .filter(|c| c.len() == 6 && c.bytes().all(|b| b.is_ascii_hexdigit()))
+        .unwrap_or_default();
+    std::iter::once(CARD_MARK)
+        .chain(
+            hex.chars()
+                .filter_map(|c| char::from_u32(0xE0000 + u32::from(c))),
+        )
+        .collect()
+}
+
+/// Цвет и текст без метки: `Some(цвет)`, если строка — заголовок карточки,
+/// записанной разметкой.
+#[must_use]
+pub fn split_card_mark(text: &str) -> Option<(Option<String>, String)> {
+    let at = text.find(CARD_MARK)?;
+    let mut hex = String::new();
+    let mut rest = String::with_capacity(text.len());
+    rest.push_str(&text[..at]);
+    for c in text[at + CARD_MARK.len_utf8()..].chars() {
+        match u32::from(c).checked_sub(0xE0000).and_then(char::from_u32) {
+            Some(ascii) if ascii.is_ascii_hexdigit() && hex.len() < 6 => hex.push(ascii),
+            _ => rest.push(c),
+        }
+    }
+    Some(((hex.len() == 6).then(|| format!("#{hex}")), rest))
+}
+
 /// Карточка как обычное сообщение с разметкой — для серверов без карточек
 /// и для личных сообщений: заголовок (ссылкой, если есть), текст, картинка.
 #[must_use]
@@ -249,11 +284,12 @@ pub fn card_as_markdown(content: Option<&str>, card: &CardDraft) -> String {
     // Карточка — цитатой: так у неё остаётся полоса слева и в нашем клиенте,
     // и в веб-клиенте оригинала (цвет полосы разметкой не передать).
     let mut card_lines: Vec<String> = Vec::new();
+    let mark = card_mark(card.color.as_deref());
     match (card.title.as_deref(), card.url.as_deref()) {
-        (Some(title), Some(url)) => card_lines.push(format!("**[{title}]({url})**")),
-        (Some(title), None) => card_lines.push(format!("**{title}**")),
-        (None, Some(url)) => card_lines.push(url.to_owned()),
-        (None, None) => {}
+        (Some(title), Some(url)) => card_lines.push(format!("**[{title}]({url})**{mark}")),
+        (Some(title), None) => card_lines.push(format!("**{title}**{mark}")),
+        (None, Some(url)) => card_lines.push(format!("{url} {mark}")),
+        (None, None) => card_lines.push(mark),
     }
     if let Some(description) = card.description.as_deref() {
         card_lines.extend(description.lines().map(str::to_owned));
@@ -282,7 +318,10 @@ mod card_tests {
             description: Some("Без ссылки".into()),
             ..CardDraft::default()
         };
-        assert_eq!(card_as_markdown(None, &card), "> **Правила**\n> Без ссылки");
+        assert_eq!(
+            card_as_markdown(None, &card),
+            "> **Правила**\u{2060}\n> Без ссылки"
+        );
         let card = CardDraft {
             title: Some("Сборка".into()),
             url: Some("https://ci.example/1".into()),
@@ -291,7 +330,21 @@ mod card_tests {
         };
         assert_eq!(
             card_as_markdown(Some("Готово"), &card),
-            "Готово\n> **[Сборка](https://ci.example/1)**\n> прошла\n>\n> за 3 мин"
+            "Готово\n> **[Сборка](https://ci.example/1)**\u{2060}\n> прошла\n>\n> за 3 мин"
         );
+    }
+
+    #[test]
+    fn card_mark_keeps_color() {
+        let card = CardDraft {
+            title: Some("Т".into()),
+            color: Some("#e06c3a".into()),
+            ..CardDraft::default()
+        };
+        let text = card_as_markdown(None, &card);
+        let (color, rest) = split_card_mark(&text).unwrap_or_default();
+        assert_eq!(color.as_deref(), Some("#e06c3a"));
+        assert_eq!(rest, "> **Т**");
+        assert!(split_card_mark("> обычная цитата").is_none());
     }
 }

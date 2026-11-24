@@ -227,6 +227,11 @@ pub(crate) fn show_text(ui: &mut egui::Ui, salt: &str, blocks: &[Block], edited:
                 let marker = if is_last { tail.take() } else { None };
                 show_spans(ui, &format!("{salt}{index}"), spans, marker);
             }
+            Block::Quote(spans) if card_quote(spans).is_some() => {
+                if let Some((color, spans)) = card_quote(spans) {
+                    show_card_quote(ui, &format!("{salt}{index}"), &spans, color);
+                }
+            }
             Block::Quote(spans) => {
                 ui.horizontal(|ui| {
                     let (bar, _) = ui.allocate_exact_size(Vec2::new(3.0, 18.0), Sense::hover());
@@ -339,6 +344,72 @@ fn show_layout_block(ui: &mut egui::Ui, salt: &str, first: bool, block: &Block) 
         }
         Block::Paragraph(_) | Block::Quote(_) | Block::Code { .. } => {}
     }
+}
+
+/// Цитата — карточка, записанная разметкой (там, куда карточки не доходят:
+/// федерация, мосты, сервер оригинала): цвет полосы и спаны без метки.
+fn card_quote(
+    spans: &[crate::markdown::Span],
+) -> Option<(egui::Color32, Vec<crate::markdown::Span>)> {
+    let mut color = None;
+    let mut found = false;
+    let cleaned = spans
+        .iter()
+        .map(|span| {
+            let mut span = span.clone();
+            if let Some((hex, rest)) = bs_api::split_card_mark(&span.text) {
+                found = true;
+                if color.is_none() {
+                    color = hex;
+                }
+                span.text = rest;
+            }
+            span
+        })
+        .collect();
+    found.then(|| {
+        let color = embed_color(color.as_deref())
+            .unwrap_or_else(|| egui::Color32::from_rgb(0xe0, 0x6c, 0x3a));
+        (color, cleaned)
+    })
+}
+
+/// Карточка из цитаты — как настоящая: подложка и полоса цвета.
+fn show_card_quote(
+    ui: &mut egui::Ui,
+    salt: &str,
+    spans: &[crate::markdown::Span],
+    color: egui::Color32,
+) {
+    let width = (ui.available_width() - 24.0).clamp(160.0, 460.0);
+    let frame = egui::Frame::new()
+        .fill(theme::bg_input())
+        .corner_radius(crate::theme::rounded(8))
+        .inner_margin(Margin {
+            left: 14,
+            right: 12,
+            top: 10,
+            bottom: 10,
+        })
+        .show(ui, |ui| {
+            ui.set_max_width(width);
+            show_spans(ui, salt, spans, None);
+        });
+    let rect = frame.response.rect;
+    let bar = egui::Rect::from_min_max(
+        rect.left_top(),
+        egui::pos2(rect.left() + 4.0, rect.bottom()),
+    );
+    ui.painter().rect_filled(
+        bar,
+        CornerRadius {
+            nw: 8,
+            sw: 8,
+            ne: 0,
+            se: 0,
+        },
+        color,
+    );
 }
 
 /// Цвет полосы карточки из `#rrggbb`.

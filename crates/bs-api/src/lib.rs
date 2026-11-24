@@ -101,7 +101,8 @@ pub use space_manage::{
 pub use sticker_packs::{StickerPack, StickerPacks};
 pub use twofactor::{E2eeKey, TwoFactorSetup, TwoFactorStatus};
 pub use webhooks::{
-    CardDraft, CardImage, InstanceVoiceBitrate, VoiceBitrate, Webhook, card_as_markdown,
+    CARD_MARK, CardDraft, CardImage, InstanceVoiceBitrate, VoiceBitrate, Webhook, card_as_markdown,
+    split_card_mark,
 };
 pub use write::{
     CreateDmRequest, FriendRequestDecision, MessageSearchQuery, SEARCH_LIMIT_DEFAULT,
