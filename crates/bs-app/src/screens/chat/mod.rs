@@ -2,6 +2,7 @@
 //! шапка и лента сообщений, поле ввода, панель участников.
 
 mod downloads;
+mod forward;
 mod me_menu;
 mod messages;
 mod model;
@@ -194,6 +195,8 @@ pub(crate) struct ChatScreen {
     profile: Option<super::profile::ProfileState>,
     /// Сообщение, на которое пишется ответ.
     reply: Option<ReplyTarget>,
+    /// Открытое окно «Переслать».
+    forward: Option<forward::ForwardDraft>,
     /// Сообщение, для которого открыт выбор реакции, и вкладка выбора.
     react_picker: Option<(String, usize)>,
     /// Имена пользователей для упоминаний (обновляется каждый кадр).
@@ -585,6 +588,11 @@ impl ChatScreen {
 
     /// Окна поверх экрана: приглашение, просмотр, профиль, настройки пространства…
     fn show_overlays(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
+        if let Some(draft) = self.forward.as_mut()
+            && !forward::show(ctx, draft, bridge)
+        {
+            self.forward = None;
+        }
         if let Some(dialog) = self.invite_dialog.as_mut()
             && !super::invite_dialog::show(ctx, dialog, bridge)
         {

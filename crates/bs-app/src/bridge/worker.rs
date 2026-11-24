@@ -964,6 +964,7 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
             AdminEvent::Storage(client.storage_stats().await.map_err(|e| text(&e)))
         }
         AdminRequest::TwoFactor(op) => AdminEvent::TwoFactor(two_factor(client, op).await),
+        AdminRequest::Privacy(set) => AdminEvent::Privacy(privacy(client, set).await),
         AdminRequest::Cleanup { dry_run } => {
             AdminEvent::Cleaned(client.storage_cleanup(dry_run).await.map_err(|e| text(&e)))
         }
@@ -1152,6 +1153,55 @@ async fn updates(
         .await
         .map(Box::new)
         .map_err(|e| upload_message(&e))
+}
+
+/// Пересылка: цитата с подписью автора (без ссылки, если автор запретил
+/// или его настройку узнать не удалось).
+async fn forward(client: &bs_api::ApiClient, request: BridgeRequest) -> BridgeResponse {
+    let BridgeRequest::Forward {
+        target,
+        dm,
+        author_id,
+        author_name,
+        content,
+        attachments,
+    } = request
+    else {
+        return BridgeResponse::Done;
+    };
+    let hide = client
+        .hides_forward_author(&author_id)
+        .await
+        .unwrap_or(true);
+    let body = bs_api::SendMessageBody {
+        content: bs_api::forward_as_markdown(
+            &author_id,
+            &author_name,
+            hide,
+            &content,
+            &attachments,
+        ),
+        attachments: Vec::new(),
+        reply_to_id: None,
+    };
+    let sent = if dm {
+        client.send_dm_message(&target, &body).await.map(drop)
+    } else {
+        client.send_channel_message(&target, &body).await.map(drop)
+    };
+    match sent {
+        Ok(()) => BridgeResponse::Done,
+        Err(err) => BridgeResponse::Compose(ComposeEvent::SendFailed(upload_message(&err))),
+    }
+}
+
+/// Приватность пересылки: узнать (`None`) или задать.
+async fn privacy(client: &bs_api::ApiClient, set: Option<bool>) -> Result<bool, String> {
+    let result = match set {
+        None => client.privacy_hide_forward().await,
+        Some(hide) => client.set_privacy_hide_forward(hide).await.map(|()| hide),
+    };
+    result.map_err(|e| upload_message(&e))
 }
 
 /// Состояние сервера; `job` — сначала отдать заявку помощнику.
@@ -1601,6 +1651,7 @@ pub(super) async fn handle_request(
                 Err(err) => BridgeResponse::Compose(ComposeEvent::SendFailed(upload_message(&err))),
             }
         }
+        request @ BridgeRequest::Forward { .. } => forward(client, request).await,
         BridgeRequest::SendRest { channel_id, body } => {
             match client.send_channel_message(&channel_id, &body).await {
                 Ok(_) => BridgeResponse::Done,

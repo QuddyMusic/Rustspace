@@ -169,6 +169,60 @@ struct Kbps {
 }
 
 impl ApiClient {
+    /// Запрещено ли давать ссылку на профиль пользователя при пересылке
+    /// (`GET /api/rustspace/users/:id/privacy`). Сервер без этой настройки
+    /// (оригинал) — не запрещено.
+    ///
+    /// # Errors
+    /// Ошибки запроса, кроме «нет такого маршрута».
+    pub async fn hides_forward_author(&self, user_id: &str) -> Result<bool, ApiError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Privacy {
+            hide_forward_author: bool,
+        }
+        match self
+            .get_json::<Privacy>(&format!("/api/rustspace/users/{user_id}/privacy"))
+            .await
+        {
+            Ok(privacy) => Ok(privacy.hide_forward_author),
+            Err(ApiError::Server { status, .. }) if status == reqwest::StatusCode::NOT_FOUND => {
+                Ok(false)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Своя настройка: не давать ссылку на профиль при пересылке.
+    ///
+    /// # Errors
+    /// Ошибки запроса.
+    pub async fn privacy_hide_forward(&self) -> Result<bool, ApiError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Privacy {
+            hide_forward_author: bool,
+        }
+        Ok(self
+            .get_json::<Privacy>("/api/rustspace/privacy")
+            .await?
+            .hide_forward_author)
+    }
+
+    /// Меняет свою настройку пересылки.
+    ///
+    /// # Errors
+    /// Ошибки запроса.
+    pub async fn set_privacy_hide_forward(&self, hide: bool) -> Result<(), ApiError> {
+        let _: serde_json::Value = self
+            .put_json(
+                "/api/rustspace/privacy",
+                &serde_json::json!({ "hideForwardAuthor": hide }),
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Битрейт голоса канала или переписки.
     ///
     /// # Errors
@@ -273,6 +327,42 @@ pub fn split_card_mark(text: &str) -> Option<(Option<String>, String)> {
     Some(((hex.len() == 6).then(|| format!("#{hex}")), rest))
 }
 
+/// Невидимая метка пересланного сообщения (в начале цитаты).
+pub const FORWARD_MARK: char = '\u{2063}';
+
+/// Пересланное сообщение разметкой: цитата с подписью «Переслано от».
+///
+/// Автор — упоминанием (по нему открывается профиль) или, если он это
+/// запретил, просто именем. Вложения — ссылками. Видно и в клиенте оригинала.
+#[must_use]
+pub fn forward_as_markdown(
+    author_id: &str,
+    author_name: &str,
+    hide_author: bool,
+    content: &str,
+    attachments: &[String],
+) -> String {
+    let author = if hide_author {
+        format!("**{}**", author_name.replace('*', ""))
+    } else {
+        format!("<@{author_id}>")
+    };
+    let mut lines = vec![format!("> {FORWARD_MARK}↪ {author}")];
+    for line in content
+        .lines()
+        .chain(attachments.iter().map(String::as_str))
+    {
+        // Цитаты внутри цитаты разметка не поддерживает — знак цитаты снимается.
+        let line = line.strip_prefix('>').map_or(line, str::trim_start);
+        lines.push(if line.trim().is_empty() {
+            ">".to_owned()
+        } else {
+            format!("> {line}")
+        });
+    }
+    lines.join("\n")
+}
+
 /// Карточка как обычное сообщение с разметкой — для серверов без карточек
 /// и для личных сообщений: заголовок (ссылкой, если есть), текст, картинка.
 #[must_use]
@@ -332,6 +422,25 @@ mod card_tests {
             card_as_markdown(Some("Готово"), &card),
             "Готово\n> **[Сборка](https://ci.example/1)**\u{2060}\n> прошла\n>\n> за 3 мин"
         );
+    }
+
+    #[test]
+    fn forward_marks_author() {
+        let text = forward_as_markdown(
+            "42",
+            "Ann",
+            false,
+            "привет\n\nмир",
+            &["https://x/a.png".into()],
+        );
+        assert_eq!(
+            text,
+            "> \u{2063}↪ <@42>\n> привет\n>\n> мир\n> https://x/a.png"
+        );
+        let hidden = forward_as_markdown("42", "A*nn", true, "hi", &[]);
+        assert_eq!(hidden, "> \u{2063}↪ **Ann**\n> hi");
+        let quoted = forward_as_markdown("1", "B", false, "> **Т**\n> текст", &[]);
+        assert_eq!(quoted, "> \u{2063}↪ <@1>\n> **Т**\n> текст");
     }
 
     #[test]

@@ -712,7 +712,10 @@ impl ChatScreen {
             .data(|d| d.get_temp::<egui::Rect>(id))
             .zip(pointer)
             .is_some_and(|(bar, pos)| bar.contains(pos));
-        let over_message = pointer.is_some_and(|pos| visible.contains(pos));
+        // Над сообщением — и не под чужим окном или меню.
+        let over_message = pointer.is_some_and(|pos| {
+            visible.contains(pos) && ui.ctx().layer_id_at(pos) == Some(ui.layer_id())
+        });
         if !(over_message || over_bar) || egui::Popup::is_any_open(ui.ctx()) {
             ui.ctx().data_mut(|d| d.remove::<egui::Rect>(id));
             return;
@@ -971,6 +974,10 @@ impl ChatScreen {
                 choice.react = true;
                 ui.close();
             }
+            if row.system.is_none() && ui.button(tr("Переслать…")).clicked() {
+                choice.forward = Some(view.selected.origin);
+                ui.close();
+            }
             if !row.body.is_empty()
                 && media::sticker_of(&row.body).is_none()
                 && media::gif_of(&row.body).is_none()
@@ -1018,6 +1025,27 @@ impl ChatScreen {
         mut choice: MenuChoice,
         gif_url: Option<&str>,
     ) {
+        if let Some(origin) = choice.forward {
+            let base = bridge.base_at(origin).unwrap_or_default();
+            self.forward = Some(super::forward::ForwardDraft {
+                origin,
+                author_id: row.author_id.clone(),
+                author_name: row.author.clone(),
+                content: row.body.clone(),
+                attachments: row
+                    .attachments
+                    .iter()
+                    .map(|a| {
+                        if a.filename.starts_with('/') {
+                            format!("{base}{}", a.filename)
+                        } else {
+                            format!("{base}/api/uploads/{}", a.filename)
+                        }
+                    })
+                    .collect(),
+                filter: String::new(),
+            });
+        }
         if choice.reply {
             self.reply = Some(ReplyTarget {
                 message_id: row.id.clone(),
@@ -1087,6 +1115,8 @@ struct MenuChoice {
     save: Option<crate::download::Click>,
     extras: Option<super::saved::ExtrasAction>,
     sticker_pack: Option<String>,
+    /// Переслать: инстанс сообщения.
+    forward: Option<usize>,
 }
 
 /// Пункты меню для картинки: копировать, сохранить, избранное, стикеры.

@@ -1772,5 +1772,11 @@
   "Голосовая связь установлена": "Voice connected",
   "Личный звонок": "Direct call",
   "{v} мс": "{v} ms",
-  "Входящий звонок…": "Incoming call…"
+  "Входящий звонок…": "Incoming call…",
+  "Переслано от ": "Forwarded from ",
+  "Переслать…": "Forward…",
+  "Переслать": "Forward",
+  "Сообщение {name} уйдёт цитатой с подписью автора.": "The message from {name} will be sent as a quote signed by its author.",
+  "Скрывать профиль при пересылке": "Hide my profile when forwarded",
+  "В пересланных сообщениях будет только ваше имя — без ссылки на профиль.": "Forwarded messages will show only your name, without a link to your profile."
 }

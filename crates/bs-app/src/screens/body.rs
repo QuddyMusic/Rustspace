@@ -227,6 +227,11 @@ pub(crate) fn show_text(ui: &mut egui::Ui, salt: &str, blocks: &[Block], edited:
                 let marker = if is_last { tail.take() } else { None };
                 show_spans(ui, &format!("{salt}{index}"), spans, marker);
             }
+            Block::Quote(spans) if forward_quote(spans).is_some() => {
+                if let Some(spans) = forward_quote(spans) {
+                    show_card_quote(ui, &format!("{salt}{index}"), &spans, theme::accent());
+                }
+            }
             Block::Quote(spans) if card_quote(spans).is_some() => {
                 if let Some((color, spans)) = card_quote(spans) {
                     show_card_quote(ui, &format!("{salt}{index}"), &spans, color);
@@ -372,6 +377,23 @@ fn card_quote(
             .unwrap_or_else(|| egui::Color32::from_rgb(0xe0, 0x6c, 0x3a));
         (color, cleaned)
     })
+}
+
+/// Пересланное сообщение (метка [`bs_api::FORWARD_MARK`] в начале цитаты):
+/// подпись «Переслано от» вместо метки.
+fn forward_quote(spans: &[crate::markdown::Span]) -> Option<Vec<crate::markdown::Span>> {
+    let first = spans.first()?;
+    let rest = first.text.strip_prefix(bs_api::FORWARD_MARK)?;
+    let rest = rest.strip_prefix("↪ ").unwrap_or(rest);
+    let mut out = spans.to_vec();
+    out[0].text = format!("↪ {}{rest}", tr("Переслано от "));
+    // Пересланная карточка: невидимые метки цвета не показываем.
+    for span in &mut out {
+        if let Some((_, text)) = bs_api::split_card_mark(&span.text) {
+            span.text = text;
+        }
+    }
+    Some(out)
 }
 
 /// Карточка из цитаты — как настоящая: подложка и полоса цвета.

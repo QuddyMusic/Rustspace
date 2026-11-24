@@ -45,6 +45,11 @@ pub(super) fn show_note(ui: &mut egui::Ui, note: Option<&Note>) {
 /// Состояние дополнительных частей «Аккаунта».
 #[derive(Debug, Default)]
 pub(crate) struct AccountUi {
+    /// Скрывать ссылку на профиль при пересылке (`None` — не знаем или
+    /// сервер без настройки).
+    pub(crate) hide_forward: Option<bool>,
+    /// Настройку уже спросили.
+    pub(crate) privacy_asked: bool,
     current: String,
     new: String,
     repeat: String,
@@ -209,6 +214,7 @@ impl ExtraUi {
                     self.apply_done(action, result);
                 }
                 AdminEvent::TwoFactor(result) => self.account.two_factor.apply(result),
+                AdminEvent::Privacy(result) => self.account.hide_forward = result.ok(),
                 AdminEvent::Personal(event) => self.personal.apply(event),
                 AdminEvent::Bots(event) => self.bots.apply(event),
                 other => self.admin.apply(other),

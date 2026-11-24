@@ -153,6 +153,48 @@ pub(super) fn chosen_label(status: ChosenUserStatus) -> &'static str {
     }
 }
 
+/// Пересылка: не давать ссылку на свой профиль (настройка сервера Rustspace).
+fn forward_privacy(
+    ui: &mut egui::Ui,
+    account: &mut crate::screens::settings_extra::AccountUi,
+    bridge: &Bridge,
+) {
+    if !account.privacy_asked {
+        account.privacy_asked = true;
+        bridge.request(crate::bridge::BridgeRequest::Admin(
+            crate::bridge::AdminRequest::Privacy(None),
+        ));
+    }
+    let Some(mut hide) = account.hide_forward else {
+        return;
+    };
+    ui.add_space(10.0);
+    card(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width() - 60.0);
+                ui.label(
+                    RichText::new(tr("Скрывать профиль при пересылке")).color(theme::text_bright()),
+                );
+                ui.label(
+                    theme::muted(tr(
+                        "В пересланных сообщениях будет только ваше имя — без ссылки на профиль.",
+                    ))
+                    .size(12.5),
+                );
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if widgets::toggle(ui, &mut hide) {
+                    account.hide_forward = Some(hide);
+                    bridge.request(crate::bridge::BridgeRequest::Admin(
+                        crate::bridge::AdminRequest::Privacy(Some(hide)),
+                    ));
+                }
+            });
+        });
+    });
+}
+
 /// «Приватность»: видимость в поиске и показ активности.
 pub(super) fn privacy(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, bridge: &Bridge) {
     page_title(ui, tr("Приватность"));
@@ -187,6 +229,7 @@ pub(super) fn privacy(ui: &mut egui::Ui, state: &mut SettingsState, me: &User, b
             ui.add_space(10.0);
         }
     });
+    forward_privacy(ui, &mut state.extra.account, bridge);
     ui.add_space(10.0);
     card(ui, |ui| {
         let mut images = crate::prefs::get().preview_images;

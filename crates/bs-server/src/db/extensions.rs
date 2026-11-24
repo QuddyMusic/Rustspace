@@ -261,6 +261,16 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             "CREATE INDEX bs_bots_owner ON bs_bots (owner_id)",
         ],
     ),
+    (
+        "0015_user_privacy",
+        &[
+            // Приватность: при пересылке — без ссылки на профиль автора.
+            "CREATE TABLE bs_user_privacy (
+                user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                hide_forward_author INTEGER NOT NULL DEFAULT 0
+            )",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

@@ -358,6 +358,22 @@ pub(crate) enum BridgeRequest {
     DeleteSticker(String),
     /// «Избранное», закрепы, закладки.
     Extras(super::extras::ExtrasOp),
+    /// Переслать сообщение в другой чат того же инстанса: цитатой с
+    /// подписью автора (ссылкой на профиль, если автор не запретил).
+    Forward {
+        /// Канал или переписка, куда пересылаем.
+        target: String,
+        /// Это личная переписка.
+        dm: bool,
+        /// Автор исходного сообщения.
+        author_id: String,
+        /// Имя автора.
+        author_name: String,
+        /// Текст.
+        content: String,
+        /// Ссылки на вложения.
+        attachments: Vec<String>,
+    },
     /// Отправить сообщение с карточкой в канал пространства.
     SendCards {
         /// Канал или личная переписка.
@@ -489,6 +505,8 @@ pub(crate) enum AdminRequest {
     },
     /// Двухфакторная защита своего аккаунта.
     TwoFactor(TwoFactorOp),
+    /// Приватность пересылки: `None` — узнать, `Some` — задать.
+    Privacy(Option<bool>),
     /// Сменить свой пароль.
     ChangePassword {
         /// Текущий (для домашнего аккаунта обязателен).
@@ -754,6 +772,8 @@ pub(crate) enum AdminEvent {
     Bots(BotEvent),
     /// Двухфакторная защита: состояние или текст ошибки.
     TwoFactor(Result<TwoFactorView, String>),
+    /// Скрывать ли ссылку на профиль при пересылке (ошибка — сервер без настройки).
+    Privacy(Result<bool, String>),
     /// Настройки инстанса.
     Settings(Result<bs_api::InstanceSettings, String>),
     /// Итог сохранения настроек.
