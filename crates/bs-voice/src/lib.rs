@@ -25,6 +25,7 @@ pub mod error;
 pub mod events;
 pub mod mixer;
 mod monitor;
+pub mod netstats;
 pub mod protocol;
 pub mod session;
 pub mod signal;
@@ -43,6 +44,7 @@ pub use error::{VoiceError, VoiceResult};
 pub use events::VoiceEvent;
 pub use mixer::{Mixer, SourceKind};
 pub use monitor::MicMonitor;
+pub use netstats::ConnectionStats;
 pub use protocol::{
     CallIdentity, CallPhase, CallRecord, INCOMING_CALL_TIMEOUT, ProtocolAction, REBIND_GRACE,
     VoiceCoordinator,

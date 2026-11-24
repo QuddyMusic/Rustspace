@@ -61,6 +61,8 @@ pub(crate) enum Icon {
     Phone,
     /// Трубка: завершить звонок.
     HangUp,
+    /// Сигнал сети: три дуги и точка (сведения о соединении).
+    Signal,
     /// Лупа.
     Search,
     /// Стрелка вниз над лотком: скачать.
@@ -438,6 +440,18 @@ fn paint_call(painter: &Painter, center: Pos2, size: f32, icon: Icon, color: Col
                 p(13.0, 20.0),
                 p(4.5, 11.0),
             ]);
+        }
+        Icon::Signal => {
+            for (radius, sweep) in [(3.5, 70.0), (7.0, 80.0), (10.5, 85.0)] {
+                line(arc(
+                    p(12.0, 19.0),
+                    radius * unit,
+                    270.0 - sweep / 2.0,
+                    270.0 + sweep / 2.0,
+                    10,
+                ));
+            }
+            painter.circle_filled(p(12.0, 19.0), unit * 1.4, color);
         }
         Icon::HangUp => {
             line(arc(p(12.0, 17.0), 9.0 * unit, 200.0, 340.0, 14));

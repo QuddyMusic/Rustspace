@@ -309,6 +309,22 @@ impl VoiceSession {
         *self.deafened.read().await
     }
 
+    /// «Сведения о соединении»: пинг, потери, джиттер, сервер и протокол.
+    ///
+    /// # Errors
+    /// LiveKit не отдал статистику.
+    pub async fn connection_stats(&self) -> VoiceResult<crate::ConnectionStats> {
+        let stats = self
+            .room
+            .get_stats()
+            .await
+            .map_err(|err| VoiceError::Connect(err.to_string()))?;
+        Ok(crate::netstats::summarize(
+            &stats.publisher_stats,
+            &stats.subscriber_stats,
+        ))
+    }
+
     /// Устанавливает громкость микрофона участника (0 — локально заглушён).
     ///
     /// Принимает identity или id пользователя: громкость хранится по id.

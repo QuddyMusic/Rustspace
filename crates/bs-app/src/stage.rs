@@ -123,7 +123,10 @@ pub(crate) fn show(ui: &mut egui::Ui, voice: &mut VoiceState, bridge: &Bridge) {
         .as_ref()
         .map(VideoControl::watchers)
         .unwrap_or_default();
-    if feeds.is_empty() {
+    // Как у оригинала: пока идёт звонок, сцена показывает всех участников —
+    // с видео или аватаркой.
+    let people = call_people(voice, bridge);
+    if feeds.is_empty() && people.is_empty() {
         voice.stage.textures.clear();
         voice.stage.focused = None;
         return;
@@ -141,7 +144,7 @@ pub(crate) fn show(ui: &mut egui::Ui, voice: &mut VoiceState, bridge: &Bridge) {
                 .size_range(160.0..=900.0)
                 .frame(theme::module(theme::bg_rail()).inner_margin(egui::Margin::same(8)))
                 .show(ui, |ui| {
-                    stage_body(ui, voice, &feeds, &watchers, &mut actions);
+                    stage_body(ui, voice, &feeds, &people, &watchers, &mut actions);
                 });
         }
         StageMode::Fullscreen => {
@@ -153,7 +156,7 @@ pub(crate) fn show(ui: &mut egui::Ui, voice: &mut VoiceState, bridge: &Bridge) {
                     ui.painter().rect_filled(screen, 0.0, theme::bg_rail());
                     let mut child =
                         ui.new_child(egui::UiBuilder::new().max_rect(screen.shrink(8.0)));
-                    stage_body(&mut child, voice, &feeds, &watchers, &mut actions);
+                    stage_body(&mut child, voice, &feeds, &people, &watchers, &mut actions);
                     ui.allocate_rect(screen, Sense::hover());
                 });
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -172,7 +175,7 @@ pub(crate) fn show(ui: &mut egui::Ui, voice: &mut VoiceState, bridge: &Bridge) {
                     egui::CentralPanel::default()
                         .frame(egui::Frame::new().fill(theme::bg_rail()).inner_margin(8))
                         .show(ctx, |ui| {
-                            stage_body(ui, voice, &feeds, &watchers, &mut actions);
+                            stage_body(ui, voice, &feeds, &people, &watchers, &mut actions);
                         });
                     if ctx.input(|i| i.viewport().close_requested()) {
                         actions.push(StageAction::Mode(StageMode::Docked));
@@ -220,6 +223,7 @@ fn stage_body(
     ui: &mut egui::Ui,
     voice: &mut VoiceState,
     feeds: &[Feed],
+    people: &[Person],
     watchers: &[String],
     actions: &mut Vec<StageAction>,
 ) {
@@ -257,13 +261,133 @@ fn stage_body(
         }
         _ => feeds.iter().collect(),
     };
+    // Участники без камеры — плитками с аватаркой (в режиме «одна плитка»
+    // не показываются).
+    let faces: Vec<&Person> = if voice.stage.focused.is_some() && shown.len() < feeds.len() {
+        Vec::new()
+    } else {
+        people
+            .iter()
+            .filter(|person| {
+                !feeds
+                    .iter()
+                    .any(|f| !f.screen && bs_user_id(&f.identity) == person.id)
+            })
+            .collect()
+    };
     let area = ui.available_rect_before_wrap();
-    let rects = grid(area, shown.len(), 8.0);
-    for (feed, rect) in shown.iter().zip(rects) {
+    let mut rects = grid(area, shown.len() + faces.len(), 8.0).into_iter();
+    for (feed, rect) in shown.iter().zip(rects.by_ref()) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         tile(&mut child, feed, voice, watchers, actions);
     }
+    let speaking = voice.speaking.clone();
+    for (person, rect) in faces.into_iter().zip(rects) {
+        face_tile(ui, rect, person, speaking.contains(&person.id));
+    }
     ui.allocate_rect(area, Sense::hover());
+}
+
+/// Участник звонка для плитки без видео.
+#[derive(Debug, Clone)]
+struct Person {
+    id: String,
+    name: String,
+    avatar: Option<String>,
+}
+
+/// Id пользователя из identity LiveKit `userId:имя`.
+fn bs_user_id(identity: &str) -> &str {
+    identity.split_once(':').map_or(identity, |(id, _)| id)
+}
+
+/// Участники текущего звонка: я и остальные (из комнаты LiveKit), с
+/// аватарками из кэша инстанса звонка.
+fn call_people(voice: &VoiceState, bridge: &Bridge) -> Vec<Person> {
+    let origin = match (&voice.call, &voice.dm) {
+        (Some(call), _) => call.origin,
+        (None, Some(dm)) => dm.origin,
+        (None, None) => return Vec::new(),
+    };
+    let cache = bridge.cache_at(origin);
+    let avatar = |id: &str| -> Option<String> {
+        let cache = cache?;
+        let in_space = voice.call.as_ref().and_then(|call| {
+            cache
+                .space(&call.space_id)?
+                .members
+                .iter()
+                .find(|m| m.user.id == id)
+                .and_then(|m| m.user.avatar.clone())
+        });
+        in_space.or_else(|| {
+            cache
+                .dm_channels()
+                .flat_map(|c| c.members.iter())
+                .find(|u| u.id == id)
+                .and_then(|u| u.avatar.clone())
+        })
+    };
+    let mut people = Vec::new();
+    if let Some(cache) = cache {
+        let me = cache.me();
+        people.push(Person {
+            id: me.id.clone(),
+            name: me
+                .display_name
+                .clone()
+                .unwrap_or_else(|| me.username.clone()),
+            avatar: me.avatar.clone(),
+        });
+    }
+    let members = voice
+        .media
+        .as_ref()
+        .map(crate::voice_media::MediaEngine::members)
+        .unwrap_or_default();
+    for (id, name) in members {
+        let avatar = avatar(&id);
+        people.push(Person { id, name, avatar });
+    }
+    people
+}
+
+/// Плитка участника без видео: аватар по центру, имя, зелёное кольцо, когда
+/// говорит.
+fn face_tile(ui: &egui::Ui, rect: Rect, person: &Person, speaking: bool) {
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, theme::rounded(10), theme::bg_input());
+    let size = (rect.height() * 0.42).clamp(40.0, 112.0);
+    let center = rect.center() - Vec2::new(0.0, 10.0);
+    let avatar = Rect::from_center_size(center, Vec2::splat(size));
+    theme::paint_avatar(
+        &painter,
+        avatar,
+        person.name.as_str(),
+        None,
+        false,
+        person.avatar.as_deref(),
+    );
+    if speaking {
+        painter.circle_stroke(
+            center,
+            size / 2.0 + 3.0,
+            egui::Stroke::new(3.0, theme::green()),
+        );
+        painter.rect_stroke(
+            rect.shrink(1.0),
+            theme::rounded(10),
+            egui::Stroke::new(2.0, theme::green()),
+            egui::StrokeKind::Inside,
+        );
+    }
+    painter.text(
+        egui::pos2(rect.center().x, avatar.bottom() + 14.0),
+        Align2::CENTER_CENTER,
+        &person.name,
+        FontId::proportional(14.0),
+        theme::text_bright(),
+    );
 }
 
 fn update_textures(ctx: &egui::Context, stage: &mut StageState, feeds: &[Feed]) {

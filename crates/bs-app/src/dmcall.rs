@@ -56,6 +56,11 @@ pub(crate) struct IncomingCall {
     pub(crate) federated_id: Option<String>,
     /// Кто звонит.
     pub(crate) caller: String,
+    /// Аватар звонящего.
+    pub(crate) avatar: Option<String>,
+    /// Когда пришёл звонок: без ответа 30 секунд — отклоняется, как у
+    /// оригинала.
+    pub(crate) since: std::time::Instant,
     /// Готовый токен, если сервер прислал его сразу.
     pub(crate) token: Option<LiveKitTokenResponse>,
 }
@@ -141,10 +146,10 @@ impl VoiceState {
             CallEvent::Incoming {
                 dm_channel_id,
                 federated_call_id,
+                caller_id,
                 caller_name,
                 livekit_url,
                 livekit_token,
-                ..
             } => {
                 if self.call.is_some() || self.dm.is_some() || self.incoming.is_some() {
                     // Заняты: сразу отклоняем.
@@ -157,11 +162,22 @@ impl VoiceState {
                     bridge.focus_on(previous);
                     return;
                 }
+                let member = dm_channel_id
+                    .as_deref()
+                    .and_then(|id| bridge.cache_at(origin)?.dm_channel(id))
+                    .and_then(|channel| channel.members.iter().find(|m| m.id == caller_id));
+                let avatar = member.and_then(|m| m.avatar.clone());
+                let caller_name = member
+                    .and_then(|m| m.display_name.clone())
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or(caller_name);
                 self.incoming = Some(IncomingCall {
                     origin,
                     dm_id: dm_channel_id,
                     federated_id: federated_call_id,
                     caller: caller_name,
+                    avatar,
+                    since: std::time::Instant::now(),
                     token: livekit_url
                         .zip(livekit_token)
                         .map(|(url, token)| LiveKitTokenResponse { token, url }),
@@ -410,36 +426,87 @@ impl VoiceState {
     }
 }
 
-/// Окно «Входящий звонок».
+/// Окно «Входящий звонок», как у оригинала: по центру над затемнением —
+/// аватар, имя и круглые кнопки «Отклонить» и «Принять». Без ответа за
+/// 30 секунд звонок отклоняется.
 pub(crate) fn show_incoming(ctx: &egui::Context, state: &VoiceState) -> Option<IncomingAnswer> {
     let call = state.incoming.as_ref()?;
+    if call.since.elapsed() >= std::time::Duration::from_secs(30) {
+        return Some(IncomingAnswer::Reject);
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(500));
     let mut answer = None;
-    egui::Window::new("incoming_call")
-        .title_bar(false)
-        .resizable(false)
-        .collapsible(false)
-        .anchor(Align2::CENTER_TOP, [0.0, 24.0])
+    let screen = ctx.content_rect();
+    egui::Area::new(egui::Id::unique("incoming_call_shade"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(screen.min)
         .show(ctx, |ui| {
-            ui.set_min_width(260.0);
-            ui.vertical_centered(|ui| {
-                ui.label(theme::muted(tr("Входящий звонок")).size(12.5));
-                ui.label(
-                    RichText::new(&call.caller)
-                        .size(18.0)
-                        .color(theme::text_bright()),
-                );
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui.add(theme::primary_button(tr("Принять"))).clicked() {
-                        answer = Some(IncomingAnswer::Accept);
-                    }
-                    if ui.button(tr("Отклонить")).clicked() {
-                        answer = Some(IncomingAnswer::Reject);
-                    }
+            ui.painter()
+                .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(128));
+            ui.allocate_rect(screen, egui::Sense::click());
+        });
+    egui::Area::new(egui::Id::unique("incoming_call"))
+        .order(egui::Order::Foreground)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(theme::bg_bubble())
+                .corner_radius(theme::rounded(12))
+                .inner_margin(egui::Margin::same(32))
+                .show(ui, |ui| {
+                    ui.set_width(276.0);
+                    ui.vertical_centered(|ui| {
+                        theme::avatar(ui, call.caller.as_str(), 88.0, None, call.avatar.as_deref());
+                        ui.add_space(12.0);
+                        ui.label(
+                            RichText::new(&call.caller)
+                                .size(20.0)
+                                .family(theme::bold_family())
+                                .color(theme::text_bright()),
+                        );
+                        ui.label(theme::muted(tr("Входящий звонок…")).size(14.0));
+                        ui.add_space(18.0);
+                        ui.horizontal(|ui| {
+                            // Две кнопки по 56 и зазор 24 — по центру.
+                            ui.add_space((ui.available_width() - 136.0) / 2.0);
+                            ui.spacing_mut().item_spacing.x = 24.0;
+                            if call_button(ui, theme::rose(), true)
+                                .on_hover_text(tr("Отклонить"))
+                                .clicked()
+                            {
+                                answer = Some(IncomingAnswer::Reject);
+                            }
+                            if call_button(ui, theme::mint(), false)
+                                .on_hover_text(tr("Принять"))
+                                .clicked()
+                            {
+                                answer = Some(IncomingAnswer::Accept);
+                            }
+                        });
+                    });
                 });
-            });
         });
     answer
+}
+
+/// Круглая кнопка звонка: трубка или «положить трубку».
+fn call_button(ui: &mut egui::Ui, color: egui::Color32, hang_up: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(56.0), egui::Sense::click());
+    let alpha = if response.hovered() { 90 } else { 50 };
+    let painter = ui.painter();
+    painter.circle_filled(rect.center(), 28.0, color.gamma_multiply_u8(alpha));
+    painter.circle_stroke(
+        rect.center(),
+        28.0,
+        egui::Stroke::new(1.0, color.gamma_multiply_u8(80)),
+    );
+    let icon = if hang_up {
+        crate::icons::Icon::HangUp
+    } else {
+        crate::icons::Icon::Phone
+    };
+    crate::icons::paint(painter, rect.center(), 26.0, icon, color);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 #[cfg(test)]

@@ -1761,5 +1761,16 @@
   "Во весь экран": "Full screen",
   "Вернуть в окно чата": "Back to the chat window",
   "В отдельном окне": "In a separate window",
-  "GIF и стикеры": "GIFs and stickers"
+  "GIF и стикеры": "GIFs and stickers",
+  "Сведения о соединении": "Connection info",
+  "Сбор статистики…": "Gathering stats…",
+  "Пинг": "Ping",
+  "Потеря пакетов": "Packet loss",
+  "Джиттер": "Jitter",
+  "Сервер": "Server",
+  "Протокол": "Protocol",
+  "Голосовая связь установлена": "Voice connected",
+  "Личный звонок": "Direct call",
+  "{v} мс": "{v} ms",
+  "Входящий звонок…": "Incoming call…"
 }

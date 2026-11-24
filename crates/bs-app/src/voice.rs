@@ -743,6 +743,7 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        net_button(ui, state, info.status.1);
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
                             let status = ui.label(
@@ -809,6 +810,117 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                 });
         });
     action
+}
+
+/// Значок сигнала слева на панели звонка (цвет — состояние связи); по щелчку
+/// — «Сведения о соединении». Статистика спрашивается раз в 2 секунды и
+/// только пока окно открыто.
+fn net_button(ui: &mut egui::Ui, voice: &VoiceState, color: egui::Color32) {
+    let id = egui::Id::unique("voice_net_info");
+    let mut open = ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false));
+    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(32.0), egui::Sense::click());
+    let fill = if response.hovered() || open {
+        theme::bg_hover()
+    } else {
+        theme::bg_input()
+    };
+    ui.painter().rect_filled(rect, theme::rounded(8), fill);
+    crate::icons::paint(ui.painter(), rect.center(), 20.0, Icon::Signal, color);
+    if response
+        .on_hover_text(tr("Сведения о соединении"))
+        .clicked()
+    {
+        open = !open;
+    }
+    if open {
+        let media = voice.media.as_ref();
+        let now = ui.input(|i| i.time);
+        let polled = egui::Id::unique("voice_net_polled");
+        let last = ui
+            .ctx()
+            .data(|d| d.get_temp::<f64>(polled).unwrap_or(f64::MIN));
+        if now - last >= 2.0 {
+            if let Some(media) = media {
+                media.request_net_stats();
+            }
+            ui.ctx().data_mut(|d| d.insert_temp(polled, now));
+        }
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(500));
+        let net = media.and_then(crate::voice_media::MediaEngine::net_stats);
+        let area = egui::Area::new(egui::Id::unique("voice_net_popover"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(rect.left_top() - egui::vec2(0.0, 8.0))
+            .pivot(egui::Align2::LEFT_BOTTOM)
+            .show(ui.ctx(), |ui| net_popover(ui, net.as_ref()));
+        // Щелчок мимо окна и значка закрывает его.
+        if ui.input(|i| i.pointer.primary_pressed())
+            && ui
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|pos| !area.response.rect.contains(pos) && !rect.contains(pos))
+        {
+            open = false;
+        }
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(id, open));
+}
+
+/// Окно «Сведения о соединении».
+fn net_popover(ui: &mut egui::Ui, stats: Option<&crate::voice_media::NetStats>) {
+    egui::Frame::new()
+        .fill(theme::bg_bubble())
+        .stroke(egui::Stroke::new(1.0, theme::border()))
+        .corner_radius(theme::rounded(10))
+        .inner_margin(Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_width(240.0);
+            ui.label(
+                RichText::new(tr("Сведения о соединении"))
+                    .family(theme::bold_family())
+                    .color(theme::text_bright()),
+            );
+            ui.add_space(6.0);
+            let Some(stats) = stats else {
+                ui.label(theme::muted(tr("Сбор статистики…")));
+                return;
+            };
+            let row = |ui: &mut egui::Ui, label: &str, value: Option<String>| {
+                ui.horizontal(|ui| {
+                    ui.label(theme::muted(label));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(value.unwrap_or_else(|| "—".to_owned()))
+                                .color(theme::text()),
+                        );
+                    });
+                });
+            };
+            row(
+                ui,
+                tr("Пинг"),
+                stats
+                    .ping_ms
+                    .map(|v| crate::tf!("{v} мс", v = format!("{v:.0}"))),
+            );
+            row(
+                ui,
+                tr("Потеря пакетов"),
+                stats.packet_loss.map(|v| format!("{v:.1} %")),
+            );
+            row(
+                ui,
+                tr("Джиттер"),
+                stats
+                    .jitter_ms
+                    .map(|v| crate::tf!("{v} мс", v = format!("{v:.0}"))),
+            );
+            row(ui, tr("Сервер"), stats.server.clone());
+            row(
+                ui,
+                tr("Протокол"),
+                stats.protocol.as_ref().map(|p| p.to_uppercase()),
+            );
+        });
 }
 
 /// Битрейт голоса звонка на панели: число, по щелчку — понизить.
@@ -893,14 +1005,17 @@ impl VoiceState {
                 (_, Some(Err(_)), _) => (tr("Нет токена LiveKit"), theme::rose()),
                 (_, _, MediaStatus::Failed(_)) => (tr("Нет звукового соединения"), theme::rose()),
                 (_, _, MediaStatus::ListenOnly(_)) => (tr("Звонок: нет микрофона"), theme::amber()),
-                (_, _, MediaStatus::Live) => (tr("Звонок идёт"), theme::green()),
+                (_, _, MediaStatus::Live) => (tr("Голосовая связь установлена"), theme::green()),
                 (_, _, MediaStatus::Unavailable) => (tr("Сборка без голоса"), theme::text_muted()),
                 _ => (tr("Подключение…"), theme::amber()),
             };
             return Some(DockInfo {
                 status,
                 detail: status_detail(dm.token.as_ref(), &self.status),
-                subtitle: theme::truncate_chars(&dm.peer, 13),
+                subtitle: theme::truncate_chars(
+                    &format!("{} / {}", tr("Личный звонок"), dm.peer),
+                    26,
+                ),
             });
         }
         let call = self.call.as_ref()?;
@@ -922,7 +1037,7 @@ fn status_line(call: &VoiceCall, media: &MediaStatus) -> (&'static str, egui::Co
         (Some(Err(_)), _, _) => (tr("Нет токена LiveKit"), theme::rose()),
         (_, MediaStatus::Failed(_), _) => (tr("Нет звукового соединения"), theme::rose()),
         (_, MediaStatus::ListenOnly(_), _) => (tr("Нет микрофона"), theme::amber()),
-        (_, MediaStatus::Live, _) => (tr("Голос подключён"), theme::green()),
+        (_, MediaStatus::Live, _) => (tr("Голосовая связь установлена"), theme::green()),
         (_, MediaStatus::Unavailable, true) => (tr("Сборка без голоса"), theme::text_muted()),
         _ => (tr("Подключение…"), theme::amber()),
     }

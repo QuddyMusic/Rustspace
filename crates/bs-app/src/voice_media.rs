@@ -277,6 +277,21 @@ pub(crate) use stub::MediaEngine;
 /// Список говорящих (для подсветки в сайдбаре).
 pub(crate) type Speaking = HashSet<String>;
 
+/// «Сведения о соединении» звонка.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct NetStats {
+    /// Пинг, мс.
+    pub(crate) ping_ms: Option<f64>,
+    /// Потеря пакетов, %.
+    pub(crate) packet_loss: Option<f64>,
+    /// Джиттер, мс.
+    pub(crate) jitter_ms: Option<f64>,
+    /// Сервер.
+    pub(crate) server: Option<String>,
+    /// Протокол.
+    pub(crate) protocol: Option<String>,
+}
+
 #[cfg(not(feature = "voice"))]
 mod stub {
     use super::{ConnectRequest, Device, DeviceKind, MediaStatus, Speaking, VoicePrefs};
@@ -322,6 +337,16 @@ mod stub {
             Speaking::new()
         }
 
+        pub(crate) fn request_net_stats(&self) {}
+
+        pub(crate) fn members(&self) -> Vec<(String, String)> {
+            Vec::new()
+        }
+
+        pub(crate) fn net_stats(&self) -> Option<super::NetStats> {
+            None
+        }
+
         pub(crate) fn start_mic_test(&mut self, _prefs: &VoicePrefs) -> Result<(), String> {
             Err(tr("сборка без голоса").to_owned())
         }
@@ -360,10 +385,74 @@ mod real {
         speaking: Speaking,
         session: Option<VoiceSession>,
         generation: u64,
+        /// Последние «Сведения о соединении».
+        net: Option<super::NetStats>,
+        /// Участники звонка (кроме себя): id и имя, по порядку входа.
+        members: Vec<(String, String)>,
     }
 
     fn lock(shared: &Mutex<Shared>) -> MutexGuard<'_, Shared> {
         shared.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Следит за комнатой звонка: участники, кто говорит, отключение.
+    async fn watch_room(session: VoiceSession, shared: Arc<Mutex<Shared>>, generation: u64) {
+        let mut events = session.subscribe();
+        {
+            let snapshot = session.snapshot().await;
+            let mut shared = lock(&shared);
+            if shared.generation == generation {
+                shared.members = snapshot
+                    .participants
+                    .values()
+                    .map(|p| (bs_voice::user_id_of(&p.identity).to_owned(), p.name.clone()))
+                    .collect();
+            }
+        }
+        loop {
+            match events.recv().await {
+                Ok(VoiceEvent::ParticipantJoined { identity, name }) => {
+                    let mut shared = lock(&shared);
+                    let id = bs_voice::user_id_of(&identity).to_owned();
+                    if shared.generation == generation
+                        && !shared.members.iter().any(|(known, _)| *known == id)
+                    {
+                        shared.members.push((id, name));
+                    }
+                }
+                Ok(VoiceEvent::ParticipantLeft { identity }) => {
+                    let mut shared = lock(&shared);
+                    let id = bs_voice::user_id_of(&identity);
+                    if shared.generation == generation {
+                        shared.members.retain(|(known, _)| known != id);
+                    }
+                }
+                Ok(VoiceEvent::ActiveSpeakers { identities }) => {
+                    let mut shared = lock(&shared);
+                    if shared.generation == generation {
+                        // identity — `userId:имя`; подсветка идёт по id.
+                        shared.speaking = identities
+                            .iter()
+                            .map(|id| bs_voice::user_id_of(id).to_owned())
+                            .collect();
+                    }
+                }
+                Ok(VoiceEvent::Disconnected { reason }) => {
+                    {
+                        let mut shared = lock(&shared);
+                        if shared.generation == generation {
+                            shared.status = MediaStatus::Failed(reason);
+                            shared.speaking.clear();
+                            shared.members.clear();
+                            shared.session = None;
+                        }
+                    }
+                    break;
+                }
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            }
+        }
     }
 
     fn processing(prefs: &VoicePrefs) -> AudioProcessingSettings {
@@ -556,34 +645,7 @@ mod real {
                     let _ = session.disconnect().await;
                     return;
                 }
-                let mut events = session.subscribe();
-                loop {
-                    match events.recv().await {
-                        Ok(VoiceEvent::ActiveSpeakers { identities }) => {
-                            let mut shared = lock(&shared);
-                            if shared.generation == generation {
-                                // identity — `userId:имя`; подсветка идёт по id.
-                                shared.speaking = identities
-                                    .iter()
-                                    .map(|id| bs_voice::user_id_of(id).to_owned())
-                                    .collect();
-                            }
-                        }
-                        Ok(VoiceEvent::Disconnected { reason }) => {
-                            {
-                                let mut shared = lock(&shared);
-                                if shared.generation == generation {
-                                    shared.status = MediaStatus::Failed(reason);
-                                    shared.speaking.clear();
-                                    shared.session = None;
-                                }
-                            }
-                            break;
-                        }
-                        Ok(_) | Err(RecvError::Lagged(_)) => {}
-                        Err(RecvError::Closed) => break,
-                    }
-                }
+                watch_room(session, shared, generation).await;
             }));
         }
 
@@ -619,6 +681,7 @@ mod real {
                 shared.generation += 1;
                 shared.status = MediaStatus::Idle;
                 shared.speaking.clear();
+                shared.members.clear();
                 shared.session.take()
             };
             if let Some(session) = session {
@@ -658,6 +721,36 @@ mod real {
         /// Рантайм для фоновых операций со звонком.
         pub(crate) fn runtime(&self) -> Handle {
             self.handle.clone()
+        }
+
+        /// Запрашивает статистику соединения (для открытых «Сведений о
+        /// соединении»; фоном не опрашивается).
+        pub(crate) fn request_net_stats(&self) {
+            let Some(session) = lock(&self.shared).session.clone() else {
+                return;
+            };
+            let shared = Arc::clone(&self.shared);
+            self.handle.spawn(async move {
+                if let Ok(stats) = session.connection_stats().await {
+                    lock(&shared).net = Some(super::NetStats {
+                        ping_ms: stats.ping_ms,
+                        packet_loss: stats.packet_loss,
+                        jitter_ms: stats.jitter_ms,
+                        server: stats.server,
+                        protocol: stats.protocol,
+                    });
+                }
+            });
+        }
+
+        /// Последние сведения о соединении.
+        pub(crate) fn net_stats(&self) -> Option<super::NetStats> {
+            lock(&self.shared).net.clone()
+        }
+
+        /// Участники звонка, кроме себя: id и имя.
+        pub(crate) fn members(&self) -> Vec<(String, String)> {
+            lock(&self.shared).members.clone()
         }
     }
 }
