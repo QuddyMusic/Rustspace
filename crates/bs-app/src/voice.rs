@@ -79,7 +79,7 @@ pub(crate) struct VoiceState {
     /// Сцена звонка: текстуры, выбор источника, кого смотрим.
     pub(crate) stage: crate::stage::StageState,
     /// Камера и экран, о которых уже сообщили серверу.
-    video_sent: (bool, bool),
+    pub(crate) video_sent: (bool, bool),
     /// Ограничения стриминга по инстансам (приходят с токеном LiveKit).
     host_limits: std::collections::HashMap<usize, bs_api::StreamingLimits>,
     /// Битрейт микрофона по звонкам: (инстанс, канал или переписка).

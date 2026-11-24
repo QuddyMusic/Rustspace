@@ -326,6 +326,17 @@ impl VoiceState {
                 if let Some(media) = self.media.as_ref() {
                     media.set_flags(call.muted, call.deafened);
                 }
+                // Собеседник (и клиент оригинала) видит микрофон и звук из
+                // voice_status — как в звонке пространства.
+                let previous = bridge.focus_index();
+                bridge.focus_on(call.origin);
+                bridge.send(ClientEvent::VoiceStatus {
+                    is_muted: call.muted,
+                    is_deafened: call.deafened,
+                    is_camera_on: self.video_sent.0,
+                    is_screen_sharing: self.video_sent.1,
+                });
+                bridge.focus_on(previous);
             }
         }
     }
