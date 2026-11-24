@@ -87,6 +87,8 @@ struct Staged {
     state: StagedState,
     /// Содержимое: чтобы перезалить под другим именем (спойлер) или ещё раз.
     bytes: Arc<Vec<u8>>,
+    /// Файл зашифрован для личной переписки: ключ, настоящие имя и тип.
+    sealed: Option<(String, String)>,
     /// Миниатюра картинки.
     preview: Preview,
 }
@@ -205,6 +207,9 @@ struct Stickers {
 /// Состояние поля ввода.
 #[derive(Debug, Default)]
 pub(crate) struct Composer {
+    /// Шифровать вложения (выставляет экран чата: личка со сквозным
+    /// шифрованием).
+    pub(crate) seal_files: bool,
     next_id: u64,
     /// Время последнего кадра: нужно разбору событий.
     now: f64,
@@ -438,6 +443,8 @@ fn gif_tile(ui: &egui::Ui, rect: Rect, item: &GifItem, starred: bool) -> GifTile
 struct RowState {
     can_send: bool,
     ready_ids: Vec<String>,
+    /// Описания зашифрованных вложений — строки в текст сообщения.
+    file_notes: Vec<String>,
     enabled: bool,
     editing: bool,
 }
@@ -445,8 +452,15 @@ struct RowState {
 impl RowState {
     /// Отправка текущего черновика с готовыми вложениями.
     fn outgoing(&self, draft: &str) -> Outgoing {
+        let mut content = draft.trim().to_owned();
+        for note in &self.file_notes {
+            if !content.is_empty() {
+                content.push('\n');
+            }
+            content.push_str(note);
+        }
         Outgoing {
-            content: draft.trim().to_owned(),
+            content,
             attachments: self.ready_ids.clone(),
             keep_draft: false,
             card: None,
@@ -840,8 +854,17 @@ impl Composer {
             (Ok(bytes), _) => {
                 self.next_id += 1;
                 let id = self.next_id;
+                // Зашифрованная личка: на сервер уходит шифротекст без имени
+                // и типа, ключ — в зашифрованном тексте сообщения.
                 let bytes = Arc::new(bytes);
+                let (upload, sealed) = if self.seal_files {
+                    let (data, key) = bs_e2ee::seal_file(&bytes);
+                    (Arc::new(data), Some((key, mime_for(&file.name).to_owned())))
+                } else {
+                    (Arc::clone(&bytes), None)
+                };
                 self.staged.push(Staged {
+                    sealed: sealed.clone(),
                     id,
                     name: file.name.clone(),
                     size: bytes.len() as u64,
@@ -851,14 +874,18 @@ impl Composer {
                         total: bytes.len() as u64,
                     },
                     preview: Preview::start(&file.name, &bytes),
-                    bytes: Arc::clone(&bytes),
+                    bytes: Arc::clone(&upload),
                 });
-                let mime = mime_for(&file.name).to_owned();
+                let (name, mime) = if sealed.is_some() {
+                    ("file.bin".to_owned(), "application/octet-stream".to_owned())
+                } else {
+                    (file.name.clone(), mime_for(&file.name).to_owned())
+                };
                 if !bridge.request(BridgeRequest::Upload {
                     id,
-                    name: file.name,
+                    name,
                     mime,
-                    bytes,
+                    bytes: upload,
                 }) && let Some(item) = self.staged.last_mut()
                 {
                     item.state = StagedState::Failed(tr("Нет соединения").to_owned());
@@ -876,6 +903,10 @@ impl Composer {
             } else {
                 format!("SPOILER_{}", item.name)
             };
+            // Имя зашифрованного файла живёт в тексте сообщения.
+            if item.sealed.is_some() {
+                return;
+            }
         }
         self.reupload(bridge, id);
     }
@@ -892,10 +923,15 @@ impl Composer {
             sent: 0,
             total: item.size,
         };
+        let (name, mime) = if item.sealed.is_some() {
+            ("file.bin".to_owned(), "application/octet-stream".to_owned())
+        } else {
+            (item.name.clone(), mime_for(&item.name).to_owned())
+        };
         if !bridge.request(BridgeRequest::Upload {
             id: fresh,
-            name: item.name.clone(),
-            mime: mime_for(&item.name).to_owned(),
+            name,
+            mime,
             bytes: Arc::clone(&item.bytes),
         }) {
             item.state = StagedState::Failed(tr("Нет соединения").to_owned());
@@ -1124,9 +1160,26 @@ impl Composer {
             })
             .collect();
         let has_text = !draft.trim().is_empty();
+        let file_notes = self
+            .staged
+            .iter()
+            .filter_map(|s| match (&s.state, &s.sealed) {
+                (StagedState::Done(id), Some((key, mime))) => Some(
+                    bs_e2ee::FileNote {
+                        id: id.clone(),
+                        name: s.name.clone(),
+                        mime: mime.clone(),
+                        key: key.clone(),
+                    }
+                    .to_line(),
+                ),
+                _ => None,
+            })
+            .collect();
         RowState {
             can_send: enabled && !busy && (has_text || (!editing && !ready_ids.is_empty())),
             ready_ids,
+            file_notes,
             enabled,
             editing,
         }

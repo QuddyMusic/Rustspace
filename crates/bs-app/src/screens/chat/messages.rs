@@ -117,6 +117,10 @@ impl ChatScreen {
                 });
                 let enabled = self.selected_channel.is_some();
                 let editing = self.is_editing();
+                // Зашифрованная личка: вложения тоже шифруются.
+                self.composer.seal_files = self.selected_channel.as_ref().is_some_and(|s| {
+                    s.kind == ChannelKind::Dm && bridge.e2ee_status(s.origin, &s.channel).enabled
+                });
                 let outgoing =
                     self.composer
                         .show(ui, bridge, &mut self.draft, &hint, enabled, editing);

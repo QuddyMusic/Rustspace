@@ -26,6 +26,7 @@ mod desktop;
 mod desktop_entry;
 mod dmcall;
 mod download;
+mod e2ee_files;
 mod emoji_data;
 #[cfg(test)]
 mod fake_instance;

@@ -323,6 +323,14 @@ fn spawn_job(
                 let _ = tx.send(BridgeResponse::Image { path, result });
             });
         }
+        BridgeRequest::Download { id, path, dest }
+            if crate::e2ee_files::key_for(path.as_str()).is_some() =>
+        {
+            jobs.spawn(async move {
+                let state = download_sealed(&client, &path, &dest).await;
+                let _ = tx.send(BridgeResponse::Download { id, state });
+            });
+        }
         BridgeRequest::Download { id, path, dest } => {
             jobs.spawn(async move {
                 let mut reported = 0_u64;
@@ -529,6 +537,29 @@ pub(super) fn remote_login_refused(outcome: Option<RegisterOutcome>, raw: &str) 
 pub(super) const MAX_IMAGE_JOBS: usize = 6;
 
 /// Скачивает и декодирует картинку; ошибка — готовый текст для показа.
+/// Зашифрованное вложение: скачать, расшифровать, записать.
+async fn download_sealed(
+    client: &bs_api::ApiClient,
+    path: &bs_api::AssetPath,
+    dest: &std::path::Path,
+) -> DownloadState {
+    let result = async {
+        let bytes = client
+            .fetch_asset(path, usize::MAX)
+            .await
+            .map_err(|err| download_message(&err))?;
+        let plain = crate::e2ee_files::reveal(path.as_str(), bytes)?;
+        tokio::fs::write(dest, plain)
+            .await
+            .map_err(|err| err.to_string())
+    }
+    .await;
+    match result {
+        Ok(()) => DownloadState::Done,
+        Err(message) => DownloadState::Failed(message),
+    }
+}
+
 pub(super) async fn load_image(
     client: &bs_api::ApiClient,
     path: &bs_api::AssetPath,
@@ -538,6 +569,8 @@ pub(super) async fn load_image(
         .fetch_asset(path, limits.max_input_bytes)
         .await
         .map_err(|err| err.to_string())?;
+    // Вложение зашифрованной переписки — расшифровать перед показом.
+    let bytes = crate::e2ee_files::reveal(path.as_str(), bytes)?;
     // Декодирование грузит процессор — уводим его с рабочих потоков сети.
     tokio::task::spawn_blocking(move || bs_media::decode(&bytes, &limits))
         .await

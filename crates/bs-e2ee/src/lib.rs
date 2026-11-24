@@ -352,6 +352,100 @@ pub fn safety_number(a: &PublicKey, b: &PublicKey) -> String {
         .join(" ")
 }
 
+/// Шифрует файл вложения своим случайным ключом. Возвращает данные для
+/// загрузки (`nonce || шифротекст`) и ключ (base64), который уходит внутри
+/// зашифрованного текста сообщения.
+#[must_use]
+pub fn seal_file(bytes: &[u8]) -> (Vec<u8>, String) {
+    let mut key: [u8; 32] = rand::random();
+    let nonce: [u8; NONCE_BYTES] = rand::random();
+    let cipher = XChaCha20Poly1305::new((&key).into());
+    // Шифрование в памяти не ошибается для данных такого размера.
+    let sealed = cipher
+        .encrypt(XNonce::from_slice(&nonce), bytes)
+        .unwrap_or_default();
+    let mut out = Vec::with_capacity(NONCE_BYTES + sealed.len());
+    out.extend_from_slice(&nonce);
+    out.extend_from_slice(&sealed);
+    let text = URL_SAFE_NO_PAD.encode(key);
+    key.zeroize();
+    (out, text)
+}
+
+/// Расшифровывает файл вложения ключом из сообщения.
+///
+/// # Errors
+/// Данные повреждены или ключ не тот.
+pub fn open_file(data: &[u8], key: &str) -> Result<Vec<u8>, OpenError> {
+    let mut raw = URL_SAFE_NO_PAD
+        .decode(key)
+        .map_err(|_| OpenError::Malformed)?;
+    if raw.len() != 32 || data.len() < NONCE_BYTES {
+        raw.zeroize();
+        return Err(OpenError::Malformed);
+    }
+    let cipher = XChaCha20Poly1305::new_from_slice(&raw).map_err(|_| OpenError::Malformed)?;
+    raw.zeroize();
+    let (nonce, sealed) = data.split_at(NONCE_BYTES);
+    cipher
+        .decrypt(XNonce::from_slice(nonce), sealed)
+        .map_err(|_| OpenError::Rejected)
+}
+
+/// Начало строки-описания зашифрованного вложения в тексте сообщения.
+const FILE_NOTE: char = '\u{2064}';
+
+/// Зашифрованное вложение: какое (id загрузки), как называлось, тип и ключ.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileNote {
+    /// Id вложения на сервере.
+    pub id: String,
+    /// Настоящее имя файла.
+    pub name: String,
+    /// Настоящий тип содержимого.
+    pub mime: String,
+    /// Ключ файла.
+    pub key: String,
+}
+
+impl FileNote {
+    /// Строка для текста сообщения (текст потом шифруется целиком).
+    #[must_use]
+    pub fn to_line(&self) -> String {
+        let raw = [&self.id, &self.name, &self.mime, &self.key].map(|part| part.replace('\t', " "));
+        format!("{FILE_NOTE}{}", URL_SAFE_NO_PAD.encode(raw.join("\t")))
+    }
+
+    fn from_line(line: &str) -> Option<Self> {
+        let raw = URL_SAFE_NO_PAD.decode(line.strip_prefix(FILE_NOTE)?).ok()?;
+        let text = String::from_utf8(raw).ok()?;
+        let mut parts = text.split('\t').map(str::to_owned);
+        Some(Self {
+            id: parts.next()?,
+            name: parts.next()?,
+            mime: parts.next()?,
+            key: parts.next()?,
+        })
+    }
+}
+
+/// Разделяет расшифрованный текст на сам текст и описания вложений.
+#[must_use]
+pub fn take_file_notes(text: &str) -> (String, Vec<FileNote>) {
+    let mut notes = Vec::new();
+    let mut kept = Vec::new();
+    for line in text.lines() {
+        match FileNote::from_line(line) {
+            Some(note) => notes.push(note),
+            None => kept.push(line),
+        }
+    }
+    if notes.is_empty() {
+        return (text.to_owned(), notes);
+    }
+    (kept.join("\n").trim_end().to_owned(), notes)
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "тесты")]
 mod tests {
@@ -509,5 +603,27 @@ mod tests {
         );
         // Каждая выгрузка — со своей солью.
         assert_ne!(text, export_key(&key, "долгий пароль").expect("выгрузка"));
+    }
+
+    #[test]
+    fn files_round_trip() {
+        let (data, key) = super::seal_file(b"picture bytes");
+        assert_ne!(&data[super::NONCE_BYTES..], b"picture bytes");
+        assert_eq!(
+            super::open_file(&data, &key).unwrap_or_default(),
+            b"picture bytes"
+        );
+        let (_, other) = super::seal_file(b"x");
+        assert!(super::open_file(&data, &other).is_err());
+        let note = super::FileNote {
+            id: "42".into(),
+            name: "кот.png".into(),
+            mime: "image/png".into(),
+            key,
+        };
+        let text = format!("привет\n{}", note.to_line());
+        let (clean, notes) = super::take_file_notes(&text);
+        assert_eq!(clean, "привет");
+        assert_eq!(notes, vec![note]);
     }
 }

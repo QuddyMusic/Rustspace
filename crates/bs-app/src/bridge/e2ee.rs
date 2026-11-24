@@ -403,9 +403,10 @@ impl E2ee {
             Some(opened.unwrap_or_else(|| tr("Не удалось расшифровать сообщение").to_owned()));
     }
 
-    /// Сообщение с ответом внутри.
+    /// Сообщение с ответом внутри (и зашифрованными вложениями).
     pub(crate) fn incoming_full(&mut self, message: &mut DmMessageWithUser, direct: bool) {
         self.incoming(&mut message.message, direct);
+        reveal_files(message);
         if let Some(reply) = message.reply_to.as_deref_mut() {
             self.incoming_full(reply, direct);
         }
@@ -487,6 +488,29 @@ pub(crate) fn is_direct(channel: &DmChannel) -> bool {
 #[path = "e2ee_live.rs"]
 #[allow(clippy::expect_used, clippy::panic, reason = "тест на живых серверах")]
 mod live;
+
+/// Зашифрованные вложения: описание (имя, тип, ключ) приходит в
+/// расшифрованном тексте. Строки описаний убираются из текста, вложениям
+/// возвращаются имя и тип, ключи запоминаются для показа и скачивания.
+fn reveal_files(message: &mut DmMessageWithUser) {
+    let Some(content) = message.message.content.as_deref() else {
+        return;
+    };
+    let (text, notes) = bs_e2ee::take_file_notes(content);
+    if notes.is_empty() {
+        return;
+    }
+    message.message.content = Some(text);
+    for note in notes {
+        if let Some(attachment) = message.attachments.iter_mut().find(|a| a.id == note.id) {
+            note.name.clone_into(&mut attachment.original_name);
+            note.mime.clone_into(&mut attachment.mimetype);
+            // У зашифрованного файла превью на сервере нет.
+            attachment.thumbnail_filename = None;
+            crate::e2ee_files::remember(&attachment.filename, &note.key);
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -692,5 +716,44 @@ mod tests {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |time| time.as_nanos())
+    }
+
+    #[test]
+    fn sealed_attachments_get_names_back() {
+        let note = bs_e2ee::FileNote {
+            id: "att1".into(),
+            name: "кот.png".into(),
+            mime: "image/png".into(),
+            key: "k1".into(),
+        };
+        let json = serde_json::json!({
+            "id": "m1", "dmChannelId": "d1", "userId": "u1",
+            "content": format!("смотри\n{}", note.to_line()),
+            "createdAt": 1,
+            "user": {
+                "id": "u1", "username": "ann", "displayName": null, "avatar": null,
+                "banner": null, "accentColor": null, "avatarColor": null, "bio": null,
+                "status": "online", "customStatus": null, "isAdmin": false,
+                "createdAt": 1, "homeInstance": null, "homeUserId": null,
+                "replicatedInstances": []
+            },
+            "embeds": [], "reactions": [],
+            "attachments": [{
+                "id": "att1", "messageId": "m1", "filename": "abc.bin",
+                "originalName": "file.bin", "mimetype": "application/octet-stream", "size": 10, "createdAt": 1
+            }]
+        });
+        let mut message = match serde_json::from_value::<DmMessageWithUser>(json) {
+            Ok(message) => message,
+            Err(err) => panic!("тестовое сообщение не разобралось: {err}"),
+        };
+        super::reveal_files(&mut message);
+        assert_eq!(message.message.content.as_deref(), Some("смотри"));
+        assert_eq!(message.attachments[0].original_name, "кот.png");
+        assert_eq!(message.attachments[0].mimetype, "image/png");
+        assert_eq!(
+            crate::e2ee_files::key_for("/api/uploads/abc.bin").as_deref(),
+            Some("k1")
+        );
     }
 }
