@@ -682,7 +682,71 @@ impl ChatScreen {
                     .map(|(_, value)| (row.id.clone(), value.clone()))
             });
         }
+        self.hover_reactions(ui, bridge, row, rect);
         self.message_menu(ui, bridge, row, view, &response, edit_request);
+    }
+
+    /// Под курсором — панель быстрых реакций в правом верхнем углу
+    /// сообщения: пять частых эмодзи и «ещё». Курсор над самой панелью её
+    /// не прячет.
+    fn hover_reactions(
+        &mut self,
+        ui: &egui::Ui,
+        bridge: &Bridge,
+        row: &MessageRow,
+        rect: egui::Rect,
+    ) {
+        let id = egui::Id::unique(("hover_reactions", &row.id));
+        let pointer = ui.ctx().input(|i| i.pointer.hover_pos());
+        let visible = rect.intersect(ui.clip_rect());
+        let over_bar = ui
+            .ctx()
+            .data(|d| d.get_temp::<egui::Rect>(id))
+            .zip(pointer)
+            .is_some_and(|(bar, pos)| bar.contains(pos));
+        let over_message = pointer.is_some_and(|pos| visible.contains(pos));
+        if !(over_message || over_bar) || egui::Popup::is_any_open(ui.ctx()) {
+            ui.ctx().data_mut(|d| d.remove::<egui::Rect>(id));
+            return;
+        }
+        let anchor = egui::pos2(
+            visible.right() - 12.0,
+            visible.top().max(ui.clip_rect().top()) - 4.0,
+        );
+        let area = egui::Area::new(id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(anchor)
+            .pivot(egui::Align2::RIGHT_TOP)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::new()
+                    .fill(theme::bg_bubble())
+                    .stroke(egui::Stroke::new(1.0, theme::border()))
+                    .corner_radius(theme::rounded(8))
+                    .inner_margin(egui::Margin::same(3))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            for entry in crate::screens::composer::quick_emoji().into_iter().take(5)
+                            {
+                                if crate::screens::composer::emoji_reaction_button(ui, entry) {
+                                    bridge.add_reaction(row.id.clone(), entry.glyph.to_owned());
+                                }
+                            }
+                            if ui
+                                .add(crate::widgets::flat_icon(
+                                    crate::icons::Icon::Smile,
+                                    16.0,
+                                    theme::text_muted(),
+                                ))
+                                .on_hover_text(tr("Добавить реакцию…"))
+                                .clicked()
+                            {
+                                self.react_picker = Some((row.id.clone(), 0));
+                            }
+                        });
+                    });
+            });
+        ui.ctx().data_mut(|d| d.insert_temp(id, area.response.rect));
     }
 
     /// Аватар, имя, ответ, текст, вложения и реакции; возвращает область и

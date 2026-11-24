@@ -1593,7 +1593,7 @@ const QUICK_DEFAULT: [&str; QUICK_SLOTS] = [
 ];
 
 /// «Часто используемые»: свои по частоте, дальше — набор по умолчанию.
-fn quick_emoji() -> Vec<&'static Entry> {
+pub(crate) fn quick_emoji() -> Vec<&'static Entry> {
     let used = crate::prefs::get().emoji_used;
     let mut ranked: Vec<(&String, &u32)> = used.iter().collect();
     ranked.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
@@ -1774,6 +1774,22 @@ fn paint_emoji(ui: &egui::Ui, rect: Rect, glyph: &str, category: Option<&(&str, 
     {
         paint_texture(ui, rect, entry);
     }
+}
+
+/// Кнопка-эмодзи для панели реакций; выбор запоминается в «Часто
+/// используемых».
+pub(crate) fn emoji_reaction_button(ui: &mut egui::Ui, entry: &'static Entry) -> bool {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, theme::rounded(6), theme::bg_hover());
+    }
+    paint_texture(ui, rect.shrink(4.0), entry);
+    let clicked = response.clicked();
+    if clicked {
+        remember_emoji(entry.glyph);
+    }
+    clicked
 }
 
 /// Кнопка «GIF»: рамка с подписью.
