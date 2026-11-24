@@ -1,7 +1,8 @@
 # Maintainer: Quddy <quddymusic@proton.me>
 #
 # Готовый клиент Rustspace из релиза GitHub (без сборки).
-#   cd packaging/arch && makepkg -si
+#   cd packaging/arch/rustspace-bin && makepkg -si
+# Сборка из клонированного репозитория — ../PKGBUILD (без скачивания релиза).
 # Обновление: поменяйте pkgver (и суммы: updpkgsums) и снова makepkg -si.
 pkgname=rustspace-bin
 pkgver=0.2.0

@@ -54,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/QuddyMusic/Rustspace/main/packaging
 |---|---|
 | Linux, AppImage | `Rustspace-x86_64.AppImage`: сделать исполняемым и запустить |
 | Debian / Ubuntu | `sudo apt install ./rustspace-linux-x86_64.deb` |
-| Arch Linux | `sudo pacman -U rustspace-bin-*-x86_64.pkg.tar.zst` или `cd packaging/arch && makepkg -si` |
+| Arch Linux | `sudo pacman -U rustspace-bin-*-x86_64.pkg.tar.zst` или сборка из клонированного репозитория: `cd packaging/arch && makepkg -si` (из релизов ничего не скачивается; `packaging/arch/rustspace-bin` — пакет из готового бинарника) |
 | Linux, архив | `rustspace-linux-x86_64.tar.gz` (есть и aarch64): распаковать и запустить `install.sh` или `rustspace` |
 | Windows 10 и 11 | `rustspace-setup-x86_64.exe` — ставит для текущего пользователя, без прав администратора; `rustspace-windows-x86_64.zip` — без установки |
 | macOS 11+ | `rustspace-macos-aarch64.dmg` (Apple Silicon) или `rustspace-macos-x86_64.dmg` (Intel): перетащить Rustspace в «Программы». Без подписи: первый запуск через «Открыть» в контекстном меню |
@@ -293,7 +293,7 @@ cargo run -p bs-tui -- --allow-insecure                # аргументы по
 Сценарий релиза собирает всё из таблицы в [Установка клиента](#установка-клиента): архив с
 `install.sh`, `.deb` (`dpkg-deb`), AppImage (`linuxdeploy`), установщик Windows (Inno Setup,
 `packaging/windows/rustspace.iss`) и `.app` для macOS. На Arch собирается
-`packaging/arch/PKGBUILD`. Иконка и `.desktop` — в `packaging/linux`.
+`packaging/arch/PKGBUILD` (сборка из исходников) и `packaging/arch/rustspace-bin/PKGBUILD` (готовый бинарник). Иконка и `.desktop` — в `packaging/linux`.
 
 ### Версии и релизы
 

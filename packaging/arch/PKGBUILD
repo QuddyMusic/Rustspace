@@ -1,0 +1,56 @@
+# Maintainer: Quddy <quddymusic@proton.me>
+#
+# Rustspace из этого репозитория: собирается из уже клонированных исходников,
+# с GitHub ничего не скачивается (зависимости Rust приходят через cargo, как
+# при любой сборке).
+#   git clone https://github.com/QuddyMusic/Rustspace && cd Rustspace/packaging/arch
+#   makepkg -si
+# Обновление: git pull и снова makepkg -si.
+# Готовый бинарник из релиза без сборки — rustspace-bin/PKGBUILD.
+pkgname=rustspace
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Rustspace — неофициальный клиент на Rust, совместимый с Backspace (чат, ЛС, голос)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/QuddyMusic/Rustspace"
+license=('AGPL-3.0-only')
+depends=('gtk3' 'libayatana-appindicator' 'alsa-lib' 'libpipewire' 'dbus' 'libxkbcommon'
+         'mesa' 'libva' 'libdrm')
+makedepends=('rust' 'cargo' 'clang' 'cmake' 'pkgconf')
+optdepends=('pipewire-pulse: системный звук демонстрации экрана'
+            'xdg-desktop-portal: глобальные клавиши и захват экрана под Wayland')
+provides=('rustspace')
+conflicts=('rustspace-bin')
+# Флаги LTO makepkg ломают сборку libwebrtc; отладочный пакет не нужен.
+options=('!lto' '!debug')
+source=()
+
+# Корень репозитория: PKGBUILD лежит в packaging/arch.
+_root() {
+    cd "$startdir/../.." && pwd
+}
+
+prepare() {
+    cd "$(_root)"
+    [ -f Cargo.toml ] && [ -d crates/bs-app ] \
+        || { echo "PKGBUILD нужно запускать из packaging/arch клонированного Rustspace" >&2; return 1; }
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+}
+
+build() {
+    cd "$(_root)"
+    # libwebrtc (голос и камера) собирается clang.
+    export CC=clang CXX=clang++
+    cargo build --release --frozen -p bs-app --features voice,camera,desktop
+}
+
+package() {
+    cd "$(_root)"
+    install -Dm755 target/release/rustspace "$pkgdir/usr/bin/rustspace"
+    install -Dm644 packaging/linux/io.github.quddymusic.Rustspace.desktop \
+        "$pkgdir/usr/share/applications/io.github.quddymusic.Rustspace.desktop"
+    install -Dm644 packaging/linux/rustspace.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/rustspace.png"
+    install -Dm644 packaging/linux/rustspace.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/rustspace.svg"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+}

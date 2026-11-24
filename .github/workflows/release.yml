@@ -284,7 +284,7 @@ jobs:
         run: |
           useradd -m builder
           mkdir -p build dist
-          cp packaging/arch/PKGBUILD build/
+          cp packaging/arch/rustspace-bin/PKGBUILD build/
           sed -i "s/^pkgver=.*/pkgver=$VERSION/" build/PKGBUILD
           # Архив уже собран: makepkg берёт файл с именем из source и не качает его.
           cp client/rustspace-linux-x86_64.tar.gz "build/rustspace-linux-x86_64-$VERSION.tar.gz"
@@ -325,7 +325,7 @@ jobs:
           | Linux, любой дистрибутив | одной командой: \`curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/packaging/linux/install.sh \| sh\` |
           | Linux, AppImage | \`Rustspace-*.AppImage\` — сделайте исполняемым и запустите |
           | Debian / Ubuntu | \`sudo apt install ./rustspace-linux-x86_64.deb\` |
-          | Arch Linux | \`sudo pacman -U rustspace-bin-*-x86_64.pkg.tar.zst\` или \`packaging/arch/PKGBUILD\`: \`makepkg -si\` |
+          | Arch Linux | \`sudo pacman -U rustspace-bin-*-x86_64.pkg.tar.zst\` или сборка из репозитория: \`cd packaging/arch && makepkg -si\` |
           | Linux, архив | \`rustspace-linux-*.tar.gz\` — распакуйте и запустите \`install.sh\` или сам \`rustspace\` |
           | Windows 10 и 11 (x86_64) | \`rustspace-setup-x86_64.exe\` — установщик; \`rustspace-windows-x86_64.zip\` — без установки |
           | macOS 11+ | \`rustspace-macos-aarch64.dmg\` (Apple Silicon) или \`rustspace-macos-x86_64.dmg\` (Intel): перетащите Rustspace в «Программы». Сборка без сертификата Apple — первый запуск через «Открыть» в контекстном меню (или \`xattr -dr com.apple.quarantine /Applications/Rustspace.app\`) |

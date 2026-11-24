@@ -55,7 +55,7 @@ Ready builds are on the [releases page](https://github.com/QuddyMusic/Rustspace/
 |---|---|
 | Linux, AppImage | `Rustspace-x86_64.AppImage`: make it executable and run |
 | Debian / Ubuntu | `sudo apt install ./rustspace-linux-x86_64.deb` |
-| Arch Linux | `sudo pacman -U rustspace-bin-*-x86_64.pkg.tar.zst`, or `cd packaging/arch && makepkg -si` |
+| Arch Linux | `sudo pacman -U rustspace-bin-*-x86_64.pkg.tar.zst`, or build from the cloned repository: `cd packaging/arch && makepkg -si` (nothing is downloaded from releases; `packaging/arch/rustspace-bin` packages the release binary) |
 | Linux, archive | `rustspace-linux-x86_64.tar.gz` (also aarch64): unpack and run `install.sh` or `rustspace` |
 | Windows 10 and 11 | `rustspace-setup-x86_64.exe` — installs for the current user, no admin rights; `rustspace-windows-x86_64.zip` — portable |
 | macOS 11+ | `rustspace-macos-aarch64.dmg` (Apple Silicon) or `rustspace-macos-x86_64.dmg` (Intel): drag Rustspace to Applications. Unsigned: first launch via *Open* in the context menu |
@@ -297,7 +297,7 @@ The release workflow builds everything from the table in
 [Installing the client](#installing-the-client): the archive with `install.sh`, `.deb`
 (`dpkg-deb`), AppImage (`linuxdeploy`), the Windows installer (Inno Setup,
 `packaging/windows/rustspace.iss`) and the macOS `.app`. Arch users build
-`packaging/arch/PKGBUILD`. The icon and `.desktop` file are in `packaging/linux`.
+`packaging/arch/PKGBUILD` (builds from the checkout) and `packaging/arch/rustspace-bin/PKGBUILD` (release binary). The icon and `.desktop` file are in `packaging/linux`.
 
 ### Versions and releases
 
