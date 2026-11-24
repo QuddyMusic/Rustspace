@@ -1755,5 +1755,10 @@
   "Отменить правку, закрыть окно": "Cancel editing, close a window",
   "Новая строка": "New line",
   "Поиск канала или беседы": "Find a channel or conversation",
-  "Вставить картинку из буфера обмена": "Paste an image from the clipboard"
+  "Вставить картинку из буфера обмена": "Paste an image from the clipboard",
+  "Звонок — Rustspace": "Call — Rustspace",
+  "Выйти из полноэкранного (Esc)": "Exit full screen (Esc)",
+  "Во весь экран": "Full screen",
+  "Вернуть в окно чата": "Back to the chat window",
+  "В отдельном окне": "In a separate window"
 }

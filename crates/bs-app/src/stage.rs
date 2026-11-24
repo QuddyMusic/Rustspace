@@ -30,9 +30,23 @@ pub(crate) struct Picker {
     limits: StreamingLimits,
 }
 
+/// Где показана сцена.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum StageMode {
+    /// Полосой над чатом.
+    #[default]
+    Docked,
+    /// Во весь экран (Esc — назад).
+    Fullscreen,
+    /// В отдельном окне.
+    Window,
+}
+
 /// Состояние сцены между кадрами.
 #[derive(Default)]
 pub(crate) struct StageState {
+    /// Где показана сцена.
+    pub(crate) mode: StageMode,
     textures: HashMap<TileKey, (u64, egui::TextureHandle)>,
     /// Открытый выбор источника.
     pub(crate) picker: Option<Picker>,
@@ -77,6 +91,7 @@ impl StageState {
         self.textures.clear();
         self.picker = None;
         self.focused = None;
+        self.mode = StageMode::Docked;
         self.watching.clear();
         self.known_streams.clear();
     }
@@ -93,6 +108,7 @@ enum StageAction {
     StopScreen,
     StopCamera,
     LocalAudio(crate::voice_media::LocalAudio),
+    Mode(StageMode),
 }
 
 /// Рисует сцену, если в звонке есть видео.
@@ -116,34 +132,55 @@ pub(crate) fn show(ui: &mut egui::Ui, voice: &mut VoiceState, bridge: &Bridge) {
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_millis(33));
     let mut actions = Vec::new();
-    egui::Panel::top("call_stage")
-        .resizable(true)
-        .default_size(300.0)
-        .size_range(160.0..=900.0)
-        .frame(theme::module(theme::bg_rail()).inner_margin(egui::Margin::same(8)))
-        .show(ui, |ui| {
-            update_textures(ui.ctx(), &mut voice.stage, &feeds);
-            let shown: Vec<&Feed> = match &voice.stage.focused {
-                Some(key)
-                    if feeds
-                        .iter()
-                        .any(|f| (&f.identity, f.screen) == (&key.0, key.1)) =>
-                {
-                    feeds
-                        .iter()
-                        .filter(|f| (&f.identity, f.screen) == (&key.0, key.1))
-                        .collect()
-                }
-                _ => feeds.iter().collect(),
-            };
-            let area = ui.available_rect_before_wrap();
-            let rects = grid(area, shown.len(), 8.0);
-            for (feed, rect) in shown.iter().zip(rects) {
-                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-                tile(&mut child, feed, voice, &watchers, &mut actions);
+    let ctx = ui.ctx().clone();
+    match voice.stage.mode {
+        StageMode::Docked => {
+            egui::Panel::top("call_stage")
+                .resizable(true)
+                .default_size(300.0)
+                .size_range(160.0..=900.0)
+                .frame(theme::module(theme::bg_rail()).inner_margin(egui::Margin::same(8)))
+                .show(ui, |ui| {
+                    stage_body(ui, voice, &feeds, &watchers, &mut actions);
+                });
+        }
+        StageMode::Fullscreen => {
+            let screen = ctx.content_rect();
+            egui::Area::new(egui::Id::unique("call_stage_fullscreen"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(screen.min)
+                .show(&ctx, |ui| {
+                    ui.painter().rect_filled(screen, 0.0, theme::bg_rail());
+                    let mut child =
+                        ui.new_child(egui::UiBuilder::new().max_rect(screen.shrink(8.0)));
+                    stage_body(&mut child, voice, &feeds, &watchers, &mut actions);
+                    ui.allocate_rect(screen, Sense::hover());
+                });
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                actions.push(StageAction::Mode(StageMode::Docked));
             }
-            ui.allocate_rect(area, Sense::hover());
-        });
+        }
+        StageMode::Window => {
+            let builder = egui::ViewportBuilder::default()
+                .with_title(tr("Звонок — Rustspace"))
+                .with_inner_size([960.0, 600.0])
+                .with_min_inner_size([320.0, 200.0]);
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("rustspace_call_window"),
+                builder,
+                |ctx, _class| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::new().fill(theme::bg_rail()).inner_margin(8))
+                        .show(ctx, |ui| {
+                            stage_body(ui, voice, &feeds, &watchers, &mut actions);
+                        });
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        actions.push(StageAction::Mode(StageMode::Docked));
+                    }
+                },
+            );
+        }
+    }
     for action in actions {
         match action {
             StageAction::Watch(identity, watching) => {
@@ -160,8 +197,73 @@ pub(crate) fn show(ui: &mut egui::Ui, voice: &mut VoiceState, bridge: &Bridge) {
                 }
             }
             StageAction::LocalAudio(audio) => voice.set_local_audio(bridge, &audio),
+            StageAction::Mode(mode) => set_mode(&ctx, &mut voice.stage, mode),
         }
     }
+}
+
+/// Меняет режим сцены; во весь экран разворачивается и само окно.
+fn set_mode(ctx: &egui::Context, stage: &mut StageState, mode: StageMode) {
+    let was_fullscreen = stage.mode == StageMode::Fullscreen;
+    let fullscreen = mode == StageMode::Fullscreen;
+    if was_fullscreen != fullscreen {
+        ctx.send_viewport_cmd_to(
+            egui::ViewportId::ROOT,
+            egui::ViewportCommand::Fullscreen(fullscreen),
+        );
+    }
+    stage.mode = mode;
+}
+
+/// Плитки и переключатель режима над ними.
+fn stage_body(
+    ui: &mut egui::Ui,
+    voice: &mut VoiceState,
+    feeds: &[Feed],
+    watchers: &[String],
+    actions: &mut Vec<StageAction>,
+) {
+    update_textures(ui.ctx(), &mut voice.stage, feeds);
+    let mode = voice.stage.mode;
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let (label, target) = match mode {
+                StageMode::Fullscreen => (tr("Выйти из полноэкранного (Esc)"), StageMode::Docked),
+                _ => (tr("Во весь экран"), StageMode::Fullscreen),
+            };
+            if ui.small_button(label).clicked() {
+                actions.push(StageAction::Mode(target));
+            }
+            let (label, target) = match mode {
+                StageMode::Window => (tr("Вернуть в окно чата"), StageMode::Docked),
+                _ => (tr("В отдельном окне"), StageMode::Window),
+            };
+            if ui.small_button(label).clicked() {
+                actions.push(StageAction::Mode(target));
+            }
+        });
+    });
+    ui.add_space(4.0);
+    let shown: Vec<&Feed> = match &voice.stage.focused {
+        Some(key)
+            if feeds
+                .iter()
+                .any(|f| (&f.identity, f.screen) == (&key.0, key.1)) =>
+        {
+            feeds
+                .iter()
+                .filter(|f| (&f.identity, f.screen) == (&key.0, key.1))
+                .collect()
+        }
+        _ => feeds.iter().collect(),
+    };
+    let area = ui.available_rect_before_wrap();
+    let rects = grid(area, shown.len(), 8.0);
+    for (feed, rect) in shown.iter().zip(rects) {
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        tile(&mut child, feed, voice, watchers, actions);
+    }
+    ui.allocate_rect(area, Sense::hover());
 }
 
 fn update_textures(ctx: &egui::Context, stage: &mut StageState, feeds: &[Feed]) {
