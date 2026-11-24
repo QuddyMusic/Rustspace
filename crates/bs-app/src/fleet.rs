@@ -274,6 +274,22 @@ impl Bridge {
     }
 
     /// Вход в домашний инстанс.
+    /// Вход по токену (ключ доступа).
+    pub(crate) fn start_token_login(
+        &mut self,
+        base: &str,
+        token: crate::bridge::Secret,
+        transport: TransportPolicy,
+    ) {
+        self.transport = transport;
+        self.leaving = false;
+        self.lost = false;
+        let home = &mut self.slots[0];
+        home.session.start_token_login(base, token, transport);
+        home.base = canonical_base(base);
+        self.focus = 0;
+    }
+
     pub(crate) fn start_login(
         &mut self,
         base: &str,

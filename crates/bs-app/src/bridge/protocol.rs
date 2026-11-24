@@ -507,6 +507,8 @@ pub(crate) enum AdminRequest {
     TwoFactor(TwoFactorOp),
     /// Приватность пересылки: `None` — узнать, `Some` — задать.
     Privacy(Option<bool>),
+    /// Ключи доступа: список, добавление (через браузер), удаление.
+    Passkeys(PasskeyOp),
     /// Сменить свой пароль.
     ChangePassword {
         /// Текущий (для домашнего аккаунта обязателен).
@@ -774,6 +776,8 @@ pub(crate) enum AdminEvent {
     TwoFactor(Result<TwoFactorView, String>),
     /// Скрывать ли ссылку на профиль при пересылке (ошибка — сервер без настройки).
     Privacy(Result<bool, String>),
+    /// Ключи доступа аккаунта (ошибка — сервер без поддержки или отказ).
+    Passkeys(Result<Vec<bs_api::Passkey>, String>),
     /// Настройки инстанса.
     Settings(Result<bs_api::InstanceSettings, String>),
     /// Итог сохранения настроек.
@@ -1374,4 +1378,15 @@ impl Drop for EndGuard {
     fn drop(&mut self) {
         let _ = self.0.send(BridgeEvent::Ended);
     }
+}
+
+/// Действие с ключами доступа.
+#[derive(Debug, Clone)]
+pub(crate) enum PasskeyOp {
+    /// Получить список.
+    List,
+    /// Открыть браузер, дождаться подтверждения, вернуть новый список.
+    Add,
+    /// Удалить ключ.
+    Remove(String),
 }

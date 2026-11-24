@@ -1778,5 +1778,20 @@
   "Переслать": "Forward",
   "Сообщение {name} уйдёт цитатой с подписью автора.": "The message from {name} will be sent as a quote signed by its author.",
   "Скрывать профиль при пересылке": "Hide my profile when forwarded",
-  "В пересланных сообщениях будет только ваше имя — без ссылки на профиль.": "Forwarded messages will show only your name, without a link to your profile."
+  "В пересланных сообщениях будет только ваше имя — без ссылки на профиль.": "Forwarded messages will show only your name, without a link to your profile.",
+  "Ключи доступа": "Passkeys",
+  "Ключ доступа (passkey) заменяет пароль и код. Хранится в Bitwarden, телефоне или Windows Hello.": "A passkey replaces the password and code. It lives in Bitwarden, your phone or Windows Hello.",
+  "Ключей пока нет.": "No passkeys yet.",
+  "Ключ доступа": "Passkey",
+  "Добавить ключ": "Add passkey",
+  "Подтвердите в браузере…": "Confirm in the browser…",
+  "добавлен {a0}": "added {a0}",
+  "вход {a0}": "last used {a0}",
+  "Этот инстанс не поддерживает вход по ключу доступа": "This instance doesn't support passkey sign-in",
+  "Время на вход вышло — начните заново": "Sign-in timed out — start again",
+  "Не удалось открыть браузер: {err}": "Couldn't open the browser: {err}",
+  "Подтвердите ключ в открывшемся браузере. Код там должен быть таким же:": "Confirm the passkey in the browser that opened. The code there must match:",
+  "Войти по ключу доступа": "Sign in with a passkey",
+  "Passkey: Bitwarden, телефон, Windows Hello — подтверждение в браузере, без пароля.": "Passkey: Bitwarden, phone, Windows Hello — confirm in the browser, no password.",
+  "Время вышло — ключ не добавлен": "Timed out — passkey not added"
 }

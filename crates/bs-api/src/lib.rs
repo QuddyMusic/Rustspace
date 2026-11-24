@@ -34,6 +34,7 @@ pub mod groups;
 pub mod instance;
 pub mod invites;
 pub mod notifications;
+pub mod passkeys;
 pub mod peers;
 pub mod personal_bridges;
 pub mod profile;
@@ -81,6 +82,7 @@ pub use instance::{
     VerifyPasswordResponse,
 };
 pub use invites::{Invite, InvitePatch, NewInvite, Redemption};
+pub use passkeys::{Passkey, PasskeyStatus, PasskeyTicket};
 pub use peers::{ApprovalRequest, Peer, Recheck};
 pub use personal_bridges::{
     MatrixLogin, PersonalAccount, PersonalBridges, PersonalChat, RemoteChat, TelegramStep,

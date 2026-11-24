@@ -60,6 +60,7 @@ pub mod media;
 pub mod mentions;
 pub mod messages;
 pub mod net;
+pub mod passkeys;
 pub mod perms;
 pub mod ratelimit;
 pub mod ready;
@@ -508,6 +509,15 @@ pub fn app(state: AppState) -> Router {
             get(routes::privacy::get_own).put(routes::privacy::put_own),
         )
         .route("/api/rustspace/users/{id}/privacy", get(routes::privacy::get_user))
+        .route("/api/rustspace/passkeys", get(routes::passkeys::list))
+        .route("/api/rustspace/passkeys/{id}", delete(routes::passkeys::remove))
+        .route("/api/rustspace/passkeys/register", post(routes::passkeys::register))
+        .route("/api/rustspace/passkeys/login", post(routes::passkeys::login))
+        .route("/api/rustspace/passkeys/options/{ticket}", get(routes::passkeys::options))
+        .route("/api/rustspace/passkeys/finish/{ticket}", post(routes::passkeys::finish))
+        .route("/api/rustspace/passkeys/status/{ticket}", get(routes::passkeys::status))
+        .route("/rustspace/passkey/{ticket}", get(routes::passkeys::page))
+        .route("/rustspace/passkey.js", get(routes::passkeys::script))
         .route("/api/rustspace/admin/server/job", post(routes::admin_server::request_job))
         .route("/api/auth/2fa", get(routes::twofactor::status))
         .route("/api/auth/2fa/setup", post(routes::twofactor::setup))

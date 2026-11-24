@@ -19,6 +19,8 @@ pub(crate) mod invite_card;
 pub(crate) mod invite_dialog;
 pub(crate) mod login;
 pub(crate) mod notification_settings;
+pub(crate) mod passkey_login;
+pub(crate) mod passkeys_ui;
 pub(crate) mod personal_bridges;
 pub(crate) mod profile;
 pub(crate) mod qr_window;

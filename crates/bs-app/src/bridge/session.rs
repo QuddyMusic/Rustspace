@@ -619,6 +619,34 @@ impl Session {
         });
     }
 
+    /// Входит по токену, полученному иначе, чем паролем (ключ доступа).
+    pub(crate) fn start_token_login(
+        &mut self,
+        base: &str,
+        token: Secret,
+        transport: TransportPolicy,
+    ) {
+        if self.phase != Phase::Idle {
+            self.last_error = Some(tr("Сначала выйдите из текущего инстанса").to_owned());
+            return;
+        }
+        let Some(base) = normalize_base(base) else {
+            self.last_error = Some(tr("некорректный адрес инстанса").to_owned());
+            return;
+        };
+        self.launch(SessionParams {
+            origin: Origin::Home,
+            base,
+            username: String::new(),
+            password: Zeroizing::new(String::new()),
+            second_factor: None,
+            register: None,
+            resume: Some(token),
+            persist: self.persist.clone(),
+            transport,
+        });
+    }
+
     /// Задаёт файл, в котором хранится сессия домашнего инстанса.
     pub(crate) fn set_persist(&mut self, path: Option<std::path::PathBuf>) {
         self.persist = path;

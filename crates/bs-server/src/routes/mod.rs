@@ -22,6 +22,7 @@ pub mod invites;
 pub mod livekit;
 pub mod messages;
 pub mod notifications;
+pub mod passkeys;
 pub mod personal_bridges;
 pub mod privacy;
 pub mod saved;

@@ -30,6 +30,8 @@ pub(crate) struct LoginScreen {
     show_factor: bool,
     /// Высота карточки на прошлом кадре — чтобы держать её по центру.
     card_height: f32,
+    /// Идёт вход по ключу доступа.
+    passkey: Option<super::passkey_login::PasskeyLogin>,
 }
 
 impl std::fmt::Debug for LoginScreen {
@@ -254,6 +256,68 @@ impl LoginScreen {
         ui.add_space(18.0);
     }
 
+    /// «Войти по ключу доступа»: страница инстанса в браузере, код для
+    /// сверки, вход, когда браузер подтвердит ключ.
+    fn passkey_part(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge, busy: bool) {
+        ui.add_space(8.0);
+        if let Some(flow) = self.passkey.as_mut() {
+            if let super::passkey_login::Step::Token(token) = flow.poll(ui.ctx()) {
+                let (base, transport) = (flow.base.clone(), flow.transport);
+                self.passkey = None;
+                bridge.start_token_login(&base, crate::bridge::Secret::new(token), transport);
+                return;
+            }
+            let mut cancel = false;
+            ui.vertical_centered(|ui| {
+                match (&flow.code, &flow.error) {
+                    (_, Some(err)) => error_note(ui, err),
+                    (Some(code), None) => {
+                        ui.label(theme::muted(tr(
+                            "Подтвердите ключ в открывшемся браузере. Код там должен быть таким же:",
+                        )));
+                        ui.label(
+                            egui::RichText::new(code)
+                                .monospace()
+                                .size(22.0)
+                                .color(theme::text_bright()),
+                        );
+                        ui.spinner();
+                    }
+                    (None, None) => {
+                        ui.spinner();
+                    }
+                }
+                cancel = ui.button(tr("Отмена")).clicked();
+            });
+            if cancel {
+                self.passkey = None;
+            }
+            return;
+        }
+        let ready = !busy && !self.base.trim().is_empty();
+        let clicked = ui
+            .vertical_centered(|ui| {
+                ui.add_enabled(ready, egui::Button::new(tr("Войти по ключу доступа")))
+                    .on_hover_text(tr(
+                        "Passkey: Bitwarden, телефон, Windows Hello — подтверждение в браузере, без пароля.",
+                    ))
+                    .clicked()
+            })
+            .inner;
+        if clicked && let Some(base) = crate::bridge::normalize_base(&self.base) {
+            let transport = if self.allow_insecure {
+                TransportPolicy::AllowInsecure
+            } else {
+                TransportPolicy::Strict
+            };
+            self.passkey = Some(super::passkey_login::PasskeyLogin::start(
+                &bridge.runtime(),
+                base,
+                transport,
+            ));
+        }
+    }
+
     /// Кнопка «Войти», отправка формы, ошибка и ссылка на регистрацию.
     fn footer(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge, busy: bool, mut submit: bool) {
         let label = if busy {
@@ -284,6 +348,7 @@ impl LoginScreen {
             self.second_factor.zeroize();
         }
 
+        self.passkey_part(ui, bridge, busy);
         if let Some(err) = bridge.last_error() {
             ui.add_space(12.0);
             error_note(ui, err);

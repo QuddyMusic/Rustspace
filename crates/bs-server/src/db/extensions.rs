@@ -271,6 +271,24 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             )",
         ],
     ),
+    (
+        "0016_passkeys",
+        &[
+            // Ключи доступа (WebAuthn): id ключа, владелец, алгоритм COSE,
+            // открытый ключ и счётчик подписей.
+            "CREATE TABLE bs_passkeys (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                alg INTEGER NOT NULL,
+                public_key TEXT NOT NULL,
+                sign_count BIGINT NOT NULL DEFAULT 0,
+                name TEXT NOT NULL DEFAULT '',
+                created_at BIGINT NOT NULL,
+                last_used_at BIGINT
+            )",
+            "CREATE INDEX bs_passkeys_user ON bs_passkeys (user_id)",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

@@ -50,6 +50,8 @@ pub(crate) struct AccountUi {
     pub(crate) hide_forward: Option<bool>,
     /// Настройку уже спросили.
     pub(crate) privacy_asked: bool,
+    /// Ключи доступа.
+    pub(crate) passkeys: super::passkeys_ui::PasskeysUi,
     current: String,
     new: String,
     repeat: String,
@@ -215,6 +217,10 @@ impl ExtraUi {
                 }
                 AdminEvent::TwoFactor(result) => self.account.two_factor.apply(result),
                 AdminEvent::Privacy(result) => self.account.hide_forward = result.ok(),
+                AdminEvent::Passkeys(result) => {
+                    self.account.passkeys.busy = false;
+                    self.account.passkeys.list = Some(result);
+                }
                 AdminEvent::Personal(event) => self.personal.apply(event),
                 AdminEvent::Bots(event) => self.bots.apply(event),
                 other => self.admin.apply(other),
@@ -616,6 +622,7 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
     card(ui, |ui| {
         two_factor_card(ui, &mut extra.account.two_factor, federated, bridge);
     });
+    super::passkeys_ui::section(ui, &mut extra.account.passkeys, federated, bridge);
     let state = &mut extra.account;
     ui.add_space(14.0);
     page_title_small(ui, tr("Опасная зона"));
@@ -666,7 +673,7 @@ pub(crate) fn security_cards(ui: &mut egui::Ui, extra: &mut ExtraUi, me: &User, 
     });
 }
 
-fn page_title_small(ui: &mut egui::Ui, text: &str) {
+pub(crate) fn page_title_small(ui: &mut egui::Ui, text: &str) {
     widgets::section_label(ui, text);
     ui.add_space(6.0);
 }

@@ -998,6 +998,7 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
         }
         AdminRequest::TwoFactor(op) => AdminEvent::TwoFactor(two_factor(client, op).await),
         AdminRequest::Privacy(set) => AdminEvent::Privacy(privacy(client, set).await),
+        AdminRequest::Passkeys(op) => AdminEvent::Passkeys(passkeys(client, op).await),
         AdminRequest::Cleanup { dry_run } => {
             AdminEvent::Cleaned(client.storage_cleanup(dry_run).await.map_err(|e| text(&e)))
         }
@@ -1235,6 +1236,46 @@ async fn privacy(client: &bs_api::ApiClient, set: Option<bool>) -> Result<bool, 
         Some(hide) => client.set_privacy_hide_forward(hide).await.map(|()| hide),
     };
     result.map_err(|e| upload_message(&e))
+}
+
+/// Ключи доступа: добавление ждёт подтверждения в браузере до пяти минут.
+async fn passkeys(
+    client: &bs_api::ApiClient,
+    op: super::PasskeyOp,
+) -> Result<Vec<bs_api::Passkey>, String> {
+    match op {
+        super::PasskeyOp::List => {}
+        super::PasskeyOp::Remove(id) => {
+            client
+                .delete_passkey(&id)
+                .await
+                .map_err(|e| upload_message(&e))?;
+        }
+        super::PasskeyOp::Add => {
+            let ticket = client
+                .passkey_register_ticket()
+                .await
+                .map_err(|e| upload_message(&e))?;
+            opener::open(&ticket.url).map_err(|e| e.to_string())?;
+            let mut done = false;
+            for _ in 0..150 {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                match client.passkey_status(&ticket.ticket).await {
+                    Ok(bs_api::PasskeyStatus::Pending) => {}
+                    Ok(bs_api::PasskeyStatus::Done { .. }) => {
+                        done = true;
+                        break;
+                    }
+                    Ok(bs_api::PasskeyStatus::Failed(reason)) => return Err(reason),
+                    Err(e) => return Err(upload_message(&e)),
+                }
+            }
+            if !done {
+                return Err(crate::i18n::tr("Время вышло — ключ не добавлен").to_owned());
+            }
+        }
+    }
+    client.passkeys().await.map_err(|e| upload_message(&e))
 }
 
 /// Состояние сервера; `job` — сначала отдать заявку помощнику.

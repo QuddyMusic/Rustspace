@@ -26,6 +26,8 @@ rusqlite = { version = "0.43", features = ["bundled"] }
 bcrypt = "0.17"
 jsonwebtoken = "9"
 sha2 = "0.10"
+# Подписи ключей доступа (passkey); уже есть в дереве через rustls.
+ring = "0.17"
 sha1 = "0.10"
 hmac = "0.12"
 hkdf = "0.12"
