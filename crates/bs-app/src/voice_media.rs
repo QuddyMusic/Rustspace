@@ -333,6 +333,8 @@ mod stub {
         }
 
         pub(crate) fn set_stream_volume(&self, _user_id: &str, _percent: u16) {}
+
+        pub(crate) fn set_voice_volume(&self, _user_id: &str, _percent: u16) {}
     }
 }
 
@@ -638,6 +640,13 @@ mod real {
         pub(crate) fn set_stream_volume(&self, user_id: &str, percent: u16) {
             if let Some(audio) = &self.audio {
                 audio.set_volume(user_id, SourceKind::Screen, Volume::new(percent));
+            }
+        }
+
+        /// Громкость голоса участника прямо сейчас (0 — не слышно).
+        pub(crate) fn set_voice_volume(&self, user_id: &str, percent: u16) {
+            if let Some(audio) = &self.audio {
+                audio.set_volume(user_id, SourceKind::Voice, Volume::new(percent));
             }
         }
 

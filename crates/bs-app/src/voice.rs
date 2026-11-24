@@ -151,7 +151,18 @@ impl VoiceState {
     ) {
         self.prefs.set_local_audio(audio);
         let prefs = self.prefs.clone();
-        self.media(bridge).apply_prefs(&prefs);
+        let media = self.media(bridge);
+        media.apply_prefs(&prefs);
+        // apply_prefs передаёт только отличные от 100 % громкости: возврат к
+        // 100 % или снятие заглушки нужно передать явно.
+        let percent = if audio.muted {
+            0
+        } else {
+            audio.volume.min(200)
+        };
+        if audio.source == crate::voice_media::AudioSource::Voice {
+            media.set_voice_volume(&audio.user_id, percent);
+        }
         self.refresh_stream_audio();
         crate::prefs::update(|saved| saved.voice = prefs);
     }
