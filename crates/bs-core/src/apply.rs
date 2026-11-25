@@ -69,6 +69,7 @@ enum Category {
 fn categorize(event: &ServerEvent) -> Category {
     match event {
         ServerEvent::MessageCreated { .. }
+        | ServerEvent::ChannelPoke { .. }
         | ServerEvent::MessageUpdated { .. }
         | ServerEvent::MessageDeleted { .. }
         | ServerEvent::EmbedsResolved { .. }
@@ -138,7 +139,8 @@ fn try_messages(cache: &mut Cache, event: ServerEvent) -> bool {
             set_last_message_id(cache, &channel_id, message_id);
             true
         }
-        ServerEvent::MessageUpdated { message } => {
+        // Тычок — системная строка канала: в ленту, но не в непрочитанные.
+        ServerEvent::MessageUpdated { message } | ServerEvent::ChannelPoke { message } => {
             upsert_message(cache, message);
             true
         }

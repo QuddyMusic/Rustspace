@@ -801,7 +801,8 @@ pub(super) fn message_rows(
                     let (author, text) = quote(&r.user, r.message.content.as_ref());
                     (r.message.id.clone(), author, text)
                 }),
-                system: None,
+                // Системные строки канала (тычок) — как у бесед.
+                system: system_line(msg.message.message_type, msg.message.content.as_deref()),
                 name_color: space_colors.get(&msg.user.id).copied(),
             })
             .collect(),
@@ -830,21 +831,22 @@ pub(super) fn message_rows(
                     let (author, text) = quote(&r.user, r.message.content.as_ref());
                     (r.message.id.clone(), author, text)
                 }),
-                system: (msg.message.message_type == Some(bs_types::MessageType::System)).then(
-                    || {
-                        msg.message
-                            .content
-                            .as_deref()
-                            .and_then(bs_types::DmSystemEvent::parse)
-                            .map_or(SystemLine::Unknown, |event| {
-                                SystemLine::Event(Box::new(event))
-                            })
-                    },
-                ),
+                system: system_line(msg.message.message_type, msg.message.content.as_deref()),
                 name_color: None,
             })
             .collect(),
     }
+}
+
+/// Системная строка ленты, если сообщение системное.
+fn system_line(kind: Option<bs_types::MessageType>, content: Option<&str>) -> Option<SystemLine> {
+    (kind == Some(bs_types::MessageType::System)).then(|| {
+        content
+            .and_then(bs_types::DmSystemEvent::parse)
+            .map_or(SystemLine::Unknown, |event| {
+                SystemLine::Event(Box::new(event))
+            })
+    })
 }
 
 /// Подпись «кто печатает» по списку имён.

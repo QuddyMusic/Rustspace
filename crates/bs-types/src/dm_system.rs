@@ -99,6 +99,14 @@ pub enum DmSystemEvent {
     IconChanged,
     /// Приглашение в пространство.
     SpaceInvite(SpaceInvite),
+    /// Тычок в канале пространства (автор строки тыкает участника).
+    #[serde(rename_all = "camelCase")]
+    ChannelPoke {
+        /// Кого.
+        target_user_id: String,
+        /// Его имя.
+        target_display_name: String,
+    },
 }
 
 impl DmSystemEvent {
@@ -115,6 +123,10 @@ impl DmSystemEvent {
                 target_user_id,
                 target_display_name,
                 ..
+            }
+            | Self::ChannelPoke {
+                target_user_id,
+                target_display_name,
             } => !target_user_id.is_empty() && !target_display_name.is_empty(),
             Self::OwnerChanged {
                 new_owner_id,
@@ -141,6 +153,7 @@ impl DmSystemEvent {
             Self::NameChanged { .. } => Some("✎"),
             Self::IconChanged => Some("🖼"),
             Self::SpaceInvite(_) => None,
+            Self::ChannelPoke { .. } => Some("👉"),
         }
     }
 
@@ -174,6 +187,10 @@ impl DmSystemEvent {
             }
             Self::IconChanged => format!("{actor} меняет значок группы"),
             Self::SpaceInvite(invite) => format!("📨 Приглашение в {}", invite.snapshot.space_name),
+            Self::ChannelPoke {
+                target_display_name,
+                ..
+            } => format!("{actor} тыкает {target_display_name}"),
         }
     }
 }
@@ -230,6 +247,22 @@ mod tests {
         );
         assert_eq!(renamed.text("А", false), "А меняет название группы");
         assert!(DmSystemEvent::parse(r#"{"event":"icon_changed"}"#).is_some());
+    }
+
+    #[test]
+    fn channel_poke_reads_like_the_original() {
+        let event = DmSystemEvent::parse(
+            r#"{"event":"channel_poke","targetUserId":"1","targetDisplayName":"Боб"}"#,
+        )
+        .unwrap();
+        assert_eq!(event.text("Квадди", true), "Квадди тыкает Боб");
+        assert_eq!(event.glyph(), Some("👉"));
+        assert!(
+            DmSystemEvent::parse(
+                r#"{"event":"channel_poke","targetUserId":"","targetDisplayName":"x"}"#
+            )
+            .is_none()
+        );
     }
 
     #[test]

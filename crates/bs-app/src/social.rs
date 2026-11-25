@@ -166,6 +166,10 @@ pub(crate) fn system_text(event: &bs_types::DmSystemEvent, actor: &str, timeline
             Some(_) => crate::tf!("{actor} меняет название группы", actor = actor),
         },
         E::IconChanged => crate::tf!("{actor} меняет значок группы", actor = actor),
+        E::ChannelPoke {
+            target_display_name: target,
+            ..
+        } => crate::tf!("{actor} тыкает {target}", actor = actor, target = target),
         E::SpaceInvite(invite) => crate::tf!(
             "📨 Приглашение в {space}",
             space = invite.snapshot.space_name

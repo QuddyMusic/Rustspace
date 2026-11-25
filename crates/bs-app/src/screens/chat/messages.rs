@@ -982,6 +982,7 @@ impl ChatScreen {
                 choice.forward = Some(view.selected.origin);
                 ui.close();
             }
+            author_items(ui, bridge, view.selected, row, &mut choice);
             if !row.body.is_empty()
                 && media::sticker_of(&row.body).is_none()
                 && media::gif_of(&row.body).is_none()
@@ -1050,6 +1051,14 @@ impl ChatScreen {
                 filter: String::new(),
             });
         }
+        if choice.mention {
+            if !self.draft.is_empty() && !self.draft.ends_with(' ') {
+                self.draft.push(' ');
+            }
+            self.draft.push_str("<@");
+            self.draft.push_str(&row.author_id);
+            self.draft.push_str("> ");
+        }
         if choice.reply {
             self.reply = Some(ReplyTarget {
                 message_id: row.id.clone(),
@@ -1112,6 +1121,7 @@ struct MessageHits {
 
 /// Что выбрали в контекстном меню сообщения.
 #[derive(Default)]
+#[allow(clippy::struct_excessive_bools, reason = "независимые пункты меню")]
 struct MenuChoice {
     reply: bool,
     react: bool,
@@ -1121,6 +1131,44 @@ struct MenuChoice {
     sticker_pack: Option<String>,
     /// Переслать: инстанс сообщения.
     forward: Option<usize>,
+    /// Упомянуть автора в поле ввода.
+    mention: bool,
+}
+
+/// «Упомянуть» и «Ткнуть» автора (PR #463 и #384 оригинала): тычок — только
+/// в канале пространства, если его инстанс их принимает, и не себя.
+fn author_items(
+    ui: &mut egui::Ui,
+    bridge: &Bridge,
+    selected: &SelectedChannel,
+    row: &MessageRow,
+    choice: &mut MenuChoice,
+) {
+    let Some(cache) = bridge.cache_at(selected.origin) else {
+        return;
+    };
+    if row.system.is_some() || row.author_id == cache.me().id {
+        return;
+    }
+    if ui.button(tr("Упомянуть")).clicked() {
+        choice.mention = true;
+        ui.close();
+    }
+    if selected.kind == ChannelKind::Space
+        && cache.supports_poke()
+        && ui
+            .button(tr("Ткнуть"))
+            .on_hover_text(tr("Участник увидит тычок в канале"))
+            .clicked()
+    {
+        if let Some(session) = bridge.session_at(selected.origin) {
+            session.send(bs_types::ClientEvent::ChannelPoke {
+                channel_id: selected.channel.clone(),
+                target_user_id: row.author_id.clone(),
+            });
+        }
+        ui.close();
+    }
 }
 
 /// Пункты меню для картинки: копировать, сохранить, избранное, стикеры.
