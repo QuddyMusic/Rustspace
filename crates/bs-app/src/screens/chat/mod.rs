@@ -199,6 +199,8 @@ pub(crate) struct ChatScreen {
     reply: Option<ReplyTarget>,
     /// Открытое окно «Переслать».
     forward: Option<forward::ForwardDraft>,
+    /// Выбор сообщений галочками для пересылки пачкой.
+    picking: Option<forward::Picking>,
     /// Сообщение, для которого открыт выбор реакции, и вкладка выбора.
     react_picker: Option<(String, usize)>,
     /// Имена пользователей для упоминаний (обновляется каждый кадр).
@@ -325,6 +327,7 @@ impl ChatScreen {
         if self.selected_channel.as_ref() != Some(&selected) {
             self.edit = None;
             self.reply = None;
+            self.picking = None;
             self.react_picker = None;
         }
         let space_open = self

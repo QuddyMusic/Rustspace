@@ -1192,41 +1192,49 @@ async fn updates(
 /// Пересылка: цитата с подписью автора (без ссылки, если автор запретил
 /// или его настройку узнать не удалось).
 async fn forward(client: &bs_api::ApiClient, request: BridgeRequest) -> BridgeResponse {
-    let BridgeRequest::Forward {
-        target,
-        dm,
-        author_id,
-        author_name,
-        content,
-        attachments,
-    } = request
-    else {
+    let BridgeRequest::Forward { target, dm, items } = request else {
         return BridgeResponse::Done;
     };
-    let hide = client
-        .hides_forward_author(&author_id)
-        .await
-        .unwrap_or(true);
-    let body = bs_api::SendMessageBody {
-        content: bs_api::forward_as_markdown(
-            &author_id,
-            &author_name,
+    // Приватность — по разу на автора; неизвестно — скрываем.
+    let mut hides: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    let mut quotes = Vec::with_capacity(items.len());
+    for item in &items {
+        let hide = if let Some(hide) = hides.get(&item.author_id) {
+            *hide
+        } else {
+            let hide = client
+                .hides_forward_author(&item.author_id)
+                .await
+                .unwrap_or(true);
+            hides.insert(item.author_id.clone(), hide);
+            hide
+        };
+        quotes.push(bs_api::forward_as_markdown(
+            &item.author_id,
+            &item.author_name,
             hide,
-            &content,
-            &attachments,
-        ),
-        attachments: Vec::new(),
-        reply_to_id: None,
-    };
-    let sent = if dm {
-        client.send_dm_message(&target, &body).await.map(drop)
-    } else {
-        client.send_channel_message(&target, &body).await.map(drop)
-    };
-    match sent {
-        Ok(()) => BridgeResponse::Done,
-        Err(err) => BridgeResponse::Compose(ComposeEvent::SendFailed(upload_message(&err))),
+            &item.content,
+            &item.attachments,
+        ));
     }
+    // Пачка — в как можно меньше сообщений: сотня отправок упёрлась бы в
+    // лимит частоты.
+    for content in bs_api::pack_forwards(&quotes, bs_types::MAX_MESSAGE_LENGTH) {
+        let body = bs_api::SendMessageBody {
+            content,
+            attachments: Vec::new(),
+            reply_to_id: None,
+        };
+        let sent = if dm {
+            client.send_dm_message(&target, &body).await.map(drop)
+        } else {
+            client.send_channel_message(&target, &body).await.map(drop)
+        };
+        if let Err(err) = sent {
+            return BridgeResponse::Compose(ComposeEvent::SendFailed(upload_message(&err)));
+        }
+    }
+    BridgeResponse::Done
 }
 
 /// Приватность пересылки: узнать (`None`) или задать.

@@ -1823,5 +1823,8 @@
   "Это не ключ восстановления: 25 знаков, например ABCDE-FGHJK-MNPQR-STVWX-YZ012": "This is not a recovery key: 25 characters, like ABCDE-FGHJK-MNPQR-STVWX-YZ012",
   "На сервере нет резервной копии ключа": "There is no key backup on the server",
   "Ваш инстанс не поддерживает эту настройку: нужен сервер Rustspace 0.3 или новее.": "Your instance does not support this setting: it needs a Rustspace 0.3 or newer server.",
-  "Спрашиваем сервер…": "Asking the server…"
+  "Спрашиваем сервер…": "Asking the server…",
+  "Отметить несколько сообщений и переслать пачкой": "Mark several messages and forward them together",
+  "Выбрано: {a0} из {a1}": "Selected: {a0} of {a1}",
+  "Сообщения ({a0}) уйдут цитатами с подписями авторов.": "The messages ({a0}) will go as quotes signed with their authors."
 }

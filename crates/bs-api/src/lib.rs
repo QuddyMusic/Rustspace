@@ -111,7 +111,7 @@ pub use sticker_packs::{StickerPack, StickerPacks};
 pub use twofactor::{E2eeBackup, E2eeKey, TwoFactorSetup, TwoFactorStatus};
 pub use webhooks::{
     CARD_MARK, CardDraft, CardImage, FORWARD_MARK, InstanceVoiceBitrate, VoiceBitrate, Webhook,
-    card_as_markdown, forward_as_markdown, split_card_mark,
+    card_as_markdown, forward_as_markdown, pack_forwards, split_card_mark,
 };
 pub use write::{
     CreateDmRequest, FriendRequestDecision, MessageSearchQuery, SEARCH_LIMIT_DEFAULT,

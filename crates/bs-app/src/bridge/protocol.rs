@@ -367,21 +367,15 @@ pub(crate) enum BridgeRequest {
     },
     /// «Избранное», закрепы, закладки.
     Extras(super::extras::ExtrasOp),
-    /// Переслать сообщение в другой чат того же инстанса: цитатой с
-    /// подписью автора (ссылкой на профиль, если автор не запретил).
+    /// Переслать сообщения в другой чат того же инстанса: цитатами с
+    /// подписями авторов (ссылкой на профиль, если автор не запретил).
     Forward {
         /// Канал или переписка, куда пересылаем.
         target: String,
         /// Это личная переписка.
         dm: bool,
-        /// Автор исходного сообщения.
-        author_id: String,
-        /// Имя автора.
-        author_name: String,
-        /// Текст.
-        content: String,
-        /// Ссылки на вложения.
-        attachments: Vec<String>,
+        /// Сообщения по порядку ленты.
+        items: Vec<ForwardItem>,
     },
     /// Отправить сообщение с карточкой в канал пространства.
     SendCards {
@@ -1416,4 +1410,17 @@ pub(crate) enum E2eeBackupOp {
     },
     /// Удалить копию.
     Delete,
+}
+
+/// Пересылаемое сообщение.
+#[derive(Debug, Clone)]
+pub(crate) struct ForwardItem {
+    /// Автор.
+    pub(crate) author_id: String,
+    /// Имя автора.
+    pub(crate) author_name: String,
+    /// Текст.
+    pub(crate) content: String,
+    /// Ссылки на вложения.
+    pub(crate) attachments: Vec<String>,
 }

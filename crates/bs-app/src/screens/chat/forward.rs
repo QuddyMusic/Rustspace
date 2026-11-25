@@ -4,7 +4,7 @@
 
 use egui::{Align2, RichText};
 
-use crate::bridge::BridgeRequest;
+use crate::bridge::{BridgeRequest, ForwardItem};
 use crate::fleet::Bridge;
 use crate::i18n::tr;
 use crate::theme;
@@ -12,15 +12,72 @@ use crate::theme;
 /// Что пересылаем.
 #[derive(Debug, Clone)]
 pub(super) struct ForwardDraft {
-    /// Инстанс сообщения: пересылаем в чаты этого же инстанса.
+    /// Инстанс сообщений: пересылаем в чаты этого же инстанса.
     pub(super) origin: usize,
-    pub(super) author_id: String,
-    pub(super) author_name: String,
-    pub(super) content: String,
-    /// Ссылки на вложения.
-    pub(super) attachments: Vec<String>,
+    /// Сообщения по порядку ленты.
+    pub(super) items: Vec<ForwardItem>,
     /// Поиск по чатам.
     pub(super) filter: String,
+}
+
+/// Больше за раз не выбрать (как в запросе оригинала, #395).
+pub(super) const MAX_PICKED: usize = 100;
+
+/// Режим выбора сообщений галочками.
+#[derive(Debug, Clone)]
+pub(super) struct Picking {
+    /// Инстанс и канал, в котором выбираем.
+    pub(super) origin: usize,
+    pub(super) channel: String,
+    /// Выбранные: id, время (для порядка) и что пересылать.
+    pub(super) picked: Vec<(String, i64, ForwardItem)>,
+}
+
+impl Picking {
+    /// Выбрано ли сообщение.
+    pub(super) fn has(&self, id: &str) -> bool {
+        self.picked.iter().any(|(known, ..)| known == id)
+    }
+
+    /// Ставит или снимает галочку (не больше [`MAX_PICKED`]).
+    pub(super) fn toggle(&mut self, id: &str, at: i64, item: ForwardItem) {
+        if let Some(index) = self.picked.iter().position(|(known, ..)| known == id) {
+            self.picked.remove(index);
+        } else if self.picked.len() < MAX_PICKED {
+            self.picked.push((id.to_owned(), at, item));
+        }
+    }
+
+    /// Черновик пересылки — по порядку ленты.
+    pub(super) fn draft(&self) -> ForwardDraft {
+        let mut picked = self.picked.clone();
+        picked.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        ForwardDraft {
+            origin: self.origin,
+            items: picked.into_iter().map(|(_, _, item)| item).collect(),
+            filter: String::new(),
+        }
+    }
+}
+
+/// Что пересылать из строки ленты: вложения — абсолютными ссылками.
+pub(super) fn item_of(row: &super::model::MessageRow, base: &str) -> ForwardItem {
+    ForwardItem {
+        author_id: row.author_id.clone(),
+        author_name: row.author.clone(),
+        content: row.body.clone(),
+        attachments: row
+            .attachments
+            .iter()
+            .map(|a| {
+                if a.filename.starts_with('/') {
+                    format!("{base}{}", a.filename)
+                } else {
+                    format!("{base}/api/uploads/{}", a.filename)
+                }
+            })
+            .collect(),
+    }
 }
 
 /// Куда можно переслать: (id, это ЛС, название).
@@ -62,10 +119,17 @@ pub(super) fn show(ctx: &egui::Context, draft: &mut ForwardDraft, bridge: &Bridg
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .default_width(360.0)
         .show(ctx, |ui| {
-            ui.label(theme::muted(crate::tf!(
-                "Сообщение {name} уйдёт цитатой с подписью автора.",
-                name = draft.author_name
-            )));
+            let note = match draft.items.as_slice() {
+                [one] => crate::tf!(
+                    "Сообщение {name} уйдёт цитатой с подписью автора.",
+                    name = one.author_name
+                ),
+                many => crate::tf!(
+                    "Сообщения ({a0}) уйдут цитатами с подписями авторов.",
+                    a0 = many.len()
+                ),
+            };
+            ui.label(theme::muted(note));
             ui.add_space(6.0);
             crate::widgets::search_box(ui, &mut draft.filter, tr("Найти чат"));
             ui.add_space(6.0);
@@ -103,10 +167,7 @@ pub(super) fn show(ctx: &egui::Context, draft: &mut ForwardDraft, bridge: &Bridg
             session.request(BridgeRequest::Forward {
                 target,
                 dm,
-                author_id: draft.author_id.clone(),
-                author_name: draft.author_name.clone(),
-                content: draft.content.clone(),
-                attachments: draft.attachments.clone(),
+                items: draft.items.clone(),
             });
         }
         keep = false;

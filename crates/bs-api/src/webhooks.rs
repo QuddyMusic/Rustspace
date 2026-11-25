@@ -363,6 +363,40 @@ pub fn forward_as_markdown(
     lines.join("\n")
 }
 
+/// Склеивает пересылаемые цитаты в как можно меньше сообщений.
+///
+/// Каждое не длиннее `limit` (в UTF-16, как считает сервер), порядок
+/// сохраняется, цитаты разделены пустой строкой. Слишком длинная цитата
+/// обрезается с «…».
+#[must_use]
+pub fn pack_forwards(quotes: &[String], limit: usize) -> Vec<String> {
+    let len = |text: &str| text.encode_utf16().count();
+    let mut out: Vec<String> = Vec::new();
+    for quote in quotes {
+        let quote = if len(quote) > limit {
+            let mut cut = String::new();
+            for ch in quote.chars() {
+                if len(&cut) + ch.len_utf16() + 1 > limit {
+                    break;
+                }
+                cut.push(ch);
+            }
+            cut.push('…');
+            cut
+        } else {
+            quote.clone()
+        };
+        match out.last_mut() {
+            Some(last) if len(last) + 2 + len(&quote) <= limit => {
+                last.push_str("\n\n");
+                last.push_str(&quote);
+            }
+            _ => out.push(quote),
+        }
+    }
+    out
+}
+
 /// Карточка как обычное сообщение с разметкой — для серверов без карточек
 /// и для личных сообщений: заголовок (ссылкой, если есть), текст, картинка.
 #[must_use]
@@ -455,5 +489,19 @@ mod card_tests {
         assert_eq!(color.as_deref(), Some("#e06c3a"));
         assert_eq!(rest, "> **Т**");
         assert!(split_card_mark("> обычная цитата").is_none());
+    }
+
+    #[test]
+    fn forwards_pack_into_few_messages_under_the_limit() {
+        let quotes: Vec<String> = (0..5).map(|n| format!("> {n}").repeat(10)).collect();
+        let packed = pack_forwards(&quotes, 70);
+        assert!(packed.iter().all(|m| m.encode_utf16().count() <= 70));
+        assert_eq!(packed.join("\n\n"), quotes.join("\n\n"));
+        assert!(packed.len() < quotes.len());
+        let long = vec!["я".repeat(50)];
+        let cut = pack_forwards(&long, 20);
+        assert_eq!(cut.len(), 1);
+        assert_eq!(cut[0].encode_utf16().count(), 20);
+        assert!(cut[0].ends_with('…'));
     }
 }

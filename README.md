@@ -153,7 +153,7 @@ every WebSocket frame and REST response the client receives.
   (explicit or shocking content) asks every member once to confirm they want to see it before
   showing its messages.
 - **Direct messages.** One-to-one and group DMs, friends and requests, user profiles, space
-  invites sent as DM cards. Forwarding with a clickable author, and a "Hide my profile when
+  invites sent as DM cards. Forwarding with a clickable author — one message or a batch of up to 100 picked with checkboxes — and a "Hide my profile when
   forwarded" privacy setting. Channel pokes and "Mention" in the message menu.
 - **Federation.** Several instances at once, remote ones signed in through the home account.
   An invite or a directory entry from an instance that is not connected yet connects it on

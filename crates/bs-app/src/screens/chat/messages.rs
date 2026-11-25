@@ -45,6 +45,9 @@ pub(super) fn show_history_header(ui: &mut egui::Ui, history: &HistoryState) -> 
 
 impl ChatScreen {
     pub(super) fn show_composer(&mut self, ui: &mut egui::Ui, bridge: &mut Bridge) {
+        if self.show_pick_bar(ui) {
+            return;
+        }
         let hint = match (&self.selected_channel, bridge.cache()) {
             (Some(selected), Some(cache)) => match selected.kind {
                 ChannelKind::Space => cache.channel(&selected.channel).map_or_else(
@@ -661,7 +664,11 @@ impl ChatScreen {
         }
         // Подсветка рисуется под сообщением: место в списке фигур занимаем заранее.
         let flash_slot = ui.painter().add(egui::Shape::Noop);
+        let pick_slot = ui.painter().add(egui::Shape::Noop);
         let (rect, hits) = self.message_body(ui, row, view.show_header);
+        if self.pick_row(ui, bridge, row, view, rect, pick_slot) {
+            return;
+        }
         let response = ui.interact(rect, ui.auto_id_with(("msg", &row.id)), Sense::click());
         // После подгрузки возвращаем в поле зрения сообщение, которое читали:
         // новые страницы появляются выше него.
@@ -696,6 +703,123 @@ impl ChatScreen {
         }
         self.hover_reactions(ui, bridge, row, rect);
         self.message_menu(ui, bridge, row, view, &response, edit_request);
+    }
+
+    /// В режиме выбора: галочка справа, подсветка выбранного, щелчок по
+    /// строке ставит или снимает галочку. `true` — строка обработана.
+    fn pick_row(
+        &mut self,
+        ui: &egui::Ui,
+        bridge: &Bridge,
+        row: &MessageRow,
+        view: &MessageView<'_>,
+        rect: egui::Rect,
+        slot: egui::layers::ShapeIdx,
+    ) -> bool {
+        let Some(picking) = self
+            .picking
+            .as_mut()
+            .filter(|p| p.origin == view.selected.origin && p.channel == view.selected.channel)
+        else {
+            return false;
+        };
+        let on = picking.has(&row.id);
+        let area = rect.expand2(egui::vec2(6.0, 2.0));
+        if on {
+            ui.painter().set(
+                slot,
+                egui::Shape::rect_filled(
+                    area,
+                    theme::rounded(6),
+                    theme::accent().gamma_multiply(0.14),
+                ),
+            );
+        }
+        let center = egui::pos2(rect.right() - 16.0, rect.top() + 14.0);
+        let painter = ui.painter();
+        if on {
+            painter.circle_filled(center, 9.0, theme::accent());
+            painter.text(
+                center,
+                egui::Align2::CENTER_CENTER,
+                "✓",
+                egui::FontId::proportional(12.0),
+                egui::Color32::WHITE,
+            );
+        } else {
+            painter.circle_stroke(center, 9.0, egui::Stroke::new(1.5, theme::text_muted()));
+        }
+        let response = ui
+            .interact(area, ui.auto_id_with(("pick", &row.id)), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.clicked() {
+            let base = bridge.base_at(picking.origin).unwrap_or_default();
+            picking.toggle(&row.id, row.created_at, super::forward::item_of(row, base));
+        }
+        true
+    }
+
+    /// Панель выбора вместо поля ввода: сколько выбрано, «Переслать»,
+    /// «Отмена». `true` — панель показана.
+    pub(super) fn show_pick_bar(&mut self, ui: &mut egui::Ui) -> bool {
+        let Some(picking) = self.picking.as_ref() else {
+            return false;
+        };
+        if self
+            .selected_channel
+            .as_ref()
+            .is_none_or(|s| s.origin != picking.origin || s.channel != picking.channel)
+        {
+            return false;
+        }
+        let count = picking.picked.len();
+        let mut cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let mut send = false;
+        // На месте поля ввода — такая же нижняя панель.
+        egui::Panel::bottom("composer")
+            .show_separator_line(false)
+            .frame(egui::Frame::new().inner_margin(Margin {
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: 18,
+            }))
+            .show(ui, |ui| {
+                egui::Frame::new()
+                    .fill(theme::bg_input())
+                    .corner_radius(theme::rounded(10))
+                    .inner_margin(egui::Margin::symmetric(14, 10))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(crate::tf!(
+                                    "Выбрано: {a0} из {a1}",
+                                    a0 = count,
+                                    a1 = super::forward::MAX_PICKED
+                                ))
+                                .color(theme::text_bright()),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    cancel |= ui.button(tr("Отмена")).clicked();
+                                    send = ui
+                                        .add_enabled(
+                                            count > 0,
+                                            theme::primary_button(tr("Переслать…")),
+                                        )
+                                        .clicked();
+                                },
+                            );
+                        });
+                    });
+            });
+        if send {
+            self.forward = self.picking.take().map(|picking| picking.draft());
+        } else if cancel {
+            self.picking = None;
+        }
+        true
     }
 
     /// Под курсором — панель быстрых реакций в правом верхнем углу
@@ -982,6 +1106,15 @@ impl ChatScreen {
                 choice.forward = Some(view.selected.origin);
                 ui.close();
             }
+            if row.system.is_none()
+                && ui
+                    .button(tr("Выбрать"))
+                    .on_hover_text(tr("Отметить несколько сообщений и переслать пачкой"))
+                    .clicked()
+            {
+                choice.pick = true;
+                ui.close();
+            }
             author_items(ui, bridge, view.selected, row, &mut choice);
             if !row.body.is_empty()
                 && media::sticker_of(&row.body).is_none()
@@ -1034,22 +1167,21 @@ impl ChatScreen {
             let base = bridge.base_at(origin).unwrap_or_default();
             self.forward = Some(super::forward::ForwardDraft {
                 origin,
-                author_id: row.author_id.clone(),
-                author_name: row.author.clone(),
-                content: row.body.clone(),
-                attachments: row
-                    .attachments
-                    .iter()
-                    .map(|a| {
-                        if a.filename.starts_with('/') {
-                            format!("{base}{}", a.filename)
-                        } else {
-                            format!("{base}/api/uploads/{}", a.filename)
-                        }
-                    })
-                    .collect(),
+                items: vec![super::forward::item_of(row, base)],
                 filter: String::new(),
             });
+        }
+        if choice.pick
+            && let Some(selected) = self.selected_channel.as_ref()
+        {
+            let mut picking = super::forward::Picking {
+                origin: selected.origin,
+                channel: selected.channel.clone(),
+                picked: Vec::new(),
+            };
+            let base = bridge.base_at(selected.origin).unwrap_or_default();
+            picking.toggle(&row.id, row.created_at, super::forward::item_of(row, base));
+            self.picking = Some(picking);
         }
         if choice.mention {
             if !self.draft.is_empty() && !self.draft.ends_with(' ') {
@@ -1133,6 +1265,8 @@ struct MenuChoice {
     forward: Option<usize>,
     /// Упомянуть автора в поле ввода.
     mention: bool,
+    /// Начать выбор сообщений с этого.
+    pick: bool,
 }
 
 /// «Упомянуть» и «Ткнуть» автора (PR #463 и #384 оригинала): тычок — только
