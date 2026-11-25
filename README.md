@@ -437,6 +437,10 @@ build checked against its `SHASUMS256.txt` (Alpine: `nodejs` from apk); it takes
 and about 1.5 GB of memory. It can be added to an existing installation the same way (run the
 script again with `--web`) and removed with `--no-web`; on a fresh install without `-y` the
 script asks. When a later server speaks a newer Backspace version, the next update rebuilds it.
+The page is marked as Rustspace without touching the build: the tab title, icons and the
+installed app (PWA manifest) say Rustspace, and a Rustspace badge — a pill on the sign-in
+screens, a tile at the bottom of the space rail inside — links to this repository and explains
+that the server is Rustspace and the web client is the original Backspace.
 The Rustspace client does not use it and works the same with or without it. Files of the web
 client do not count against the 200-requests-a-minute limit: its service worker fetches the
 whole build (over a hundred files) when it is first opened. `/api/instance/info` reports the

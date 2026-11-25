@@ -130,6 +130,126 @@ async fn file_response(path: &Path, immutable: bool) -> Option<Response> {
     Some(response)
 }
 
+/// Плитка Rustspace 512×512 — значок веб-версии на экране и в PWA.
+const TILE_PNG: &[u8] = include_bytes!("../../bs-app/assets/brand-tile.png");
+/// Плашка «Rustspace» поверх веб-клиента оригинала.
+const BRAND_CSS: &str = "#rustspace-badge{position:fixed;top:6px;left:50%;\
+transform:translateX(-50%);z-index:2147483000;display:flex;align-items:center;gap:6px;\
+padding:2px 10px 2px 4px;border-radius:999px;background:rgba(183,65,14,.92);color:#fff;\
+font:600 11px/18px system-ui,-apple-system,'Segoe UI',sans-serif;text-decoration:none;\
+box-shadow:0 2px 10px rgba(0,0,0,.35);opacity:.85;transition:opacity .15s}\
+#rustspace-badge:hover{opacity:1}#rustspace-badge img{width:16px;height:16px;\
+border-radius:4px}\
+body:has(nav) #rustspace-badge{top:auto;bottom:72px;left:16px;transform:none;\
+padding:0;width:40px;height:40px;border-radius:12px;background:none;font-size:0;gap:0;\
+opacity:.75}\
+body:has(nav) #rustspace-badge img{width:40px;height:40px;border-radius:12px}\
+@media (max-width:640px){#rustspace-badge{display:none}}";
+
+/// Файлы брендирования веб-версии (`/rustspace/brand/…`).
+fn brand_asset(path: &str) -> Option<Response> {
+    let (body, kind): (Vec<u8>, &'static str) = match path {
+        "/rustspace/brand/icon.svg" => (ICON.as_bytes().to_vec(), "image/svg+xml"),
+        "/rustspace/brand/icon-512.png" => (TILE_PNG.to_vec(), "image/png"),
+        "/rustspace/brand/web.css" => (BRAND_CSS.as_bytes().to_vec(), "text/css; charset=utf-8"),
+        _ => return None,
+    };
+    Some(
+        (
+            [
+                (CONTENT_TYPE, kind),
+                (CACHE_CONTROL, "public, max-age=86400"),
+            ],
+            body,
+        )
+            .into_response(),
+    )
+}
+
+/// `index.html` веб-клиента оригинала с приметами Rustspace: заголовок
+/// вкладки, значки, имя приложения и плашка-ссылка вверху. Сама сборка не
+/// меняется — подмена при раздаче, поэтому годится и чужая `--web-dist`.
+fn brand_index(page: &str, config: &crate::config::Config) -> String {
+    let title = "Rustspace";
+    let tip = format!(
+        "Rustspace {} — неофициальный сервер на Rust, совместимый с Backspace. \
+         Веб-клиент — оригинальный Backspace. / Unofficial Rust server compatible \
+         with Backspace; the web client is the original Backspace.",
+        config.version
+    );
+    let head = format!(
+        r#"<link rel="icon" type="image/svg+xml" href="/rustspace/brand/icon.svg" /><link rel="apple-touch-icon" href="/rustspace/brand/icon-512.png" /><meta name="application-name" content="{title}" /><link rel="stylesheet" href="/rustspace/brand/web.css" /></head>"#
+    );
+    let badge = format!(
+        r#"<a id="rustspace-badge" href="{}" target="_blank" rel="noopener" title="{}"><img src="/rustspace/brand/icon.svg" alt="" />Rustspace</a>"#,
+        escape_html(&config.source_code_url),
+        escape_html(&tip)
+    );
+    let mut out = page
+        // Значки оригинала уступают своим.
+        .replace(r#"rel="icon""#, r#"rel="x-backspace-icon""#)
+        .replace(r#"rel="apple-touch-icon""#, r#"rel="x-backspace-touch-icon""#)
+        .replace("<title>Backspace</title>", "<title>Rustspace</title>")
+        .replace(
+            r#"name="apple-mobile-web-app-title" content="Backspace""#,
+            r#"name="apple-mobile-web-app-title" content="Rustspace""#,
+        )
+        .replacen("</head>", &head, 1);
+    if let Some(start) = out.find("<body")
+        && let Some(end) = out[start..].find('>')
+    {
+        out.insert_str(start + end + 1, &badge);
+    }
+    out
+}
+
+/// Манифест PWA: установленное приложение называется Rustspace и носит его
+/// значок. Не JSON — отдаётся как есть.
+fn brand_manifest(text: &str) -> String {
+    let Ok(mut manifest) = serde_json::from_str::<serde_json::Value>(text) else {
+        return text.to_owned();
+    };
+    if let Some(object) = manifest.as_object_mut() {
+        object.insert("name".into(), json!("Rustspace"));
+        object.insert("short_name".into(), json!("Rustspace"));
+        object.insert(
+            "description".into(),
+            json!("Rustspace — unofficial Rust server compatible with Backspace, with the Backspace web client."),
+        );
+        object.insert(
+            "icons".into(),
+            json!([
+                {"src": "/rustspace/brand/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                {"src": "/rustspace/brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+                {"src": "/rustspace/brand/icon.svg", "sizes": "any", "type": "image/svg+xml"}
+            ]),
+        );
+    }
+    manifest.to_string()
+}
+
+/// Отдаёт файл клиента; `index.html` и манифест — с приметами Rustspace.
+async fn client_file(
+    path: &Path,
+    immutable: bool,
+    config: &crate::config::Config,
+) -> Option<Response> {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if name != "index.html" && name != "manifest.webmanifest" {
+        return file_response(path, immutable).await;
+    }
+    let text = tokio::fs::read_to_string(path).await.ok()?;
+    let (body, kind) = if name == "index.html" {
+        (brand_index(&text, config), "text/html; charset=utf-8")
+    } else {
+        (brand_manifest(&text), "application/manifest+json")
+    };
+    Some(([(CONTENT_TYPE, kind), (CACHE_CONTROL, "no-cache")], body).into_response())
+}
+
 /// Страница «здесь нет веб-версии» для `/`, когда веб-клиент не подключён.
 const LANDING: &str = include_str!("landing.html");
 /// Значок Rustspace (`packaging/brand/rustspace/icon.svg`).
@@ -319,6 +439,11 @@ pub async fn fallback(State(state): State<AppState>, request: axum::extract::Req
     let uri = request.uri().clone();
     let path = uri.path();
     let api = path.starts_with("/api/") || path.starts_with("/ws");
+    if (method == Method::GET || method == Method::HEAD)
+        && let Some(asset) = brand_asset(path)
+    {
+        return asset;
+    }
     // Без веб-клиента главная страница объясняет, чем подключаться.
     if state.config.web_dist.is_none()
         && path == "/"
@@ -350,11 +475,12 @@ pub async fn fallback(State(state): State<AppState>, request: axum::extract::Req
     }
     if path != "/"
         && let Some(file) = inside(root, path)
-        && let Some(response) = file_response(&file, path.starts_with("/assets/")).await
+        && let Some(response) =
+            client_file(&file, path.starts_with("/assets/"), &state.config).await
     {
         return response;
     }
-    match file_response(&root.join("index.html"), false).await {
+    match client_file(&root.join("index.html"), false, &state.config).await {
         Some(page) => page,
         None => (
             StatusCode::NOT_FOUND,
@@ -454,6 +580,30 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn web_client_is_marked_as_rustspace() {
+        let plain = std::iter::once(("JWT_SECRET".to_owned(), "s".repeat(40))).collect();
+        let config = crate::config::Config::from_map(&plain).expect("конфигурация");
+        let page = r#"<html><head><meta name="apple-mobile-web-app-title" content="Backspace" /><link rel="icon" type="image/png" href="/icons/favicon-32.png" /><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" /><title>Backspace</title></head><body class="x"><div id="root"></div></body></html>"#;
+        let branded = brand_index(page, &config);
+        assert!(branded.contains("<title>Rustspace</title>"));
+        assert!(branded.contains(r#"content="Rustspace""#));
+        assert!(!branded.contains(r#"rel="icon" type="image/png""#));
+        assert!(branded.contains(
+            r#"<link rel="icon" type="image/svg+xml" href="/rustspace/brand/icon.svg" />"#
+        ));
+        assert!(branded.contains(r#"<body class="x"><a id="rustspace-badge""#));
+        assert!(branded.contains(&escape_html(&config.source_code_url)));
+        let manifest =
+            brand_manifest(r#"{"name":"Backspace","short_name":"Backspace","start_url":"/"}"#);
+        let value: serde_json::Value = serde_json::from_str(&manifest).expect("JSON");
+        assert_eq!(value["name"], "Rustspace");
+        assert_eq!(value["start_url"], "/");
+        assert_eq!(value["icons"][0]["src"], "/rustspace/brand/icon-512.png");
+        assert!(brand_asset("/rustspace/brand/web.css").is_some());
+        assert!(brand_asset("/rustspace/brand/../x").is_none());
+    }
 
     #[test]
     fn policy_names_the_voice_server() {
