@@ -334,12 +334,7 @@ pub(crate) fn hide(message_id: &str) {
 
 /// Автоперевод: перевести чужое сообщение, если включено и оно не на
 /// нужном языке (и перевод не скрывали).
-pub(crate) fn auto(
-    runtime: &tokio::runtime::Handle,
-    ctx: &egui::Context,
-    message_id: &str,
-    text: &str,
-) {
+pub(crate) fn auto(runtime: &crate::rt::Handle, ctx: &egui::Context, message_id: &str, text: &str) {
     let prefs = crate::prefs::get().translate;
     if !prefs.auto {
         return;
@@ -360,7 +355,7 @@ pub(crate) fn auto(
 
 /// Показать перевод сообщения: из кэша или запросить.
 pub(crate) fn request(
-    runtime: &tokio::runtime::Handle,
+    runtime: &crate::rt::Handle,
     ctx: &egui::Context,
     message_id: &str,
     text: &str,
@@ -396,12 +391,11 @@ fn engine_label(engine: Engine) -> &'static str {
 }
 
 fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .user_agent(concat!("rustspace/", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(40))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| e.to_string())
+    let builder = crate::sys::http(Some(std::time::Duration::from_secs(40)));
+    // В браузере переходы ведёт сам браузер.
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = builder.redirect(reqwest::redirect::Policy::none());
+    builder.build().map_err(|e| e.to_string())
 }
 
 /// Переводит текст выбранным сервисом.
@@ -453,7 +447,11 @@ fn http_error(status: reqwest::StatusCode) -> String {
 
 async fn get_json(request: reqwest::RequestBuilder) -> Result<serde_json::Value, String> {
     let response = request.send().await.map_err(|e| {
-        if e.is_connect() {
+        #[cfg(not(target_arch = "wasm32"))]
+        let unreachable = e.is_connect();
+        #[cfg(target_arch = "wasm32")]
+        let unreachable = e.is_request();
+        if unreachable {
             tr("нет связи с сервисом перевода").to_owned()
         } else {
             e.to_string()

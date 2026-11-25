@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
+#[cfg(not(target_arch = "wasm32"))]
 use fxtranslate::engine::{Engine, Translation};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -76,6 +77,7 @@ impl Pair {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Движок направления (общий словарь — один и тот же путь).
     fn engine(&self) -> Result<Engine, String> {
         Engine::load(&self.model, &self.src_vocab, &self.trg_vocab)
@@ -133,13 +135,10 @@ fn http() -> Result<&'static reqwest::Client, String> {
     if let Some(client) = CLIENT.get() {
         return Ok(client);
     }
-    let client = reqwest::Client::builder()
-        .user_agent(concat!("rustspace/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(std::time::Duration::from_secs(20))
-        .timeout(std::time::Duration::from_secs(15 * 60))
-        .https_only(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let builder = crate::sys::http(Some(std::time::Duration::from_secs(15 * 60)));
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = builder.https_only(true);
+    let client = builder.build().map_err(|e| e.to_string())?;
     Ok(CLIENT.get_or_init(|| client))
 }
 
@@ -170,6 +169,14 @@ async fn records() -> Result<Vec<Record>, String> {
 }
 
 /// Скачивает, распаковывает и сверяет файл записи.
+#[cfg(target_arch = "wasm32")]
+#[allow(clippy::unused_async, reason = "как у настольной версии")]
+async fn fetch_file(_record: &Record, _dest: &Path) -> Result<(), String> {
+    Err(tr("перевод без модели недоступен в браузере").to_owned())
+}
+
+/// Скачивает, распаковывает и сверяет файл записи.
+#[cfg(not(target_arch = "wasm32"))]
 async fn fetch_file(record: &Record, dest: &Path) -> Result<(), String> {
     let url = format!(
         "{CDN_ROOT}/{}",
@@ -190,7 +197,7 @@ async fn fetch_file(record: &Record, dest: &Path) -> Result<(), String> {
     }
     let expected = record.decompressed_hash.clone();
     let dest = dest.to_owned();
-    tokio::task::spawn_blocking(move || {
+    bs_rt::spawn_blocking(move || {
         let bytes = unpack(&packed)?;
         if let Some(expected) = expected {
             let got = Sha256::digest(&bytes)
@@ -205,8 +212,8 @@ async fn fetch_file(record: &Record, dest: &Path) -> Result<(), String> {
             }
         }
         let tmp = dest.with_extension("part");
-        std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())
+        crate::files::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+        crate::files::rename(&tmp, &dest).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -236,9 +243,7 @@ async fn ensure_pair(records: &[Record], src: &str, trg: &str) -> Result<Pair, S
     }
     let model = pick(records, "model", src, trg)
         .ok_or_else(|| crate::tf!("нет модели {a0} → {a1}", a0 = src, a1 = trg))?;
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| e.to_string())?;
+    crate::files::create_dir_all(&dir).map_err(|e| e.to_string())?;
     *downloading() = Some(format!("{src} → {trg}"));
     let result = async {
         if let Some(vocab) = pick(records, "vocab", src, trg) {
@@ -281,13 +286,15 @@ async fn route(src: &str, trg: &str) -> Result<Vec<Pair>, String> {
     ])
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Задание потоку переводчика.
 struct Job {
     pairs: Vec<Pair>,
     text: String,
-    reply: tokio::sync::oneshot::Sender<Result<String, String>>,
+    reply: bs_rt::sync::oneshot::Sender<Result<String, String>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Модели держит один поток: движок нельзя передавать между потоками.
 fn worker() -> &'static Mutex<mpsc::Sender<Option<Job>>> {
     static WORKER: OnceLock<Mutex<mpsc::Sender<Option<Job>>>> = OnceLock::new();
@@ -325,6 +332,7 @@ fn worker() -> &'static Mutex<mpsc::Sender<Option<Job>>> {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Движок из одного направления или из двух через английский.
 fn build(pairs: &[Pair]) -> Result<Translation, String> {
     match pairs {
@@ -420,6 +428,7 @@ fn by_script(text: &str) -> Option<String> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Переводит текст с метками `⟦n⟧`: метки и пустые строки остаются на месте,
 /// переводятся только куски текста между ними.
 fn translate_marked(engine: &Translation, text: &str) -> String {
@@ -442,6 +451,7 @@ fn translate_marked(engine: &Translation, text: &str) -> String {
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Кусок без меток: пробелы по краям сохраняются, текст без букв не трогается.
 fn piece(engine: &Translation, text: &str) -> String {
     if !text.chars().any(char::is_alphabetic) {
@@ -467,20 +477,28 @@ pub(crate) async fn translate(target: &str, text: &str) -> Result<String, String
         return Ok(text.to_owned());
     }
     let pairs = route(model_code(&source), model_code(target)).await?;
-    let (reply, answer) = tokio::sync::oneshot::channel();
-    let job = Job {
-        pairs,
-        text: text.to_owned(),
-        reply,
-    };
-    worker()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .send(Some(job))
-        .map_err(|_| tr("переводчик остановился").to_owned())?;
-    answer
-        .await
-        .map_err(|_| tr("переводчик остановился").to_owned())?
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = pairs;
+        Err(tr("перевод без модели недоступен в браузере").to_owned())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let (reply, answer) = bs_rt::sync::oneshot::channel();
+        let job = Job {
+            pairs,
+            text: text.to_owned(),
+            reply,
+        };
+        worker()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .send(Some(job))
+            .map_err(|_| tr("переводчик остановился").to_owned())?;
+        answer
+            .await
+            .map_err(|_| tr("переводчик остановился").to_owned())?
+    }
 }
 
 /// Скачать заранее модели между языком перевода и английским (в обе стороны).
@@ -530,12 +548,15 @@ pub(crate) fn installed() -> Vec<(String, u64)> {
 /// # Errors
 /// Файлы не удалились.
 pub(crate) fn remove_all() -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
     let _ = worker()
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .send(None);
     match root() {
-        Some(root) if root.exists() => std::fs::remove_dir_all(root).map_err(|e| e.to_string()),
+        Some(root) if root.exists() => {
+            crate::files::remove_dir_all(root).map_err(|e| e.to_string())
+        }
         _ => Ok(()),
     }
 }

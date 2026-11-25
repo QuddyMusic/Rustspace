@@ -19,8 +19,8 @@ pub(crate) fn register() {
     if let Some(icon) = &icon
         && !icon.exists()
     {
-        let _ = std::fs::create_dir_all(icon.parent().unwrap_or(icon));
-        let _ = std::fs::write(
+        let _ = crate::files::create_dir_all(icon.parent().unwrap_or(icon));
+        let _ = crate::files::write(
             icon,
             include_bytes!("../../../packaging/linux/rustspace.png"),
         );
@@ -41,6 +41,6 @@ pub(crate) fn register() {
 /// Файл журнала.
 pub(crate) fn log_file() -> Option<std::fs::File> {
     let dir: PathBuf = crate::saved_session::config_dir()?;
-    std::fs::create_dir_all(&dir).ok()?;
+    crate::files::create_dir_all(&dir).ok()?;
     std::fs::File::create(dir.join("rustspace.log")).ok()
 }

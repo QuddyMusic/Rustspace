@@ -9,11 +9,11 @@
 
 use std::collections::HashMap;
 
+use bs_rt::sync::mpsc;
 use bs_types::{ClientEvent, ServerEvent};
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
@@ -29,14 +29,14 @@ pub(crate) async fn spawn(ready: ServerEvent) -> (String, mpsc::UnboundedReceive
     let (tx, rx) = mpsc::unbounded_channel();
     let ready_text = serde_json::to_string(&ready).expect("serialize ready");
 
-    tokio::spawn(async move {
+    bs_rt::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
                 return;
             };
             let events = tx.clone();
             let ready_text = ready_text.clone();
-            tokio::spawn(async move {
+            bs_rt::spawn(async move {
                 let _ = handle_conn(stream, events, ready_text).await;
             });
         }

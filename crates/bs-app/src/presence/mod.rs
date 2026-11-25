@@ -18,7 +18,8 @@ pub(crate) mod stores;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use bs_types::{Activity, ActivityAssets, ActivityTimestamps, ActivityType};
 use serde::{Deserialize, Serialize};
@@ -283,7 +284,7 @@ struct State {
 
 struct Engine {
     state: Mutex<State>,
-    rescan: tokio::sync::Notify,
+    rescan: bs_rt::sync::Notify,
     ipc_server: Mutex<Option<ipc::Server>>,
     ipc_starting: std::sync::atomic::AtomicBool,
 }
@@ -299,11 +300,11 @@ fn icons_path() -> Option<std::path::PathBuf> {
 }
 
 /// Запустить движок (один раз).
-fn engine(runtime: &tokio::runtime::Handle, ctx: &egui::Context) -> Arc<Engine> {
+fn engine(runtime: &crate::rt::Handle, ctx: &egui::Context) -> Arc<Engine> {
     ENGINE
         .get_or_init(|| {
             let uploaded = icons_path()
-                .and_then(|p| std::fs::read_to_string(p).ok())
+                .and_then(|p| crate::files::read_to_string(p).ok())
                 .and_then(|t| serde_json::from_str(&t).ok())
                 .unwrap_or_default();
             let engine = Arc::new(Engine {
@@ -312,7 +313,7 @@ fn engine(runtime: &tokio::runtime::Handle, ctx: &egui::Context) -> Arc<Engine> 
                     uploaded,
                     ..State::default()
                 }),
-                rescan: tokio::sync::Notify::new(),
+                rescan: bs_rt::sync::Notify::new(),
                 ipc_server: Mutex::new(None),
                 ipc_starting: std::sync::atomic::AtomicBool::new(false),
             });
@@ -323,7 +324,7 @@ fn engine(runtime: &tokio::runtime::Handle, ctx: &egui::Context) -> Arc<Engine> 
         .clone()
 }
 
-fn spawn_scanner(runtime: &tokio::runtime::Handle, ctx: &egui::Context, engine: &Arc<Engine>) {
+fn spawn_scanner(runtime: &crate::rt::Handle, ctx: &egui::Context, engine: &Arc<Engine>) {
     let (engine, ctx) = (engine.clone(), ctx.clone());
     runtime.spawn(async move {
         let http = reqwest::Client::new();
@@ -340,7 +341,7 @@ fn spawn_scanner(runtime: &tokio::runtime::Handle, ctx: &egui::Context, engine: 
             }
             let dictionary = lock(&engine).dictionary.clone();
             let scan_stores = stores.clone();
-            let scanned = tokio::task::spawn_blocking(move || {
+            let scanned = bs_rt::spawn_blocking(move || {
                 let infos = procs::list();
                 let found = if prefs.games {
                     games::detect(&infos, &dictionary, &scan_stores.games(), &prefs.bindings())
@@ -357,8 +358,8 @@ fn spawn_scanner(runtime: &tokio::runtime::Handle, ctx: &egui::Context, engine: 
                 fetch_local_icons(&engine, &ctx);
                 ctx.request_repaint();
             }
-            tokio::select! {
-                () = tokio::time::sleep(SCAN_INTERVAL) => {}
+            bs_rt::select! {
+                () = bs_rt::time::sleep(SCAN_INTERVAL) => {}
                 () = engine.rescan.notified() => {}
             }
         }
@@ -455,7 +456,7 @@ fn spawn_media(ctx: &egui::Context, engine: &Arc<Engine>) {
 /// Включить или выключить IPC-сервер по настройке.
 fn ensure_ipc(
     engine: &Arc<Engine>,
-    runtime: &tokio::runtime::Handle,
+    runtime: &crate::rt::Handle,
     ctx: &egui::Context,
     wanted: bool,
 ) {
@@ -486,7 +487,7 @@ fn ensure_ipc(
     }
     let (engine, ctx) = (engine.clone(), ctx.clone());
     runtime.spawn(async move {
-        let (out, mut pushes) = tokio::sync::watch::channel(None);
+        let (out, mut pushes) = bs_rt::sync::watch::channel(None);
         let server = ipc::start(out).await;
         let sockets = server.as_ref().map_or(0, |s| s.sockets);
         if server.is_none() {
@@ -653,6 +654,10 @@ pub(crate) fn rescan() {
 /// Каждый кадр: запустить движок, собрать активность и разослать её
 /// всем подключённым инстансам (с задержкой и с учётом ограничителя).
 pub(crate) fn tick(ctx: &egui::Context, bridge: &mut crate::fleet::Bridge) {
+    // Из браузера не видно ни игр, ни плееров, ни программ с Rich Presence.
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
     let runtime = bridge.runtime();
     let engine = engine(&runtime, ctx);
     take_uploads(&engine, bridge);
@@ -863,7 +868,7 @@ fn take_uploads(engine: &Engine, bridge: &mut crate::fleet::Bridge) {
     if let Some(path) = icons_path()
         && let Ok(text) = serde_json::to_string(&state.uploaded)
     {
-        let _ = std::fs::write(path, text);
+        let _ = crate::files::write(path, text);
     }
 }
 

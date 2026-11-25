@@ -87,7 +87,7 @@ fn cache_path() -> Option<PathBuf> {
 pub(crate) fn load() -> Dictionary {
     let seed = parse_dictionary(SEED).unwrap_or_default();
     let cached = cache_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|p| crate::files::read_to_string(p).ok())
         .and_then(|t| parse_dictionary(&t));
     match cached {
         Some(cached) if cached.version >= seed.version => cached,
@@ -99,7 +99,7 @@ pub(crate) fn load() -> Dictionary {
 pub(crate) async fn sync(http: &reqwest::Client, current: u64) -> Option<Dictionary> {
     let path = cache_path()?;
     let etag_path = path.with_file_name("games-cache-etag.txt");
-    let etag = std::fs::read_to_string(&etag_path)
+    let etag = crate::files::read_to_string(&etag_path)
         .ok()
         .filter(|e| !e.trim().is_empty());
     let mut request = http
@@ -123,11 +123,11 @@ pub(crate) async fn sync(http: &reqwest::Client, current: u64) -> Option<Diction
         return None;
     }
     let temporary = path.with_extension("json.tmp");
-    if std::fs::write(&temporary, &body).is_ok() {
-        let _ = std::fs::rename(&temporary, &path);
+    if crate::files::write(&temporary, &body).is_ok() {
+        let _ = crate::files::rename(&temporary, &path);
     }
     if let Some(etag) = new_etag {
-        let _ = std::fs::write(&etag_path, etag);
+        let _ = crate::files::write(&etag_path, etag);
     }
     (parsed.version > current).then_some(parsed)
 }
@@ -172,7 +172,7 @@ fn obs_streaming() -> bool {
         {
             continue;
         }
-        let Ok(bytes) = std::fs::read(&file) else {
+        let Ok(bytes) = crate::files::read(&file) else {
             continue;
         };
         let tail = &bytes[bytes.len().saturating_sub(1024 * 1024)..];

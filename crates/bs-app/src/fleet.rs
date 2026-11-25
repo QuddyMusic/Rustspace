@@ -20,9 +20,9 @@
 
 use std::ops::{Deref, DerefMut};
 
+use crate::rt::Handle;
 use bs_api::{IdentityDeleteMode, RegistryEntry, RegistryStatus, ReplicatedEntry};
 use bs_types::TransportPolicy;
-use tokio::runtime::Handle;
 
 use crate::bridge::{BridgeRequest, FailureKind, IssuedCredential, Secret, Session};
 use crate::i18n::tr;
@@ -1120,7 +1120,7 @@ impl Bridge {
     /// Адрес и канал запросов каждого работающего инстанса (для картинок).
     pub(crate) fn image_links(
         &self,
-    ) -> Vec<(String, tokio::sync::mpsc::UnboundedSender<BridgeRequest>)> {
+    ) -> Vec<(String, bs_rt::sync::mpsc::UnboundedSender<BridgeRequest>)> {
         self.slots
             .iter()
             .filter_map(|slot| {
@@ -1570,7 +1570,7 @@ mod tests {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let mut bridge = Bridge::new(runtime.handle().clone());
+        let mut bridge = Bridge::new(crate::rt::Handle::new(runtime.handle().clone()));
         bridge.connect_remote("orbit.example", Some("pw"));
         assert!(bridge.take_message().unwrap().contains("домашний"));
         assert_eq!(bridge.rows().len(), 0);
@@ -1583,7 +1583,7 @@ mod tests {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let mut bridge = Bridge::new(runtime.handle().clone());
+        let mut bridge = Bridge::new(crate::rt::Handle::new(runtime.handle().clone()));
         bridge.connect_remote("   ", None);
         assert!(bridge.take_message().unwrap().contains("адрес"));
     }
@@ -1593,7 +1593,7 @@ mod tests {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let mut bridge = Bridge::new(runtime.handle().clone());
+        let mut bridge = Bridge::new(crate::rt::Handle::new(runtime.handle().clone()));
         bridge.connect_and_join("orbit.example", "abc123");
         assert!(bridge.take_message().unwrap().contains("домашний"));
         assert!(

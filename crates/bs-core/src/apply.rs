@@ -722,7 +722,7 @@ fn try_friends(cache: &mut Cache, event: ServerEvent) -> bool {
 
 /// Текущий момент в epoch-миллисекундах (0, если часы ушли до эпохи).
 fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use bs_rt::time::{SystemTime, UNIX_EPOCH};
 
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| {
         i64::try_from(d.as_millis()).map_or(i64::MAX, |ms| ms)

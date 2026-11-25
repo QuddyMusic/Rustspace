@@ -71,14 +71,14 @@ pub(crate) fn unique_path(folder: &Path, name: &str, taken: &mut HashSet<PathBuf
 pub(crate) fn start(ctx: &egui::Context, click: Click) -> Pending {
     let (tx, rx) = channel();
     let ctx = ctx.clone();
-    std::thread::spawn(move || {
+    crate::sys::background(move || {
         let picked = match click {
-            Click::One(target) => rfd::FileDialog::new()
+            Click::One(target) => crate::sys::FileDialog::new()
                 .set_file_name(safe_name(&target.name))
                 .save_file()
                 .map(|path| vec![(target, path)])
                 .unwrap_or_default(),
-            Click::All(targets) => rfd::FileDialog::new()
+            Click::All(targets) => crate::sys::FileDialog::new()
                 .pick_folder()
                 .map(|folder| {
                     let mut taken = HashSet::new();
@@ -116,8 +116,8 @@ mod tests {
     #[test]
     fn unique_path_avoids_disk_and_batch_collisions() {
         let dir = std::env::temp_dir().join(format!("bs-uniq-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("a.txt"), b"x").unwrap();
+        crate::files::create_dir_all(&dir).unwrap();
+        crate::files::write(dir.join("a.txt"), b"x").unwrap();
         let mut taken = HashSet::new();
         assert_eq!(
             unique_path(&dir, "a.txt", &mut taken),
@@ -130,6 +130,6 @@ mod tests {
         assert_eq!(unique_path(&dir, "b", &mut taken), dir.join("b"));
         assert_eq!(unique_path(&dir, "b", &mut taken), dir.join("b (1)"));
         assert_eq!(unique_path(&dir, ".hidden", &mut taken), dir.join("hidden"));
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = crate::files::remove_dir_all(&dir);
     }
 }

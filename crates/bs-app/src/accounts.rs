@@ -72,18 +72,18 @@ fn dir() -> Option<PathBuf> {
 }
 
 fn read(dir: &Path) -> Index {
-    std::fs::read(dir.join(INDEX))
+    crate::files::read(dir.join(INDEX))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
 
 fn write(dir: &Path, index: &Index) {
-    let result = std::fs::create_dir_all(dir).and_then(|()| {
+    let result = crate::files::create_dir_all(dir).and_then(|()| {
         let json = serde_json::to_vec_pretty(index).map_err(std::io::Error::other)?;
         let tmp = dir.join(format!("{INDEX}.tmp"));
-        std::fs::write(&tmp, json)?;
-        std::fs::rename(tmp, dir.join(INDEX))
+        crate::files::write(&tmp, json)?;
+        crate::files::rename(tmp, dir.join(INDEX))
     });
     if let Err(err) = result {
         tracing::warn!(%err, "список аккаунтов не записан");
@@ -231,6 +231,6 @@ mod tests {
         assert_eq!(back.active.as_deref(), Some("session-2.json"));
         assert_eq!(back.accounts, index.accounts);
         assert_eq!(back.accounts[1].subtitle(), "@bob · chat.example.org");
-        let _ = std::fs::remove_dir_all(dir);
+        let _ = crate::files::remove_dir_all(dir);
     }
 }

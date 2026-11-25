@@ -5,7 +5,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use super::procs::ProcessInfo;
 
@@ -90,7 +91,7 @@ fn read_text(path: &Path) -> Option<String> {
     if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
         return None;
     }
-    std::fs::read_to_string(path).ok()
+    crate::files::read_to_string(path).ok()
 }
 
 fn read_json(path: &Path) -> Option<serde_json::Value> {

@@ -19,7 +19,7 @@ pub(crate) struct TranslatePage {
 }
 
 /// Страница «Перевод».
-pub(crate) fn page(ui: &mut egui::Ui, state: &mut TranslatePage, runtime: &tokio::runtime::Handle) {
+pub(crate) fn page(ui: &mut egui::Ui, state: &mut TranslatePage, runtime: &crate::rt::Handle) {
     page_title(ui, tr("Перевод"));
     let saved = crate::prefs::get().translate;
     let mut prefs = saved.clone();
@@ -83,7 +83,7 @@ fn check_card(
     ui: &mut egui::Ui,
     state: &mut TranslatePage,
     prefs: &TranslatePrefs,
-    runtime: &tokio::runtime::Handle,
+    runtime: &crate::rt::Handle,
 ) {
     card(ui, |ui| {
         widgets::section_label(ui, tr("Проверка"));
@@ -138,7 +138,7 @@ fn check_card(
 }
 
 /// Настройки выбранного варианта.
-fn engine_fields(ui: &mut egui::Ui, prefs: &mut TranslatePrefs, runtime: &tokio::runtime::Handle) {
+fn engine_fields(ui: &mut egui::Ui, prefs: &mut TranslatePrefs, runtime: &crate::rt::Handle) {
     let field = |ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str, secret: bool| {
         widgets::field_label(ui, label);
         ui.add(
@@ -213,7 +213,7 @@ fn engine_fields(ui: &mut egui::Ui, prefs: &mut TranslatePrefs, runtime: &tokio:
 fn local_fields(
     ui: &mut egui::Ui,
     local: &mut crate::local_llm::LocalPrefs,
-    runtime: &tokio::runtime::Handle,
+    runtime: &crate::rt::Handle,
 ) {
     use crate::local_llm::{self, MODELS, Progress};
     ui.label(
@@ -335,7 +335,7 @@ fn progress_line(ui: &mut egui::Ui, status: crate::local_llm::Progress) {
 type Prefetch = std::sync::Arc<std::sync::Mutex<Option<Result<(), String>>>>;
 
 /// Перевод без языковой модели: что скачано, скачать для своего языка.
-fn offline_fields(ui: &mut egui::Ui, target: &str, runtime: &tokio::runtime::Handle) {
+fn offline_fields(ui: &mut egui::Ui, target: &str, runtime: &crate::rt::Handle) {
     ui.label(
         theme::muted(tr(
             "Обычный машинный переводчик, как в Firefox: маленькие модели (около 30 МБ на \

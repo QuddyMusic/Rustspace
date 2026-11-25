@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use bs_instances::ConnectionState;
+use bs_rt::sync::mpsc as tokio_mpsc;
 use bs_types::{ClientEvent, DmMessageWithUser, ReadyPayload, ServerEvent, TransportPolicy};
-use tokio::sync::mpsc as tokio_mpsc;
 
 use super::{
     BridgeEvent, BridgeRequest, BridgeResponse, ChannelKind, HISTORY_PAGE, HistoryItems, Phase,
@@ -46,7 +46,7 @@ fn new_bridge() -> Session {
     // Runtime намеренно утекает: `Handle` должен оставаться валидным
     // на всё время теста, а дропать его вручную ради этого не нужно.
     std::mem::forget(runtime);
-    Session::new(handle)
+    Session::new(crate::rt::Handle::new(handle))
 }
 
 /// Мост с живой сессией: кэш и каналы есть, сети нет.
@@ -419,7 +419,7 @@ async fn run_session_happy_path_relays_commands() {
 
     let mut p = params();
     p.base = base;
-    let session = tokio::spawn(run_session(
+    let session = bs_rt::spawn(run_session(
         p,
         events_tx,
         commands_rx,
@@ -427,7 +427,7 @@ async fn run_session_happy_path_relays_commands() {
         responses_tx,
     ));
 
-    let event = tokio::task::spawn_blocking({
+    let event = bs_rt::spawn_blocking({
         let events_rx = events_rx;
         move || events_rx.recv_timeout(Duration::from_secs(10))
     })
@@ -448,7 +448,7 @@ async fn run_session_happy_path_relays_commands() {
 
     // Heartbeat шлёт `ping` в произвольный момент — пропускаем его.
     let received = loop {
-        let event = tokio::time::timeout(Duration::from_secs(10), server_events.recv())
+        let event = bs_rt::time::timeout(Duration::from_secs(10), server_events.recv())
             .await
             .expect("сервер должен получить событие")
             .expect("канал событий сервера не должен закрыться");
@@ -467,7 +467,7 @@ async fn run_session_happy_path_relays_commands() {
     );
 
     drop(commands_tx);
-    tokio::time::timeout(Duration::from_secs(10), session)
+    bs_rt::time::timeout(Duration::from_secs(10), session)
         .await
         .expect("run_session должен завершиться")
         .expect("задача не должна паниковать");
@@ -480,7 +480,7 @@ async fn download_request_writes_the_file_and_reports_failures() {
     let ready = ServerEvent::Ready(Box::new(ready_payload()));
     let (base, _server_events) = crate::fake_instance::spawn(ready).await;
     let dir = std::env::temp_dir().join(format!("bs-bridge-dl-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("папка");
+    crate::files::create_dir_all(&dir).expect("папка");
 
     let (events_tx, events_rx) = std_mpsc::channel();
     let (_commands_tx, commands_rx) = tokio_mpsc::unbounded_channel();
@@ -488,14 +488,14 @@ async fn download_request_writes_the_file_and_reports_failures() {
     let (responses_tx, responses_rx) = std_mpsc::channel();
     let mut p = params();
     p.base = base;
-    let session = tokio::spawn(run_session(
+    let session = bs_rt::spawn(run_session(
         p,
         events_tx,
         commands_rx,
         requests_rx,
         responses_tx,
     ));
-    let ready = tokio::task::spawn_blocking(move || {
+    let ready = bs_rt::spawn_blocking(move || {
         let event = events_rx.recv_timeout(Duration::from_secs(10));
         (events_rx, event)
     })
@@ -521,7 +521,7 @@ async fn download_request_writes_the_file_and_reports_failures() {
             })
             .expect("запрос");
     }
-    let states = tokio::task::spawn_blocking(move || {
+    let states = bs_rt::spawn_blocking(move || {
         let mut done = std::collections::HashMap::new();
         while done.len() < 2 {
             match responses_rx.recv_timeout(Duration::from_secs(10)) {
@@ -543,10 +543,10 @@ async fn download_request_writes_the_file_and_reports_failures() {
         matches!(states.get(&2), Some(super::DownloadState::Failed(m)) if m.contains("больше не доступен")),
         "{states:?}"
     );
-    assert_eq!(std::fs::read(&ok_path).expect("файл").len(), 3000);
+    assert_eq!(crate::files::read(&ok_path).expect("файл").len(), 3000);
     assert!(!bad_path.exists());
     session.abort();
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = crate::files::remove_dir_all(&dir);
 }
 
 /// Явный выход стирает сохранённую сессию, а без файла входа по токену нет.
@@ -585,17 +585,16 @@ async fn resume_with_saved_token_reaches_ready_and_persists() {
     p.password = zeroize::Zeroizing::new(String::new());
     p.resume = Some(Secret::new("jwt-abc"));
     p.persist = Some(path.clone());
-    let session = tokio::spawn(run_session(
+    let session = bs_rt::spawn(run_session(
         p,
         events_tx,
         commands_rx,
         requests_rx,
         responses_tx,
     ));
-    let event =
-        tokio::task::spawn_blocking(move || events_rx.recv_timeout(Duration::from_secs(10)))
-            .await
-            .expect("join");
+    let event = bs_rt::spawn_blocking(move || events_rx.recv_timeout(Duration::from_secs(10)))
+        .await
+        .expect("join");
     assert!(matches!(&event, Ok(BridgeEvent::Ready { .. })), "{event:?}");
     let saved = crate::saved_session::load(&path).expect("сессия сохранена");
     assert_eq!(saved.base, base);
@@ -652,7 +651,7 @@ async fn aborted_session_still_reports_ended() {
 
     let mut p = params();
     p.base = base;
-    let session = tokio::spawn(run_session(
+    let session = bs_rt::spawn(run_session(
         p,
         events_tx,
         commands_rx,
@@ -660,7 +659,7 @@ async fn aborted_session_still_reports_ended() {
         responses_tx,
     ));
 
-    let events_rx = tokio::task::spawn_blocking(move || {
+    let events_rx = bs_rt::spawn_blocking(move || {
         let first = events_rx.recv_timeout(Duration::from_secs(10));
         assert!(matches!(first, Ok(BridgeEvent::Ready { .. })), "{first:?}");
         events_rx
@@ -671,7 +670,7 @@ async fn aborted_session_still_reports_ended() {
     session.abort();
     let _ = session.await;
 
-    let events_rx = tokio::task::spawn_blocking(move || {
+    let events_rx = bs_rt::spawn_blocking(move || {
         // Допускаем промежуточные `State`, но `Ended` обязан прийти.
         loop {
             match events_rx.recv_timeout(Duration::from_secs(10)) {

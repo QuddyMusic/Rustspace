@@ -52,7 +52,27 @@ pub(crate) fn message(cache: &Cache, message: &NewMessage, focused: bool) {
     show(toast(cache, message, prefs.previews));
 }
 
+/// Показ уведомлением браузера (разрешение спрашивается при первом).
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn show(toast: Toast) {
+    use web_sys::{Notification, NotificationOptions, NotificationPermission};
+    match Notification::permission() {
+        NotificationPermission::Granted => {
+            let options = NotificationOptions::new();
+            options.set_body(&toast.body);
+            if let Err(err) = Notification::new_with_options(&toast.title, &options) {
+                tracing::debug!(?err, "уведомление браузера не показано");
+            }
+        }
+        NotificationPermission::Default => {
+            let _ = Notification::request_permission();
+        }
+        _ => {}
+    }
+}
+
 /// Показ в фоновом потоке.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn show(toast: Toast) {
     let spawned = std::thread::Builder::new()
         .name("notify".to_owned())

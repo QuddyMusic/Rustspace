@@ -330,7 +330,7 @@ impl Session {
                 .map(|(list, _)| list)
                 .unwrap_or_default();
             self.space_profiles
-                .insert(space_id.to_owned(), (profiles, std::time::Instant::now()));
+                .insert(space_id.to_owned(), (profiles, web_time::Instant::now()));
             self.request(BridgeRequest::SpaceProfiles(space_id.to_owned()));
         }
     }
@@ -351,8 +351,8 @@ impl Session {
             let entry = self
                 .stream_previews
                 .entry(key.clone())
-                .or_insert_with(|| (None, std::time::Instant::now(), 0));
-            entry.1 = std::time::Instant::now();
+                .or_insert_with(|| (None, web_time::Instant::now(), 0));
+            entry.1 = web_time::Instant::now();
             self.request(BridgeRequest::StreamPreview(super::PreviewOp::Get {
                 channel_id: key.0.clone(),
                 user_id: key.1.clone(),

@@ -254,8 +254,8 @@ mod tests {
     #[test]
     fn hyprland_hide_and_show() {
         let dir = std::env::temp_dir().join(format!("rs-wm-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
+        let _ = crate::files::remove_dir_all(&dir);
+        crate::files::create_dir_all(&dir).expect("dir");
         let path = dir.join(".socket.sock");
         let listener = UnixListener::bind(&path).expect("bind");
         let server = std::thread::spawn(move || {
@@ -289,7 +289,7 @@ mod tests {
                 format!("dispatch focuswindow pid:{pid}"),
             ]
         );
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = crate::files::remove_dir_all(&dir);
     }
 
     #[test]

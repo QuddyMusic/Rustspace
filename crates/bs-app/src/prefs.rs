@@ -12,7 +12,8 @@
 
 use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -319,7 +320,7 @@ pub(crate) fn default_path() -> Option<PathBuf> {
 pub(crate) fn load(path: Option<PathBuf>) -> Prefs {
     let prefs = path
         .as_deref()
-        .and_then(|path| std::fs::read(path).ok())
+        .and_then(|path| crate::files::read(path).ok())
         .and_then(|bytes| match serde_json::from_slice::<Prefs>(&bytes) {
             Ok(prefs) => Some(prefs),
             Err(err) => {
@@ -375,12 +376,12 @@ pub(crate) fn flush(force: bool) {
 /// Атомарная запись файла.
 fn write(path: &std::path::Path, prefs: &Prefs) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+        crate::files::create_dir_all(dir)?;
     }
     let json = serde_json::to_vec_pretty(prefs).map_err(std::io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, path)
+    crate::files::write(&tmp, json)?;
+    crate::files::rename(&tmp, path)
 }
 
 #[cfg(test)]
@@ -439,7 +440,7 @@ mod tests {
             },
         );
         write(&path, &prefs).unwrap();
-        let back: Prefs = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let back: Prefs = serde_json::from_slice(&crate::files::read(&path).unwrap()).unwrap();
         assert_eq!(back, prefs);
     }
 

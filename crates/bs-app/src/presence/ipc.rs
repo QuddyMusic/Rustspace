@@ -17,9 +17,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use bs_rt::sync::watch;
 use serde_json::{Value, json};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::watch;
 
 const OP_HANDSHAKE: i32 = 0;
 const OP_FRAME: i32 = 1;
@@ -232,7 +233,7 @@ struct Shared {
 
 /// Работающий сервер; при сбросе останавливается и убирает сокеты.
 pub(crate) struct Server {
-    tasks: Vec<tokio::task::JoinHandle<()>>,
+    tasks: Vec<bs_rt::JoinHandle<()>>,
     #[cfg(unix)]
     paths: Vec<std::path::PathBuf>,
     /// Сколько сокетов (каналов) слушаем.
@@ -246,7 +247,7 @@ impl Drop for Server {
         }
         #[cfg(unix)]
         for path in &self.paths {
-            let _ = std::fs::remove_file(path);
+            let _ = crate::files::remove_file(path);
         }
     }
 }
@@ -286,6 +287,7 @@ fn ready_payload() -> Value {
 }
 
 /// Соединение одной игры: её состояние разбора.
+#[cfg(not(target_arch = "wasm32"))]
 struct Conn<'a> {
     id: u64,
     client_id: Option<String>,
@@ -294,6 +296,7 @@ struct Conn<'a> {
     out: &'a watch::Sender<Option<IpcPush>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Conn<'_> {
     /// Разобрать накопленное: кадры для ответа и `true`, если пора закрыть.
     fn feed(&mut self, data: &[u8]) -> (Vec<Vec<u8>>, bool) {
@@ -361,6 +364,7 @@ impl Conn<'_> {
 }
 
 /// Одно соединение игры.
+#[cfg(not(target_arch = "wasm32"))]
 async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
     shared: Arc<Mutex<Shared>>,
@@ -399,7 +403,7 @@ async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
         }
     }
     // Отсрочка: переподключающаяся игра не мигает активностью.
-    tokio::time::sleep(DISCONNECT_GRACE).await;
+    bs_rt::time::sleep(DISCONNECT_GRACE).await;
     shared
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -510,14 +514,14 @@ pub(crate) async fn start(out: watch::Sender<Option<IpcPush>>) -> Option<Server>
                 if !meta.file_type().is_socket() {
                     continue; // Чужой файл не удаляем никогда.
                 }
-                let probe = tokio::time::timeout(
+                let probe = bs_rt::time::timeout(
                     Duration::from_millis(400),
                     tokio::net::UnixStream::connect(&path),
                 )
                 .await;
                 match probe {
                     Ok(Err(error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
-                        if std::fs::remove_file(&path).is_err() {
+                        if crate::files::remove_file(&path).is_err() {
                             continue;
                         }
                     }
@@ -529,9 +533,9 @@ pub(crate) async fn start(out: watch::Sender<Option<IpcPush>>) -> Option<Server>
             };
             let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
             let (shared, out) = (shared.clone(), out.clone());
-            server.tasks.push(tokio::spawn(async move {
+            server.tasks.push(bs_rt::spawn(async move {
                 while let Ok((stream, _)) = listener.accept().await {
-                    tokio::spawn(serve(stream, shared.clone(), out.clone()));
+                    bs_rt::spawn(serve(stream, shared.clone(), out.clone()));
                 }
             }));
             server.paths.push(path);
@@ -561,7 +565,7 @@ pub(crate) async fn start(out: watch::Sender<Option<IpcPush>>) -> Option<Server>
             continue;
         };
         let (shared, out) = (shared.clone(), out.clone());
-        server.tasks.push(tokio::spawn(async move {
+        server.tasks.push(bs_rt::spawn(async move {
             loop {
                 if pipe.connect().await.is_err() {
                     break;
@@ -570,12 +574,19 @@ pub(crate) async fn start(out: watch::Sender<Option<IpcPush>>) -> Option<Server>
                     break;
                 };
                 let connected = std::mem::replace(&mut pipe, next);
-                tokio::spawn(serve(connected, shared.clone(), out.clone()));
+                bs_rt::spawn(serve(connected, shared.clone(), out.clone()));
             }
         }));
         server.sockets += 1;
     }
     (server.sockets > 0).then_some(server)
+}
+
+/// В браузере программы не достучатся до страницы: IPC нет.
+#[cfg(target_arch = "wasm32")]
+#[allow(clippy::unused_async, reason = "как у настоящего сервера")]
+pub(crate) async fn start(_out: watch::Sender<Option<IpcPush>>) -> Option<Server> {
+    None
 }
 
 #[cfg(test)]
@@ -624,7 +635,7 @@ mod tests {
         let (out, mut seen) = watch::channel(None);
         let shared = Arc::new(Mutex::new(Shared::default()));
         let (client, server) = tokio::io::duplex(4096);
-        tokio::spawn(serve(server, shared, out));
+        bs_rt::spawn(serve(server, shared, out));
         let (mut read, mut write) = tokio::io::split(client);
         write
             .write_all(&encode_frame(
@@ -649,7 +660,7 @@ mod tests {
             .write_all(&encode_frame(OP_FRAME, &set))
             .await
             .unwrap_or_default();
-        let changed = tokio::time::timeout(Duration::from_secs(2), seen.changed()).await;
+        let changed = bs_rt::time::timeout(Duration::from_secs(2), seen.changed()).await;
         assert!(changed.is_ok());
         let push = seen.borrow().clone();
         assert_eq!(push.as_ref().and_then(|p| p.pid), Some(77));

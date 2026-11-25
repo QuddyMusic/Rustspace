@@ -9,7 +9,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -166,7 +167,7 @@ pub(crate) fn installed(model: &str) -> Installed {
         return Installed::default();
     };
     let engine_dir = root.join("engine");
-    let tag = std::fs::read_to_string(engine_dir.join("VERSION")).ok();
+    let tag = crate::files::read_to_string(engine_dir.join("VERSION")).ok();
     let engine = tag.filter(|_| find_file(&engine_dir, server_name()).is_some());
     let gpu = engine_dir.join("GPU").exists();
     let model = model_file(&root, model).filter(|p| p.exists());
@@ -325,14 +326,11 @@ pub(crate) fn pick_model_file(model: &serde_json::Value) -> Option<String> {
 }
 
 fn http() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .user_agent(concat!("rustspace/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| e.to_string())
+    crate::sys::http(None).build().map_err(|e| e.to_string())
 }
 
 /// Скачать в файл (через `.part`), сообщая ход.
+#[cfg(not(target_arch = "wasm32"))]
 async fn download_to(
     ctx: &egui::Context,
     client: &reqwest::Client,
@@ -369,10 +367,29 @@ async fn download_to(
         .map_err(|e| e.to_string())
 }
 
+/// В браузере ничего не скачивается на диск.
+#[cfg(target_arch = "wasm32")]
+async fn download_to(
+    _ctx: &egui::Context,
+    _client: &reqwest::Client,
+    _what: &'static str,
+    _url: &str,
+    _target: &Path,
+) -> Result<(), String> {
+    Err(tr("локальная модель недоступна в браузере").to_owned())
+}
+
+/// В браузере архивы не распаковываются.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn unpack(_archive: &Path, _dir: &Path) -> Result<(), String> {
+    Err(tr("локальная модель недоступна в браузере").to_owned())
+}
+
 /// Распаковать архив llama.cpp в `dir`, убрав верхний каталог.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn unpack(archive: &Path, dir: &Path) -> Result<(), String> {
-    let _ = std::fs::remove_dir_all(dir);
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let _ = crate::files::remove_dir_all(dir);
+    crate::files::create_dir_all(dir).map_err(|e| e.to_string())?;
     let is_zip = archive
         .extension()
         .is_some_and(|x| x.eq_ignore_ascii_case("zip"));
@@ -386,11 +403,11 @@ pub(crate) fn unpack(archive: &Path, dir: &Path) -> Result<(), String> {
             };
             let target = dir.join(path);
             if entry.is_dir() {
-                std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+                crate::files::create_dir_all(&target).map_err(|e| e.to_string())?;
                 continue;
             }
             if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                crate::files::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
             let mut out = std::fs::File::create(&target).map_err(|e| e.to_string())?;
             std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
@@ -451,7 +468,7 @@ async fn install_engine(
             name = candidates[0].clone()
         )
     })?;
-    std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+    crate::files::create_dir_all(root).map_err(|e| e.to_string())?;
     let archive = root.join(
         if Path::new(&suffix).extension().is_some_and(|x| x == "zip") {
             "engine.zip"
@@ -463,17 +480,17 @@ async fn install_engine(
     set(ctx, Progress::Unpacking);
     let dir = root.join("engine");
     let (archive2, dir2) = (archive.clone(), dir.clone());
-    tokio::task::spawn_blocking(move || unpack(&archive2, &dir2))
+    bs_rt::spawn_blocking(move || unpack(&archive2, &dir2))
         .await
         .map_err(|e| e.to_string())??;
-    let _ = std::fs::remove_file(&archive);
-    std::fs::write(dir.join("VERSION"), &tag).map_err(|e| e.to_string())?;
+    let _ = crate::files::remove_file(&archive);
+    crate::files::write(dir.join("VERSION"), &tag).map_err(|e| e.to_string())?;
     if suffix.contains("vulkan") {
-        let _ = std::fs::write(dir.join("GPU"), "1");
+        let _ = crate::files::write(dir.join("GPU"), "1");
     } else if gpu {
         // Под видеокарту сборки не нашлось: стоит обычная, без повторной
         // установки при каждом запуске.
-        let _ = std::fs::write(dir.join("CPU_FALLBACK"), "1");
+        let _ = crate::files::write(dir.join("CPU_FALLBACK"), "1");
     }
     Ok(())
 }
@@ -497,8 +514,8 @@ async fn install_model(
     let file = pick_model_file(&info)
         .ok_or_else(|| tr("в репозитории модели нет файла Q4_K_M").to_owned())?;
     let dir = root.join("models").join(choice.id);
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let _ = crate::files::remove_dir_all(&dir);
+    crate::files::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let url = format!("https://huggingface.co/{}/resolve/main/{file}", choice.repo);
     let name = Path::new(&file)
         .file_name()
@@ -507,7 +524,7 @@ async fn install_model(
 }
 
 /// Поставить недостающее: llama.cpp (нужной сборки) и выбранную модель.
-pub(crate) fn install(runtime: &tokio::runtime::Handle, ctx: &egui::Context, prefs: &LocalPrefs) {
+pub(crate) fn install(runtime: &crate::rt::Handle, ctx: &egui::Context, prefs: &LocalPrefs) {
     if matches!(
         status(),
         Progress::Looking(_) | Progress::Downloading(..) | Progress::Unpacking
@@ -541,7 +558,7 @@ pub(crate) fn install(runtime: &tokio::runtime::Handle, ctx: &egui::Context, pre
 pub(crate) fn remove() {
     stop();
     if let Some(root) = root() {
-        let _ = std::fs::remove_dir_all(root);
+        let _ = crate::files::remove_dir_all(root);
     }
     *progress() = Progress::Idle;
 }
@@ -594,7 +611,7 @@ fn spawn_server(
         |r| r.join("llama-server.log"),
     );
     if let Some(parent) = log_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        let _ = crate::files::create_dir_all(parent);
     }
     let log = std::fs::File::create(&log_path).map_err(|e| {
         crate::tf!(
@@ -711,7 +728,7 @@ pub(crate) async fn ensure(prefs: &LocalPrefs) -> Result<String, String> {
             stop();
             return Err(tr("модель не загрузилась за две минуты").to_owned());
         }
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        bs_rt::time::sleep(Duration::from_millis(400)).await;
     }
 }
 

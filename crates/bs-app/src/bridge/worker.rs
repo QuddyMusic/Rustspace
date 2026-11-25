@@ -79,10 +79,10 @@ pub(super) async fn run_session(
     let mut sub = handle.subscribe();
     // Загрузки картинок идут параллельно, но не больше `MAX_IMAGE_JOBS`
     // сразу; при выходе из сессии `JoinSet` обрывает незавершённые.
-    let mut jobs: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
-    let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_IMAGE_JOBS));
+    let mut jobs: bs_rt::JoinSet<()> = bs_rt::JoinSet::new();
+    let gate = std::sync::Arc::new(bs_rt::sync::Semaphore::new(MAX_IMAGE_JOBS));
     loop {
-        tokio::select! {
+        bs_rt::select! {
             Some(_) = jobs.join_next(), if !jobs.is_empty() => {}
             event = sub.recv() => {
                 if !forward_event(event, &events, persist.as_deref()) {
@@ -306,9 +306,9 @@ fn forward_event(
 fn spawn_job(
     request: BridgeRequest,
     client: &bs_api::ApiClient,
-    gate: &std::sync::Arc<tokio::sync::Semaphore>,
+    gate: &std::sync::Arc<bs_rt::sync::Semaphore>,
     responses: &std_mpsc::Sender<BridgeResponse>,
-    jobs: &mut tokio::task::JoinSet<()>,
+    jobs: &mut bs_rt::JoinSet<()>,
 ) -> Option<BridgeRequest> {
     let client = client.clone();
     let tx = responses.clone();
@@ -331,28 +331,9 @@ fn spawn_job(
                 let _ = tx.send(BridgeResponse::Download { id, state });
             });
         }
+        // В браузере файл целиком скачивается и отдаётся браузеру.
         BridgeRequest::Download { id, path, dest } => {
-            jobs.spawn(async move {
-                let mut reported = 0_u64;
-                let progress_tx = tx.clone();
-                let result = client
-                    .download_asset(&path, &dest, move |got, total| {
-                        // Не чаще раза на каждые 128 КиБ (и в самом начале).
-                        if got == 0 || got.saturating_sub(reported) >= DOWNLOAD_STEP {
-                            reported = got;
-                            let _ = progress_tx.send(BridgeResponse::Download {
-                                id,
-                                state: DownloadState::Progress { got, total },
-                            });
-                        }
-                    })
-                    .await;
-                let state = match result {
-                    Ok(_) => DownloadState::Done,
-                    Err(err) => DownloadState::Failed(download_message(&err)),
-                };
-                let _ = tx.send(BridgeResponse::Download { id, state });
-            });
+            jobs.spawn(download_job(client, id, path, dest, tx));
         }
         BridgeRequest::Raw { tag, path } => {
             jobs.spawn(async move {
@@ -413,6 +394,57 @@ fn spawn_job(
         other => return Some(other),
     }
     None
+}
+
+/// Скачивание в файл с ходом загрузки.
+#[cfg(not(target_arch = "wasm32"))]
+async fn download_job(
+    client: bs_api::ApiClient,
+    id: u64,
+    path: bs_api::AssetPath,
+    dest: std::path::PathBuf,
+    tx: std_mpsc::Sender<BridgeResponse>,
+) {
+    let mut reported = 0_u64;
+    let progress_tx = tx.clone();
+    let result = client
+        .download_asset(&path, &dest, move |got, total| {
+            // Не чаще раза на каждые 128 КиБ (и в самом начале).
+            if got == 0 || got.saturating_sub(reported) >= DOWNLOAD_STEP {
+                reported = got;
+                let _ = progress_tx.send(BridgeResponse::Download {
+                    id,
+                    state: DownloadState::Progress { got, total },
+                });
+            }
+        })
+        .await;
+    let state = match result {
+        Ok(_) => DownloadState::Done,
+        Err(err) => DownloadState::Failed(download_message(&err)),
+    };
+    let _ = tx.send(BridgeResponse::Download { id, state });
+}
+
+/// Скачивание в браузере: файл целиком и сразу браузеру.
+#[cfg(target_arch = "wasm32")]
+async fn download_job(
+    client: bs_api::ApiClient,
+    id: u64,
+    path: bs_api::AssetPath,
+    dest: std::path::PathBuf,
+    tx: std_mpsc::Sender<BridgeResponse>,
+) {
+    let result = async {
+        let bytes = client
+            .fetch_asset(&path, usize::MAX)
+            .await
+            .map_err(|err| download_message(&err))?;
+        crate::sys::save_file(&dest, bytes).await
+    }
+    .await;
+    let state = result.map_or_else(DownloadState::Failed, |()| DownloadState::Done);
+    let _ = tx.send(BridgeResponse::Download { id, state });
 }
 
 /// Чем закончилась попытка регистрации на чужом инстансе.
@@ -549,9 +581,7 @@ async fn download_sealed(
             .await
             .map_err(|err| download_message(&err))?;
         let plain = crate::e2ee_files::reveal(path.as_str(), bytes)?;
-        tokio::fs::write(dest, plain)
-            .await
-            .map_err(|err| err.to_string())
+        crate::sys::save_file(dest, plain).await
     }
     .await;
     match result {
@@ -572,7 +602,7 @@ pub(super) async fn load_image(
     // Вложение зашифрованной переписки — расшифровать перед показом.
     let bytes = crate::e2ee_files::reveal(path.as_str(), bytes)?;
     // Декодирование грузит процессор — уводим его с рабочих потоков сети.
-    tokio::task::spawn_blocking(move || bs_media::decode(&bytes, &limits))
+    bs_rt::spawn_blocking(move || bs_media::decode(&bytes, &limits))
         .await
         .map_err(|err| crate::tf!("декодер упал: {err}", err = err))?
         .map_err(|err| err.to_string())
@@ -1403,10 +1433,10 @@ async fn passkeys(
                 .passkey_register_ticket()
                 .await
                 .map_err(|e| upload_message(&e))?;
-            opener::open(&ticket.url).map_err(|e| e.to_string())?;
+            crate::sys::open_url(&ticket.url)?;
             let mut done = false;
             for _ in 0..150 {
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                bs_rt::time::sleep(std::time::Duration::from_secs(2)).await;
                 match client.passkey_status(&ticket.ticket).await {
                     Ok(bs_api::PasskeyStatus::Pending) => {}
                     Ok(bs_api::PasskeyStatus::Done { .. }) => {

@@ -430,7 +430,7 @@ fn rows(ui: &mut egui::Ui, items: &[&Item], tab: Tab) -> Option<String> {
                 ui.label(theme::muted(meta).size(12.0));
                 if clicked {
                     if tab == Tab::Links {
-                        let _ = opener::open(&item.url);
+                        let _ = crate::sys::open_url(&item.url);
                     } else {
                         jump = Some(item.message_id.clone());
                     }

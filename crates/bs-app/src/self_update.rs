@@ -78,8 +78,8 @@ fn writable_dir(path: &Path) -> bool {
         return false;
     };
     let probe = dir.join(format!(".rustspace-write-test-{}", std::process::id()));
-    let ok = std::fs::write(&probe, b"").is_ok();
-    let _ = std::fs::remove_file(&probe);
+    let ok = crate::files::write(&probe, b"").is_ok();
+    let _ = crate::files::remove_file(&probe);
     ok
 }
 
@@ -150,7 +150,7 @@ pub(crate) fn asset_for<'a>(method: &Method, assets: &'a [Asset]) -> Option<&'a 
 
 /// Начинает обновление до `version` (в фоне).
 pub(crate) fn start(
-    runtime: &tokio::runtime::Handle,
+    runtime: &crate::rt::Handle,
     ctx: &egui::Context,
     version: String,
     assets: &[Asset],
@@ -225,7 +225,7 @@ async fn run(
     }
     set(ctx, Progress::Installing);
     let method = method.clone();
-    tokio::task::spawn_blocking(move || install(&method, &bytes))
+    bs_rt::spawn_blocking(move || install(&method, &bytes))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -250,12 +250,21 @@ async fn download(
         .and_then(reqwest::Response::error_for_status)
         .map_err(|e| e.to_string())?;
     let total = response.content_length();
-    let mut bytes = Vec::with_capacity(usize::try_from(total.unwrap_or(0)).unwrap_or(0));
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        bytes.extend_from_slice(&chunk);
+    #[cfg(target_arch = "wasm32")]
+    {
+        let bytes = response.bytes().await.map_err(|e| e.to_string())?.to_vec();
         set(ctx, Progress::Downloading(bytes.len() as u64, total));
+        Ok(bytes)
     }
-    Ok(bytes)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut bytes = Vec::with_capacity(usize::try_from(total.unwrap_or(0)).unwrap_or(0));
+        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+            bytes.extend_from_slice(&chunk);
+            set(ctx, Progress::Downloading(bytes.len() as u64, total));
+        }
+        Ok(bytes)
+    }
 }
 
 /// Кладёт `data` рядом с `target` и атомарно подменяет его.
@@ -266,20 +275,27 @@ fn replace_file(target: &Path, data: &[u8]) -> Result<(), String> {
             .file_name()
             .map_or_else(|| "rustspace".into(), |n| n.to_string_lossy())
     ));
-    std::fs::write(&temp, data).map_err(|e| e.to_string())?;
+    crate::files::write(&temp, data).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| e.to_string())?;
     }
-    std::fs::rename(&temp, target).map_err(|e| {
-        let _ = std::fs::remove_file(&temp);
+    crate::files::rename(&temp, target).map_err(|e| {
+        let _ = crate::files::remove_file(&temp);
         e.to_string()
     })
 }
 
+/// В браузере обновляет сама страница.
+#[cfg(target_arch = "wasm32")]
+fn binary_from_tarball(_data: &[u8]) -> Result<Vec<u8>, String> {
+    Err(tr("веб-версия обновляется вместе с сервером").to_owned())
+}
+
 /// Достаёт `rustspace` из архива релиза.
+#[cfg(not(target_arch = "wasm32"))]
 fn binary_from_tarball(data: &[u8]) -> Result<Vec<u8>, String> {
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(data));
     for entry in archive.entries().map_err(|e| e.to_string())? {
@@ -304,17 +320,17 @@ fn install(method: &Method, data: &[u8]) -> Result<(), String> {
         Method::AppImage(image) => replace_file(image, data),
         Method::Installer => {
             let path = std::env::temp_dir().join("rustspace-setup.exe");
-            std::fs::write(&path, data).map_err(|e| e.to_string())?;
+            crate::files::write(&path, data).map_err(|e| e.to_string())?;
             *INSTALLER.lock().unwrap_or_else(PoisonError::into_inner) = Some(path);
             Ok(())
         }
         Method::MacBundle(bundle) => {
             let parent = bundle.parent().ok_or("нет папки")?;
             let staging = parent.join(".rustspace-update");
-            let _ = std::fs::remove_dir_all(&staging);
-            std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+            let _ = crate::files::remove_dir_all(&staging);
+            crate::files::create_dir_all(&staging).map_err(|e| e.to_string())?;
             let zip = staging.join("update.zip");
-            std::fs::write(&zip, data).map_err(|e| e.to_string())?;
+            crate::files::write(&zip, data).map_err(|e| e.to_string())?;
             let status = std::process::Command::new("ditto")
                 .args(["-x", "-k"])
                 .arg(&zip)
@@ -326,14 +342,14 @@ fn install(method: &Method, data: &[u8]) -> Result<(), String> {
             }
             let fresh = staging.join("Rustspace.app");
             let old = parent.join(".Rustspace.app.old");
-            let _ = std::fs::remove_dir_all(&old);
-            std::fs::rename(bundle, &old).map_err(|e| e.to_string())?;
-            if let Err(err) = std::fs::rename(&fresh, bundle) {
-                let _ = std::fs::rename(&old, bundle);
+            let _ = crate::files::remove_dir_all(&old);
+            crate::files::rename(bundle, &old).map_err(|e| e.to_string())?;
+            if let Err(err) = crate::files::rename(&fresh, bundle) {
+                let _ = crate::files::rename(&old, bundle);
                 return Err(err.to_string());
             }
-            let _ = std::fs::remove_dir_all(&old);
-            let _ = std::fs::remove_dir_all(&staging);
+            let _ = crate::files::remove_dir_all(&old);
+            let _ = crate::files::remove_dir_all(&staging);
             Ok(())
         }
         Method::Manual(why) => Err(why.clone()),

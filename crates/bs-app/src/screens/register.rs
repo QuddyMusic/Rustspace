@@ -7,7 +7,8 @@
 //! выполняется вход.
 
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use bs_api::{ApiClient, InstanceInfo, InviteCheck, RegisterRequest, UsernameCheck};
 use bs_types::{Origin, TransportPolicy};
@@ -49,7 +50,7 @@ impl<T> Default for Probe<T> {
     }
 }
 
-impl<T: Send + 'static> Probe<T> {
+impl<T: bs_rt::MaybeSend + 'static> Probe<T> {
     /// Значение поменялось: сбросить ответ и запланировать проверку.
     fn touch(&mut self, key: &str) {
         if self.key != key {
@@ -66,10 +67,10 @@ impl<T: Send + 'static> Probe<T> {
     }
 
     /// Запускает запрос, когда подошёл срок, и принимает ответы.
-    fn poll<F, Fut>(&mut self, runtime: &tokio::runtime::Handle, run: F)
+    fn poll<F, Fut>(&mut self, runtime: &crate::rt::Handle, run: F)
     where
         F: FnOnce(String) -> Fut,
-        Fut: std::future::Future<Output = Result<T, String>> + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, String>> + bs_rt::MaybeSend + 'static,
     {
         if let Some(rx) = &self.rx {
             while let Ok((key, result)) = rx.try_recv() {

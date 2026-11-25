@@ -13,7 +13,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use zbus::blocking::{Connection, MessageIterator};
 use zbus::message::Type as MessageType;
@@ -111,8 +112,8 @@ fn triggers(shortcuts: &Shortcuts) -> BTreeMap<Action, String> {
 }
 
 fn token() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let nanos = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
     format!("backspace_{}_{nanos}", std::process::id())
 }

@@ -39,7 +39,7 @@ pub(crate) enum Step {
 impl PasskeyLogin {
     /// Начинает вход: билет, браузер, опрос до пяти минут.
     pub(crate) fn start(
-        runtime: &tokio::runtime::Handle,
+        runtime: &crate::rt::Handle,
         base: String,
         transport: TransportPolicy,
     ) -> Self {
@@ -74,7 +74,7 @@ impl PasskeyLogin {
                 url: ticket.url,
             });
             for _ in 0..150 {
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                bs_rt::time::sleep(Duration::from_secs(2)).await;
                 match client.passkey_status(&ticket.ticket).await {
                     Ok(bs_api::PasskeyStatus::Pending) => {}
                     Ok(bs_api::PasskeyStatus::Done { token: Some(token) }) => {
@@ -112,7 +112,7 @@ impl PasskeyLogin {
         while let Ok(event) = self.rx.try_recv() {
             match event {
                 Event::Ticket { code, url } => {
-                    if let Err(err) = opener::open(&url) {
+                    if let Err(err) = crate::sys::open_url(&url) {
                         self.error =
                             Some(crate::tf!("Не удалось открыть браузер: {err}", err = err));
                     }

@@ -10,6 +10,21 @@
 // Бинарь: `pub` не нужен (unreachable_pub), а `pub(crate)` внутри приватных
 // модулей clippy считает избыточным. Оставляем `pub(crate)` — он честнее.
 #![allow(clippy::redundant_pub_crate)]
+// В браузере задачи живут в одном потоке, а настольные службы (трей,
+// игры, локальные модели, самообновление) не собираются в работу.
+#![cfg_attr(
+    target_arch = "wasm32",
+    allow(
+        clippy::future_not_send,
+        dead_code,
+        unused_imports,
+        unused_mut,
+        clippy::unused_async,
+        clippy::unused_self,
+        clippy::needless_pass_by_value,
+        reason = "веб-версия без настольных служб"
+    )
+)]
 // Шаблоны перевода `tf!("… {name} …")` подставляются во время работы
 // (см. `i18n`), а не `format!`: подстановки в них — не ошибка.
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -31,6 +46,7 @@ mod e2ee_files;
 mod emoji_data;
 #[cfg(test)]
 mod fake_instance;
+mod files;
 mod fleet;
 mod gif_favorites;
 mod highlight;
@@ -49,6 +65,7 @@ mod portal_keys;
 mod prefs;
 mod presence;
 mod registry;
+mod rt;
 mod saved_session;
 mod screens;
 mod self_update;
@@ -57,6 +74,7 @@ mod social;
 mod sounds;
 mod stage;
 mod stream_preview;
+mod sys;
 mod theme;
 mod translate;
 mod updates;
@@ -73,6 +91,7 @@ mod wm;
 /// для порталов (без точек портал его не примет).
 pub(crate) const APP_ID: &str = "io.github.quddymusic.Rustspace";
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     if std::env::args()
         .skip(1)
@@ -153,10 +172,48 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             theme::install(&cc.egui_ctx);
-            Ok(Box::new(app::BackspaceApp::new(&cc.egui_ctx, handle)))
+            Ok(Box::new(app::BackspaceApp::new(
+                &cc.egui_ctx,
+                rt::Handle::new(handle),
+            )))
         }),
     );
 
     runtime.shutdown_timeout(std::time::Duration::from_secs(2));
     result
+}
+
+/// Веб-версия: приложение рисуется на `<canvas id="rustspace">` страницы.
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    use wasm_bindgen::JsCast as _;
+    std::panic::set_hook(Box::new(|info| {
+        web_sys::console::error_1(&info.to_string().into());
+    }));
+    let runner = eframe::WebRunner::new();
+    wasm_bindgen_futures::spawn_local(async move {
+        let Some(canvas) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id("rustspace"))
+            .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+        else {
+            return;
+        };
+        let started = runner
+            .start(
+                canvas,
+                eframe::WebOptions::default(),
+                Box::new(|cc| {
+                    theme::install(&cc.egui_ctx);
+                    Ok(Box::new(app::BackspaceApp::new(
+                        &cc.egui_ctx,
+                        rt::Handle::new(),
+                    )))
+                }),
+            )
+            .await;
+        if let Err(err) = started {
+            tracing::error!(?err, "приложение не запустилось");
+        }
+    });
 }

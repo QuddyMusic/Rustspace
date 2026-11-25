@@ -35,7 +35,7 @@ fn http() -> reqwest::Client {
         .no_proxy()
         .timeout(Duration::from_secs(20));
     if let Ok(path) = std::env::var("BS_E2EE_LIVE_CA")
-        && let Ok(pem) = std::fs::read(&path)
+        && let Ok(pem) = crate::files::read(&path)
         && let Ok(cert) = reqwest::Certificate::from_pem(&pem)
     {
         builder = builder.add_root_certificate(cert);
@@ -44,8 +44,8 @@ fn http() -> reqwest::Client {
 }
 
 fn suffix() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let nanos = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or_default();
     format!("{nanos:08x}")
@@ -118,7 +118,7 @@ impl Side {
             if let Some(found) = found {
                 return found["id"].as_str().expect("id переписки").to_owned();
             }
-            tokio::time::sleep(Duration::from_millis(250)).await;
+            bs_rt::time::sleep(Duration::from_millis(250)).await;
         }
         panic!("переписка не появилась у {}", self.name);
     }
@@ -132,7 +132,7 @@ impl Side {
             if list.len() >= count {
                 return list;
             }
-            tokio::time::sleep(Duration::from_millis(250)).await;
+            bs_rt::time::sleep(Duration::from_millis(250)).await;
         }
         panic!("у {} нет {count} сообщений", self.name);
     }
@@ -176,7 +176,7 @@ async fn run(a_base: &str, b_base: &str) {
                 Some(json!({"remoteOrigin": b_base})),
             )
             .await;
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        bs_rt::time::sleep(Duration::from_secs(2)).await;
         a.post(
             "/api/social/requests",
             json!({"username": format!("{}@{host}", b.name)}),
@@ -198,7 +198,7 @@ async fn run(a_base: &str, b_base: &str) {
         if request.is_some() {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        bs_rt::time::sleep(Duration::from_millis(250)).await;
     }
     let request = request.expect("заявка дошла до b");
     let (status, _) = b
@@ -225,7 +225,7 @@ async fn run(a_base: &str, b_base: &str) {
         if friend.is_some() {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        bs_rt::time::sleep(Duration::from_millis(250)).await;
     }
     let friend = friend.expect("b в друзьях у a");
     let opened = a.post("/api/dm", json!({"userId": friend})).await;

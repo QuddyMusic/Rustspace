@@ -1846,5 +1846,9 @@
   "Сбросить всё": "Reset all",
   "Вернуть общий профиль в этом пространстве": "Use your main profile in this space again",
   "Этот инстанс не поддерживает свой профиль в пространстве": "This instance doesn't support per-space profiles",
-  "Превью трансляции пока нет": "No stream preview yet"
+  "Превью трансляции пока нет": "No stream preview yet",
+  "веб-версия обновляется вместе с сервером": "the web version updates together with the server",
+  "перевод без модели недоступен в браузере": "translation without a model is not available in the browser",
+  "В браузере файл открывается из загрузок браузера": "In the browser, open the file from the browser's downloads",
+  "локальная модель недоступна в браузере": "the local model is not available in the browser"
 }

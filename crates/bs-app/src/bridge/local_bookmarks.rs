@@ -15,7 +15,7 @@ fn path() -> Option<PathBuf> {
 
 fn load() -> Store {
     path()
-        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|p| crate::files::read(p).ok())
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
@@ -28,8 +28,8 @@ fn save(store: &Store) {
         .map_err(|e| e.to_string())
         .and_then(|bytes| {
             let tmp = path.with_extension("json.tmp");
-            std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-            std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+            crate::files::write(&tmp, bytes).map_err(|e| e.to_string())?;
+            crate::files::rename(&tmp, &path).map_err(|e| e.to_string())
         });
     if let Err(err) = written {
         tracing::warn!(%err, "локальные закладки не сохранились");

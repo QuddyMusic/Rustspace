@@ -81,7 +81,7 @@ impl Session {
                     let at = self
                         .space_profiles
                         .get(&space_id)
-                        .map_or_else(std::time::Instant::now, |(_, at)| *at);
+                        .map_or_else(web_time::Instant::now, |(_, at)| *at);
                     self.space_profiles.insert(space_id, (list, at));
                 }
             }
@@ -89,7 +89,7 @@ impl Session {
                 self.space_profile_saved = Some(result.as_ref().map(drop).map_err(Clone::clone));
                 if let Ok(list) = result {
                     self.space_profiles
-                        .insert(space_id, (list, std::time::Instant::now()));
+                        .insert(space_id, (list, web_time::Instant::now()));
                 }
             }
             BridgeResponse::E2eePeerKey {

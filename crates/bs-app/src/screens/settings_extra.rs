@@ -355,8 +355,8 @@ impl AccountUi {
         }
         let (tx, rx) = channel();
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let chosen = rfd::FileDialog::new()
+        crate::sys::background(move || {
+            let chosen = crate::sys::FileDialog::new()
                 .add_filter(tr("Изображения"), &["png", "jpg", "jpeg", "gif", "webp"])
                 .pick_file();
             if let Some(path) = chosen {
@@ -367,7 +367,7 @@ impl AccountUi {
                     Ok(meta) if meta.len() > MAX_IMAGE_BYTES => {
                         Err(tr("Картинка больше 16 МБ").to_owned())
                     }
-                    Ok(_) => std::fs::read(&path).map_err(|e| e.to_string()),
+                    Ok(_) => crate::files::read(&path).map_err(|e| e.to_string()),
                     Err(e) => Err(e.to_string()),
                 };
                 let _ = tx.send((kind, name, bytes));

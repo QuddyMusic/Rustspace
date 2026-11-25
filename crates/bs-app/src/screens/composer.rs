@@ -140,7 +140,7 @@ impl Preview {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         let bytes = Arc::clone(bytes);
-        std::thread::spawn(move || {
+        crate::sys::background(move || {
             let image = preview_image(&bytes);
             let _ = tx.send(image);
         });
@@ -533,7 +533,7 @@ fn read_paths(paths: Vec<PathBuf>) -> Vec<Picked> {
                 Ok(meta) if meta.len() > MAX_FILE_BYTES => {
                     Err(tr("Файл слишком большой").to_owned())
                 }
-                Ok(_) => std::fs::read(&path).map_err(|err| err.to_string()),
+                Ok(_) => crate::files::read(&path).map_err(|err| err.to_string()),
                 Err(err) => Err(err.to_string()),
             };
             Picked { name, bytes }
@@ -949,8 +949,8 @@ impl Composer {
         }
         let (tx, rx) = channel();
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let dialog = rfd::FileDialog::new();
+        crate::sys::background(move || {
+            let dialog = crate::sys::FileDialog::new();
             let paths = match mode {
                 PickMode::Files => dialog.pick_files(),
                 PickMode::Images => dialog
@@ -980,7 +980,7 @@ impl Composer {
         let (tx, rx) = channel();
         let repaint = ctx.clone();
         let paths: Vec<PathBuf> = dropped.iter().map(|f| f.path().to_path_buf()).collect();
-        std::thread::spawn(move || {
+        crate::sys::background(move || {
             let files = read_paths(paths);
             let _ = tx.send(files);
             repaint.request_repaint();
@@ -1019,7 +1019,7 @@ impl Composer {
         }
         let (tx, rx) = channel();
         let repaint = ctx.clone();
-        std::thread::spawn(move || {
+        crate::sys::background(move || {
             let mut picked: Vec<Picked> = images.iter().map(|image| png_of(image)).collect();
             if files && let Some(paths) = crate::clipboard::files() {
                 picked.extend(read_paths(paths));

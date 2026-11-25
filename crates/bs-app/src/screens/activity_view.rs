@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock, PoisonError};
-use std::time::Instant;
+use web_time::Instant;
 
 use bs_types::{Activity, ActivityType};
 use egui::{Color32, RichText, Sense, Vec2};

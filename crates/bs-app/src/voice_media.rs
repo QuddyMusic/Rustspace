@@ -307,7 +307,7 @@ mod stub {
         reason = "тот же интерфейс, что у настоящего движка"
     )]
     impl MediaEngine {
-        pub(crate) fn new(_handle: tokio::runtime::Handle) -> Self {
+        pub(crate) fn new(_handle: crate::rt::Handle) -> Self {
             Self
         }
 
@@ -371,13 +371,13 @@ mod stub {
 mod real {
     use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+    use crate::rt::Handle;
+    use bs_rt::JoinHandle;
+    use bs_rt::sync::broadcast::error::RecvError;
     use bs_voice::{
         AudioEngine, AudioProcessingSettings, MicMonitor, SourceKind, VoiceConfig, VoiceEvent,
         VoiceSession, Volume, device::DeviceKind as LkKind,
     };
-    use tokio::runtime::Handle;
-    use tokio::sync::broadcast::error::RecvError;
-    use tokio::task::JoinHandle;
 
     use super::{
         AudioSource, ConnectRequest, Device, DeviceKind, MediaStatus, Speaking, VoicePrefs,
@@ -527,7 +527,8 @@ mod real {
         pub(crate) fn start_mic_test(&mut self, prefs: &VoicePrefs) -> Result<(), String> {
             let audio = self.audio(prefs)?;
             self.apply_prefs(prefs);
-            let monitor = MicMonitor::start(&audio, &self.handle).map_err(|err| err.to_string())?;
+            let monitor =
+                MicMonitor::start(&audio, self.handle.tokio()).map_err(|err| err.to_string())?;
             self.mic_test = Some(monitor);
             Ok(())
         }

@@ -352,7 +352,7 @@ fn icon_row(
 
 /// Диалог выбора картинки; `None` — пользователь передумал.
 fn pick_icon() -> Option<Result<Vec<u8>, String>> {
-    let path = rfd::FileDialog::new()
+    let path = crate::sys::FileDialog::new()
         .add_filter(tr("Картинки"), &["png", "jpg", "jpeg", "gif", "webp"])
         .pick_file()?;
     let size = std::fs::metadata(&path).map_or(0, |m| m.len());
@@ -360,7 +360,7 @@ fn pick_icon() -> Option<Result<Vec<u8>, String>> {
         return Some(Err(tr("Файл больше 8 МБ").to_owned()));
     }
     Some(
-        std::fs::read(&path)
+        crate::files::read(&path)
             .map_err(|err| crate::tf!("Не удалось прочитать файл: {err}", err = err)),
     )
 }

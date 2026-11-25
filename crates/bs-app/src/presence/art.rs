@@ -77,7 +77,7 @@ fn read_image(path: &Path) -> Option<Vec<u8>> {
     if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_FILE_BYTES {
         return None;
     }
-    normalized(&std::fs::read(path).ok()?)
+    normalized(&crate::files::read(path).ok()?)
 }
 
 fn first_image(paths: impl IntoIterator<Item = PathBuf>) -> Option<Vec<u8>> {
@@ -200,7 +200,7 @@ fn desktop_icon(exe: Option<&str>, name: &str) -> Option<Vec<u8>> {
                 .metadata()
                 .ok()
                 .filter(|m| m.len() <= 64 * 1024)
-                .and_then(|_| std::fs::read_to_string(entry.path()).ok())
+                .and_then(|_| crate::files::read_to_string(entry.path()).ok())
             else {
                 continue;
             };
@@ -562,11 +562,11 @@ mod tests {
     fn icons_come_out_of_executables() {
         let dir = tempfile::tempdir().unwrap_or_else(|_| unreachable!());
         let path = dir.path().join("Game.exe");
-        std::fs::write(&path, tiny_pe()).unwrap_or_default();
+        crate::files::write(&path, tiny_pe()).unwrap_or_default();
         let png = pe_icon(&path).unwrap_or_default();
         let image = image::load_from_memory(&png).map(|i| (i.width(), i.height()));
         assert_eq!(image.ok(), Some((2, 2)));
-        std::fs::write(&path, b"MZ not really").unwrap_or_default();
+        crate::files::write(&path, b"MZ not really").unwrap_or_default();
         assert!(pe_icon(&path).is_none());
     }
 }

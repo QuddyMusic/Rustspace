@@ -79,7 +79,7 @@ pub(crate) fn available() -> Vec<LanguageInfo> {
                 let code = path.file_stem()?.to_str()?.to_owned();
                 (path.extension()? == "json" && valid_code(&code) && code != "ru" && code != "en")
                     .then(|| {
-                    let name = parse(&std::fs::read_to_string(&path).ok()?)
+                    let name = parse(&crate::files::read_to_string(&path).ok()?)
                         .ok()?
                         .remove("@language")
                         .unwrap_or_else(|| code.clone());
@@ -113,7 +113,7 @@ pub(crate) fn set_language(code: &str) {
         "ru" | "" => None,
         "en" => load(code, EN),
         other if valid_code(other) => user_dir()
-            .and_then(|dir| std::fs::read_to_string(dir.join(format!("{other}.json"))).ok())
+            .and_then(|dir| crate::files::read_to_string(dir.join(format!("{other}.json"))).ok())
             .and_then(|json| load(other, &json)),
         _ => None,
     };
@@ -264,7 +264,7 @@ mod tests {
                 if path.extension().is_none_or(|e| e != "rs") || path.ends_with("i18n.rs") {
                     continue;
                 }
-                let src = std::fs::read_to_string(&path).unwrap();
+                let src = crate::files::read_to_string(&path).unwrap();
                 let src = src.split("#[cfg(test)]").next().unwrap_or_default();
                 for marker in ["tr(", "tf!("] {
                     let mut from = 0;

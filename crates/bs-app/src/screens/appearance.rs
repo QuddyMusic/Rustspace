@@ -473,7 +473,7 @@ fn import_export(ui: &mut egui::Ui, state: &mut AppearanceState, appearance: &mu
 }
 
 fn export(palette: &Palette) -> (bool, String) {
-    let Some(path) = rfd::FileDialog::new()
+    let Some(path) = crate::sys::FileDialog::new()
         .set_file_name("rustspace-theme.json")
         .add_filter(tr("Тема (JSON)"), &["json"])
         .save_file()
@@ -482,7 +482,7 @@ fn export(palette: &Palette) -> (bool, String) {
     };
     let result = serde_json::to_vec_pretty(palette)
         .map_err(std::io::Error::other)
-        .and_then(|json| std::fs::write(&path, json));
+        .and_then(|json| crate::files::write(&path, json));
     match result {
         Ok(()) => (true, crate::tf!("Сохранено: {a0}", a0 = path.display())),
         Err(err) => (false, crate::tf!("Не удалось сохранить: {err}", err = err)),
@@ -491,11 +491,13 @@ fn export(palette: &Palette) -> (bool, String) {
 
 /// `None` — пользователь закрыл диалог.
 fn import() -> Option<Result<Palette, String>> {
-    let path = rfd::FileDialog::new()
+    let path = crate::sys::FileDialog::new()
         .add_filter(tr("Тема (JSON)"), &["json"])
         .pick_file()?;
     Some(parse_theme(
-        &std::fs::read(&path).map_err(|err| err.to_string()).ok()?,
+        &crate::files::read(&path)
+            .map_err(|err| err.to_string())
+            .ok()?,
     ))
 }
 

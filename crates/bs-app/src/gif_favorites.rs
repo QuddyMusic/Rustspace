@@ -74,7 +74,7 @@ pub(crate) struct GifFavorites {
 }
 
 fn read_book(path: &Path) -> Book {
-    std::fs::read(path)
+    crate::files::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
@@ -174,13 +174,13 @@ impl GifFavorites {
         let mut book = read_book(path);
         book.insert(key.clone(), self.items.iter().map(Entry::from).collect());
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-            std::fs::create_dir_all(parent)?;
+            crate::files::create_dir_all(parent)?;
         }
         let json = serde_json::to_vec_pretty(&book).map_err(std::io::Error::other)?;
-        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-        std::fs::write(&tmp, json)?;
-        std::fs::rename(&tmp, path).inspect_err(|_| {
-            let _ = std::fs::remove_file(&tmp);
+        let tmp = path.with_extension(format!("{}.tmp", crate::files::pid()));
+        crate::files::write(&tmp, json)?;
+        crate::files::rename(&tmp, path).inspect_err(|_| {
+            let _ = crate::files::remove_file(&tmp);
         })
     }
 }
@@ -202,7 +202,7 @@ mod tests {
 
     fn temp_path(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("bs-giffav-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = crate::files::remove_dir_all(&dir);
         dir.join("sub").join(FILE_NAME)
     }
 
@@ -259,8 +259,8 @@ mod tests {
     #[test]
     fn broken_file_is_an_empty_collection() {
         let path = temp_path("broken");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, b"{ nope").unwrap();
+        crate::files::create_dir_all(path.parent().unwrap()).unwrap();
+        crate::files::write(&path, b"{ nope").unwrap();
         let mut favs = GifFavorites::with_path(path);
         favs.select("k");
         assert!(favs.items().is_empty());

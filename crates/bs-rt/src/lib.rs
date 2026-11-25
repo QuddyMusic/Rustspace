@@ -135,16 +135,99 @@ where
     }
 }
 
+/// Выполняет тяжёлую синхронную работу, не останавливая задачи: на десктопе
+/// — в отдельном потоке tokio, в браузере потоков нет, и работа идёт сразу
+/// в очередной задаче.
+pub fn spawn_blocking<F, T>(work: F) -> JoinHandle<T>
+where
+    F: FnOnce() -> T + MaybeSend + 'static,
+    T: MaybeSend + 'static,
+{
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        JoinHandle {
+            inner: tokio::task::spawn_blocking(work),
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        spawn(async move { work() })
+    }
+}
+
+/// Набор фоновых задач: их результаты приходят по мере готовности, а при
+/// удалении набора незавершённые отменяются.
+#[derive(Debug)]
+pub struct JoinSet<T> {
+    tasks: futures_util::stream::FuturesUnordered<JoinHandle<T>>,
+}
+
+impl<T> Default for JoinSet<T> {
+    fn default() -> Self {
+        Self {
+            tasks: futures_util::stream::FuturesUnordered::new(),
+        }
+    }
+}
+
+impl<T: MaybeSend + 'static> JoinSet<T> {
+    /// Пустой набор.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Запускает задачу в наборе.
+    pub fn spawn<F>(&mut self, future: F)
+    where
+        F: Future<Output = T> + MaybeSend + 'static,
+    {
+        self.tasks.push(spawn(future));
+    }
+
+    /// Задач в наборе нет.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.tasks.is_empty()
+    }
+
+    /// Сколько задач ещё в наборе.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.tasks.len()
+    }
+
+    /// Ждёт следующую завершившуюся задачу; `None` — набор пуст.
+    pub async fn join_next(&mut self) -> Option<Result<T, JoinError>> {
+        futures_util::StreamExt::next(&mut self.tasks).await
+    }
+}
+
+impl<T> JoinSet<T> {
+    /// Отменяет все задачи набора.
+    pub fn abort_all(&self) {
+        for task in &self.tasks {
+            task.abort();
+        }
+    }
+}
+
+impl<T> Drop for JoinSet<T> {
+    fn drop(&mut self) {
+        self.abort_all();
+    }
+}
+
 /// Время: монотонные часы, паузы и сроки.
 pub mod time {
     use super::{Duration, Future};
 
     /// Монотонное время (`performance.now()` в браузере).
     #[cfg(not(target_arch = "wasm32"))]
-    pub use std::time::Instant;
+    pub use std::time::{Instant, SystemTime, UNIX_EPOCH};
     /// Монотонное время (`performance.now()` в браузере).
     #[cfg(target_arch = "wasm32")]
-    pub use web_time::Instant;
+    pub use web_time::{Instant, SystemTime, UNIX_EPOCH};
 
     /// Срок истёк раньше, чем будущее завершилось.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

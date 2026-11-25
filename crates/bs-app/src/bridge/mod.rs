@@ -34,6 +34,7 @@ use self::worker::*;
 use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
 
+use crate::rt::Handle;
 use bs_api::{
     ApiClient, ChangePasswordRequest, FederationCredentialRequest, IdentityDeleteMode,
     IdentityDeleteResult, RegisterRequest, RegistryEntry, RegistryResponse, ReplicatedEntry,
@@ -41,12 +42,11 @@ use bs_api::{
 use bs_core::{Cache, apply};
 use bs_identity::CredentialStore;
 use bs_instances::{ConnectionState, InstanceEvent, InstanceHandle, ReconnectPolicy};
+use bs_rt::sync::{broadcast, mpsc as tokio_mpsc};
 use bs_types::{
     ClientEvent, ClientKind, DmMessageWithUser, MessageWithUser, Origin, ReadyPayload, ServerEvent,
     TransportPolicy,
 };
-use tokio::runtime::Handle;
-use tokio::sync::{broadcast, mpsc as tokio_mpsc};
 use zeroize::Zeroizing;
 
 use crate::i18n::tr;
@@ -85,7 +85,7 @@ pub(crate) struct Session {
     requests: Option<tokio_mpsc::UnboundedSender<BridgeRequest>>,
     responses: Option<std_mpsc::Receiver<BridgeResponse>>,
     /// Фоновая задача сессии: её `abort()` и есть выход.
-    session: Option<tokio::task::JoinHandle<()>>,
+    session: Option<bs_rt::JoinHandle<()>>,
     /// Куда сохранять сессию домашнего инстанса (`None` — не сохранять).
     persist: Option<std::path::PathBuf>,
     friends: Vec<bs_types::Friend>,
@@ -146,7 +146,7 @@ pub(crate) struct Session {
     /// Пространство, только что созданное или в которое вступили.
     opened_space: Option<String>,
     /// Свои профили участников пространств и когда их спрашивали.
-    space_profiles: HashMap<String, (Vec<bs_api::SpaceProfile>, std::time::Instant)>,
+    space_profiles: HashMap<String, (Vec<bs_api::SpaceProfile>, web_time::Instant)>,
     /// Итог последнего сохранения своего профиля в пространстве.
     space_profile_saved: Option<Result<(), String>>,
     /// Кадры превью трансляций: (канал, пользователь) → (кадр, когда
@@ -204,7 +204,7 @@ pub(crate) fn normalize_base(raw: &str) -> Option<String> {
 }
 
 /// Кадр превью трансляции, когда его спросили, и поколение для текстуры.
-type StreamPreviewSlot = (Option<std::sync::Arc<[u8]>>, std::time::Instant, u64);
+type StreamPreviewSlot = (Option<std::sync::Arc<[u8]>>, web_time::Instant, u64);
 
 #[cfg(test)]
 mod tests;

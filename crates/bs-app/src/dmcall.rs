@@ -60,7 +60,7 @@ pub(crate) struct IncomingCall {
     pub(crate) avatar: Option<String>,
     /// Когда пришёл звонок: без ответа 30 секунд — отклоняется, как у
     /// оригинала.
-    pub(crate) since: std::time::Instant,
+    pub(crate) since: web_time::Instant,
     /// Готовый токен, если сервер прислал его сразу.
     pub(crate) token: Option<LiveKitTokenResponse>,
 }
@@ -257,7 +257,7 @@ impl VoiceState {
             federated_id: federated_call_id,
             caller: caller_name,
             avatar,
-            since: std::time::Instant::now(),
+            since: web_time::Instant::now(),
             token: livekit_url
                 .zip(livekit_token)
                 .map(|(url, token)| LiveKitTokenResponse { token, url }),
@@ -564,7 +564,7 @@ mod tests {
             federated_id: Some("f1".into()),
             caller: "Bob".into(),
             avatar: None,
-            since: std::time::Instant::now(),
+            since: web_time::Instant::now(),
             token: None,
         };
         let fed = Some("f1".to_owned());

@@ -9,7 +9,8 @@
 //! если он приложен к релизу) и «Пропустить версию».
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use serde::Deserialize;
 
@@ -128,7 +129,11 @@ pub(crate) fn valid_repo(repo: &str) -> bool {
 }
 
 /// Вызывается каждый кадр: проверяет по расписанию.
-pub(crate) fn tick(runtime: &tokio::runtime::Handle, ctx: &egui::Context, prefs: &UpdatePrefs) {
+pub(crate) fn tick(runtime: &crate::rt::Handle, ctx: &egui::Context, prefs: &UpdatePrefs) {
+    // Веб-версия приходит с сервера и обновляется вместе с ним.
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
     let due = {
         let checker = checker();
         prefs.enabled
@@ -142,11 +147,7 @@ pub(crate) fn tick(runtime: &tokio::runtime::Handle, ctx: &egui::Context, prefs:
 }
 
 /// Проверяет сейчас (кнопка в настройках).
-pub(crate) fn check_now(
-    runtime: &tokio::runtime::Handle,
-    ctx: &egui::Context,
-    prefs: &UpdatePrefs,
-) {
+pub(crate) fn check_now(runtime: &crate::rt::Handle, ctx: &egui::Context, prefs: &UpdatePrefs) {
     {
         let mut checker = checker();
         if checker.state == UpdateState::Checking {
@@ -215,9 +216,7 @@ struct GhAsset {
 }
 
 async fn fetch(repo: &str, prereleases: bool) -> Result<Option<Release>, String> {
-    let client = reqwest::Client::builder()
-        .user_agent(concat!("rustspace/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(20))
+    let client = crate::sys::http(Some(Duration::from_secs(20)))
         .build()
         .map_err(|err| err.to_string())?;
     let url = if prereleases {

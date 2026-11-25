@@ -59,9 +59,9 @@ pub(super) fn button(ui: &mut egui::Ui) {
 /// Открыть файл программой по умолчанию или показать его в папке.
 fn open(path: &std::path::Path, reveal: bool) {
     let result = if reveal {
-        opener::reveal(path)
+        crate::sys::reveal_path(path)
     } else {
-        opener::open(path)
+        crate::sys::open_path(path)
     };
     if let Err(err) = result {
         tracing::warn!(%err, "файл не открылся");

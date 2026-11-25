@@ -83,7 +83,7 @@ pub(crate) struct VoiceState {
     /// Ограничения стриминга по инстансам (приходят с токеном LiveKit).
     host_limits: std::collections::HashMap<usize, bs_api::StreamingLimits>,
     /// Когда последний раз клали кадр превью своей трансляции.
-    preview_at: Option<std::time::Instant>,
+    preview_at: Option<web_time::Instant>,
     /// Битрейт микрофона по звонкам: (инстанс, канал или переписка).
     pub(crate) bitrates: std::collections::HashMap<(usize, String), bs_api::VoiceBitrate>,
 }
@@ -527,7 +527,7 @@ impl VoiceState {
         else {
             return;
         };
-        self.preview_at = Some(std::time::Instant::now());
+        self.preview_at = Some(web_time::Instant::now());
         let previous = bridge.focus_index();
         bridge.focus_on(call.origin);
         bridge.request(BridgeRequest::StreamPreview(

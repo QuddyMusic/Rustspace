@@ -15,7 +15,6 @@
 //! групповые переписки идут как раньше.
 
 use std::collections::HashMap;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use bs_e2ee::{PublicKey, SecretKey};
@@ -104,32 +103,6 @@ fn state_path(session_file: &Path, me: &str) -> PathBuf {
     session_file.with_file_name(format!("e2ee-{safe}.json"))
 }
 
-fn write_private(path: &Path, body: &[u8]) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-    let _ = std::fs::remove_file(&tmp);
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let written = (|| {
-        let mut file = options.open(&tmp)?;
-        file.write_all(body)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&tmp, path)
-    })();
-    if written.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    written
-}
-
 impl E2ee {
     /// Загружает состояние аккаунта или создаёт новое с новым ключом.
     /// `session_file` — файл сохранённой сессии; без него ключ живёт только
@@ -138,7 +111,7 @@ impl E2ee {
         let path = session_file.map(|file| state_path(file, me));
         let stored: Option<Stored> = path
             .as_deref()
-            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|path| crate::files::read(path).ok())
             .map(zeroize::Zeroizing::new)
             .and_then(|bytes| serde_json::from_slice(&bytes).ok());
         let in_keyring = stored.as_ref().is_some_and(|stored| stored.key_in_keyring);
@@ -235,7 +208,7 @@ impl E2ee {
         let body = serde_json::to_vec_pretty(&stored).map(zeroize::Zeroizing::new);
         let written = body
             .map_err(std::io::Error::other)
-            .and_then(|body| write_private(path, &body));
+            .and_then(|body| crate::files::write_private(path, &body));
         if let Err(err) = written {
             tracing::warn!(%err, "не удалось сохранить ключи шифрования переписок");
         }
@@ -660,7 +633,7 @@ mod tests {
         assert_eq!(second.public_key(), key);
         assert!(second.status("dm").enabled);
         assert!(second.outbox.is_empty(), "ключ второй раз не объявляется");
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = crate::files::remove_dir_all(&dir);
     }
 
     #[test]
@@ -696,25 +669,25 @@ mod tests {
             rand_suffix()
         ));
         let session = dir.join("session.json");
-        std::fs::create_dir_all(&dir).unwrap_or_default();
+        crate::files::create_dir_all(&dir).unwrap_or_default();
         let file = dir.join("e2ee-ann.json");
         let body = br#"{"secretKey":"","keyInKeyring":true,"chats":{"dm":{"enabled":true}}}"#;
-        std::fs::write(&file, body).unwrap_or_default();
+        crate::files::write(&file, body).unwrap_or_default();
         // В тестах хранилища нет: ключ из него не достать.
         let mut state = E2ee::load(Some(&session), "ann");
         assert!(state.locked());
         state.set_enabled("dm2", true);
         assert_eq!(
-            std::fs::read(&file).unwrap_or_default(),
+            crate::files::read(&file).unwrap_or_default(),
             body,
             "сохранённое не тронуто"
         );
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = crate::files::remove_dir_all(&dir);
     }
 
     fn rand_suffix() -> u128 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        web_time::SystemTime::now()
+            .duration_since(web_time::UNIX_EPOCH)
             .map_or(0, |time| time.as_nanos())
     }
 

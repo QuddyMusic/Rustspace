@@ -36,7 +36,7 @@ pub(crate) fn ensure() {
         return;
     }
     let entry = entry(&exe);
-    if std::fs::read_to_string(&ours).is_ok_and(|current| current == entry) {
+    if crate::files::read_to_string(&ours).is_ok_and(|current| current == entry) {
         return;
     }
     if let Err(err) = write(&home, &ours, &entry) {
@@ -48,15 +48,15 @@ pub(crate) fn ensure() {
 
 fn write(home: &Path, ours: &Path, entry: &str) -> std::io::Result<()> {
     if let Some(dir) = ours.parent() {
-        std::fs::create_dir_all(dir)?;
+        crate::files::create_dir_all(dir)?;
     }
     let icon_dir = home.join("icons/hicolor/256x256/apps");
-    std::fs::create_dir_all(&icon_dir)?;
+    crate::files::create_dir_all(&icon_dir)?;
     let icon = icon_dir.join(format!("{ICON_NAME}.png"));
     if !icon.exists() {
-        std::fs::write(icon, ICON)?;
+        crate::files::write(icon, ICON)?;
     }
-    std::fs::write(ours, entry)
+    crate::files::write(ours, entry)
 }
 
 /// Содержимое `.desktop`-файла для бинарника `exe`.

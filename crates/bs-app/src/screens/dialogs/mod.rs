@@ -95,8 +95,8 @@ impl CreateSpaceForm {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            if let Some(path) = rfd::FileDialog::new()
+        crate::sys::background(move || {
+            if let Some(path) = crate::sys::FileDialog::new()
                 .add_filter(tr("Изображения"), &["png", "jpg", "jpeg", "gif", "webp"])
                 .pick_file()
             {
@@ -107,7 +107,7 @@ impl CreateSpaceForm {
                     Ok(meta) if meta.len() > MAX_ICON_BYTES => {
                         Err(tr("Картинка больше 16 МБ").to_owned())
                     }
-                    Ok(_) => std::fs::read(&path).map_err(|e| e.to_string()),
+                    Ok(_) => crate::files::read(&path).map_err(|e| e.to_string()),
                     Err(e) => Err(e.to_string()),
                 };
                 let _ = tx.send((name, bytes));

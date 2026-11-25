@@ -17,9 +17,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use bs_api::{AssetPath, resolve_asset};
 use bs_media::Decoded;
+use bs_rt::sync::mpsc::UnboundedSender;
 use egui::epaint::RectShape;
 use egui::{Color32, Context, CornerRadius, Id, Rect, TextureHandle, TextureOptions, pos2};
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::bridge::{BridgeRequest, DownloadState};
 
@@ -812,7 +812,7 @@ mod tests {
     #[test]
     fn downloads_are_listed_newest_first_until_cleared() {
         let hub = ImageHub::default();
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = bs_rt::sync::mpsc::unbounded_channel();
         hub.set_links(vec![("https://home.example".to_owned(), tx)]);
         hub.set_current(Some("https://home.example"));
         assert!(hub.request_download("a.png", "/tmp/a.png".into(), "a.png"));
@@ -833,8 +833,8 @@ mod tests {
     #[test]
     fn bare_names_belong_to_the_focused_instance_not_to_a_list_position() {
         let hub = ImageHub::default();
-        let (a, _ra) = tokio::sync::mpsc::unbounded_channel();
-        let (b, _rb) = tokio::sync::mpsc::unbounded_channel();
+        let (a, _ra) = bs_rt::sync::mpsc::unbounded_channel();
+        let (b, _rb) = bs_rt::sync::mpsc::unbounded_channel();
         // Между домашним и третьим инстансом второй не работает: в списке
         // ссылок третий стоит вторым.
         hub.set_links(vec![

@@ -49,7 +49,7 @@ pub(crate) fn migrate_legacy_dir() {
     if new.exists() || !old.is_dir() {
         return;
     }
-    match std::fs::rename(&old, &new) {
+    match crate::files::rename(&old, &new) {
         Ok(()) => {
             tracing::info!(from = %old.display(), to = %new.display(), "настройки перенесены");
         }
@@ -61,7 +61,10 @@ pub(crate) fn migrate_legacy_dir() {
 
 /// Запись хранилища ключей со старым именем каталога в пути (`None` — путь
 /// не из каталога настроек).
-#[cfg_attr(test, allow(dead_code, reason = "keyring в тестах отключён"))]
+#[cfg_attr(
+    any(test, target_arch = "wasm32"),
+    allow(dead_code, reason = "keyring в тестах отключён")
+)]
 fn legacy_account(account: &str) -> Option<String> {
     let new = config_dir()?.display().to_string();
     let old = legacy_config_dir()?.display().to_string();
@@ -76,7 +79,10 @@ fn config_base() -> Option<PathBuf> {
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
     };
-    let base = if cfg!(windows) {
+    let base = if cfg!(target_arch = "wasm32") {
+        // В браузере пути — ключи хранилища страницы.
+        PathBuf::from("/")
+    } else if cfg!(windows) {
         var("APPDATA")?
     } else if cfg!(target_os = "macos") {
         var("HOME")?.join("Library").join("Application Support")
@@ -88,7 +94,7 @@ fn config_base() -> Option<PathBuf> {
 
 /// Читает сохранённую сессию; повреждённый или пустой файл — `None`.
 pub(crate) fn load(path: &Path) -> Option<SavedSession> {
-    let bytes = std::fs::read(path).ok()?;
+    let bytes = crate::files::read(path).ok()?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let text = |key: &str| value.get(key).and_then(serde_json::Value::as_str);
     let base = text("base")?.trim();
@@ -126,7 +132,7 @@ pub(crate) fn load(path: &Path) -> Option<SavedSession> {
 /// Адрес и флаг http из файла сессии, даже если токена уже нет (например,
 /// хранилище ключей недоступно): чтобы форма входа была заполнена.
 pub(crate) fn hint(path: &Path) -> Option<(String, bool)> {
-    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&crate::files::read(path).ok()?).ok()?;
     let base = value.get("base")?.as_str()?.trim().to_owned();
     let insecure = value
         .get("allowInsecure")
@@ -142,10 +148,9 @@ pub(crate) fn save(
     token: &str,
     transport: TransportPolicy,
 ) -> std::io::Result<()> {
-    use std::io::Write as _;
 
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent)?;
+        crate::files::create_dir_all(parent)?;
     }
     let insecure = transport == TransportPolicy::AllowInsecure;
     let body = if keystore::set(&session_account(path), token) {
@@ -155,33 +160,13 @@ pub(crate) fn save(
     };
     let json =
         zeroize::Zeroizing::new(serde_json::to_vec_pretty(&body).map_err(std::io::Error::other)?);
-    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-    let _ = std::fs::remove_file(&tmp);
-    let write = || -> std::io::Result<()> {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&tmp)?;
-        file.write_all(&json)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&tmp, path)
-    };
-    let result = write();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
+    crate::files::write_private(path, &json)
 }
 
 /// Стирает сохранённую сессию (выход, отказ токена, удаление аккаунта).
 pub(crate) fn clear(path: &Path) {
     keystore::delete(&session_account(path));
-    if let Err(err) = std::fs::remove_file(path)
+    if let Err(err) = crate::files::remove_file(path)
         && err.kind() != std::io::ErrorKind::NotFound
     {
         tracing::warn!(%err, "не удалось удалить файл сессии");
@@ -196,14 +181,14 @@ fn session_account(path: &Path) -> String {
 
 /// Системное хранилище ключей (Secret Service, Keychain, Credential Manager).
 /// В тестах отключено: они не должны трогать настоящий keyring пользователя,
-/// поэтому всегда идёт запасной путь — файл.
+/// поэтому всегда идёт запасной путь — файл. В браузере keyring нет.
 pub(crate) mod keystore {
     const SERVICE: &str = "rustspace";
     /// Имя службы до переименования: секреты оттуда переезжают при чтении.
-    #[cfg(not(test))]
+    #[cfg(not(any(test, target_arch = "wasm32")))]
     const LEGACY_SERVICE: &str = "backspace-rs";
 
-    #[cfg(not(test))]
+    #[cfg(not(any(test, target_arch = "wasm32")))]
     fn entry(account: &str) -> Option<keyring::Entry> {
         keyring::Entry::new(SERVICE, account)
             .map_err(|err| tracing::debug!(%err, "keyring недоступен"))
@@ -211,7 +196,7 @@ pub(crate) mod keystore {
     }
 
     /// Секрет, сохранённый до переименования; переносится под новое имя.
-    #[cfg(not(test))]
+    #[cfg(not(any(test, target_arch = "wasm32")))]
     fn take_legacy(account: &str) -> Option<zeroize::Zeroizing<String>> {
         let old = keyring::Entry::new(LEGACY_SERVICE, &super::legacy_account(account)?).ok()?;
         let secret = zeroize::Zeroizing::new(old.get_password().ok()?);
@@ -222,7 +207,7 @@ pub(crate) mod keystore {
     }
 
     /// Сохраняет секрет; `false` — хранилища нет, нужен запасной путь.
-    #[cfg(not(test))]
+    #[cfg(not(any(test, target_arch = "wasm32")))]
     pub(crate) fn set(account: &str, secret: &str) -> bool {
         entry(account).is_some_and(|entry| match entry.set_password(secret) {
             Ok(()) => true,
@@ -234,7 +219,7 @@ pub(crate) mod keystore {
     }
 
     /// Читает секрет.
-    #[cfg(not(test))]
+    #[cfg(not(any(test, target_arch = "wasm32")))]
     pub(crate) fn get(account: &str) -> Option<zeroize::Zeroizing<String>> {
         match entry(account)?.get_password() {
             Ok(secret) => Some(zeroize::Zeroizing::new(secret)),
@@ -246,25 +231,25 @@ pub(crate) mod keystore {
     }
 
     /// Стирает секрет.
-    #[cfg(not(test))]
+    #[cfg(not(any(test, target_arch = "wasm32")))]
     pub(crate) fn delete(account: &str) {
         if let Some(entry) = entry(account) {
             let _ = entry.delete_credential();
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) const fn set(_account: &str, _secret: &str) -> bool {
         let _ = SERVICE;
         false
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) const fn get(_account: &str) -> Option<zeroize::Zeroizing<String>> {
         None
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) const fn delete(_account: &str) {}
 }
 
@@ -275,8 +260,8 @@ mod tests {
     #[test]
     fn keyring_marker_without_keyring_is_no_session() {
         let path = temp_path("kr");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
+        crate::files::create_dir_all(path.parent().unwrap()).unwrap();
+        crate::files::write(
             &path,
             br#"{"base":"https://x.example","tokenInKeyring":true}"#,
         )
@@ -286,7 +271,7 @@ mod tests {
 
     fn temp_path(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("bs-saved-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = crate::files::remove_dir_all(&dir);
         dir.join("nested").join(FILE_NAME)
     }
 
@@ -310,10 +295,10 @@ mod tests {
     fn missing_or_broken_file_is_none() {
         let path = temp_path("bad");
         assert!(load(&path).is_none());
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, b"{ not json").unwrap();
+        crate::files::create_dir_all(path.parent().unwrap()).unwrap();
+        crate::files::write(&path, b"{ not json").unwrap();
         assert!(load(&path).is_none());
-        std::fs::write(&path, br#"{"base":"","token":"t"}"#).unwrap();
+        crate::files::write(&path, br#"{"base":"","token":"t"}"#).unwrap();
         assert!(load(&path).is_none());
     }
 

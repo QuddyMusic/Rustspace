@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use tokio::runtime::Handle;
+use crate::rt::Handle;
 
 use crate::bridge::ChannelKind;
 use crate::fleet::Bridge;
@@ -63,6 +63,10 @@ impl BackspaceApp {
         {
             login.base = base;
             login.allow_insecure = insecure;
+        } else if let Some(origin) = crate::sys::page_origin() {
+            // Веб-версия: инстанс — тот, что отдал страницу.
+            login.allow_insecure = origin.starts_with("http://");
+            login.base = origin;
         } else if crate::prefs::get().recent_instances.is_empty() {
             // Ни одного входа и ни одного инстанса: свой по умолчанию.
             crate::brand::DEFAULT_INSTANCE.clone_into(&mut login.base);
@@ -324,7 +328,7 @@ fn update_buttons(
     ui: &mut egui::Ui,
     release: &crate::updates::Release,
     progress: &crate::self_update::Progress,
-    runtime: &tokio::runtime::Handle,
+    runtime: &crate::rt::Handle,
 ) -> bool {
     use crate::self_update::{Method, Progress};
     let note = |ui: &mut egui::Ui, text: String| {
@@ -381,7 +385,7 @@ fn update_buttons(
 fn update_strip(
     ui: &mut egui::Ui,
     prefs: &crate::updates::UpdatePrefs,
-    runtime: &tokio::runtime::Handle,
+    runtime: &crate::rt::Handle,
 ) {
     let Some(release) = crate::updates::offer(prefs) else {
         return;

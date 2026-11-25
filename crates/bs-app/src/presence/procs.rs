@@ -207,7 +207,7 @@ fn read_pid(dir: &Path, pid: u32) -> Option<ProcessInfo> {
         .ok()
         .and_then(|p| p.to_str().map(str::to_owned))
         .filter(|p| !p.ends_with(" (deleted)"));
-    let tokens: Vec<String> = std::fs::read(dir.join("cmdline"))
+    let tokens: Vec<String> = crate::files::read(dir.join("cmdline"))
         .map(|raw| {
             raw.split(|b| *b == 0)
                 .filter(|t| !t.is_empty())
@@ -215,7 +215,7 @@ fn read_pid(dir: &Path, pid: u32) -> Option<ProcessInfo> {
                 .collect()
         })
         .unwrap_or_default();
-    let comm = std::fs::read_to_string(dir.join("comm"))
+    let comm = crate::files::read_to_string(dir.join("comm"))
         .ok()
         .map(|c| c.trim().to_owned())
         .filter(|c| !c.is_empty());
@@ -239,8 +239,14 @@ fn read_pid(dir: &Path, pid: u32) -> Option<ProcessInfo> {
     })
 }
 
+/// В браузере процессов системы не видно.
+#[cfg(target_arch = "wasm32")]
+pub(crate) const fn list() -> Vec<ProcessInfo> {
+    Vec::new()
+}
+
 /// Процессы системы (Windows, macOS).
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_arch = "wasm32")))]
 pub(crate) fn list() -> Vec<ProcessInfo> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
     let mut system = System::new();
