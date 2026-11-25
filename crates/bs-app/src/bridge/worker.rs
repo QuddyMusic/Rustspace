@@ -1394,6 +1394,14 @@ async fn sticker_request(client: &bs_api::ApiClient, request: BridgeRequest) -> 
             BridgeResponse::Compose(ComposeEvent::StickerChanged(result))
         }
         BridgeRequest::StickerPacks(op) => sticker_pack_op(client, op).await,
+        BridgeRequest::RenameSticker { id, name } => {
+            BridgeResponse::Compose(ComposeEvent::StickerChanged(
+                client
+                    .rename_sticker(&id, &name)
+                    .await
+                    .map_err(|err| upload_message(&err)),
+            ))
+        }
         BridgeRequest::DeleteSticker(id) => BridgeResponse::Compose(ComposeEvent::StickerChanged(
             client
                 .delete_sticker(&id)
@@ -1679,6 +1687,7 @@ pub(super) async fn handle_request(
         request @ (BridgeRequest::Stickers
         | BridgeRequest::UploadSticker { .. }
         | BridgeRequest::DeleteSticker(_)
+        | BridgeRequest::RenameSticker { .. }
         | BridgeRequest::StickerPacks(_)) => sticker_request(client, request).await,
         BridgeRequest::SendCards {
             channel_id,

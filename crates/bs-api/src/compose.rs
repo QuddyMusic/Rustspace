@@ -305,6 +305,20 @@ impl ApiClient {
     pub async fn delete_sticker(&self, id: &str) -> Result<serde_json::Value, ApiError> {
         self.delete_json(&format!("/api/stickers/{id}")).await
     }
+
+    /// Переименовывает личный стикер (`PATCH /api/stickers/:id`, 1.11).
+    ///
+    /// # Errors
+    /// Ошибки запроса; `sticker_name_invalid` — имя не годится.
+    pub async fn rename_sticker(&self, id: &str, name: &str) -> Result<(), ApiError> {
+        let _: serde_json::Value = self
+            .patch_json(
+                &format!("/api/stickers/{id}"),
+                &serde_json::json!({ "name": name }),
+            )
+            .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

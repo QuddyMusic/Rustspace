@@ -356,6 +356,13 @@ pub(crate) enum BridgeRequest {
     StickerPacks(PackOp),
     /// Удалить личный стикер.
     DeleteSticker(String),
+    /// Переименовать личный стикер.
+    RenameSticker {
+        /// Id стикера.
+        id: String,
+        /// Новое имя.
+        name: String,
+    },
     /// «Избранное», закрепы, закладки.
     Extras(super::extras::ExtrasOp),
     /// Переслать сообщение в другой чат того же инстанса: цитатой с

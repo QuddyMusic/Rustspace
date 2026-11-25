@@ -202,6 +202,10 @@ struct Stickers {
     packs: crate::screens::sticker_packs::Packs,
     /// Загружаемая картинка сразу ляжет в этот пак.
     upload_into: Option<String>,
+    /// Поиск по именам своих стикеров.
+    query: String,
+    /// Переименование: id и вводимое имя.
+    renaming: Option<(String, String)>,
 }
 
 /// Состояние поля ввода.
@@ -1630,9 +1634,31 @@ impl Composer {
             ui.label(RichText::new(error).color(theme::rose()).size(12.5));
         }
         ui.add_space(4.0);
+        self.sticker_rename_row(ui, bridge);
+        if self
+            .stickers
+            .items
+            .as_ref()
+            .is_some_and(|items| items.len() > 8)
+        {
+            widgets::search_box(ui, &mut self.stickers.query, tr("Найти стикер"));
+            ui.add_space(4.0);
+        }
+        let query = self.stickers.query.trim().to_lowercase();
+        let found: Option<Vec<PersonalSticker>> = self.stickers.items.as_ref().map(|items| {
+            items
+                .iter()
+                .filter(|s| query.is_empty() || s.name.to_lowercase().contains(&query))
+                .cloned()
+                .collect()
+        });
+        let mut rename = None;
         let packs = &self.stickers.packs;
-        match &self.stickers.items {
+        match &found {
             None => theme::empty_state(ui, tr("Загрузка…")),
+            Some(items) if items.is_empty() && !query.is_empty() => {
+                theme::empty_state(ui, tr("Ничего не найдено"));
+            }
             Some(items) if items.is_empty() => {
                 theme::empty_state(
                     ui,
@@ -1651,6 +1677,10 @@ impl Composer {
                         response.context_menu(|ui| {
                             crate::widgets::menu_spacing(ui);
                             packs.mine_menu(ui, bridge, sticker);
+                            if ui.button(tr("Переименовать…")).clicked() {
+                                rename = Some((sticker.id.clone(), sticker.name.clone()));
+                                ui.close();
+                            }
                             if ui.button(tr("Удалить стикер")).clicked() {
                                 delete = Some(sticker.id.clone());
                                 ui.close();
@@ -1667,7 +1697,49 @@ impl Composer {
         if let Some(id) = delete {
             bridge.request_home(BridgeRequest::DeleteSticker(id));
         }
+        if rename.is_some() {
+            self.stickers.renaming = rename;
+        }
         chosen
+    }
+
+    /// Строка переименования стикера над сеткой.
+    fn sticker_rename_row(&mut self, ui: &mut egui::Ui, bridge: &Bridge) {
+        let Some((id, name)) = self.stickers.renaming.as_mut() else {
+            return;
+        };
+        let mut done = None;
+        ui.horizontal(|ui| {
+            let field = ui.add(
+                egui::TextEdit::singleline(name)
+                    .desired_width((ui.available_width() - 200.0).max(80.0))
+                    .char_limit(100)
+                    .hint_text(tr("Имя стикера")),
+            );
+            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let valid = !name.trim().is_empty();
+            let save = ui
+                .add_enabled(valid, theme::primary_button(tr("Сохранить")))
+                .clicked();
+            if save || (enter && valid) {
+                done = Some(true);
+            }
+            if ui.button(tr("Отмена")).clicked() {
+                done = Some(false);
+            }
+        });
+        ui.add_space(4.0);
+        match done {
+            Some(true) => {
+                bridge.request_home(BridgeRequest::RenameSticker {
+                    id: id.clone(),
+                    name: name.trim().to_owned(),
+                });
+                self.stickers.renaming = None;
+            }
+            Some(false) => self.stickers.renaming = None,
+            None => {}
+        }
     }
 }
 

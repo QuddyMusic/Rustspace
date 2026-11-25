@@ -1803,5 +1803,8 @@
   "Упомянуть": "Mention",
   "Ткнуть": "Poke",
   "Участник увидит тычок в канале": "The member will see the poke in the channel",
-  "{actor} тыкает {target}": "{actor} pokes {target}"
+  "{actor} тыкает {target}": "{actor} pokes {target}",
+  "Найти стикер": "Find a sticker",
+  "Переименовать…": "Rename…",
+  "Имя стикера": "Sticker name"
 }
