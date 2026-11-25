@@ -1821,5 +1821,7 @@
   "Запишите его и храните отдельно от устройства — в менеджере паролей или на бумаге. Он показывается один раз; сервер его не знает и восстановить не сможет.": "Write it down and keep it apart from this device — in a password manager or on paper. It is shown once; the server does not know it and cannot recover it.",
   "Я сохранил ключ восстановления": "I saved the recovery key",
   "Это не ключ восстановления: 25 знаков, например ABCDE-FGHJK-MNPQR-STVWX-YZ012": "This is not a recovery key: 25 characters, like ABCDE-FGHJK-MNPQR-STVWX-YZ012",
-  "На сервере нет резервной копии ключа": "There is no key backup on the server"
+  "На сервере нет резервной копии ключа": "There is no key backup on the server",
+  "Ваш инстанс не поддерживает эту настройку: нужен сервер Rustspace 0.3 или новее.": "Your instance does not support this setting: it needs a Rustspace 0.3 or newer server.",
+  "Спрашиваем сервер…": "Asking the server…"
 }

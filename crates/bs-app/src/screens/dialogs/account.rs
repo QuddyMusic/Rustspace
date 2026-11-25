@@ -165,8 +165,16 @@ fn forward_privacy(
             crate::bridge::AdminRequest::Privacy(None),
         ));
     }
-    let Some(mut hide) = account.hide_forward else {
-        return;
+    // Видна всегда: пока сервер не ответил или если он её не знает —
+    // выключенной и с пояснением.
+    let known = account.hide_forward.is_some();
+    let mut hide = account.hide_forward.unwrap_or(false);
+    let note = match (&account.privacy_error, known) {
+        (_, true) => None,
+        (Some(_), false) => Some(tr(
+            "Ваш инстанс не поддерживает эту настройку: нужен сервер Rustspace 0.3 или новее.",
+        )),
+        (None, false) => Some(tr("Спрашиваем сервер…")),
     };
     ui.add_space(10.0);
     card(ui, |ui| {
@@ -182,9 +190,15 @@ fn forward_privacy(
                     ))
                     .size(12.5),
                 );
+                if let Some(note) = note {
+                    ui.label(RichText::new(note).color(theme::amber()).size(12.5));
+                }
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if widgets::toggle(ui, &mut hide) {
+                let changed = ui
+                    .add_enabled_ui(known, |ui| widgets::toggle(ui, &mut hide))
+                    .inner;
+                if changed {
                     account.hide_forward = Some(hide);
                     bridge.request(crate::bridge::BridgeRequest::Admin(
                         crate::bridge::AdminRequest::Privacy(Some(hide)),

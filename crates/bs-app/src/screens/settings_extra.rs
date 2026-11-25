@@ -50,6 +50,8 @@ pub(crate) struct AccountUi {
     pub(crate) hide_forward: Option<bool>,
     /// Настройку уже спросили.
     pub(crate) privacy_asked: bool,
+    /// Сервер не дал настройку (старый или не Rustspace).
+    pub(crate) privacy_error: Option<String>,
     /// Ключи доступа.
     pub(crate) passkeys: super::passkeys_ui::PasskeysUi,
     current: String,
@@ -216,7 +218,13 @@ impl ExtraUi {
                     self.apply_done(action, result);
                 }
                 AdminEvent::TwoFactor(result) => self.account.two_factor.apply(result),
-                AdminEvent::Privacy(result) => self.account.hide_forward = result.ok(),
+                AdminEvent::Privacy(result) => match result {
+                    Ok(hide) => {
+                        self.account.hide_forward = Some(hide);
+                        self.account.privacy_error = None;
+                    }
+                    Err(err) => self.account.privacy_error = Some(err),
+                },
                 AdminEvent::Passkeys(result) => {
                     self.account.passkeys.busy = false;
                     self.account.passkeys.list = Some(result);

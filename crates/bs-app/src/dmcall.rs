@@ -143,46 +143,7 @@ impl VoiceState {
     /// Разбирает событие звонка от сервера.
     pub(crate) fn handle_call(&mut self, bridge: &mut Bridge, origin: usize, event: CallEvent) {
         match event {
-            CallEvent::Incoming {
-                dm_channel_id,
-                federated_call_id,
-                caller_id,
-                caller_name,
-                livekit_url,
-                livekit_token,
-            } => {
-                if self.call.is_some() || self.dm.is_some() || self.incoming.is_some() {
-                    // Заняты: сразу отклоняем.
-                    let previous = bridge.focus_index();
-                    bridge.focus_on(origin);
-                    bridge.send(ClientEvent::DmCallReject {
-                        dm_channel_id,
-                        federated_call_id,
-                    });
-                    bridge.focus_on(previous);
-                    return;
-                }
-                let member = dm_channel_id
-                    .as_deref()
-                    .and_then(|id| bridge.cache_at(origin)?.dm_channel(id))
-                    .and_then(|channel| channel.members.iter().find(|m| m.id == caller_id));
-                let avatar = member.and_then(|m| m.avatar.clone());
-                let caller_name = member
-                    .and_then(|m| m.display_name.clone())
-                    .filter(|name| !name.trim().is_empty())
-                    .unwrap_or(caller_name);
-                self.incoming = Some(IncomingCall {
-                    origin,
-                    dm_id: dm_channel_id,
-                    federated_id: federated_call_id,
-                    caller: caller_name,
-                    avatar,
-                    since: std::time::Instant::now(),
-                    token: livekit_url
-                        .zip(livekit_token)
-                        .map(|(url, token)| LiveKitTokenResponse { token, url }),
-                });
-            }
+            incoming @ CallEvent::Incoming { .. } => self.on_incoming(bridge, origin, incoming),
             CallEvent::Accepted {
                 dm_channel_id,
                 federated_call_id,
@@ -241,6 +202,66 @@ impl VoiceState {
                 }
             }
         }
+    }
+
+    /// Входящий звонок: окно принятия, повтор того же звонка или «занято».
+    fn on_incoming(&mut self, bridge: &mut Bridge, origin: usize, event: CallEvent) {
+        let CallEvent::Incoming {
+            dm_channel_id,
+            federated_call_id,
+            caller_id,
+            caller_name,
+            livekit_url,
+            livekit_token,
+        } = event
+        else {
+            return;
+        };
+        // Звонок между инстансами приходит через каждый из них: повтор
+        // того же звонка — не «занято» (отказ по копии оборвал бы и
+        // сам звонок, и он стал бы «пропущенным»).
+        if self.incoming.as_ref().is_some_and(|known| {
+            same_incoming(
+                known,
+                origin,
+                dm_channel_id.as_ref(),
+                federated_call_id.as_ref(),
+            )
+        }) {
+            return;
+        }
+        // Голосовой канал не мешает: принятый звонок сам из него выйдет.
+        if self.dm.is_some() || self.incoming.is_some() {
+            // Заняты другим личным звонком: сразу отклоняем.
+            let previous = bridge.focus_index();
+            bridge.focus_on(origin);
+            bridge.send(ClientEvent::DmCallReject {
+                dm_channel_id,
+                federated_call_id,
+            });
+            bridge.focus_on(previous);
+            return;
+        }
+        let member = dm_channel_id
+            .as_deref()
+            .and_then(|id| bridge.cache_at(origin)?.dm_channel(id))
+            .and_then(|channel| channel.members.iter().find(|m| m.id == caller_id));
+        let avatar = member.and_then(|m| m.avatar.clone());
+        let caller_name = member
+            .and_then(|m| m.display_name.clone())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(caller_name);
+        self.incoming = Some(IncomingCall {
+            origin,
+            dm_id: dm_channel_id,
+            federated_id: federated_call_id,
+            caller: caller_name,
+            avatar,
+            since: std::time::Instant::now(),
+            token: livekit_url
+                .zip(livekit_token)
+                .map(|(url, token)| LiveKitTokenResponse { token, url }),
+        });
     }
 
     /// Собеседник или сервер закончил звонок.
@@ -509,6 +530,18 @@ fn call_button(ui: &mut egui::Ui, color: egui::Color32, hang_up: bool) -> egui::
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// Тот же входящий звонок: общий id федеративного звонка или та же беседа
+/// того же инстанса.
+fn same_incoming(
+    known: &IncomingCall,
+    origin: usize,
+    dm_id: Option<&String>,
+    federated_id: Option<&String>,
+) -> bool {
+    (known.federated_id.is_some() && known.federated_id.as_ref() == federated_id)
+        || (known.origin == origin && known.dm_id.is_some() && known.dm_id.as_ref() == dm_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::same_call;
@@ -521,5 +554,30 @@ mod tests {
         assert!(same_call(None, Some(&b), None, Some(&b)));
         assert!(!same_call(Some(&a), None, Some(&b), None));
         assert!(!same_call(None, None, None, None));
+    }
+
+    #[test]
+    fn the_same_call_through_another_instance_is_not_busy() {
+        let known = super::IncomingCall {
+            origin: 0,
+            dm_id: Some("d1".into()),
+            federated_id: Some("f1".into()),
+            caller: "Bob".into(),
+            avatar: None,
+            since: std::time::Instant::now(),
+            token: None,
+        };
+        let fed = Some("f1".to_owned());
+        let other_dm = Some("d9".to_owned());
+        assert!(super::same_incoming(
+            &known,
+            1,
+            other_dm.as_ref(),
+            fed.as_ref()
+        ));
+        let dm = Some("d1".to_owned());
+        assert!(super::same_incoming(&known, 0, dm.as_ref(), None));
+        let fed2 = Some("f2".to_owned());
+        assert!(!super::same_incoming(&known, 1, dm.as_ref(), fed2.as_ref()));
     }
 }

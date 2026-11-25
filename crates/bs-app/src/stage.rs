@@ -317,22 +317,28 @@ fn call_people(voice: &VoiceState, bridge: &Bridge) -> Vec<Person> {
                 .space(&call.space_id)?
                 .members
                 .iter()
-                .find(|m| m.user.id == id)
+                .find(|m| m.user.id == id || m.user.home_user_id.as_deref() == Some(id))
                 .and_then(|m| m.user.avatar.clone())
         });
         in_space.or_else(|| {
+            // В комнате у гостей с других инстансов — их домашний id.
             cache
                 .dm_channels()
                 .flat_map(|c| c.members.iter())
-                .find(|u| u.id == id)
+                .find(|u| u.id == id || u.home_user_id.as_deref() == Some(id))
                 .and_then(|u| u.avatar.clone())
         })
     };
     let mut people = Vec::new();
     if let Some(cache) = cache {
         let me = cache.me();
+        // Свой id в комнате (домашний) — чтобы подсвечивать, когда говорю.
+        let room_id = voice
+            .media
+            .as_ref()
+            .and_then(crate::voice_media::MediaEngine::me_id);
         people.push(Person {
-            id: me.id.clone(),
+            id: room_id.unwrap_or_else(|| me.id.clone()),
             name: me
                 .display_name
                 .clone()

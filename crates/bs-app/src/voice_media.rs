@@ -343,6 +343,10 @@ mod stub {
             Vec::new()
         }
 
+        pub(crate) fn me_id(&self) -> Option<String> {
+            None
+        }
+
         pub(crate) fn net_stats(&self) -> Option<super::NetStats> {
             None
         }
@@ -389,6 +393,9 @@ mod real {
         net: Option<super::NetStats>,
         /// Участники звонка (кроме себя): id и имя, по порядку входа.
         members: Vec<(String, String)>,
+        /// Свой id в комнате (домашний: в звонке на чужом инстансе он не
+        /// совпадает с id в его кэше).
+        me: Option<String>,
     }
 
     fn lock(shared: &Mutex<Shared>) -> MutexGuard<'_, Shared> {
@@ -398,14 +405,19 @@ mod real {
     /// Следит за комнатой звонка: участники, кто говорит, отключение.
     async fn watch_room(session: VoiceSession, shared: Arc<Mutex<Shared>>, generation: u64) {
         let mut events = session.subscribe();
+        let me = session.local_identity();
+        let me_id = bs_voice::user_id_of(&me).to_owned();
         {
             let snapshot = session.snapshot().await;
             let mut shared = lock(&shared);
             if shared.generation == generation {
+                shared.me = Some(me_id.clone());
+                // Себя комната тоже числит участником; на сцене «я» — отдельно.
                 shared.members = snapshot
                     .participants
                     .values()
-                    .map(|p| (bs_voice::user_id_of(&p.identity).to_owned(), p.name.clone()))
+                    .filter(|p| bs_voice::user_id_of(&p.identity) != me_id)
+                    .map(|p| member(&p.identity, &p.name))
                     .collect();
             }
         }
@@ -413,8 +425,9 @@ mod real {
             match events.recv().await {
                 Ok(VoiceEvent::ParticipantJoined { identity, name }) => {
                     let mut shared = lock(&shared);
-                    let id = bs_voice::user_id_of(&identity).to_owned();
+                    let (id, name) = member(&identity, &name);
                     if shared.generation == generation
+                        && id != me_id
                         && !shared.members.iter().any(|(known, _)| *known == id)
                     {
                         shared.members.push((id, name));
@@ -453,6 +466,23 @@ mod real {
                 Err(RecvError::Closed) => break,
             }
         }
+    }
+
+    /// Id и имя участника: имя — из события, а если оно пустое (так бывает у
+    /// пользователей других инстансов) — из identity `id:имя`.
+    fn member(identity: &str, name: &str) -> (String, String) {
+        let id = bs_voice::user_id_of(identity).to_owned();
+        let name = if name.trim().is_empty() {
+            identity
+                .split_once(':')
+                .map(|(_, name)| name.trim())
+                .filter(|name| !name.is_empty())
+                .unwrap_or(&id)
+                .to_owned()
+        } else {
+            name.to_owned()
+        };
+        (id, name)
     }
 
     fn processing(prefs: &VoicePrefs) -> AudioProcessingSettings {
@@ -751,6 +781,11 @@ mod real {
         /// Участники звонка, кроме себя: id и имя.
         pub(crate) fn members(&self) -> Vec<(String, String)> {
             lock(&self.shared).members.clone()
+        }
+
+        /// Свой id в комнате звонка.
+        pub(crate) fn me_id(&self) -> Option<String> {
+            lock(&self.shared).me.clone()
         }
     }
 }
