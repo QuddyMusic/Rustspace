@@ -147,7 +147,56 @@ pub struct E2eeKey {
     pub public_key: Option<String>,
 }
 
+/// Резервная копия ключа шифрования на сервере: запись, зашифрованная на
+/// устройстве ключом восстановления.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct E2eeBackup {
+    /// Запись `bs-e2ee-key:1:…`.
+    pub data: String,
+    /// Открытый ключ, который в ней лежит.
+    pub public_key: String,
+    /// Когда сохранена (мс).
+    pub updated_at: i64,
+}
+
 impl ApiClient {
+    /// `GET /api/rustspace/e2ee/backup`; `None` — копии нет или сервер её не
+    /// хранит.
+    ///
+    /// # Errors
+    /// Сетевые ошибки и отказ сервера.
+    pub async fn e2ee_backup(&self) -> Result<Option<E2eeBackup>, ApiError> {
+        match self.get_json("/api/rustspace/e2ee/backup").await {
+            Ok(backup) => Ok(Some(backup)),
+            Err(err) if err.status() == Some(reqwest::StatusCode::NOT_FOUND) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// `PUT /api/rustspace/e2ee/backup`.
+    ///
+    /// # Errors
+    /// Сетевые ошибки и отказ сервера.
+    pub async fn put_e2ee_backup(&self, data: &str, public_key: &str) -> Result<(), ApiError> {
+        let _: serde_json::Value = self
+            .put_json(
+                "/api/rustspace/e2ee/backup",
+                &serde_json::json!({ "data": data, "publicKey": public_key }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// `DELETE /api/rustspace/e2ee/backup`.
+    ///
+    /// # Errors
+    /// Сетевые ошибки и отказ сервера.
+    pub async fn delete_e2ee_backup(&self) -> Result<(), ApiError> {
+        let _: serde_json::Value = self.delete_json("/api/rustspace/e2ee/backup").await?;
+        Ok(())
+    }
+
     /// `PUT /api/e2ee/key`: публикует свой открытый ключ в справочнике
     /// сервера (расширение `bs-server`; оригинал отвечает `404`).
     ///

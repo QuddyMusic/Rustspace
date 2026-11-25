@@ -535,6 +535,12 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/api/e2ee/keys/{userId}", get(routes::e2ee::of_user))
         .route(
+            "/api/rustspace/e2ee/backup",
+            get(routes::e2ee::backup)
+                .put(routes::e2ee::put_backup)
+                .delete(routes::e2ee::delete_backup),
+        )
+        .route(
             "/api/rustspace/channels/{id}/bridges",
             get(routes::bridges::list).post(routes::bridges::create),
         )

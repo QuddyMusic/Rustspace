@@ -1312,6 +1312,11 @@ impl Bridge {
             .is_some_and(|slot| slot.session.e2ee_locked())
     }
 
+    /// Сессия инстанса для действий с резервной копией ключа.
+    pub(crate) fn e2ee_session(&mut self, origin: usize) -> Option<&mut crate::bridge::Session> {
+        self.slots.get_mut(origin).map(|slot| &mut slot.session)
+    }
+
     /// Запись ключа шифрования для другого устройства.
     ///
     /// # Errors

@@ -1238,6 +1238,25 @@ async fn privacy(client: &bs_api::ApiClient, set: Option<bool>) -> Result<bool, 
     result.map_err(|e| upload_message(&e))
 }
 
+/// Резервная копия ключа: действие, затем её состояние.
+async fn e2ee_backup(
+    client: &bs_api::ApiClient,
+    op: super::E2eeBackupOp,
+) -> Result<Option<bs_api::E2eeBackup>, String> {
+    match op {
+        super::E2eeBackupOp::Load => {}
+        super::E2eeBackupOp::Save { data, public_key } => client
+            .put_e2ee_backup(&data, &public_key)
+            .await
+            .map_err(|e| upload_message(&e))?,
+        super::E2eeBackupOp::Delete => client
+            .delete_e2ee_backup()
+            .await
+            .map_err(|e| upload_message(&e))?,
+    }
+    client.e2ee_backup().await.map_err(|e| upload_message(&e))
+}
+
 /// Ключи доступа: добавление ждёт подтверждения в браузере до пяти минут.
 async fn passkeys(
     client: &bs_api::ApiClient,
@@ -1763,6 +1782,7 @@ async fn social_request(
             let _ = client.publish_e2ee_key(&key).await;
             BridgeResponse::Quiet
         }
+        BridgeRequest::E2eeBackup(op) => BridgeResponse::E2eeBackup(e2ee_backup(client, op).await),
         BridgeRequest::E2eePeerKey {
             dm_channel_id,
             user_id,

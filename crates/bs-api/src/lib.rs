@@ -101,7 +101,7 @@ pub use space_manage::{
     RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input,
 };
 pub use sticker_packs::{StickerPack, StickerPacks};
-pub use twofactor::{E2eeKey, TwoFactorSetup, TwoFactorStatus};
+pub use twofactor::{E2eeBackup, E2eeKey, TwoFactorSetup, TwoFactorStatus};
 pub use webhooks::{
     CARD_MARK, CardDraft, CardImage, FORWARD_MARK, InstanceVoiceBitrate, VoiceBitrate, Webhook,
     card_as_markdown, forward_as_markdown, split_card_mark,

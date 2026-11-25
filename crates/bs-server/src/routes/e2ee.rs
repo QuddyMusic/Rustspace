@@ -96,9 +96,89 @@ pub async fn of_user(
         .await
 }
 
+/// Запись резервной копии: формат `bs-e2ee-key:1:…` (Argon2id +
+/// XChaCha20-Poly1305 на устройстве). Сервер проверяет только форму.
+fn is_backup(text: &str) -> bool {
+    text.len() <= 1024
+        && text.strip_prefix("bs-e2ee-key:1:").is_some_and(|rest| {
+            !rest.is_empty()
+                && rest
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+}
+
+/// `GET /api/rustspace/e2ee/backup` → `{data, publicKey, updatedAt}`;
+/// копии нет — 404 `backup_not_found`.
+///
+/// Запись зашифрована ключом восстановления, который знает только
+/// пользователь: взлом сервера даёт шифротекст, а не ключ переписок.
+pub async fn backup(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Value>> {
+    state
+        .run(move |tx, _| {
+            let row = tx
+                .query_one(
+                    "SELECT data, public_key, updated_at FROM bs_e2ee_backups WHERE user_id = ?",
+                    params![&user.id],
+                )?
+                .ok_or_else(|| ApiError::not_found("backup_not_found"))?;
+            Ok(Json(json!({
+                "data": row.text("data")?,
+                "publicKey": row.text("public_key")?,
+                "updatedAt": row.int("updated_at")?,
+            })))
+        })
+        .await
+}
+
+/// `PUT /api/rustspace/e2ee/backup` `{data, publicKey}` — заменяет копию.
+pub async fn put_backup(
+    State(state): State<AppState>,
+    user: AuthUser,
+    JsonBody(body): JsonBody,
+) -> ApiResult<Json<Value>> {
+    let data = str_field(&body, "data")
+        .filter(|data| is_backup(data))
+        .ok_or_else(|| ApiError::bad_request("e2ee_backup_invalid"))?
+        .to_owned();
+    let key = str_field(&body, "publicKey")
+        .filter(|key| is_public_key(key))
+        .ok_or_else(|| ApiError::bad_request("e2ee_key_invalid"))?
+        .to_owned();
+    state
+        .run(move |tx, _| {
+            let now = now_ms();
+            tx.execute(
+                "INSERT INTO bs_e2ee_backups (user_id, data, public_key, updated_at) \
+                 VALUES (?, ?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET \
+                 data = excluded.data, public_key = excluded.public_key, \
+                 updated_at = excluded.updated_at",
+                params![&user.id, &data, &key, now],
+            )?;
+            Ok(Json(json!({"publicKey": key, "updatedAt": now})))
+        })
+        .await
+}
+
+/// `DELETE /api/rustspace/e2ee/backup`.
+pub async fn delete_backup(
+    State(state): State<AppState>,
+    user: AuthUser,
+) -> ApiResult<Json<Value>> {
+    state
+        .run(move |tx, _| {
+            tx.execute(
+                "DELETE FROM bs_e2ee_backups WHERE user_id = ?",
+                params![&user.id],
+            )?;
+            Ok(Json(json!({"success": true})))
+        })
+        .await
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_public_key;
+    use super::{is_backup, is_public_key};
 
     #[test]
     fn only_canonical_32_byte_keys_are_accepted() {
@@ -112,5 +192,14 @@ mod tests {
             "hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo"
         ));
         assert!(!is_public_key(""));
+    }
+
+    #[test]
+    fn backup_record_shape() {
+        assert!(is_backup("bs-e2ee-key:1:AbC-_09"));
+        assert!(!is_backup("bs-e2ee-key:1:"));
+        assert!(!is_backup("bs-e2ee:1:AbC"));
+        assert!(!is_backup("bs-e2ee-key:1:a b"));
+        assert!(!is_backup(&format!("bs-e2ee-key:1:{}", "a".repeat(1100))));
     }
 }

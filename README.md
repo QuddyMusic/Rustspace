@@ -92,9 +92,11 @@ every WebSocket frame and REST response the client receives.
   ordinary message, so it works through any server, the original included. Keys are exchanged
   in the conversation itself and verified with a safety number. Attachments are encrypted too
   (the file name and type travel inside the encrypted text); group conversations are not
-  encrypted, and there is no forward secrecy. The key lives in the system
-  keyring and moves to another device as a passphrase-protected record (the encryption
-  window). The other person needs this client: the original web client shows ciphertext. While a
+  encrypted, and there is no forward secrecy. The key lives in the system keyring and moves to
+  another device as a passphrase-protected record (the encryption window) or through a backup
+  on the server (`bs-server`): it is encrypted with a 25-character recovery key that the
+  device creates and the server never sees, so a compromised server does not expose your
+  conversations. The other person needs this client: the original web client shows ciphertext. While a
   one-to-one conversation is not encrypted, a thin bar above it says so (and whether the other
   person has a key at all); it closes with one click and stays closed for that conversation.
 - **Spaces.** Channels and categories, roles and permissions, per-channel overrides, members,

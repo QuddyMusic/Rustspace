@@ -201,6 +201,8 @@ pub(crate) enum BridgeRequest {
     NotificationSettings,
     /// Опубликовать свой открытый ключ шифрования в справочнике сервера.
     E2eePublish(String),
+    /// Резервная копия ключа шифрования на сервере.
+    E2eeBackup(E2eeBackupOp),
     /// Узнать в справочнике ключ собеседника по переписке.
     E2eePeerKey {
         /// Переписка.
@@ -1218,6 +1220,8 @@ pub(crate) enum BridgeResponse {
         /// Открытый ключ.
         public_key: String,
     },
+    /// Резервная копия ключа после запроса (`None` — копии нет).
+    E2eeBackup(Result<Option<bs_api::E2eeBackup>, String>),
     /// Запрос выполнен, показывать нечего.
     Quiet,
     /// Пришли заявки в друзья.
@@ -1396,4 +1400,20 @@ pub(crate) enum PasskeyOp {
     Add,
     /// Удалить ключ.
     Remove(String),
+}
+
+/// Действие с резервной копией ключа шифрования.
+#[derive(Debug, Clone)]
+pub(crate) enum E2eeBackupOp {
+    /// Узнать, есть ли копия.
+    Load,
+    /// Сохранить запись (зашифрована ключом восстановления на устройстве).
+    Save {
+        /// Запись `bs-e2ee-key:1:…`.
+        data: String,
+        /// Открытый ключ в ней.
+        public_key: String,
+    },
+    /// Удалить копию.
+    Delete,
 }

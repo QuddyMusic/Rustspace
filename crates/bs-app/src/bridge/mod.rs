@@ -145,6 +145,8 @@ pub(crate) struct Session {
     explore_loading: bool,
     /// Пространство, только что созданное или в которое вступили.
     opened_space: Option<String>,
+    /// Резервная копия ключа шифрования на сервере (`None` — не спрашивали).
+    e2ee_backup: Option<Result<Option<bs_api::E2eeBackup>, String>>,
     /// Короткое сообщение об успехе («Профиль сохранён»).
     info: Option<String>,
     /// Загрузка истории по id канала.

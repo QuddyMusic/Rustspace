@@ -58,6 +58,7 @@ impl Session {
             instance_info_asked: false,
             explore_loading: false,
             opened_space: None,
+            e2ee_backup: None,
             info: None,
             history: HashMap::new(),
             search: SearchState::default(),
@@ -298,6 +299,66 @@ impl Session {
         Ok(())
     }
 
+    /// Резервная копия ключа на сервере (`None` — ещё не знаем).
+    pub(crate) const fn e2ee_backup(&self) -> Option<&Result<Option<bs_api::E2eeBackup>, String>> {
+        self.e2ee_backup.as_ref()
+    }
+
+    /// Спросить сервер о резервной копии.
+    pub(crate) fn load_e2ee_backup(&mut self) {
+        self.e2ee_backup = None;
+        self.request(BridgeRequest::E2eeBackup(super::E2eeBackupOp::Load));
+    }
+
+    /// Новая резервная копия: ключ восстановления создаётся здесь и
+    /// возвращается, чтобы показать его пользователю; сервер получает только
+    /// запись, зашифрованную им.
+    ///
+    /// # Errors
+    /// Текст для пользователя.
+    pub(crate) fn create_e2ee_backup(&self) -> Result<String, String> {
+        let code = bs_e2ee::recovery_code();
+        let data = self.export_e2ee_key(&code)?;
+        let public_key = self
+            .e2ee
+            .borrow()
+            .as_ref()
+            .map(e2ee::E2ee::public_key)
+            .unwrap_or_default();
+        self.request(BridgeRequest::E2eeBackup(super::E2eeBackupOp::Save {
+            data,
+            public_key,
+        }));
+        Ok(code)
+    }
+
+    /// Удалить резервную копию с сервера.
+    pub(crate) fn delete_e2ee_backup(&self) {
+        self.request(BridgeRequest::E2eeBackup(super::E2eeBackupOp::Delete));
+    }
+
+    /// Ставит ключ из резервной копии на сервере.
+    ///
+    /// # Errors
+    /// Текст для пользователя.
+    pub(crate) fn restore_e2ee_backup(&mut self, code: &str) -> Result<(), String> {
+        let Some(code) = bs_e2ee::normalize_recovery_code(code) else {
+            return Err(crate::i18n::tr(
+                "Это не ключ восстановления: 25 знаков, например ABCDE-FGHJK-MNPQR-STVWX-YZ012",
+            )
+            .to_owned());
+        };
+        let Some(Ok(Some(backup))) = self.e2ee_backup.clone() else {
+            return Err(crate::i18n::tr("На сервере нет резервной копии ключа").to_owned());
+        };
+        self.import_e2ee_key(&backup.data, &code)
+    }
+
+    /// Свой открытый ключ шифрования (`None` — сессии нет).
+    pub(crate) fn e2ee_public_key(&self) -> Option<String> {
+        self.e2ee.borrow().as_ref().map(e2ee::E2ee::public_key)
+    }
+
     /// Принимает новый ключ собеседника после сверки контрольного числа.
     pub(crate) fn accept_e2ee_key(&mut self, dm_channel_id: &str) {
         if let Some(e2ee) = self.e2ee.get_mut().as_mut() {
@@ -459,6 +520,7 @@ impl Session {
         self.explore = None;
         self.explore_loading = false;
         self.opened_space = None;
+        self.e2ee_backup = None;
         self.info = None;
         self.notice = None;
         self.search = SearchState::default();

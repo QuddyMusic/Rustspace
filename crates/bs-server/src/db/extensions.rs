@@ -289,6 +289,19 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             "CREATE INDEX bs_passkeys_user ON bs_passkeys (user_id)",
         ],
     ),
+    (
+        "0017_e2ee_backups",
+        &[
+            // Резервная копия ключа шифрования: запись, зашифрованная на
+            // устройстве ключом восстановления, которого сервер не видит.
+            "CREATE TABLE bs_e2ee_backups (
+                user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                data TEXT NOT NULL,
+                public_key TEXT NOT NULL,
+                updated_at BIGINT NOT NULL
+            )",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

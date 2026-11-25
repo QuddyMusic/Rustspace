@@ -64,6 +64,7 @@ impl Session {
                 }
             }
             BridgeResponse::Quiet => {}
+            BridgeResponse::E2eeBackup(result) => self.e2ee_backup = Some(result),
             BridgeResponse::E2eePeerKey {
                 dm_channel_id,
                 public_key,

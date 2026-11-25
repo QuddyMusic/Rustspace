@@ -123,6 +123,8 @@ fn extension_message(code: &str) -> Option<&'static str> {
         "e2ee_key_invalid" => "Invalid encryption key bundle",
         "e2ee_key_not_found" => "This user has not published an encryption key",
         "e2ee_payload_invalid" => "Invalid encrypted message",
+        "e2ee_backup_invalid" => "Invalid encryption key backup",
+        "backup_not_found" => "No encryption key backup",
         _ => return None,
     })
 }

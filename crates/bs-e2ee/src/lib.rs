@@ -446,6 +446,50 @@ pub fn take_file_notes(text: &str) -> (String, Vec<FileNote>) {
     (kept.join("\n").trim_end().to_owned(), notes)
 }
 
+/// Алфавит ключа восстановления: base32 Крокфорда (без I, L, O, U).
+const RECOVERY_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/// Знаков в ключе восстановления: 25 × 5 бит = 125 бит случайности.
+const RECOVERY_CHARS: usize = 25;
+
+/// Новый ключ восстановления вида `ABCDE-FGHJK-MNPQR-STVWX-YZ012`.
+///
+/// Его создаёт устройство и показывает пользователю; на сервер уходит только
+/// запись ключа шифрования, зашифрованная им ([`export_key`]). 125 бит не
+/// перебрать, даже получив запись из базы взломанного сервера.
+#[must_use]
+pub fn recovery_code() -> String {
+    let symbols: Vec<u8> = (0..RECOVERY_CHARS)
+        .map(|_| RECOVERY_ALPHABET[usize::from(rand::random::<u8>() & 31)])
+        .collect();
+    group_recovery(&symbols)
+}
+
+fn group_recovery(symbols: &[u8]) -> String {
+    symbols
+        .chunks(5)
+        .map(|chunk| chunk.iter().map(|&b| char::from(b)).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Приводит введённый ключ восстановления к каноническому виду: регистр,
+/// пробелы и дефисы не важны, O читается как 0, I и L — как 1. `None` — это
+/// не ключ восстановления.
+#[must_use]
+pub fn normalize_recovery_code(input: &str) -> Option<String> {
+    let symbols: Vec<u8> = input
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .map(|c| match c.to_ascii_uppercase() {
+            'O' => b'0',
+            'I' | 'L' => b'1',
+            other => u8::try_from(other).unwrap_or(b'?'),
+        })
+        .collect();
+    (symbols.len() == RECOVERY_CHARS && symbols.iter().all(|b| RECOVERY_ALPHABET.contains(b)))
+        .then(|| group_recovery(&symbols))
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "тесты")]
 mod tests {
@@ -625,5 +669,30 @@ mod tests {
         let (clean, notes) = super::take_file_notes(&text);
         assert_eq!(clean, "привет");
         assert_eq!(notes, vec![note]);
+    }
+
+    #[test]
+    fn recovery_code_round_trips_a_key() {
+        let code = recovery_code();
+        assert_eq!(code.len(), 29);
+        assert_eq!(
+            normalize_recovery_code(&code).as_deref(),
+            Some(code.as_str())
+        );
+        let sloppy = code.to_lowercase().replace('-', " ");
+        assert_eq!(
+            normalize_recovery_code(&sloppy).as_deref(),
+            Some(code.as_str())
+        );
+        assert!(normalize_recovery_code("ABCDE-FGHJK").is_none());
+        assert_eq!(
+            normalize_recovery_code("oooOO-iiiii-LLLLL-00000-11111").as_deref(),
+            Some("00000-11111-11111-00000-11111")
+        );
+        let key = SecretKey::generate();
+        let record = export_key(&key, &code).expect("запись");
+        let back = import_key(&record, &normalize_recovery_code(&sloppy).expect("ключ"))
+            .expect("ключ из записи");
+        assert_eq!(back.public(), key.public());
     }
 }
