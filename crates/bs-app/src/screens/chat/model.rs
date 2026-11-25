@@ -325,6 +325,8 @@ pub(crate) fn dm_sidebar_items(cache: &Cache) -> Vec<SidebarDm> {
 /// Пространства идут по инстансам (домашний первым). Копии одной беседы на
 /// разных инстансах (одинаковый ключ) сливаются в одну; показывается копия
 /// домашнего инстанса, как в оригинале: туда приходят ответы собеседника.
+/// Инстанс без связи уступает копию тому, что на связи: если домашний
+/// недоступен, беседа идёт через пиринговый (failover оригинала).
 /// Файлы получают полный адрес владельца, чтобы их можно было грузить, не
 /// зная, чьё это значение.
 #[must_use]
@@ -338,7 +340,21 @@ pub(crate) fn merged_sidebar(bridge: &Bridge) -> (Vec<SidebarSpace>, Vec<Sidebar
             Some((origin, base, sidebar_items(cache), dm_sidebar_items(cache)))
         })
         .collect();
-    merge_origins(parts)
+    merge_preferring(parts, |origin| bridge.is_connected(origin))
+}
+
+/// Склейка, в которой копии бесед инстансов без связи уступают копиям
+/// тех, что на связи. Пространства остаются в порядке инстансов.
+#[must_use]
+pub(super) fn merge_preferring(
+    mut parts: Vec<(usize, &str, Vec<SidebarSpace>, Vec<SidebarDm>)>,
+    connected: impl Fn(usize) -> bool,
+) -> (Vec<SidebarSpace>, Vec<SidebarDm>) {
+    // Стабильно: на связи — вперёд, внутри групп порядок прежний.
+    parts.sort_by_key(|(origin, ..)| !connected(*origin));
+    let (mut spaces, dms) = merge_origins(parts);
+    spaces.sort_by_key(|space| space.origin);
+    (spaces, dms)
 }
 
 /// Склейка списков нескольких инстансов (см. [`merged_sidebar`]).

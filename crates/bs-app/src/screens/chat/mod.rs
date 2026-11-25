@@ -286,6 +286,40 @@ impl ChatScreen {
     }
 
     /// Открывает канал и переключает центр на ленту.
+    /// Открытая беседа ушла из списка (её инстанс без связи), а другая её
+    /// копия на связи: переходим на копию — и обратно, когда связь вернётся.
+    fn follow_dm_copy(&mut self, bridge: &Bridge, dms: &[SidebarDm]) {
+        let Some(selected) = self.selected_channel.as_ref() else {
+            return;
+        };
+        if selected.kind != ChannelKind::Dm
+            || dms
+                .iter()
+                .any(|dm| (dm.origin, &dm.id) == (selected.origin, &selected.channel))
+        {
+            return;
+        }
+        let Some(key) = bridge
+            .cache_at(selected.origin)
+            .and_then(|cache| cache.dm_channels().find(|dm| dm.id == selected.channel))
+            .and_then(|dm| dm.federated_id.clone())
+        else {
+            return;
+        };
+        let Some(copy) = dms
+            .iter()
+            .find(|dm| dm.key.as_deref() == Some(key.as_str()))
+        else {
+            return;
+        };
+        let target = SelectedChannel {
+            origin: copy.origin,
+            channel: copy.id.clone(),
+            kind: ChannelKind::Dm,
+        };
+        self.open_channel(target);
+    }
+
     pub(crate) fn open_channel(&mut self, selected: SelectedChannel) {
         // Правка относилась к прежнему каналу.
         if self.selected_channel.as_ref() != Some(&selected) {
@@ -692,6 +726,7 @@ impl ChatScreen {
         let extras_nav = self.drive_extras(bridge, now);
         self.drive_voice(&ctx, bridge, now);
         let (items, dms) = merged_sidebar(bridge);
+        self.follow_dm_copy(bridge, &dms);
 
         self.take_space_events(bridge, &ctx, now);
         if let Some(opened) = bridge.take_opened_space() {
@@ -1108,6 +1143,35 @@ mod tests {
         // Копия с ключом одна (домашняя); беседы без ключа не склеиваются;
         // порядок — по времени последнего сообщения.
         assert_eq!(ids, vec![(1, "78"), (0, "9"), (1, "79")]);
+    }
+
+    #[test]
+    fn dm_moves_to_a_connected_copy_when_home_is_down() {
+        let parts = || {
+            vec![
+                (
+                    0,
+                    "https://home.example",
+                    Vec::new(),
+                    vec![dm_item("9", Some("k"), 10), dm_item("8", Some("only"), 5)],
+                ),
+                (
+                    1,
+                    "https://orbit.example",
+                    Vec::new(),
+                    vec![dm_item("77", Some("k"), 10)],
+                ),
+            ]
+        };
+        let ids = |dms: Vec<super::SidebarDm>| -> Vec<(usize, String)> {
+            dms.into_iter().map(|d| (d.origin, d.id)).collect()
+        };
+        // Всё на связи — домашняя копия.
+        let (_, dms) = super::merge_preferring(parts(), |_| true);
+        assert_eq!(ids(dms), vec![(0, "9".into()), (0, "8".into())]);
+        // Дом без связи — копия пира; беседа без копии остаётся домашней.
+        let (_, dms) = super::merge_preferring(parts(), |origin| origin != 0);
+        assert_eq!(ids(dms), vec![(1, "77".into()), (0, "8".into())]);
     }
 
     #[test]

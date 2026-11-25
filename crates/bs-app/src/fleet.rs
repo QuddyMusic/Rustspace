@@ -1367,6 +1367,27 @@ impl Bridge {
         self.slots[0].session.connection()
     }
 
+    /// Инстанс на связи: сессия жива и сокет не переподключается.
+    pub(crate) fn is_connected(&self, index: usize) -> bool {
+        self.slots.get(index).is_some_and(|slot| {
+            slot.session.is_live()
+                && *slot.session.connection() == bs_instances::ConnectionState::Connected
+        })
+    }
+
+    /// Почему не удался последний вход в домашний инстанс.
+    pub(crate) fn home_failure(&self) -> Option<FailureKind> {
+        self.slots[0].session.failure()
+    }
+
+    /// Домашний инстанс без связи, а другие работают: личные беседы идут
+    /// через их копии.
+    pub(crate) fn home_failed_over(&self) -> bool {
+        self.slots[0].session.is_live()
+            && !self.is_connected(0)
+            && (1..self.slots.len()).any(|index| self.is_connected(index))
+    }
+
     /// Первый `ready` домашнего инстанса.
     pub(crate) fn take_ready(&mut self) -> bool {
         self.slots[0].session.take_ready()

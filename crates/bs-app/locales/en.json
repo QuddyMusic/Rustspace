@@ -1797,5 +1797,7 @@
   "Добавить аккаунт": "Add account",
   "Войти ещё в один аккаунт — этот останется в списке": "Sign in to another account — this one stays in the list",
   "Переключиться на этот аккаунт": "Switch to this account",
-  "Сохранённые аккаунты": "Saved accounts"
+  "Сохранённые аккаунты": "Saved accounts",
+  "Нет связи с домашним инстансом — личные беседы идут через другие ваши инстансы. Переподключаемся…": "No connection to your home instance — direct messages go through your other instances. Reconnecting…",
+  "Повторим вход через {a0} с": "Retrying sign-in in {a0} s"
 }

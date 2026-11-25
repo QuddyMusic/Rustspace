@@ -34,6 +34,8 @@ pub(crate) struct LoginScreen {
     passkey: Option<super::passkey_login::PasskeyLogin>,
     /// Выбран сохранённый аккаунт (номер в списке) — войти в него.
     pub(crate) picked: Option<usize>,
+    /// Вход по сохранённой сессии повторится сам (сервер недоступен).
+    pub(crate) retry_note: Option<String>,
 }
 
 impl std::fmt::Debug for LoginScreen {
@@ -412,6 +414,13 @@ impl LoginScreen {
         if let Some(err) = bridge.last_error() {
             ui.add_space(12.0);
             error_note(ui, err);
+        }
+        if let Some(note) = &self.retry_note {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(theme::muted(note.as_str()).size(12.5));
+            });
         }
         ui.add_space(14.0);
         ui.horizontal(|ui| {

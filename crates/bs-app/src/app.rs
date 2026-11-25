@@ -38,6 +38,8 @@ pub(crate) struct BackspaceApp {
     desktop: crate::desktop::Desktop,
     /// Переключение аккаунта ждёт, пока закроется текущая сессия.
     pending_switch: Option<Switch>,
+    /// Вход по сохранённой сессии: если сервер недоступен, он повторяется.
+    resume: Option<Resume>,
 }
 
 impl BackspaceApp {
@@ -53,8 +55,10 @@ impl BackspaceApp {
         let mut login = LoginScreen::default();
         // Сохранённая сессия: входим по токену, без пароля.
         let path = crate::accounts::active_path();
+        let mut resume = None;
         if let Some(base) = bridge.restore(path.clone()) {
             login.base = base;
+            resume = path.map(Resume::new);
         } else if let Some((base, insecure)) = path.as_deref().and_then(crate::saved_session::hint)
         {
             login.base = base;
@@ -71,6 +75,26 @@ impl BackspaceApp {
             images: ImageHub::default(),
             desktop: crate::desktop::Desktop::start(ctx),
             pending_switch: None,
+            resume,
+        }
+    }
+}
+
+/// Повтор входа по сохранённой сессии, пока домашний инстанс недоступен.
+#[derive(Debug)]
+struct Resume {
+    path: std::path::PathBuf,
+    attempt: u32,
+    /// Когда повторить (время egui).
+    at: Option<f64>,
+}
+
+impl Resume {
+    const fn new(path: std::path::PathBuf) -> Self {
+        Self {
+            path,
+            attempt: 0,
+            at: None,
         }
     }
 }
@@ -85,6 +109,51 @@ enum Switch {
 }
 
 impl BackspaceApp {
+    /// Сервер не ответил на вход по сохранённой сессии: повторяем с
+    /// растущей паузой (5 с … 1 мин), пока не войдём или пользователь не
+    /// займётся формой сам.
+    fn drive_resume(&mut self, now: f64, ctx: &egui::Context) {
+        let Some(resume) = self.resume.as_mut() else {
+            self.login.retry_note = None;
+            return;
+        };
+        if matches!(self.screen, Screen::Chat) {
+            self.resume = None;
+            self.login.retry_note = None;
+            return;
+        }
+        if self.bridge.is_busy() {
+            return;
+        }
+        if self.bridge.home_failure() != Some(crate::bridge::FailureKind::Network)
+            || self.bridge.persist_path().as_ref() != Some(&resume.path)
+        {
+            self.resume = None;
+            self.login.retry_note = None;
+            return;
+        }
+        let at = *resume.at.get_or_insert_with(|| {
+            let pause = 5.0 * f64::from(2_u32.saturating_pow(resume.attempt.min(4)));
+            now + pause.min(60.0)
+        });
+        if now < at {
+            let left = (at - now).ceil();
+            self.login.retry_note = Some(crate::tf!(
+                "Повторим вход через {a0} с",
+                a0 = format!("{left:.0}")
+            ));
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            return;
+        }
+        resume.attempt += 1;
+        resume.at = None;
+        let path = resume.path.clone();
+        self.login.retry_note = None;
+        if self.bridge.restore(Some(path)).is_none() {
+            self.resume = None;
+        }
+    }
+
     /// Выход и переключение аккаунтов из чата.
     fn chat_action(&mut self, action: ChatAction) {
         match action {
@@ -116,8 +185,9 @@ impl BackspaceApp {
         if saved {
             crate::accounts::set_active(&path);
         }
-        if let Some(base) = self.bridge.restore(Some(path)) {
+        if let Some(base) = self.bridge.restore(Some(path.clone())) {
             self.login.base = base;
+            self.resume = Some(Resume::new(path));
         } else {
             self.login.switch_instance();
         }
@@ -218,10 +288,16 @@ impl BackspaceApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let text = notice.unwrap_or_else(|| {
-                        crate::tf!(
-                            "Соединение: {a0}",
-                            a0 = connection_label(self.bridge.connection())
-                        )
+                        if self.bridge.home_failed_over() {
+                            tr("Нет связи с домашним инстансом — личные беседы идут через \
+                                другие ваши инстансы. Переподключаемся…")
+                            .to_owned()
+                        } else {
+                            crate::tf!(
+                                "Соединение: {a0}",
+                                a0 = connection_label(self.bridge.connection())
+                            )
+                        }
                     });
                     ui.label(
                         egui::RichText::new(text)
@@ -446,6 +522,8 @@ impl BackspaceApp {
         }
         let entering = matches!(self.screen, Screen::Login);
         self.screen = next_screen(self.screen, ready, lost);
+        let now = ui.ctx().input(|i| i.time);
+        self.drive_resume(now, ui.ctx());
         // Вошли: инстанс — в недавние на экране входа.
         if entering
             && matches!(self.screen, Screen::Chat)
