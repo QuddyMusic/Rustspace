@@ -17,8 +17,8 @@ original server.
 - Multiple instances at once; federated instances signed in through the home account.
 
 ### GUI client
-- Sign-in, registration, session restore with the token in the system keyring; switching
-  instance from settings and recent instances on the login form.
+- Sign-in, registration, session restore with the token in the system keyring; several
+  accounts with switching, recent instances on the login form, passkeys.
 - Spaces, channels, categories, roles, overrides, members, bans, invites, join requests,
   directory, notification settings; DMs and group DMs, friends, profiles.
 - Messages: edit, delete, replies, reactions, mentions, markdown, read state, history,
@@ -76,6 +76,26 @@ original server.
   Silicon and Intel, dmg), static server builds that the server's updater picks up; CI green
   on Linux, Windows and macOS.
 
+### Version 0.3.0
+- **Several accounts** with switching from the avatar menu and one-click sign-in on the login
+  screen; each keeps its own token and encryption keys.
+- **Passkeys** (WebAuthn in `bs-server` without third-party libraries): sign-in and a second
+  factor through Bitwarden, a phone, Windows Hello or a keychain.
+- **Failover to a peer instance**, as in the original: a direct message whose instance lost
+  its connection moves to its copy on a connected instance and back; signing in with the saved
+  session retries while the home instance is down.
+- **Encrypted attachments** in end-to-end encrypted DMs; **forwarding** with a clickable author
+  and a privacy setting.
+- **Calls like the original**: incoming call window, connection details, participants in DMs and
+  group calls, the other side sees muted microphone and sound; per-participant volume,
+  fullscreen or a separate window.
+- From the original 1.11 and its open PRs: channel pokes, "Mention" in the message menu, sticker
+  rename and search, one GIF/sticker button, attachment reordering, cards across federation and
+  bridges, hover reactions, chat hotkeys.
+- **Web version for vanilla Backspace clients** (`setup.sh --web`).
+- Windows: no console window, notifications signed "Rustspace"; Arch package builds from the
+  checkout.
+
 ### This iteration
 - **Screen sharing rebuilt.** Capture now uses libwebrtc's own desktop capturer instead of
   xcap: on Wayland it goes through the ScreenCast portal (the system dialog picks the screen
@@ -118,6 +138,15 @@ original server.
   Needs a run on a real machine (GNOME/KDE on Wayland, Windows, macOS).
 - **TUI** lags behind the GUI (no DM feed, groups, space settings or voice UI). Postponed by
   the owner's decision.
+- **From the original's open PRs**: the space soundboard (#464), opt-in per-message
+  instance translation with first-transfer consent (#448, ours translates with open-source
+  models instead), the sticker peer allow-list (#471). They are not merged upstream yet; we
+  follow them once they land.
+- **Starting with the home instance down**: other instances connect with credentials the home
+  instance issues, so until it answers the client waits and retries instead of opening chats
+  through peers. Once running, losing the home instance no longer interrupts DMs.
+- **Mentions in the input field** appear as the `<@id>` token until sent (the original shows a
+  chip).
 
 ## Next
 - **Media on Windows and macOS.** Games and Rich Presence already work there (process list,

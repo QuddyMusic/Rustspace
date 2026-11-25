@@ -8,7 +8,7 @@
 # Обновление: git pull и снова makepkg -si.
 # Готовый бинарник из релиза без сборки — rustspace-bin/PKGBUILD.
 pkgname=rustspace
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Rustspace — неофициальный клиент на Rust, совместимый с Backspace (чат, ЛС, голос)"
 arch=('x86_64' 'aarch64')

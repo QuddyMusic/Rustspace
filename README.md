@@ -46,7 +46,7 @@ The script asks before installing build packages (pacman, apt, dnf or zypper) an
 Rust via rustup; it fetches the sources into `~/.local/src/rustspace`, builds the client and
 puts it into `~/.local/bin` with a menu entry (`--system` — into `/usr/local`). Voice and camera
 need clang 21+; without it the client is built without them and the script says what to
-install. To update, run it again. Options: `--ref v0.2.0`, `--no-voice`, `--uninstall`,
+install. To update, run it again. Options: `--ref v0.3.0`, `--no-voice`, `--uninstall`,
 `--help`. The build needs about 10 GB of disk and a few minutes.
 
 Ready builds are on the [releases page](https://github.com/QuddyMusic/Rustspace/releases):
@@ -77,15 +77,22 @@ every WebSocket frame and REST response the client receives.
 - **Sign-in.** Login and registration (with invite code and live username check). Plain `http`
   outside loopback only with explicit consent. The session survives restarts: the token lives
   in the system keyring (Secret Service, Keychain, Credential Manager), with a `0600` file as a
-  fallback. "Switch instance" in settings signs out and opens a clean login form; the login
-  form lists recent instances (one click fills the address).
+  fallback. The login form lists recent instances (one click fills the address). If the
+  instance is unreachable at startup, signing in with the saved session retries on its own.
+- **Multiple accounts.** Your avatar menu lists your other accounts (switch without a password)
+  and "Add account"; the login screen shows saved accounts for one-click sign-in. Each account
+  keeps its own token and its own encryption keys.
 - **Two-factor authentication** (on a server that supports it, that is `bs-server`): a code at
   login; turning on, recovery codes and turning off in account settings.
+- **Passkeys** (`bs-server`): "Sign in with a passkey" confirms in the browser through
+  Bitwarden, a phone, Windows Hello or a keychain, with no password or code; passkeys are added
+  and removed in account settings.
 - **End-to-end encryption for one-to-one conversations.** Turned on from the conversation
   header; text is encrypted on the device (X25519, XChaCha20-Poly1305) and travels as an
   ordinary message, so it works through any server, the original included. Keys are exchanged
-  in the conversation itself and verified with a safety number. Attachments and group
-  conversations are not encrypted; there is no forward secrecy. The key lives in the system
+  in the conversation itself and verified with a safety number. Attachments are encrypted too
+  (the file name and type travel inside the encrypted text); group conversations are not
+  encrypted, and there is no forward secrecy. The key lives in the system
   keyring and moves to another device as a passphrase-protected record (the encryption
   window). The other person needs this client: the original web client shows ciphertext. While a
   one-to-one conversation is not encrypted, a thin bar above it says so (and whether the other
@@ -144,11 +151,14 @@ every WebSocket frame and REST response the client receives.
   (explicit or shocking content) asks every member once to confirm they want to see it before
   showing its messages.
 - **Direct messages.** One-to-one and group DMs, friends and requests, user profiles, space
-  invites sent as DM cards.
+  invites sent as DM cards. Forwarding with a clickable author, and a "Hide my profile when
+  forwarded" privacy setting. Channel pokes and "Mention" in the message menu.
 - **Federation.** Several instances at once, remote ones signed in through the home account.
   An invite or a directory entry from an instance that is not connected yet connects it on
   the spot and then joins the space. The Explore page shows the shared directory of other
-  instances (`/api/directory`) when the home instance has it configured.
+  instances (`/api/directory`) when the home instance has it configured. If the home instance
+  loses its connection, direct messages go through their copies on your other instances and
+  come back when it reconnects.
 - **Voice and video** (`--features voice`). Voice channels and DM calls over LiveKit; mute and
   deafen; input and output volume 0–200 %, per-user volume and local mute, stream volume and
   attenuation while someone speaks; echo cancellation, noise suppression and AGC; microphone
@@ -309,7 +319,7 @@ To release, bump the version, add its section to `CHANGELOG.md` (it becomes the 
 commit, and push a tag with the same number:
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.3.0 && git push origin v0.3.0
 ```
 
 `.github/workflows/release.yml` checks that the tag matches `Cargo.toml`, builds the server
@@ -497,6 +507,12 @@ without it the server answers `401` with code `two_factor_required`. The secret 
 encrypted with a key derived from `JWT_SECRET`: after changing `JWT_SECRET`, protection has
 to be set up again. Someone who lost both the phone and the recovery codes is let back in by
 the administrator: a password reset in the admin panel also removes the second factor.
+
+Passkeys (WebAuthn) live under `/api/rustspace/passkeys`: the client gets a ticket and opens the
+instance page `/rustspace/passkey/<ticket>`, where the browser creates a passkey or signs in with
+one; the client checks the code and picks up the token. ES256, EdDSA and RS256 signatures are
+verified without third-party libraries. `PUBLIC_ORIGIN` must be a domain name (browsers do not
+accept an IP address as a WebAuthn origin), with HTTPS outside `localhost`.
 
 ### Bridges to Telegram, Discord and Matrix
 

@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "bs-api"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bs-types",
  "reqwest",
@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "bs-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "arboard",
  "bs-api",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "bs-bot"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bs-api",
  "bs-types",
@@ -982,7 +982,7 @@ dependencies = [
 
 [[package]]
 name = "bs-contract"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bs-api",
  "bs-types",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "bs-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bs-api",
  "bs-identity",
@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "bs-e2ee"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1031,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "bs-identity"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bs-api",
  "bs-types",
@@ -1047,7 +1047,7 @@ dependencies = [
 
 [[package]]
 name = "bs-instances"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bs-api",
  "bs-identity",
@@ -1063,7 +1063,7 @@ dependencies = [
 
 [[package]]
 name = "bs-media"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "image",
  "thiserror 2.0.21",
@@ -1071,7 +1071,7 @@ dependencies = [
 
 [[package]]
 name = "bs-permissions"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bitflags 2.13.2",
  "pretty_assertions",
@@ -1082,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "bs-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1132,7 +1132,7 @@ dependencies = [
 
 [[package]]
 name = "bs-tui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bs-api",
  "bs-core",
@@ -1151,7 +1151,7 @@ dependencies = [
 
 [[package]]
 name = "bs-types"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "insta",
  "pretty_assertions",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "bs-voice"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bs-types",
  "cpal",
@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "bs-ws"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bs-types",
  "futures-util",
@@ -10988,7 +10988,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
 ]
