@@ -1851,5 +1851,7 @@
   "перевод без модели недоступен в браузере": "translation without a model is not available in the browser",
   "В браузере файл открывается из загрузок браузера": "In the browser, open the file from the browser's downloads",
   "локальная модель недоступна в браузере": "the local model is not available in the browser",
-  "Сервер не знает свой публичный адрес: администратору нужно задать PUBLIC_ORIGIN или DOMAIN в настройках сервера": "The server does not know its public address: the administrator needs to set PUBLIC_ORIGIN or DOMAIN in the server settings"
+  "Сервер не знает свой публичный адрес: администратору нужно задать PUBLIC_ORIGIN или DOMAIN в настройках сервера": "The server does not know its public address: the administrator needs to set PUBLIC_ORIGIN or DOMAIN in the server settings",
+  "Файл больше {a0} МБ": "File is larger than {a0} MB",
+  "Тема сохранена в загрузки браузера": "Theme saved to the browser's downloads"
 }

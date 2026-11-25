@@ -440,7 +440,8 @@ opens the instance's page, so it opens the Rustspace web client too: the page ca
 window buttons are drawn by the app itself. In the browser, settings, accounts and encryption
 keys are kept in the page's `localStorage`, downloads go to the browser's downloads and
 notifications are browser notifications; voice, the tray, game activity, local models and
-self-update are desktop-only, and picking files from disk is not there yet. The module is
+self-update are desktop-only. Files are picked with the browser's file chooser or dropped onto
+the page. The module is
 served gzip-compressed when the browser accepts it and revalidated by ETag, so a repeat visit
 does not download it again.
 

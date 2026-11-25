@@ -521,24 +521,19 @@ pub(crate) fn mime_for(name: &str) -> &'static str {
 }
 
 fn read_paths(paths: Vec<PathBuf>) -> Vec<Picked> {
-    paths
+    crate::sys::read_files(paths, MAX_FILE_BYTES)
         .into_iter()
-        .map(|path| {
-            let name = path.file_name().map_or_else(
-                || tr("файл").to_owned(),
-                |n| n.to_string_lossy().into_owned(),
-            );
-            let bytes = match std::fs::metadata(&path) {
-                Ok(meta) if meta.len() == 0 => Err(tr("Файл пустой").to_owned()),
-                Ok(meta) if meta.len() > MAX_FILE_BYTES => {
-                    Err(tr("Файл слишком большой").to_owned())
-                }
-                Ok(_) => crate::files::read(&path).map_err(|err| err.to_string()),
-                Err(err) => Err(err.to_string()),
-            };
-            Picked { name, bytes }
-        })
+        .map(Picked::from)
         .collect()
+}
+
+impl From<crate::sys::PickedFile> for Picked {
+    fn from(file: crate::sys::PickedFile) -> Self {
+        Self {
+            name: file.name,
+            bytes: file.bytes,
+        }
+    }
 }
 
 /// Картинка из буфера обмена как PNG-файл.
@@ -948,25 +943,24 @@ impl Composer {
             return;
         }
         let (tx, rx) = channel();
-        let ctx = ctx.clone();
-        crate::sys::background(move || {
-            let dialog = crate::sys::FileDialog::new();
-            let paths = match mode {
-                PickMode::Files => dialog.pick_files(),
-                PickMode::Images => dialog
-                    .add_filter(
-                        tr("Изображения"),
-                        &["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"],
-                    )
-                    .pick_files(),
-                PickMode::Sticker => dialog
-                    .add_filter(tr("Изображения"), &["png", "jpg", "jpeg", "gif", "webp"])
-                    .pick_file()
-                    .map(|p| vec![p]),
-            };
-            let files = paths.map(read_paths).unwrap_or_default();
-            let _ = tx.send(files);
-            ctx.request_repaint();
+        let spec = match mode {
+            PickMode::Files => crate::sys::PickSpec {
+                filter: None,
+                many: true,
+                limit: MAX_FILE_BYTES,
+            },
+            PickMode::Images => crate::sys::PickSpec {
+                filter: Some((
+                    "Изображения",
+                    &["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"],
+                )),
+                many: true,
+                limit: MAX_FILE_BYTES,
+            },
+            PickMode::Sticker => crate::sys::PickSpec::image(MAX_FILE_BYTES),
+        };
+        crate::sys::pick_files(ctx, spec, move |files| {
+            let _ = tx.send(files.into_iter().map(Picked::from).collect());
         });
         self.reading = Some((mode, rx));
     }
@@ -978,13 +972,42 @@ impl Composer {
             return;
         }
         let (tx, rx) = channel();
-        let repaint = ctx.clone();
-        let paths: Vec<PathBuf> = dropped.iter().map(|f| f.path().to_path_buf()).collect();
-        crate::sys::background(move || {
-            let files = read_paths(paths);
-            let _ = tx.send(files);
-            repaint.request_repaint();
-        });
+        // В браузере файлы читаются только асинхронно.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let repaint = ctx.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let mut files = Vec::new();
+                for file in &dropped {
+                    let name = file.path().file_name().map_or_else(
+                        || tr("файл").to_owned(),
+                        |n| n.to_string_lossy().into_owned(),
+                    );
+                    let bytes = file.bytes_async().await.and_then(|bytes| {
+                        if bytes.is_empty() {
+                            Err(tr("Файл пустой").to_owned())
+                        } else if bytes.len() as u64 > MAX_FILE_BYTES {
+                            Err(tr("Файл слишком большой").to_owned())
+                        } else {
+                            Ok(bytes)
+                        }
+                    });
+                    files.push(Picked { name, bytes });
+                }
+                let _ = tx.send(files);
+                repaint.request_repaint();
+            });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let repaint = ctx.clone();
+            let paths: Vec<PathBuf> = dropped.iter().map(|f| f.path().to_path_buf()).collect();
+            crate::sys::background(move || {
+                let files = read_paths(paths);
+                let _ = tx.send(files);
+                repaint.request_repaint();
+            });
+        }
         self.reading = Some((PickMode::Files, rx));
     }
 

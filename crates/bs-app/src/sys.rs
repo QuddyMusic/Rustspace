@@ -124,6 +124,207 @@ pub(crate) fn page_origin() -> Option<String> {
     }
 }
 
+/// Файл, выбранный пользователем: имя и содержимое (или почему оно не
+/// прочитано).
+#[derive(Debug)]
+pub(crate) struct PickedFile {
+    pub(crate) name: String,
+    pub(crate) bytes: Result<Vec<u8>, String>,
+}
+
+/// Что выбирать.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PickSpec {
+    /// Подпись и расширения фильтра (`None` — любые файлы).
+    pub(crate) filter: Option<(&'static str, &'static [&'static str])>,
+    /// Несколько файлов разом.
+    pub(crate) many: bool,
+    /// Больше файл не читается.
+    pub(crate) limit: u64,
+}
+
+impl PickSpec {
+    /// Одна картинка не больше `limit` байт.
+    pub(crate) const fn image(limit: u64) -> Self {
+        Self {
+            filter: Some(("Изображения", &["png", "jpg", "jpeg", "gif", "webp"])),
+            many: false,
+            limit,
+        }
+    }
+}
+
+/// Почему файл не прочитан, по размеру; `None` — размер подходит.
+fn size_problem(size: u64, limit: u64) -> Option<String> {
+    if size == 0 {
+        return Some(crate::i18n::tr("Файл пустой").to_owned());
+    }
+    (size > limit).then(|| crate::tf!("Файл больше {a0} МБ", a0 = (limit / (1024 * 1024)).max(1)))
+}
+
+/// Читает файлы с диска (перетащенные на окно, выбранные в диалоге).
+pub(crate) fn read_files(paths: Vec<std::path::PathBuf>, limit: u64) -> Vec<PickedFile> {
+    paths
+        .into_iter()
+        .map(|path| {
+            let name = path.file_name().map_or_else(
+                || crate::i18n::tr("файл").to_owned(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            let bytes = match std::fs::metadata(&path) {
+                Ok(meta) => size_problem(meta.len(), limit).map_or_else(
+                    || crate::files::read(&path).map_err(|err| err.to_string()),
+                    Err,
+                ),
+                Err(err) => Err(err.to_string()),
+            };
+            PickedFile { name, bytes }
+        })
+        .collect()
+}
+
+/// Открывает выбор файлов и отдаёт прочитанное в `done` (пусто — выбор
+/// закрыли). На десктопе — системный диалог в отдельном потоке, в браузере —
+/// выбор файла страницы.
+pub(crate) fn pick_files(
+    ctx: &egui::Context,
+    spec: PickSpec,
+    done: impl FnOnce(Vec<PickedFile>) + Send + 'static,
+) {
+    let ctx = ctx.clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    background(move || {
+        let mut dialog = FileDialog::new();
+        if let Some((name, extensions)) = spec.filter {
+            dialog = dialog.add_filter(crate::i18n::tr(name), extensions);
+        }
+        let paths = if spec.many {
+            dialog.pick_files().unwrap_or_default()
+        } else {
+            dialog.pick_file().into_iter().collect()
+        };
+        done(read_files(paths, spec.limit));
+        ctx.request_repaint();
+    });
+    #[cfg(target_arch = "wasm32")]
+    if let Err(err) = browser_pick(ctx, spec, Box::new(done)) {
+        tracing::warn!(?err, "выбор файла в браузере не открылся");
+    }
+}
+
+/// Ящик, куда придут выбранные файлы (для окон, которые ждут выбор
+/// между кадрами).
+pub(crate) type PickInbox = std::sync::mpsc::Receiver<Vec<PickedFile>>;
+
+/// Открывает выбор файлов; результат — в возвращённом ящике.
+pub(crate) fn pick_inbox(ctx: &egui::Context, spec: PickSpec) -> PickInbox {
+    let (tx, rx) = std::sync::mpsc::channel();
+    pick_files(ctx, spec, move |files| {
+        let _ = tx.send(files);
+    });
+    rx
+}
+
+/// Что пришло в ящик: `Some` — выбор закончен (пусто — закрыли).
+pub(crate) fn take_picked(inbox: &mut Option<PickInbox>) -> Option<Vec<PickedFile>> {
+    let result = match inbox.as_ref()?.try_recv() {
+        Ok(files) => files,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Vec::new(),
+    };
+    *inbox = None;
+    Some(result)
+}
+
+/// Отдаёт браузеру файл как скачанный (только веб-версия).
+///
+/// # Errors
+/// Браузер отказал.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn offer_download(name: &str, bytes: &[u8]) -> Result<(), String> {
+    browser_download(name, bytes).map_err(|err| format!("{err:?}"))
+}
+
+/// `<input type="file">` страницы: по `change` читает файлы, по `cancel`
+/// отдаёт пустой список.
+#[cfg(target_arch = "wasm32")]
+fn browser_pick(
+    ctx: egui::Context,
+    spec: PickSpec,
+    done: Box<dyn FnOnce(Vec<PickedFile>)>,
+) -> Result<(), wasm_bindgen::JsValue> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use wasm_bindgen::JsCast as _;
+    use wasm_bindgen::closure::Closure;
+
+    let document = web_sys::window()
+        .and_then(|window| window.document())
+        .ok_or_else(|| wasm_bindgen::JsValue::from_str("нет документа"))?;
+    let input: web_sys::HtmlInputElement = document.create_element("input")?.dyn_into()?;
+    input.set_type("file");
+    input.set_multiple(spec.many);
+    if let Some((_, extensions)) = spec.filter {
+        let accept: Vec<String> = extensions.iter().map(|ext| format!(".{ext}")).collect();
+        input.set_accept(&accept.join(","));
+    }
+    let done = Rc::new(RefCell::new(Some(done)));
+    let finish = {
+        let done = Rc::clone(&done);
+        move |files: Vec<PickedFile>| {
+            if let Some(done) = done.borrow_mut().take() {
+                done(files);
+            }
+            ctx.request_repaint();
+        }
+    };
+    let finish = Rc::new(finish);
+    let on_change = {
+        let input = input.clone();
+        let finish = Rc::clone(&finish);
+        Closure::once_into_js(move || {
+            wasm_bindgen_futures::spawn_local(async move {
+                let mut picked = Vec::new();
+                if let Some(list) = input.files() {
+                    for index in 0..list.length() {
+                        let Some(file) = list.get(index) else {
+                            continue;
+                        };
+                        #[allow(
+                            clippy::cast_possible_truncation,
+                            clippy::cast_sign_loss,
+                            reason = "размер файла в байтах"
+                        )]
+                        let size = file.size() as u64;
+                        let bytes = if let Some(problem) = size_problem(size, spec.limit) {
+                            Err(problem)
+                        } else {
+                            wasm_bindgen_futures::JsFuture::from(file.array_buffer())
+                                .await
+                                .map(|buffer| js_sys::Uint8Array::new(&buffer).to_vec())
+                                .map_err(|err| format!("{err:?}"))
+                        };
+                        picked.push(PickedFile {
+                            name: file.name(),
+                            bytes,
+                        });
+                    }
+                }
+                finish(picked);
+            });
+        })
+    };
+    let on_cancel = {
+        let finish = Rc::clone(&finish);
+        Closure::once_into_js(move || finish(Vec::new()))
+    };
+    input.add_event_listener_with_callback("change", on_change.unchecked_ref())?;
+    input.add_event_listener_with_callback("cancel", on_cancel.unchecked_ref())?;
+    input.click();
+    Ok(())
+}
+
 /// Системный диалог выбора файла.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use rfd::FileDialog;

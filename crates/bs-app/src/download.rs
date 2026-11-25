@@ -70,7 +70,27 @@ pub(crate) fn unique_path(folder: &Path, name: &str, taken: &mut HashSet<PathBuf
 /// Открывает диалог в отдельном потоке и возвращает ожидание результата.
 pub(crate) fn start(ctx: &egui::Context, click: Click) -> Pending {
     let (tx, rx) = channel();
+    // В браузере файлы уходят в его загрузки: путь — только имя файла.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = ctx;
+        let targets = match click {
+            Click::One(target) => vec![target],
+            Click::All(targets) => targets,
+        };
+        let picked = targets
+            .into_iter()
+            .map(|target| {
+                let path = PathBuf::from(safe_name(&target.name));
+                (target, path)
+            })
+            .collect();
+        let _ = tx.send(picked);
+        rx
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     let ctx = ctx.clone();
+    #[cfg(not(target_arch = "wasm32"))]
     crate::sys::background(move || {
         let picked = match click {
             Click::One(target) => crate::sys::FileDialog::new()
@@ -95,6 +115,7 @@ pub(crate) fn start(ctx: &egui::Context, click: Click) -> Pending {
         let _ = tx.send(picked);
         ctx.request_repaint();
     });
+    #[cfg(not(target_arch = "wasm32"))]
     rx
 }
 

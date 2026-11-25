@@ -117,7 +117,7 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 base64 = "0.22"
-web-sys = { version = "0.3", features = ["Window", "Document", "console", "Storage", "Location", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Notification", "NotificationOptions", "NotificationPermission"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "console", "Storage", "Location", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Notification", "NotificationOptions", "NotificationPermission", "HtmlInputElement", "FileList", "File", "Event", "EventTarget"] }
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 chrono = { workspace = true, features = ["wasmbind"] }

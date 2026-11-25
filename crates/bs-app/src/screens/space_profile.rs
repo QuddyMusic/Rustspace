@@ -62,26 +62,15 @@ impl SpaceProfileDialog {
             return;
         }
         let (tx, rx) = channel();
-        let ctx = ctx.clone();
-        crate::sys::background(move || {
-            let chosen = crate::sys::FileDialog::new()
-                .add_filter(tr("Изображения"), &["png", "jpg", "jpeg", "gif", "webp"])
-                .pick_file();
-            if let Some(path) = chosen {
-                let name = path
-                    .file_name()
-                    .map_or_else(|| "image".to_owned(), |n| n.to_string_lossy().into_owned());
-                let bytes = match std::fs::metadata(&path) {
-                    Ok(meta) if meta.len() > MAX_IMAGE_BYTES => {
-                        Err(tr("Картинка больше 16 МБ").to_owned())
-                    }
-                    Ok(_) => crate::files::read(&path).map_err(|e| e.to_string()),
-                    Err(e) => Err(e.to_string()),
-                };
-                let _ = tx.send((slot, name, bytes));
-            }
-            ctx.request_repaint();
-        });
+        crate::sys::pick_files(
+            ctx,
+            crate::sys::PickSpec::image(MAX_IMAGE_BYTES),
+            move |files| {
+                if let Some(file) = files.into_iter().next() {
+                    let _ = tx.send((slot, file.name, file.bytes));
+                }
+            },
+        );
         self.picking = Some(rx);
     }
 

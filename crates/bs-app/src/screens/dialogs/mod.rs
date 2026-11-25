@@ -94,26 +94,15 @@ impl CreateSpaceForm {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
-        let ctx = ctx.clone();
-        crate::sys::background(move || {
-            if let Some(path) = crate::sys::FileDialog::new()
-                .add_filter(tr("Изображения"), &["png", "jpg", "jpeg", "gif", "webp"])
-                .pick_file()
-            {
-                let name = path
-                    .file_name()
-                    .map_or_else(|| "icon".to_owned(), |n| n.to_string_lossy().into_owned());
-                let bytes = match std::fs::metadata(&path) {
-                    Ok(meta) if meta.len() > MAX_ICON_BYTES => {
-                        Err(tr("Картинка больше 16 МБ").to_owned())
-                    }
-                    Ok(_) => crate::files::read(&path).map_err(|e| e.to_string()),
-                    Err(e) => Err(e.to_string()),
-                };
-                let _ = tx.send((name, bytes));
-            }
-            ctx.request_repaint();
-        });
+        crate::sys::pick_files(
+            ctx,
+            crate::sys::PickSpec::image(MAX_ICON_BYTES),
+            move |files| {
+                if let Some(file) = files.into_iter().next() {
+                    let _ = tx.send((file.name, file.bytes));
+                }
+            },
+        );
         self.picking = Some(rx);
     }
 

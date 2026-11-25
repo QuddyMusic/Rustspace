@@ -36,6 +36,8 @@ pub(crate) struct AppearanceState {
     scale: Option<f32>,
     /// Последнее сообщение об импорте/экспорте.
     notice: Option<(bool, String)>,
+    /// Ждём файл темы из выбора файла.
+    importing: Option<crate::sys::PickInbox>,
 }
 
 /// Рисует страницу.
@@ -455,14 +457,25 @@ fn import_export(ui: &mut egui::Ui, state: &mut AppearanceState, appearance: &mu
             state.notice = Some(export(&appearance.palette()));
         }
         if ui.button(tr("Импортировать…")).clicked() {
-            state.notice = match import() {
-                Some(Ok(palette)) => {
+            state.importing = Some(crate::sys::pick_inbox(
+                ui.ctx(),
+                crate::sys::PickSpec {
+                    filter: Some(("Тема (JSON)", &["json"])),
+                    many: false,
+                    limit: 64 * 1024,
+                },
+            ));
+        }
+        if let Some(file) =
+            crate::sys::take_picked(&mut state.importing).and_then(|files| files.into_iter().next())
+        {
+            state.notice = Some(match file.bytes.and_then(|bytes| parse_theme(&bytes)) {
+                Ok(palette) => {
                     appearance.custom = Some(palette);
-                    Some((true, tr("Тема загружена").to_owned()))
+                    (true, tr("Тема загружена").to_owned())
                 }
-                Some(Err(err)) => Some((false, err)),
-                None => None,
-            };
+                Err(err) => (false, err),
+            });
         }
     });
     if let Some((ok, text)) = &state.notice {
@@ -473,32 +486,34 @@ fn import_export(ui: &mut egui::Ui, state: &mut AppearanceState, appearance: &mu
 }
 
 fn export(palette: &Palette) -> (bool, String) {
-    let Some(path) = crate::sys::FileDialog::new()
-        .set_file_name("rustspace-theme.json")
-        .add_filter(tr("Тема (JSON)"), &["json"])
-        .save_file()
-    else {
-        return (true, String::new());
-    };
-    let result = serde_json::to_vec_pretty(palette)
-        .map_err(std::io::Error::other)
-        .and_then(|json| crate::files::write(&path, json));
-    match result {
-        Ok(()) => (true, crate::tf!("Сохранено: {a0}", a0 = path.display())),
-        Err(err) => (false, crate::tf!("Не удалось сохранить: {err}", err = err)),
-    }
-}
-
-/// `None` — пользователь закрыл диалог.
-fn import() -> Option<Result<Palette, String>> {
-    let path = crate::sys::FileDialog::new()
-        .add_filter(tr("Тема (JSON)"), &["json"])
-        .pick_file()?;
-    Some(parse_theme(
-        &crate::files::read(&path)
+    // В браузере тема уходит в его загрузки.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let result = serde_json::to_vec_pretty(palette)
             .map_err(|err| err.to_string())
-            .ok()?,
-    ))
+            .and_then(|json| crate::sys::offer_download("rustspace-theme.json", &json));
+        match result {
+            Ok(()) => (true, tr("Тема сохранена в загрузки браузера").to_owned()),
+            Err(err) => (false, crate::tf!("Не удалось сохранить: {err}", err = err)),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(path) = crate::sys::FileDialog::new()
+            .set_file_name("rustspace-theme.json")
+            .add_filter(tr("Тема (JSON)"), &["json"])
+            .save_file()
+        else {
+            return (true, String::new());
+        };
+        let result = serde_json::to_vec_pretty(palette)
+            .map_err(std::io::Error::other)
+            .and_then(|json| crate::files::write(&path, json));
+        match result {
+            Ok(()) => (true, crate::tf!("Сохранено: {a0}", a0 = path.display())),
+            Err(err) => (false, crate::tf!("Не удалось сохранить: {err}", err = err)),
+        }
+    }
 }
 
 /// Разбирает файл темы. Недостающие поля берутся из темы по умолчанию.

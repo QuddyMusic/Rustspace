@@ -53,6 +53,8 @@ pub(crate) struct GroupDialog {
     search: String,
     busy: bool,
     error: Option<String>,
+    /// Ждём картинку из выбора файла.
+    icon_pick: Option<crate::sys::PickInbox>,
 }
 
 fn friend_name(friend: &Friend) -> String {
@@ -81,6 +83,7 @@ impl GroupDialog {
             search: String::new(),
             busy: false,
             error: None,
+            icon_pick: None,
         }
     }
 
@@ -97,6 +100,7 @@ impl GroupDialog {
             search: String::new(),
             busy: false,
             error: None,
+            icon_pick: None,
         }
     }
 
@@ -332,8 +336,10 @@ fn icon_row(
             ui.add_enabled_ui(owner && !state.busy, |ui| {
                 ui.horizontal(|ui| {
                     if ui.add(theme::primary_button(tr("Загрузить…"))).clicked() {
-                        op = pick_icon()
-                            .map(|picked| picked.map(|bytes| GroupOp::Icon(Some(bytes))));
+                        state.icon_pick = Some(crate::sys::pick_inbox(
+                            ui.ctx(),
+                            crate::sys::PickSpec::image(ICON_MAX_BYTES),
+                        ));
                     }
                     if dm.icon.is_some() && ui.button(tr("Убрать")).clicked() {
                         op = Some(Ok(GroupOp::Icon(None)));
@@ -343,26 +349,16 @@ fn icon_row(
             ui.label(theme::muted(tr("Квадрат по центру картинки, до 8 МБ.")).size(12.0));
         });
     });
+    if let Some(file) =
+        crate::sys::take_picked(&mut state.icon_pick).and_then(|files| files.into_iter().next())
+    {
+        op = Some(file.bytes.map(|bytes| GroupOp::Icon(Some(bytes))));
+    }
     match op {
         Some(Ok(op)) => state.send(bridge, dm.id.clone(), op),
         Some(Err(err)) => state.error = Some(err),
         None => {}
     }
-}
-
-/// Диалог выбора картинки; `None` — пользователь передумал.
-fn pick_icon() -> Option<Result<Vec<u8>, String>> {
-    let path = crate::sys::FileDialog::new()
-        .add_filter(tr("Картинки"), &["png", "jpg", "jpeg", "gif", "webp"])
-        .pick_file()?;
-    let size = std::fs::metadata(&path).map_or(0, |m| m.len());
-    if size > ICON_MAX_BYTES {
-        return Some(Err(tr("Файл больше 8 МБ").to_owned()));
-    }
-    Some(
-        crate::files::read(&path)
-            .map_err(|err| crate::tf!("Не удалось прочитать файл: {err}", err = err)),
-    )
 }
 
 fn name_row(
