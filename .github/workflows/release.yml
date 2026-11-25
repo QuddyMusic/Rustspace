@@ -297,9 +297,35 @@ jobs:
           name: arch
           path: dist/*
 
+  web:
+    name: веб-версия
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - name: wasm32
+        run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: web
+      # Клиент egui в WebAssembly; setup.sh --web ставит его из релиза.
+      - name: сборка
+        run: packaging/web/build.sh "$PWD/stage/web"
+      - name: архив
+        run: |
+          mkdir -p dist
+          tar czf dist/rustspace-web.tar.gz -C stage/web .
+          (cd dist && sha256sum rustspace-web.tar.gz > rustspace-web.tar.gz.sha256)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: web
+          path: dist/*
+
   release:
     name: черновик релиза
-    needs: [version, server, client, arch]
+    needs: [version, server, client, arch, web]
     if: ${{ !cancelled() && needs.version.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
@@ -338,6 +364,9 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/v$VERSION/packaging/server/setup.sh \\
             | sudo sh -s -- --release $VERSION --domain ВАШ.ДОМЕН
           \`\`\`
+
+          Добавьте \`--web\`, чтобы сервер отдавал и веб-версию Rustspace (\`rustspace-web.tar.gz\`):
+          браузер и десктоп Backspace откроют её по адресу инстанса.
 
           Файлы \`*.sha256\` — контрольные суммы; \`setup.sh\` и клиент проверяют их сами.
 

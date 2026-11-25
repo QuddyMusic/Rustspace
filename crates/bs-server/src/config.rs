@@ -324,19 +324,6 @@ fn default_db_path() -> PathBuf {
 mod tests {
     use super::*;
 
-    /// `setup.sh --web` собирает веб-клиент той версии Backspace, протокол
-    /// которой реализует сервер.
-    #[test]
-    fn setup_builds_the_compatible_web_client() {
-        let script = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../packaging/server/setup.sh"
-        ))
-        .expect("setup.sh");
-        let line = format!("BACKSPACE_WEB_VERSION=\"{BACKSPACE_COMPAT_VERSION}\"");
-        assert!(script.lines().any(|l| l == line), "в setup.sh нет {line}");
-    }
-
     fn vars(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
             .iter()

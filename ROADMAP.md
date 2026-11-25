@@ -92,7 +92,7 @@ original server.
 - From the original 1.11 and its open PRs: channel pokes, "Mention" in the message menu, sticker
   rename and search, one GIF/sticker button, attachment reordering, cards across federation and
   bridges, hover reactions, chat hotkeys.
-- **Web version for vanilla Backspace clients** (`setup.sh --web`).
+- **Web version**: the Rustspace client in the browser and in the Backspace desktop shell (`setup.sh --web`).
 - Windows: no console window, notifications signed "Rustspace"; Arch package builds from the
   checkout.
 
@@ -179,8 +179,8 @@ original server.
    - [x] Admin: users, storage, update status, telemetry (the choice is stored, but the
      server sends nothing).
    - [x] Serving the web client (`BS_WEB_DIST`), content policy, CSP reports.
-   - [x] Web version for vanilla Backspace clients: `setup.sh --web` builds the original web
-     client 1.11.0 and the server serves it (browser and Backspace desktop connect).
+   - [x] Web version: the Rustspace client built to WebAssembly; `setup.sh --web` installs it
+     from the release and the server serves it (browser and Backspace desktop connect).
    - [x] Forced voice disconnect through the LiveKit API (finding S16).
    - [x] Compatibility stand (`tools/compat`): 17 scenarios, responses and events compared
      with the original on SQLite and on PostgreSQL.

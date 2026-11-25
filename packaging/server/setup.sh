@@ -50,14 +50,6 @@ LIVEKIT_VERSION="1.13.11"
 
 GITHUB_REPO="QuddyMusic/Rustspace"
 
-# Веб-клиент оригинального Backspace для ванильных клиентов (браузер и
-# десктоп Backspace грузят интерфейс с инстанса). Версия — та, протокол
-# которой реализует сервер (BACKSPACE_COMPAT_VERSION в
-# crates/bs-server/src/config.rs; тест следит, чтобы они совпадали), коммит —
-# тега v$BACKSPACE_WEB_VERSION, сверен вручную.
-UPSTREAM_REPO="TheZwiss/backspace"
-BACKSPACE_WEB_VERSION="1.11.0"
-BACKSPACE_WEB_COMMIT="cfa6ce43306f829f1c273f6402ef625362b793da"
 
 # Хэши архивов LiveKit 1.13.11 (из checksums.txt релиза, сверены вручную):
 # так подменённый архив не пройдёт, даже если подменён и checksums.txt.
@@ -135,14 +127,14 @@ usage() {
 Прочее:
   --port ПОРТ            порт сервера (3000)
   --proxy-hops N         сколько прокси перед сервером (1; без прокси — 0)
-  --web                  веб-версия для ванильных клиентов Backspace: собрать
-                         веб-клиент оригинала (v1.11.0) и раздавать его на
-                         https://ДОМЕН/ — браузер и десктоп Backspace подключатся.
-                         Можно и позже: повторный запуск с --web. Клиентам
-                         Rustspace она не нужна
+  --web                  веб-версия Rustspace на https://ДОМЕН/: тот же клиент в
+                         браузере, ею же открывается десктоп Backspace. Берётся
+                         из того же релиза, что сервер (при сборке из исходников
+                         — собирается), и обновляется вместе с ним. Можно и
+                         позже: повторный запуск с --web
   --no-web               убрать веб-версию (на / снова страница «подключайтесь
                          клиентом»)
-  --web-dist КАТАЛОГ     взять уже собранный веб-клиент (packages/web/dist)
+  --web-dist КАТАЛОГ     взять уже собранный веб-клиент (packaging/web/build.sh)
   --source-url URL       репозиторий с исходниками запущенного сервера, если вы
                          его меняли (по умолчанию — github.com/QuddyMusic/Rustspace)
   --data-from КАТАЛОГ    перенести данные из каталога (*.db и uploads/)
@@ -202,88 +194,45 @@ confirm() {
     case "$answer" in y|Y|yes|д|Д|да) return 0 ;; *) return 1 ;; esac
 }
 
-# Node.js подходит для сборки веб-клиента (оригинал требует >= 22.12).
-node_ok() {
-    "$1" -e 'const [a, b] = process.versions.node.split(".").map(Number);
-process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)' 2>/dev/null
-}
-
-# Каталог с node и npm: системный, если подходит, иначе официальная сборка
-# Node 22 с nodejs.org, сверенная с SHASUMS256.txt релиза.
-node_dir() {
-    if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 \
-        && node_ok "$(command -v node)"; then
-        dirname "$(command -v node)"
-        return 0
+# Адрес файла релиза: того, из которого ставится сервер.
+release_url() {
+    if [ "$RELEASE" = latest ]; then
+        echo "https://github.com/$GITHUB_REPO/releases/latest/download/$1"
+    else
+        echo "https://github.com/$GITHUB_REPO/releases/download/v$RELEASE/$1"
     fi
-    [ "$OS" != alpine ] || die "для веб-версии нужен Node.js 22.12 или новее (apk add nodejs npm в Alpine 3.21+)"
-    case "$ARCH" in
-        amd64) node_arch=x64 ;;
-        arm64) node_arch=arm64 ;;
-        armv7) node_arch=armv7l ;;
-    esac
-    base="https://nodejs.org/dist/latest-v22.x"
-    sums=$(curl -sSfL "$base/SHASUMS256.txt") || die "не удалось скачать $base/SHASUMS256.txt"
-    file=$(printf '%s\n' "$sums" \
-        | sed -n "s/^[0-9a-f]\{64\}  \(node-v22\.[0-9.]*-linux-$node_arch\.tar\.gz\)\$/\1/p" | head -n 1)
-    [ -n "$file" ] || die "в $base нет сборки Node.js для linux-$node_arch"
-    expected=$(printf '%s\n' "$sums" | sed -n "s/^\([0-9a-f]\{64\}\)  $file\$/\1/p")
-    curl -sSfL -o "$1/$file" "$base/$file" || die "не удалось скачать $base/$file"
-    actual=$(sha256sum "$1/$file" | cut -d' ' -f1)
-    [ "$actual" = "$expected" ] || die "хэш $file не совпал ($actual)"
-    mkdir "$1/node"
-    tar xzf "$1/$file" -C "$1/node" --strip-components=1
-    rm -f "$1/$file"
-    echo "$1/node/bin"
 }
 
-# Собирает веб-клиент оригинала в $DATA/web. Сборка идёт во временном
-# каталоге от пользователя службы, не от root: скрипты сборки — чужой код.
-build_web() {
-    say "Собираю веб-версию: веб-клиент Backspace $BACKSPACE_WEB_VERSION (несколько минут)"
+# Скачивает файл релиза в каталог $2 и сверяет его контрольную сумму.
+fetch_release() {
+    url=$(release_url "$1")
+    curl -sSfL -o "$2/$1" "$url" || die "не удалось скачать $url"
+    curl -sSfL -o "$2/$1.sha256" "$url.sha256" || die "не удалось скачать $url.sha256"
+    expected=$(cut -d' ' -f1 < "$2/$1.sha256")
+    actual=$(sha256sum "$2/$1" | cut -d' ' -f1)
+    [ -n "$expected" ] && [ "$actual" = "$expected" ] || die "контрольная сумма $1 не совпала"
+}
+
+# Ставит веб-версию Rustspace в $DATA/web: из релиза или, если сервер
+# собирается из исходников, сборкой (packaging/web/build.sh).
+install_web() {
     work=$(mktemp -d)
-    bin=$(node_dir "$work") || exit 1
-    archive="https://github.com/$UPSTREAM_REPO/archive/$BACKSPACE_WEB_COMMIT.tar.gz"
-    curl -sSfL -o "$work/src.tar.gz" "$archive" || die "не удалось скачать $archive"
-    mkdir "$work/src" "$work/home"
-    tar xzf "$work/src.tar.gz" -C "$work/src" --strip-components=1
-    rm -f "$work/src.tar.gz"
-    pnpm_version=$(sed -n 's/.*"packageManager": *"pnpm@\([0-9.]*\)".*/\1/p' "$work/src/package.json")
-    [ -n "$pnpm_version" ] || die "в исходниках Backspace не указана версия pnpm"
-    # Окружение чистое (su -l): чужие настройки npm и кэш root сборке не
-    # нужны. Переносим только прокси — без них npm не выйдет в сеть.
-    pass_env=""
-    for v in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do
-        eval "value=\${$v:-}"
-        case "$value" in *"'"*) continue ;; esac
-        [ -z "$value" ] || pass_env="$pass_env export $v='$value';"
-    done
-    if [ -n "${NODE_EXTRA_CA_CERTS:-}" ] && [ -f "$NODE_EXTRA_CA_CERTS" ]; then
-        cp "$NODE_EXTRA_CA_CERTS" "$work/extra-ca.pem"
-        pass_env="$pass_env export NODE_EXTRA_CA_CERTS='$work/extra-ca.pem';"
+    if [ "$BUILDING" = 1 ]; then
+        say "Собираю веб-версию Rustspace (первый раз — 5–15 минут)"
+        (cd "$REPO" && PATH="$CARGO_HOME/bin:$PATH" sh packaging/web/build.sh "$work/web") \
+            || die "сборка веб-версии не удалась"
+    elif [ -n "$RELEASE" ]; then
+        say "Скачиваю веб-версию Rustspace"
+        fetch_release rustspace-web.tar.gz "$work"
+        mkdir "$work/web"
+        tar xzf "$work/rustspace-web.tar.gz" -C "$work/web"
+    else
+        die "веб-версия ставится из релиза или сборкой из исходников; с --binary укажите --web-dist"
     fi
-    chown -R "$APP" "$work"
-    chmod 700 "$work"
-    if ! su -l -s /bin/sh "$APP" -c "
-        set -e
-        $pass_env
-        cd '$work/src'
-        export HOME='$work/home' PATH='$bin:/usr/local/bin:/usr/bin:/bin' CI=1
-        export npm_config_update_notifier=false npm_config_cache='$work/home/.npm'
-        export npm_config_userconfig='$work/home/.npmrc'
-        pnpm() { npm exec --yes -- 'pnpm@$pnpm_version' \"\$@\"; }
-        pnpm install --frozen-lockfile --filter '@backspace/web...'
-        pnpm --filter @backspace/shared build
-        pnpm --filter @backspace/web build
-    " > "$work/build.log" 2>&1; then
-        tail -n 30 "$work/build.log" >&2
-        rm -rf "$work"
-        die "сборка веб-клиента не удалась (нужно около 1,5 ГБ памяти)"
-    fi
-    [ -f "$work/src/packages/web/dist/index.html" ] || die "сборка веб-клиента не дала index.html"
+    [ -f "$work/web/index.html" ] && [ -f "$work/web/rustspace_bg.wasm" ] \
+        || die "в веб-версии нет index.html или rustspace_bg.wasm"
     rm -rf "$DATA/web"
-    cp -R "$work/src/packages/web/dist" "$DATA/web"
-    echo "$BACKSPACE_WEB_VERSION" > "$DATA/web/.backspace-web"
+    cp -R "$work/web" "$DATA/web"
     chown -R "root:$APP" "$DATA/web"
     chmod -R g+rX,o-rwx "$DATA/web"
     rm -rf "$work"
@@ -572,10 +521,13 @@ fi
 if [ -n "$WEB_DIST" ] && [ -n "$WITH_WEB" ]; then
     die "--web-dist нельзя вместе с --web или --no-web"
 fi
+if [ "$WITH_WEB" = 1 ] && [ -n "$BINARY" ]; then
+    die "с --binary веб-версию не скачать и не собрать: укажите собранную через --web-dist"
+fi
 OLD_WEB=$(carried BS_WEB_DIST)
 if [ -z "$WITH_WEB" ] && [ -z "$WEB_DIST" ] && [ -z "$OLD_WEB" ] && [ "$UPDATE" != 1 ] \
     && [ "$ASSUME_YES" != 1 ]; then
-    if confirm "Включить веб-версию для ванильных клиентов Backspace (браузер, десктоп Backspace)? Клиентам Rustspace она не нужна; можно и позже — запуском с --web"; then
+    if confirm "Включить веб-версию Rustspace (браузер, десктоп Backspace)? Можно и позже — запуском с --web"; then
         WITH_WEB=1
     else
         WITH_WEB=0
@@ -584,7 +536,7 @@ fi
 if [ -n "$WEB_DIST" ]; then
     WEB_TEXT="готовая сборка из $WEB_DIST"
 elif [ "$WITH_WEB" = 1 ]; then
-    WEB_TEXT="веб-клиент Backspace $BACKSPACE_WEB_VERSION, сборка (около 1,5 ГБ памяти)"
+    WEB_TEXT="Rustspace в браузере (вместе с сервером)"
 elif [ "$WITH_WEB" = 0 ] && [ -n "$OLD_WEB" ]; then
     WEB_TEXT="убирается"
 elif [ -n "$OLD_WEB" ]; then
@@ -622,9 +574,6 @@ BUILDING=0
 [ -z "$BINARY" ] && [ -z "$RELEASE" ] && BUILDING=1
 if [ "$OS" = alpine ]; then
     apk add --no-cache ca-certificates curl tar ffmpeg iproute2 >/dev/null
-    if [ "$WITH_WEB" = 1 ] || [ -f "$DATA/web/.backspace-web" ]; then
-        apk add --no-cache nodejs npm >/dev/null
-    fi
     [ "$BUILDING" = 0 ] || apk add --no-cache build-base >/dev/null
     if [ "$DB_CHOICE" = local ] && ! command -v psql >/dev/null 2>&1; then
         installed=0
@@ -699,18 +648,9 @@ if [ -n "$BINARY" ]; then
     cp "$BINARY" "$NEW_BIN"
 elif [ -n "$RELEASE" ]; then
     asset="rustspace-server-linux-$RUST_ARCH.tar.gz"
-    if [ "$RELEASE" = latest ]; then
-        url="https://github.com/$GITHUB_REPO/releases/latest/download/$asset"
-    else
-        url="https://github.com/$GITHUB_REPO/releases/download/v$RELEASE/$asset"
-    fi
-    say "Скачиваю $url"
+    say "Скачиваю $(release_url "$asset")"
     tmp=$(mktemp -d)
-    curl -sSfL -o "$tmp/$asset" "$url" || die "не удалось скачать $url"
-    curl -sSfL -o "$tmp/$asset.sha256" "$url.sha256" || die "не удалось скачать $url.sha256"
-    expected=$(cut -d' ' -f1 < "$tmp/$asset.sha256")
-    actual=$(sha256sum "$tmp/$asset" | cut -d' ' -f1)
-    [ -n "$expected" ] && [ "$actual" = "$expected" ] || die "контрольная сумма $asset не совпала"
+    fetch_release "$asset" "$tmp"
     tar xzf "$tmp/$asset" -C "$tmp" rustspace-server
     cp "$tmp/rustspace-server" "$NEW_BIN"
     rm -rf "$tmp"
@@ -921,12 +861,11 @@ elif [ "$WITH_WEB" = 0 ]; then
     [ "$WEB_DIR" != "$DATA/web" ] || rm -rf "$DATA/web"
     WEB_DIR=""
 else
-    # Собранную скриптом веб-версию пересобираем, когда сервер перешёл на
-    # новую версию протокола Backspace.
-    built=$(cat "$DATA/web/.backspace-web" 2>/dev/null || true)
-    if [ "$WITH_WEB" = 1 ] || { [ "$WEB_DIR" = "$DATA/web" ] && [ -n "$built" ] \
-        && [ "$built" != "$BACKSPACE_WEB_VERSION" ]; }; then
-        build_web
+    # Веб-версия, поставленная скриптом, обновляется вместе с сервером;
+    # веб-клиент оригинала (его ставил setup.sh до 0.4.0) заменяется ею.
+    if [ "$WITH_WEB" = 1 ] || { [ "$WEB_DIR" = "$DATA/web" ] \
+        && { [ -f "$DATA/web/.rustspace-web" ] || [ -f "$DATA/web/.backspace-web" ]; }; }; then
+        install_web
         WEB_DIR="$DATA/web"
     fi
 fi

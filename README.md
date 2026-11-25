@@ -413,7 +413,7 @@ What it does:
 - builds `rustspace-server` from the clone, or downloads it from a release (`--release
   [VERSION]`) and checks its checksum, or takes `--binary`;
 - downloads LiveKit and checks its hash;
-- with `--web`, sets up the **web version for vanilla Backspace clients** (see below);
+- with `--web`, sets up the **web version** of Rustspace (see below);
 - writes `/etc/rustspace/rustspace.env` and `/etc/rustspace/livekit.yaml`, creates the
   `rustspace` and `livekit` services and checks that both answer;
 - **updates**: run it again without arguments (after `git pull`, or with `--release`) — the
@@ -427,48 +427,28 @@ What it does:
   `/var/lib/backspace`, the `backspace` service and user) is moved to the new ones and the old
   ones are removed.
 
-**Web version for vanilla Backspace clients.** The original Backspace desktop app is a shell
-that loads its interface from the instance, and the browser uses the same interface, so they
-need the original web client on the server. `setup.sh --web` builds it — Backspace 1.11.0, the
-version whose protocol the server speaks, from the pinned commit of the `v1.11.0` tag — and the
-server serves it at `https://DOMAIN/`. The build runs as the service user in a temporary
-directory, with the system Node.js if it is 22.12 or newer, otherwise the official Node 22
-build checked against its `SHASUMS256.txt` (Alpine: `nodejs` from apk); it takes a few minutes
-and about 1.5 GB of memory. It can be added to an existing installation the same way (run the
-script again with `--web`) and removed with `--no-web`; on a fresh install without `-y` the
-script asks. When a later server speaks a newer Backspace version, the next update rebuilds it.
-The page is marked as Rustspace without touching the build: the tab title, icons and the
-installed app (PWA manifest) say Rustspace, and a Rustspace badge — a pill on the sign-in
-screens, a tile at the bottom of the space rail inside — links to this repository and explains
-that the server is Rustspace and the web client is the original Backspace.
-The Rustspace client does not use it and works the same with or without it. Files of the web
-client do not count against the 200-requests-a-minute limit: its service worker fetches the
-whole build (over a hundred files) when it is first opened. `/api/instance/info` reports the
-Backspace version in `version` to browsers (the vanilla client builds its desktop download links
-from it) and the Rustspace version to everyone else; `rustspaceVersion` always has the latter.
-
-It is meant for a reverse proxy in front (Nginx Proxy Manager, Caddy…): at the end it prints
-what to set there and on the router — `https://DOMAIN` → port 3000, `https://lk.DOMAIN` → port
-7880 (both with WebSockets), TCP 7881 and UDP 7882 forwarded to the machine. `--help` lists all
-options.
-
-### Run
-
-```sh
-JWT_SECRET="$(openssl rand -hex 32)" \
-DB_PATH=data/rustspace.db UPLOAD_DIR=data/uploads \
-target/release/rustspace-server
-```
-
-The server listens on `0.0.0.0:3000`. The first registered user becomes the administrator.
-It stops on `Ctrl+C` or `SIGTERM`, waiting for open requests.
+**Web version.** The Rustspace client also runs in the browser: the same egui interface built
+to WebAssembly (`packaging/web/build.sh`). `setup.sh --web` puts it on the server — downloaded
+from the same release as the server (`rustspace-web.tar.gz`, checksum verified) or, when the
+server is built from source, built next to it; no Node.js — and the server serves it at
+`https://DOMAIN/`. It is updated together with the server, can be added later the same way
+(run the script again with `--web`) and removed with `--no-web`; on a fresh install without
+`-y` the script asks. An installation that had the original web client (setup.sh before 0.4.0)
+gets the Rustspace one on its next update. The original Backspace desktop app is a shell that
+opens the instance's page, so it opens the Rustspace web client too: the page calls its
+`rendererReady`, leaves a 32-pixel strip at the top to drag the frameless window by, and the
+window buttons are drawn by the app itself. In the browser, settings, accounts and encryption
+keys are kept in the page's `localStorage`, downloads go to the browser's downloads and
+notifications are browser notifications; voice, the tray, game activity, local models and
+self-update are desktop-only, and picking files from disk is not there yet. The module is
+served gzip-compressed when the browser accepts it and revalidated by ETag, so a repeat visit
+does not download it again.
 
 Moving from the original server: stop it, copy the database and start `rustspace-server`
 with the same `JWT_SECRET`, `DB_PATH` and `UPLOAD_DIR`. Going back works the same way.
 
-To have the server also serve the original web client (the web version for vanilla clients),
-use `setup.sh --web`, or build it yourself (`pnpm --filter @backspace/web build` in the Backspace
-1.11.0 sources) and point at the build: `BS_WEB_DIST=/path/to/packages/web/dist`.
+To have the server also serve the web version, use `setup.sh --web`, or build it yourself
+(`packaging/web/build.sh DIR`) and point at the build: `BS_WEB_DIST=DIR`.
 Without it, `/` shows a short page saying the instance is reached with the Rustspace desktop
 client, with its address to copy and a link to the source and builds (`BACKSPACE_SOURCE_URL`,
 by default this repository; set your own if you changed the server). The page is in Russian
@@ -517,7 +497,8 @@ the administrator: a password reset in the admin panel also removes the second f
 Passkeys (WebAuthn) live under `/api/rustspace/passkeys`: the client gets a ticket and opens the
 instance page `/rustspace/passkey/<ticket>`, where the browser creates a passkey or signs in with
 one; the client checks the code and picks up the token. ES256, EdDSA and RS256 signatures are
-verified without third-party libraries. `PUBLIC_ORIGIN` must be a domain name (browsers do not
+verified without third-party libraries. The site is `PUBLIC_ORIGIN` or, without it,
+`https://DOMAIN`; it must be a domain name (browsers do not
 accept an IP address as a WebAuthn origin), with HTTPS outside `localhost`.
 
 ### Bridges to Telegram, Discord and Matrix
@@ -670,7 +651,7 @@ marked.
 | `UPLOAD_DIR` | `data/uploads` | Directory for uploaded files |
 | `MAX_UPLOAD_SIZE` | `104857600` | File size limit in bytes (the administrator can change it in settings) |
 | `TUS_EXPIRATION_HOURS` | `24` | How long an unfinished upload lives |
-| `BS_WEB_DIST` | none | *(bs-server)* Directory of the built web client (the web version for vanilla Backspace clients; `setup.sh --web` builds it); without it `/` shows a "use the desktop client" page and the rest is API only |
+| `BS_WEB_DIST` | none | *(bs-server)* Directory of the built web version of Rustspace (`setup.sh --web` installs it, `packaging/web/build.sh` builds it); without it `/` shows a "use the desktop client" page and the rest is API only |
 | `DOMAIN` | none | Instance domain (invite links, `user@domain` names) |
 | `PUBLIC_ORIGIN` | none | Full external address when it is not `https://DOMAIN` |
 | `TRUSTED_PROXY_HOPS` | `1` | How many proxies in front write `X-Forwarded-For` (0–4). Rate limits depend on it: behind one nginx `1`, without a proxy `0` |
