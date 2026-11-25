@@ -10,7 +10,7 @@ workspace = true
 
 [features]
 # Захват камеры (nokhwa: V4L2 / Media Foundation / AVFoundation).
-camera = ["dep:nokhwa"]
+camera = ["dep:nokhwa", "dep:image"]
 
 [dependencies]
 bs-types = { workspace = true }
@@ -23,7 +23,11 @@ url = { workspace = true }
 tracing = { workspace = true }
 livekit = { version = "0.9.7", default-features = false, features = ["native", "rustls-tls-webpki-roots", "tokio", "glib-main-loop"] }
 cpal = "0.18"
-nokhwa = { version = "0.10", features = ["input-native"], optional = true }
+# Без декодера MJPEG nokhwa (mozjpeg): его libjpeg сталкивается с libjpeg
+# внутри WebRTC (на macOS — дубликаты символов при линковке). MJPEG
+# разбирает чистый Rust (image/zune-jpeg).
+nokhwa = { version = "0.10", default-features = false, features = ["input-native"], optional = true }
+image = { version = "0.25.10", default-features = false, features = ["jpeg"], optional = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

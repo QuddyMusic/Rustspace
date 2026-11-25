@@ -16,6 +16,10 @@ pub(crate) struct PasskeysUi {
     pub(crate) busy: bool,
     /// Ждём именно подтверждения нового ключа.
     adding: bool,
+    /// Код для сверки со страницей в браузере.
+    pub(crate) code: Option<String>,
+    /// Билет, подтверждения которого пора ждать.
+    pub(crate) ticket: Option<String>,
 }
 
 /// Раздел целиком (у федеративного аккаунта ключи на его домашнем инстансе).
@@ -29,13 +33,16 @@ pub(crate) fn section(ui: &mut egui::Ui, state: &mut PasskeysUi, federated: bool
 }
 
 fn send(bridge: &Bridge, account: &mut PasskeysUi, op: PasskeyOp) {
-    account.adding = matches!(op, PasskeyOp::Add);
+    account.adding = matches!(op, PasskeyOp::Add | PasskeyOp::Await(_));
     account.busy = true;
     bridge.request(BridgeRequest::Admin(AdminRequest::Passkeys(op)));
 }
 
 /// Список ключей, «Добавить», «Удалить».
 fn show(ui: &mut egui::Ui, account: &mut PasskeysUi, bridge: &Bridge) {
+    if let Some(ticket) = account.ticket.take() {
+        send(bridge, account, PasskeyOp::Await(ticket));
+    }
     if account.list.is_none() && !account.busy {
         send(bridge, account, PasskeyOp::List);
     }
@@ -109,4 +116,26 @@ fn show(ui: &mut egui::Ui, account: &mut PasskeysUi, bridge: &Bridge) {
             ui.label(theme::muted(tr("Подтвердите в браузере…")).size(12.5));
         }
     });
+    if let Some(code) = account
+        .code
+        .as_ref()
+        .filter(|_| account.busy && account.adding)
+    {
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(theme::muted(tr("Код на странице в браузере должен быть таким:")).size(12.5));
+            ui.label(
+                RichText::new(code)
+                    .monospace()
+                    .size(18.0)
+                    .color(theme::text_bright()),
+            );
+        });
+        ui.label(
+            theme::muted(tr(
+                "Это не код двухфакторной аутентификации: он только связывает окно с этой страницей.",
+            ))
+            .size(11.5),
+        );
+    }
 }

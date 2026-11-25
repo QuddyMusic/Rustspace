@@ -433,7 +433,7 @@ from the same release as the server (`rustspace-web.tar.gz`, checksum verified) 
 server is built from source, built next to it; no Node.js — and the server serves it at
 `https://DOMAIN/`. It is updated together with the server, can be added later the same way
 (run the script again with `--web`) and removed with `--no-web`; on a fresh install without
-`-y` the script asks. An installation that had the original web client (setup.sh before 0.4.0)
+`-y` the script asks. An installation that had the original web client (setup.sh before 0.3.0)
 gets the Rustspace one on its next update. The original Backspace desktop app is a shell that
 opens the instance's page, so it opens the Rustspace web client too: the page calls its
 `rendererReady`, leaves a 32-pixel strip at the top to drag the frameless window by, and the

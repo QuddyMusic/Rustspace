@@ -227,8 +227,19 @@ impl ExtraUi {
                 },
                 AdminEvent::Passkeys(result) => {
                     self.account.passkeys.busy = false;
+                    self.account.passkeys.code = None;
                     self.account.passkeys.list = Some(result);
                 }
+                AdminEvent::PasskeyCode(result) => match result {
+                    Ok((code, ticket)) => {
+                        self.account.passkeys.code = Some(code);
+                        self.account.passkeys.ticket = Some(ticket);
+                    }
+                    Err(err) => {
+                        self.account.passkeys.busy = false;
+                        self.account.passkeys.list = Some(Err(err));
+                    }
+                },
                 AdminEvent::Personal(event) => self.personal.apply(event),
                 AdminEvent::Bots(event) => self.bots.apply(event),
                 other => self.admin.apply(other),

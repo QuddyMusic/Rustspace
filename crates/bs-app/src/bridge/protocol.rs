@@ -810,6 +810,8 @@ pub(crate) enum AdminEvent {
     Privacy(Result<bool, String>),
     /// Ключи доступа аккаунта (ошибка — сервер без поддержки или отказ).
     Passkeys(Result<Vec<bs_api::Passkey>, String>),
+    /// Браузер открыт: (код для сверки, билет).
+    PasskeyCode(Result<(String, String), String>),
     /// Настройки инстанса.
     Settings(Result<bs_api::InstanceSettings, String>),
     /// Итог сохранения настроек.
@@ -1437,8 +1439,10 @@ impl Drop for EndGuard {
 pub(crate) enum PasskeyOp {
     /// Получить список.
     List,
-    /// Открыть браузер, дождаться подтверждения, вернуть новый список.
+    /// Получить билет, открыть браузер и вернуть код для сверки.
     Add,
+    /// Дождаться подтверждения нового ключа по билету, вернуть новый список.
+    Await(String),
     /// Удалить ключ.
     Remove(String),
 }

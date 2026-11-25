@@ -1858,5 +1858,7 @@
   "Сервер голоса завершил соединение": "The voice server ended the connection",
   "Соединение с сервером голоса оборвалось": "The connection to the voice server was lost",
   "браузер не дал микрофон": "the browser did not give access to the microphone",
-  "нет окна браузера": "no browser window"
+  "нет окна браузера": "no browser window",
+  "Код на странице в браузере должен быть таким:": "The code on the browser page should be:",
+  "Это не код двухфакторной аутентификации: он только связывает окно с этой страницей.": "This is not a two-factor code: it only links this window to that page."
 }

@@ -862,7 +862,7 @@ elif [ "$WITH_WEB" = 0 ]; then
     WEB_DIR=""
 else
     # Веб-версия, поставленная скриптом, обновляется вместе с сервером;
-    # веб-клиент оригинала (его ставил setup.sh до 0.4.0) заменяется ею.
+    # веб-клиент оригинала (его ставил setup.sh до 0.3.0) заменяется ею.
     if [ "$WITH_WEB" = 1 ] || { [ "$WEB_DIR" = "$DATA/web" ] \
         && { [ -f "$DATA/web/.rustspace-web" ] || [ -f "$DATA/web/.backspace-web" ]; }; }; then
         install_web

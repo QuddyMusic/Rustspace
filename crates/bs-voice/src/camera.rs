@@ -101,6 +101,25 @@ mod native {
     use crate::capture::CapturedFrame;
     use crate::error::{VoiceError, VoiceResult};
 
+    /// Кадр камеры в RGB: MJPEG разбирает image (чистый Rust), остальные
+    /// форматы (YUYV, NV12, RGB) — nokhwa.
+    fn decode(buffer: &nokhwa::Buffer) -> Result<(u32, u32, Vec<u8>), nokhwa::NokhwaError> {
+        if buffer.source_frame_format() == FrameFormat::MJPEG {
+            let image =
+                image::load_from_memory_with_format(buffer.buffer(), image::ImageFormat::Jpeg)
+                    .map_err(|err| nokhwa::NokhwaError::ProcessFrameError {
+                        src: FrameFormat::MJPEG,
+                        destination: "RGB".to_owned(),
+                        error: err.to_string(),
+                    })?
+                    .to_rgb8();
+            return Ok((image.width(), image.height(), image.into_raw()));
+        }
+        let image = buffer.decode_image::<RgbFormat>()?;
+        let (width, height) = image.dimensions();
+        Ok((width, height, image.into_raw()))
+    }
+
     fn error(err: impl std::fmt::Display) -> VoiceError {
         VoiceError::Video(format!("камера: {err}"))
     }
@@ -165,13 +184,10 @@ mod native {
                 };
                 info!(format = %camera.camera_format(), "камера открыта");
                 while flag.load(Ordering::Relaxed) {
-                    let frame = camera
-                        .frame()
-                        .and_then(|buffer| buffer.decode_image::<RgbFormat>());
+                    let frame = camera.frame().and_then(|buffer| decode(&buffer));
                     match frame {
-                        Ok(image) => {
-                            let (width, height) = image.dimensions();
-                            let rgba = rgb_to_rgba(image.as_raw());
+                        Ok((width, height, rgb)) => {
+                            let rgba = rgb_to_rgba(&rgb);
                             let Ok(i420) = crate::convert::rgba_to_i420(&rgba, width, height)
                             else {
                                 continue;

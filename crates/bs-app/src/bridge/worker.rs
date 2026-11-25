@@ -1028,6 +1028,9 @@ pub(super) async fn handle_admin(client: &bs_api::ApiClient, request: AdminReque
         }
         AdminRequest::TwoFactor(op) => AdminEvent::TwoFactor(two_factor(client, op).await),
         AdminRequest::Privacy(set) => AdminEvent::Privacy(privacy(client, set).await),
+        AdminRequest::Passkeys(super::PasskeyOp::Add) => {
+            AdminEvent::PasskeyCode(passkey_ticket(client).await)
+        }
         AdminRequest::Passkeys(op) => AdminEvent::Passkeys(passkeys(client, op).await),
         AdminRequest::Cleanup { dry_run } => {
             AdminEvent::Cleaned(client.storage_cleanup(dry_run).await.map_err(|e| text(&e)))
@@ -1415,36 +1418,43 @@ async fn gallery_page(
     }
 }
 
+/// Новый ключ: билет на сервере, страница в браузере; код — для сверки с
+/// кодом на странице.
+async fn passkey_ticket(client: &bs_api::ApiClient) -> Result<(String, String), String> {
+    let ticket = client.passkey_register_ticket().await.map_err(|e| {
+        if e.code() == Some("passkeys_unavailable") {
+            tr(
+                "Сервер не знает свой публичный адрес: администратору нужно задать \
+                PUBLIC_ORIGIN или DOMAIN в настройках сервера",
+            )
+            .to_owned()
+        } else {
+            upload_message(&e)
+        }
+    })?;
+    crate::sys::open_url(&ticket.url)?;
+    Ok((ticket.code, ticket.ticket))
+}
+
 /// Ключи доступа: добавление ждёт подтверждения в браузере до пяти минут.
 async fn passkeys(
     client: &bs_api::ApiClient,
     op: super::PasskeyOp,
 ) -> Result<Vec<bs_api::Passkey>, String> {
     match op {
-        super::PasskeyOp::List => {}
         super::PasskeyOp::Remove(id) => {
             client
                 .delete_passkey(&id)
                 .await
                 .map_err(|e| upload_message(&e))?;
         }
-        super::PasskeyOp::Add => {
-            let ticket = client.passkey_register_ticket().await.map_err(|e| {
-                if e.code() == Some("passkeys_unavailable") {
-                    tr(
-                        "Сервер не знает свой публичный адрес: администратору нужно задать \
-                        PUBLIC_ORIGIN или DOMAIN в настройках сервера",
-                    )
-                    .to_owned()
-                } else {
-                    upload_message(&e)
-                }
-            })?;
-            crate::sys::open_url(&ticket.url)?;
+        // Добавление идёт через passkey_ticket и Await.
+        super::PasskeyOp::List | super::PasskeyOp::Add => {}
+        super::PasskeyOp::Await(ticket) => {
             let mut done = false;
             for _ in 0..150 {
                 bs_rt::time::sleep(std::time::Duration::from_secs(2)).await;
-                match client.passkey_status(&ticket.ticket).await {
+                match client.passkey_status(&ticket).await {
                     Ok(bs_api::PasskeyStatus::Pending) => {}
                     Ok(bs_api::PasskeyStatus::Done { .. }) => {
                         done = true;

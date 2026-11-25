@@ -458,7 +458,7 @@ button{background:#e86a3a;color:#fff;border:0;border-radius:10px;padding:12px 22
 button:disabled{opacity:.5}.ok{color:#5fd39a}.err{color:#f2708a}
 </style></head><body><main>
 <h1 id="title">Ключ доступа Rustspace</h1>
-<p>Проверьте, что код совпадает с кодом в приложении:</p>
+<p>Проверьте, что код совпадает с кодом в окне Rustspace (это не код двухфакторной аутентификации):</p>
 <div class="code" id="code">······</div>
 <button id="go" disabled>Продолжить</button>
 <p id="note"></p>

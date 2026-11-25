@@ -52,7 +52,9 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: cargo test
         run: cargo test --workspace --all-features
+      # Портал XDG и dbus-run-session есть только на Linux.
       - name: portal GlobalShortcuts (своя шина D-Bus)
+        if: runner.os == 'Linux'
         run: dbus-run-session -- cargo test -p bs-app --all-features portal_keys -- --ignored
 
   doc:
