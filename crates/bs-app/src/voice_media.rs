@@ -271,8 +271,15 @@ pub(crate) fn livekit_url_allowed(livekit: &str, instance_base: &str) -> bool {
 
 #[cfg(feature = "voice")]
 pub(crate) use real::MediaEngine;
-#[cfg(not(feature = "voice"))]
+#[cfg(all(not(feature = "voice"), not(target_arch = "wasm32")))]
 pub(crate) use stub::MediaEngine;
+#[cfg(all(not(feature = "voice"), target_arch = "wasm32"))]
+pub(crate) use web::MediaEngine;
+
+/// Голос в веб-версии: WebRTC браузера.
+#[cfg(all(not(feature = "voice"), target_arch = "wasm32"))]
+#[path = "web_voice.rs"]
+mod web;
 
 /// Список говорящих (для подсветки в сайдбаре).
 pub(crate) type Speaking = HashSet<String>;
@@ -292,7 +299,7 @@ pub(crate) struct NetStats {
     pub(crate) protocol: Option<String>,
 }
 
-#[cfg(not(feature = "voice"))]
+#[cfg(all(not(feature = "voice"), not(target_arch = "wasm32")))]
 mod stub {
     use super::{ConnectRequest, Device, DeviceKind, MediaStatus, Speaking, VoicePrefs};
     use crate::i18n::tr;

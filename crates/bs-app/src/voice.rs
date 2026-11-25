@@ -817,33 +817,36 @@ pub(crate) fn show_dock(ctx_ui: &mut egui::Ui, state: &VoiceState) -> DockAction
                                 ui.ctx()
                                     .request_repaint_after(std::time::Duration::from_millis(100));
                             }
-                            let screen_tip = if video.screen_on {
-                                tr("Остановить демонстрацию")
-                            } else {
-                                tr("Показать экран")
-                            };
-                            let screen = widgets::icon_button(ui, Icon::Screen, 30.0);
-                            if video.screen_on {
-                                ui.painter().rect_stroke(
-                                    screen.rect.shrink(1.0),
-                                    8.0,
-                                    egui::Stroke::new(1.5, theme::green()),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
-                            if screen.on_hover_text(screen_tip).clicked() {
-                                action = DockAction::ToggleScreenShare;
-                            }
-                            let (camera_icon, camera_tip) = if video.camera_on {
-                                (Icon::Camera, tr("Выключить камеру"))
-                            } else {
-                                (Icon::CameraOff, tr("Включить камеру"))
-                            };
-                            if widgets::icon_button(ui, camera_icon, 30.0)
-                                .on_hover_text(camera_tip)
-                                .clicked()
-                            {
-                                action = DockAction::ToggleCamera;
+                            // В браузере камеры и показа экрана пока нет.
+                            if !cfg!(target_arch = "wasm32") {
+                                let screen_tip = if video.screen_on {
+                                    tr("Остановить демонстрацию")
+                                } else {
+                                    tr("Показать экран")
+                                };
+                                let screen = widgets::icon_button(ui, Icon::Screen, 30.0);
+                                if video.screen_on {
+                                    ui.painter().rect_stroke(
+                                        screen.rect.shrink(1.0),
+                                        8.0,
+                                        egui::Stroke::new(1.5, theme::green()),
+                                        egui::StrokeKind::Inside,
+                                    );
+                                }
+                                if screen.on_hover_text(screen_tip).clicked() {
+                                    action = DockAction::ToggleScreenShare;
+                                }
+                                let (camera_icon, camera_tip) = if video.camera_on {
+                                    (Icon::Camera, tr("Выключить камеру"))
+                                } else {
+                                    (Icon::CameraOff, tr("Включить камеру"))
+                                };
+                                if widgets::icon_button(ui, camera_icon, 30.0)
+                                    .on_hover_text(camera_tip)
+                                    .clicked()
+                                {
+                                    action = DockAction::ToggleCamera;
+                                }
                             }
                         });
                     });

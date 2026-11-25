@@ -439,8 +439,10 @@ opens the instance's page, so it opens the Rustspace web client too: the page ca
 `rendererReady`, leaves a 32-pixel strip at the top to drag the frameless window by, and the
 window buttons are drawn by the app itself. In the browser, settings, accounts and encryption
 keys are kept in the page's `localStorage`, downloads go to the browser's downloads and
-notifications are browser notifications; voice, the tray, game activity, local models and
-self-update are desktop-only. Files are picked with the browser's file chooser or dropped onto
+notifications are browser notifications. Voice channels and calls work in the browser too: a
+small LiveKit client of our own over the browser's WebRTC (signalling with `livekit-protocol`),
+microphone chosen in the browser's site settings; camera, screen sharing, the tray, game
+activity, local models and self-update are desktop-only. Files are picked with the browser's file chooser or dropped onto
 the page. The module is
 served gzip-compressed when the browser accepts it and revalidated by ETag, so a repeat visit
 does not download it again.

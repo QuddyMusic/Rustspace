@@ -117,7 +117,10 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 base64 = "0.22"
-web-sys = { version = "0.3", features = ["Window", "Document", "console", "Storage", "Location", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Notification", "NotificationOptions", "NotificationPermission", "HtmlInputElement", "FileList", "File", "Event", "EventTarget"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "console", "Storage", "Location", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Notification", "NotificationOptions", "NotificationPermission", "HtmlInputElement", "FileList", "File", "Event", "EventTarget", "WebSocket", "BinaryType", "MessageEvent", "CloseEvent", "RtcPeerConnection", "RtcConfiguration", "RtcIceServer", "RtcSessionDescriptionInit", "RtcSdpType", "RtcIceCandidate", "RtcIceCandidateInit", "RtcPeerConnectionIceEvent", "RtcTrackEvent", "RtcRtpTransceiver", "RtcRtpTransceiverInit", "RtcRtpTransceiverDirection", "MediaStream", "MediaStreamTrack", "MediaDevices", "MediaStreamConstraints", "HtmlAudioElement", "HtmlMediaElement", "Navigator"] }
+# Сигнализация LiveKit для голоса в браузере (Apache-2.0).
+livekit-protocol = "0.8.2"
+prost = "0.14"
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 chrono = { workspace = true, features = ["wasmbind"] }
