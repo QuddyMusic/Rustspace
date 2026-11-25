@@ -96,6 +96,11 @@ async fn global_limit(
     request: Request,
     next: Next,
 ) -> Response {
+    if state.config.web_dist.is_some()
+        && web::is_static_file(request.method(), request.uri().path())
+    {
+        return next.run(request).await;
+    }
     match state.limiter.check(Limit::GLOBAL, ip) {
         Ok(()) => next.run(request).await,
         Err(err) => err.into_response(),

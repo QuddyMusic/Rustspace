@@ -354,7 +354,23 @@ async fn instance_info_and_unknown_routes() {
     let (status, info) = server.get("/api/instance/info", None).await;
     assert_eq!(status, 200);
     assert_eq!(info["name"], "Rustspace");
+    // Не браузер (клиент Rustspace, помощник обновления) — версия Rustspace.
     assert_eq!(info["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(info["rustspaceVersion"], env!("CARGO_PKG_VERSION"));
+    // Браузер (ванильный веб, десктоп Backspace) — версия протокола Backspace:
+    // по ней он строит ссылки на свой десктоп-клиент.
+    let browser: Value = server
+        .http
+        .get(format!("{}/api/instance/info", server.base))
+        .header("user-agent", "Mozilla/5.0 (X11; Linux x86_64) Chrome/140.0")
+        .send()
+        .await
+        .expect("запрос")
+        .json()
+        .await
+        .expect("JSON");
+    assert_eq!(browser["version"], "1.11.0");
+    assert_eq!(browser["rustspaceVersion"], env!("CARGO_PKG_VERSION"));
     assert_eq!(info["compatibleWith"], "1.11.0");
     assert_eq!(info["registrationOpen"], true);
     assert_eq!(info["directoryConfigured"], false);

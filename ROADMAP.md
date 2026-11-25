@@ -150,6 +150,8 @@ original server.
    - [x] Admin: users, storage, update status, telemetry (the choice is stored, but the
      server sends nothing).
    - [x] Serving the web client (`BS_WEB_DIST`), content policy, CSP reports.
+   - [x] Web version for vanilla Backspace clients: `setup.sh --web` builds the original web
+     client 1.11.0 and the server serves it (browser and Backspace desktop connect).
    - [x] Forced voice disconnect through the LiveKit API (finding S16).
    - [x] Compatibility stand (`tools/compat`): 17 scenarios, responses and events compared
      with the original on SQLite and on PostgreSQL.

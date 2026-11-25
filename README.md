@@ -401,6 +401,7 @@ What it does:
 - builds `rustspace-server` from the clone, or downloads it from a release (`--release
   [VERSION]`) and checks its checksum, or takes `--binary`;
 - downloads LiveKit and checks its hash;
+- with `--web`, sets up the **web version for vanilla Backspace clients** (see below);
 - writes `/etc/rustspace/rustspace.env` and `/etc/rustspace/livekit.yaml`, creates the
   `rustspace` and `livekit` services and checks that both answer;
 - **updates**: run it again without arguments (after `git pull`, or with `--release`) — the
@@ -413,6 +414,22 @@ What it does:
   the next one continues. An installation with the old names (`/etc/backspace`,
   `/var/lib/backspace`, the `backspace` service and user) is moved to the new ones and the old
   ones are removed.
+
+**Web version for vanilla Backspace clients.** The original Backspace desktop app is a shell
+that loads its interface from the instance, and the browser uses the same interface, so they
+need the original web client on the server. `setup.sh --web` builds it — Backspace 1.11.0, the
+version whose protocol the server speaks, from the pinned commit of the `v1.11.0` tag — and the
+server serves it at `https://DOMAIN/`. The build runs as the service user in a temporary
+directory, with the system Node.js if it is 22.12 or newer, otherwise the official Node 22
+build checked against its `SHASUMS256.txt` (Alpine: `nodejs` from apk); it takes a few minutes
+and about 1.5 GB of memory. It can be added to an existing installation the same way (run the
+script again with `--web`) and removed with `--no-web`; on a fresh install without `-y` the
+script asks. When a later server speaks a newer Backspace version, the next update rebuilds it.
+The Rustspace client does not use it and works the same with or without it. Files of the web
+client do not count against the 200-requests-a-minute limit: its service worker fetches the
+whole build (over a hundred files) when it is first opened. `/api/instance/info` reports the
+Backspace version in `version` to browsers (the vanilla client builds its desktop download links
+from it) and the Rustspace version to everyone else; `rustspaceVersion` always has the latter.
 
 It is meant for a reverse proxy in front (Nginx Proxy Manager, Caddy…): at the end it prints
 what to set there and on the router — `https://DOMAIN` → port 3000, `https://lk.DOMAIN` → port
@@ -433,8 +450,9 @@ It stops on `Ctrl+C` or `SIGTERM`, waiting for open requests.
 Moving from the original server: stop it, copy the database and start `rustspace-server`
 with the same `JWT_SECRET`, `DB_PATH` and `UPLOAD_DIR`. Going back works the same way.
 
-To have the server also serve the original web client, build it
-(`pnpm --filter @backspace/web build`) and point at the build: `BS_WEB_DIST=/path/to/packages/web/dist`.
+To have the server also serve the original web client (the web version for vanilla clients),
+use `setup.sh --web`, or build it yourself (`pnpm --filter @backspace/web build` in the Backspace
+1.11.0 sources) and point at the build: `BS_WEB_DIST=/path/to/packages/web/dist`.
 Without it, `/` shows a short page saying the instance is reached with the Rustspace desktop
 client, with its address to copy and a link to the source and builds (`BACKSPACE_SOURCE_URL`,
 by default this repository; set your own if you changed the server). The page is in Russian
@@ -630,7 +648,7 @@ marked.
 | `UPLOAD_DIR` | `data/uploads` | Directory for uploaded files |
 | `MAX_UPLOAD_SIZE` | `104857600` | File size limit in bytes (the administrator can change it in settings) |
 | `TUS_EXPIRATION_HOURS` | `24` | How long an unfinished upload lives |
-| `BS_WEB_DIST` | none | *(bs-server)* Directory of the built web client; without it `/` shows a "use the desktop client" page and the rest is API only |
+| `BS_WEB_DIST` | none | *(bs-server)* Directory of the built web client (the web version for vanilla Backspace clients; `setup.sh --web` builds it); without it `/` shows a "use the desktop client" page and the rest is API only |
 | `DOMAIN` | none | Instance domain (invite links, `user@domain` names) |
 | `PUBLIC_ORIGIN` | none | Full external address when it is not `https://DOMAIN` |
 | `TRUSTED_PROXY_HOPS` | `1` | How many proxies in front write `X-Forwarded-For` (0–4). Rate limits depend on it: behind one nginx `1`, without a proxy `0` |

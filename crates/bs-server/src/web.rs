@@ -286,6 +286,27 @@ fn landing(config: &crate::config::Config, lang: Lang) -> Response {
         .into_response()
 }
 
+/// Файл сборки веб-клиента: в общий лимит запросов не идёт. Сервис-воркер
+/// ванильного клиента при первом открытии разом загружает всю сборку
+/// (больше сотни файлов), и несколько новых устройств за одним NAT
+/// исчерпали бы лимит в 200 запросов в минуту. API, загрузки и `/ws`
+/// считаются как раньше.
+#[must_use]
+pub fn is_static_file(method: &Method, path: &str) -> bool {
+    if method != Method::GET && method != Method::HEAD {
+        return false;
+    }
+    if path.starts_with("/assets/") {
+        return true;
+    }
+    let name = path.rsplit('/').next().unwrap_or_default();
+    ["/api/", "/ws", "/uploads/", "/.well-known/", "/rustspace/"]
+        .iter()
+        .all(|prefix| !path.starts_with(prefix))
+        && path.matches('/').count() <= 2
+        && name.contains('.')
+}
+
 /// Всё, что не нашло маршрута: файлы веб-клиента и его страница для
 /// остальных адресов; для API — ответ «не найдено».
 pub async fn fallback(State(state): State<AppState>, request: axum::extract::Request) -> Response {
@@ -346,6 +367,24 @@ pub async fn fallback(State(state): State<AppState>, request: axum::extract::Req
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "тесты")]
 mod tests {
+    #[test]
+    fn web_client_files_skip_the_global_limit() {
+        use axum::http::Method;
+        assert!(is_static_file(&Method::GET, "/assets/index-abc.js"));
+        assert!(is_static_file(&Method::GET, "/sw.js"));
+        assert!(is_static_file(
+            &Method::HEAD,
+            "/fonts/DMSans-Variable.woff2"
+        ));
+        assert!(!is_static_file(&Method::POST, "/assets/x.js"));
+        assert!(!is_static_file(&Method::GET, "/api/instance/info"));
+        assert!(!is_static_file(&Method::GET, "/uploads/a/b.png"));
+        assert!(!is_static_file(&Method::GET, "/ws"));
+        assert!(!is_static_file(&Method::GET, "/"));
+        assert!(!is_static_file(&Method::GET, "/rustspace/passkey.js"));
+        assert!(!is_static_file(&Method::GET, "/a/b/c/d.js"));
+    }
+
     #[test]
     fn landing_speaks_the_visitors_language() {
         assert_eq!(pick_lang(None, Some("ru-RU,ru;q=0.9,en;q=0.8")), Lang::Ru);
