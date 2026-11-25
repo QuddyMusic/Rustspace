@@ -59,6 +59,7 @@ impl Session {
             explore_loading: false,
             opened_space: None,
             e2ee_backup: None,
+            gallery_pages: Vec::new(),
             info: None,
             history: HashMap::new(),
             search: SearchState::default(),
@@ -297,6 +298,11 @@ impl Session {
         self.request(BridgeRequest::E2eePublish(key));
         self.flush_e2ee();
         Ok(())
+    }
+
+    /// Забирает пришедшие страницы галереи вложений.
+    pub(crate) fn take_gallery_pages(&mut self) -> Vec<GalleryPage> {
+        std::mem::take(&mut self.gallery_pages)
     }
 
     /// Резервная копия ключа на сервере (`None` — ещё не знаем).

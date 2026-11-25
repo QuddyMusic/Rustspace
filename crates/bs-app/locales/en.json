@@ -1826,5 +1826,12 @@
   "Спрашиваем сервер…": "Asking the server…",
   "Отметить несколько сообщений и переслать пачкой": "Mark several messages and forward them together",
   "Выбрано: {a0} из {a1}": "Selected: {a0} of {a1}",
-  "Сообщения ({a0}) уйдут цитатами с подписями авторов.": "The messages ({a0}) will go as quotes signed with their authors."
+  "Сообщения ({a0}) уйдут цитатами с подписями авторов.": "The messages ({a0}) will go as quotes signed with their authors.",
+  "GIF": "GIFs",
+  "Файлы": "Files",
+  "Вложения": "Attachments",
+  "Здесь пока ничего нет": "Nothing here yet",
+  "Загрузить ещё": "Load more",
+  "К сообщению": "Go to message",
+  "Вложения: картинки, видео, аудио, GIF, ссылки, файлы": "Attachments: images, videos, audio, GIFs, links, files"
 }

@@ -367,6 +367,14 @@ pub(crate) enum BridgeRequest {
     },
     /// «Избранное», закрепы, закладки.
     Extras(super::extras::ExtrasOp),
+    /// Страница галереи вложений: сообщения с файлами (`links == false`)
+    /// или со ссылками.
+    Gallery {
+        channel_id: String,
+        kind: ChannelKind,
+        links: bool,
+        offset: u32,
+    },
     /// Переслать сообщения в другой чат того же инстанса: цитатами с
     /// подписями авторов (ссылкой на профиль, если автор не запретил).
     Forward {
@@ -1214,6 +1222,8 @@ pub(crate) enum BridgeResponse {
         /// Открытый ключ.
         public_key: String,
     },
+    /// Страница галереи вложений.
+    Gallery(GalleryPage),
     /// Резервная копия ключа после запроса (`None` — копии нет).
     E2eeBackup(Result<Option<bs_api::E2eeBackup>, String>),
     /// Запрос выполнен, показывать нечего.
@@ -1423,4 +1433,24 @@ pub(crate) struct ForwardItem {
     pub(crate) content: String,
     /// Ссылки на вложения.
     pub(crate) attachments: Vec<String>,
+}
+
+/// Сообщение для галереи вложений.
+#[derive(Debug, Clone)]
+pub(crate) struct GalleryEntry {
+    pub(crate) message_id: String,
+    pub(crate) author: String,
+    pub(crate) created_at: i64,
+    pub(crate) content: String,
+    pub(crate) attachments: Vec<bs_types::Attachment>,
+}
+
+/// Страница галереи: ответ на [`BridgeRequest::Gallery`].
+#[derive(Debug, Clone)]
+pub(crate) struct GalleryPage {
+    pub(crate) channel_id: String,
+    pub(crate) links: bool,
+    pub(crate) offset: u32,
+    /// Всего сообщений (ошибка — текст).
+    pub(crate) result: Result<(Vec<GalleryEntry>, i64), String>,
 }

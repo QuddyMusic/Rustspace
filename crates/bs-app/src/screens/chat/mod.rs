@@ -3,6 +3,7 @@
 
 mod downloads;
 mod forward;
+mod gallery;
 mod me_menu;
 mod messages;
 mod model;
@@ -201,6 +202,8 @@ pub(crate) struct ChatScreen {
     forward: Option<forward::ForwardDraft>,
     /// Выбор сообщений галочками для пересылки пачкой.
     picking: Option<forward::Picking>,
+    /// Галерея вложений открытого чата.
+    gallery: Option<gallery::Gallery>,
     /// Сообщение, для которого открыт выбор реакции, и вкладка выбора.
     react_picker: Option<(String, usize)>,
     /// Имена пользователей для упоминаний (обновляется каждый кадр).
@@ -328,6 +331,7 @@ impl ChatScreen {
             self.edit = None;
             self.reply = None;
             self.picking = None;
+            self.gallery = None;
             self.react_picker = None;
         }
         let space_open = self
@@ -633,6 +637,18 @@ impl ChatScreen {
             && !forward::show(ctx, draft, bridge)
         {
             self.forward = None;
+        }
+        if let Some(gallery) = self.gallery.as_mut() {
+            match gallery.show(ctx, bridge) {
+                gallery::Action::Keep => {}
+                gallery::Action::Close => self.gallery = None,
+                gallery::Action::Jump(id) => {
+                    self.gallery = None;
+                    if let Some(selected) = self.selected_channel.clone() {
+                        bridge.jump_to(selected.kind, &selected.channel, &id);
+                    }
+                }
+            }
         }
         if let Some(dialog) = self.invite_dialog.as_mut()
             && !super::invite_dialog::show(ctx, dialog, bridge)

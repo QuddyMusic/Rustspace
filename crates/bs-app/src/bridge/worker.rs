@@ -1265,6 +1265,82 @@ async fn e2ee_backup(
     client.e2ee_backup().await.map_err(|e| upload_message(&e))
 }
 
+/// Страница галереи: поиск без текста с фильтром «есть файл» или «есть
+/// ссылка», по 50 сообщений.
+async fn gallery_page(
+    client: &bs_api::ApiClient,
+    channel_id: String,
+    kind: ChannelKind,
+    links: bool,
+    offset: u32,
+) -> GalleryPage {
+    let query = bs_api::MessageSearchQuery {
+        has: Some(if links { "link" } else { "file" }.to_owned()),
+        offset: Some(offset),
+        limit: Some(50),
+        ..Default::default()
+    };
+    let entry =
+        |id: String, user: &bs_types::User, created_at, content: Option<String>, attachments| {
+            GalleryEntry {
+                message_id: id,
+                author: user
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| user.username.clone()),
+                created_at,
+                content: content.unwrap_or_default(),
+                attachments,
+            }
+        };
+    let result = match kind {
+        ChannelKind::Space => client
+            .search_channel_messages(&channel_id, &query)
+            .await
+            .map(|r| {
+                let list = r
+                    .results
+                    .into_iter()
+                    .map(|m| {
+                        entry(
+                            m.message.id,
+                            &m.user,
+                            m.message.created_at,
+                            m.message.content,
+                            m.attachments,
+                        )
+                    })
+                    .collect();
+                (list, r.total_count)
+            }),
+        ChannelKind::Dm => client
+            .search_dm_messages(&channel_id, &query)
+            .await
+            .map(|r| {
+                let list = r
+                    .results
+                    .into_iter()
+                    .map(|m| {
+                        entry(
+                            m.message.id,
+                            &m.user,
+                            m.message.created_at,
+                            m.message.content,
+                            m.attachments,
+                        )
+                    })
+                    .collect();
+                (list, r.total_count)
+            }),
+    };
+    GalleryPage {
+        channel_id,
+        links,
+        offset,
+        result: result.map_err(|err| space_message(&err)),
+    }
+}
+
 /// Ключи доступа: добавление ждёт подтверждения в браузере до пяти минут.
 async fn passkeys(
     client: &bs_api::ApiClient,
@@ -2103,6 +2179,12 @@ async fn history_request(
                 },
             }
         }
+        BridgeRequest::Gallery {
+            channel_id,
+            kind,
+            links,
+            offset,
+        } => BridgeResponse::Gallery(gallery_page(client, channel_id, kind, links, offset).await),
         BridgeRequest::Search {
             channel_id,
             kind,

@@ -997,6 +997,7 @@ impl ChatScreen {
             }
         }
         self.notification_button(ui, bridge, &selected);
+        self.gallery_button(ui, bridge, &selected);
         let color = if self.search.open {
             theme::text_bright()
         } else {
@@ -1010,6 +1011,31 @@ impl ChatScreen {
             self.search.toggle();
         }
         super::downloads::button(ui);
+    }
+
+    /// Кнопка галереи вложений.
+    fn gallery_button(&mut self, ui: &mut egui::Ui, bridge: &Bridge, selected: &SelectedChannel) {
+        let color = if self.gallery.is_some() {
+            theme::text_bright()
+        } else {
+            theme::text_faint()
+        };
+        if ui
+            .add(widgets::flat_icon(Icon::Image, 22.0, color))
+            .on_hover_text(tr("Вложения: картинки, видео, аудио, GIF, ссылки, файлы"))
+            .clicked()
+        {
+            self.gallery = if self.gallery.is_some() {
+                None
+            } else {
+                Some(super::gallery::Gallery::open(
+                    bridge,
+                    selected.origin,
+                    &selected.channel,
+                    selected.kind,
+                ))
+            };
+        }
     }
 
     /// Колокольчик: уведомления канала (как в меню канала оригинала).
