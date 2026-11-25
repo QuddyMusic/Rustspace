@@ -105,6 +105,8 @@ fn menu(
                             ui.close();
                         }
                     });
+                    ui.add_space(8.0);
+                    section(ui, |ui| accounts(ui, bridge, nav));
                 });
         });
 }
@@ -211,6 +213,54 @@ fn section(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
             ui.spacing_mut().item_spacing.y = 2.0;
             add(ui);
         });
+}
+
+/// Другие сохранённые аккаунты и «Добавить аккаунт».
+fn accounts(ui: &mut egui::Ui, bridge: &Bridge, nav: &mut Option<Nav>) {
+    let current = bridge.persist_path();
+    for (index, account) in crate::accounts::list().iter().enumerate() {
+        if crate::accounts::path_of(account) == current {
+            continue;
+        }
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::click());
+        if response.hovered() {
+            ui.painter()
+                .rect_filled(rect, theme::rounded(6), theme::bg_active());
+        }
+        let face = egui::Rect::from_center_size(
+            rect.left_center() + egui::vec2(18.0, 0.0),
+            egui::Vec2::splat(26.0),
+        );
+        theme::paint_avatar(ui.painter(), face, account.face(), None, false, None);
+        let text = rect.left_center() + egui::vec2(38.0, 0.0);
+        ui.painter().text(
+            text - egui::vec2(0.0, 8.0),
+            egui::Align2::LEFT_CENTER,
+            &account.name,
+            egui::FontId::proportional(13.5),
+            theme::text_bright(),
+        );
+        ui.painter().text(
+            text + egui::vec2(0.0, 8.0),
+            egui::Align2::LEFT_CENTER,
+            account.subtitle(),
+            egui::FontId::proportional(11.0),
+            theme::text_muted(),
+        );
+        if response
+            .on_hover_text(tr("Переключиться на этот аккаунт"))
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        {
+            *nav = Some(Nav::SwitchAccount(Some(index)));
+            ui.close();
+        }
+    }
+    if row(ui, crate::icons::Icon::Plus, tr("Добавить аккаунт")).clicked() {
+        *nav = Some(Nav::SwitchAccount(None));
+        ui.close();
+    }
 }
 
 /// Строка-кнопка с иконкой.

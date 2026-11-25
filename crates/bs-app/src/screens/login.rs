@@ -32,6 +32,8 @@ pub(crate) struct LoginScreen {
     card_height: f32,
     /// Идёт вход по ключу доступа.
     passkey: Option<super::passkey_login::PasskeyLogin>,
+    /// Выбран сохранённый аккаунт (номер в списке) — войти в него.
+    pub(crate) picked: Option<usize>,
 }
 
 impl std::fmt::Debug for LoginScreen {
@@ -124,6 +126,63 @@ impl LoginScreen {
         )
     }
 
+    /// Сохранённые аккаунты: вход в один щелчок, без пароля.
+    fn saved_accounts(&mut self, ui: &mut egui::Ui, bridge: &Bridge, busy: bool) {
+        let current = bridge.persist_path();
+        let accounts: Vec<_> = crate::accounts::list()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, account)| crate::accounts::path_of(account) != current)
+            .collect();
+        if accounts.is_empty() {
+            return;
+        }
+        form_label(ui, tr("Сохранённые аккаунты"));
+        for (index, account) in accounts {
+            let (rect, response) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), 44.0),
+                if busy {
+                    egui::Sense::hover()
+                } else {
+                    egui::Sense::click()
+                },
+            );
+            if response.hovered() && !busy {
+                ui.painter()
+                    .rect_filled(rect, theme::rounded(8), theme::bg_hover());
+            }
+            let face = egui::Rect::from_center_size(
+                rect.left_center() + egui::vec2(20.0, 0.0),
+                egui::Vec2::splat(30.0),
+            );
+            theme::paint_avatar(ui.painter(), face, account.face(), None, busy, None);
+            let text = rect.left_center() + egui::vec2(44.0, 0.0);
+            ui.painter().text(
+                text - egui::vec2(0.0, 8.0),
+                egui::Align2::LEFT_CENTER,
+                &account.name,
+                egui::FontId::proportional(14.0),
+                theme::text_bright(),
+            );
+            ui.painter().text(
+                text + egui::vec2(0.0, 9.0),
+                egui::Align2::LEFT_CENTER,
+                account.subtitle(),
+                egui::FontId::proportional(11.5),
+                theme::text_muted(),
+            );
+            if response
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                self.picked = Some(index);
+            }
+        }
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(6.0);
+    }
+
     /// Содержимое карточки входа.
     /// Поле адреса инстанса и недавние инстансы под ним.
     fn address_field(&mut self, ui: &mut egui::Ui, width: f32) -> egui::Response {
@@ -182,8 +241,9 @@ impl LoginScreen {
             ui.label(theme::muted(tr("Войдите в свой инстанс")));
         });
         ui.add_space(14.0);
-
         let busy = bridge.is_busy();
+        self.saved_accounts(ui, bridge, busy);
+
         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
         let mut submit = false;
         // Поле кода — по запросу или когда сервер сам попросил код.

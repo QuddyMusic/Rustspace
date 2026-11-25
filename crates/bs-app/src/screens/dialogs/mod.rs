@@ -461,8 +461,8 @@ pub(crate) enum SettingsAction {
     Close,
     /// Выйти из всех инстансов.
     Logout,
-    /// Выйти и войти в другой инстанс.
-    SwitchInstance,
+    /// Войти ещё в один аккаунт (текущий остаётся сохранённым).
+    AddAccount,
     /// Действие в панели «Подключения».
     Connections(super::connections::ConnAction),
 }
@@ -885,11 +885,11 @@ fn settings_nav(
                 );
             }
             ui.add_space(6.0);
-            if sidebar_item(ui, tr("Сменить инстанс"), theme::text())
-                .on_hover_text(tr("Выйти и войти в другой инстанс"))
+            if sidebar_item(ui, tr("Добавить аккаунт"), theme::text())
+                .on_hover_text(tr("Войти ещё в один аккаунт — этот останется в списке"))
                 .clicked()
             {
-                *action = SettingsAction::SwitchInstance;
+                *action = SettingsAction::AddAccount;
             }
             if sidebar_item(ui, tr("Выйти"), theme::rose()).clicked() {
                 *action = SettingsAction::Logout;

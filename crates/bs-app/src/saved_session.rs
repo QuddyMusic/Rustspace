@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use bs_types::TransportPolicy;
 
 use crate::bridge::Secret;
-
-/// Имя файла в каталоге настроек приложения.
+/// Имя файла сессии (в тестах; список аккаунтов — в `accounts`).
+#[cfg(test)]
 const FILE_NAME: &str = "session.json";
 
 /// Что нужно, чтобы войти без пароля.
@@ -84,11 +84,6 @@ fn config_base() -> Option<PathBuf> {
         var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|h| h.join(".config")))?
     };
     Some(base)
-}
-
-/// Путь к файлу сессии по умолчанию.
-pub(crate) fn default_path() -> Option<PathBuf> {
-    config_dir().map(|dir| dir.join(FILE_NAME))
 }
 
 /// Читает сохранённую сессию; повреждённый или пустой файл — `None`.

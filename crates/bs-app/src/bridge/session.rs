@@ -652,6 +652,11 @@ impl Session {
         self.persist = path;
     }
 
+    /// Файл, в котором хранится сессия.
+    pub(crate) fn persist_path(&self) -> Option<&std::path::Path> {
+        self.persist.as_deref()
+    }
+
     /// Стирает сохранённую сессию (явный выход).
     pub(crate) fn forget_saved(&self) {
         if let Some(path) = self.persist.as_ref() {

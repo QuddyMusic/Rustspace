@@ -36,6 +36,8 @@ pub(crate) struct BackspaceApp {
     images: ImageHub,
     /// Трей и глобальные клавиши.
     desktop: crate::desktop::Desktop,
+    /// Переключение аккаунта ждёт, пока закроется текущая сессия.
+    pending_switch: Option<Switch>,
 }
 
 impl BackspaceApp {
@@ -50,7 +52,7 @@ impl BackspaceApp {
         let mut bridge = Bridge::new(runtime);
         let mut login = LoginScreen::default();
         // Сохранённая сессия: входим по токену, без пароля.
-        let path = crate::saved_session::default_path();
+        let path = crate::accounts::active_path();
         if let Some(base) = bridge.restore(path.clone()) {
             login.base = base;
         } else if let Some((base, insecure)) = path.as_deref().and_then(crate::saved_session::hint)
@@ -68,6 +70,56 @@ impl BackspaceApp {
             chat: ChatScreen::with_prefs(),
             images: ImageHub::default(),
             desktop: crate::desktop::Desktop::start(ctx),
+            pending_switch: None,
+        }
+    }
+}
+
+/// Куда переключиться после закрытия текущей сессии.
+#[derive(Debug)]
+enum Switch {
+    /// Сохранённый аккаунт (файл сессии).
+    To(std::path::PathBuf),
+    /// Новый аккаунт: экран входа.
+    New,
+}
+
+impl BackspaceApp {
+    /// Выход и переключение аккаунтов из чата.
+    fn chat_action(&mut self, action: ChatAction) {
+        match action {
+            ChatAction::None => {}
+            ChatAction::Logout => {
+                if let Some(path) = self.bridge.persist_path() {
+                    crate::accounts::forget(&path);
+                }
+                self.bridge.logout();
+            }
+            ChatAction::SwitchAccount(index) => {
+                let target = index.and_then(|index| {
+                    crate::accounts::list()
+                        .get(index)
+                        .and_then(crate::accounts::path_of)
+                });
+                self.pending_switch = Some(target.map_or(Switch::New, Switch::To));
+                self.bridge.leave();
+            }
+        }
+    }
+
+    /// Входит в сохранённый аккаунт (`path`) или готовит вход в новый.
+    fn switch_to(&mut self, target: Option<std::path::PathBuf>) {
+        let Some(path) = target.or_else(crate::accounts::new_path) else {
+            return;
+        };
+        let saved = crate::saved_session::load(&path).is_some();
+        if saved {
+            crate::accounts::set_active(&path);
+        }
+        if let Some(base) = self.bridge.restore(Some(path)) {
+            self.login.base = base;
+        } else {
+            self.login.switch_instance();
         }
     }
 }
@@ -386,6 +438,12 @@ impl BackspaceApp {
             // Кэш и каналы мост уже сбросил сам, когда сессия закрылась.
             self.chat.reset();
         }
+        if lost && let Some(switch) = self.pending_switch.take() {
+            self.switch_to(match switch {
+                Switch::To(path) => Some(path),
+                Switch::New => None,
+            });
+        }
         let entering = matches!(self.screen, Screen::Login);
         self.screen = next_screen(self.screen, ready, lost);
         // Вошли: инстанс — в недавние на экране входа.
@@ -396,6 +454,10 @@ impl BackspaceApp {
             crate::prefs::update(|prefs| {
                 crate::prefs::push_recent(&mut prefs.recent_instances, &base, insecure);
             });
+            if let (Some(path), Some(cache)) = (self.bridge.persist_path(), self.bridge.cache_at(0))
+            {
+                crate::accounts::remember(&path, cache.me(), &base);
+            }
         }
 
         // Активность (игры, музыка, Rich Presence) — всем инстансам.
@@ -418,18 +480,19 @@ impl BackspaceApp {
             Screen::Login => {
                 update_strip(ui, &prefs.updates, &self.bridge.runtime());
                 self.login.show(ui, &mut self.bridge);
+                if let Some(index) = self.login.picked.take()
+                    && let Some(path) = crate::accounts::list()
+                        .get(index)
+                        .and_then(crate::accounts::path_of)
+                {
+                    self.switch_to(Some(path));
+                }
             }
             Screen::Chat => {
                 update_strip(ui, &prefs.updates, &self.bridge.runtime());
                 self.notice_strip(ui);
-                match self.chat.show(ui, &mut self.bridge) {
-                    ChatAction::None => {}
-                    ChatAction::Logout => self.bridge.logout(),
-                    ChatAction::SwitchInstance => {
-                        self.bridge.logout();
-                        self.login.switch_instance();
-                    }
-                }
+                let action = self.chat.show(ui, &mut self.bridge);
+                self.chat_action(action);
             }
         }
 

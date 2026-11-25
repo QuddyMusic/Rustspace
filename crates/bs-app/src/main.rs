@@ -16,6 +16,7 @@
 // В тестах паника — законный способ упасть быстро и с понятным текстом.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+mod accounts;
 mod app;
 mod brand;
 mod bridge;

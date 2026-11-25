@@ -344,6 +344,19 @@ impl Bridge {
     /// Выход: закрывает все сессии и забывает сохранённый вход.
     pub(crate) fn logout(&mut self) {
         self.slots[0].session.forget_saved();
+        self.leave();
+    }
+
+    /// Файл сессии домашнего аккаунта.
+    pub(crate) fn persist_path(&self) -> Option<std::path::PathBuf> {
+        self.slots[0]
+            .session
+            .persist_path()
+            .map(std::path::Path::to_path_buf)
+    }
+
+    /// Закрывает все сессии, но помнит вход (переключение аккаунта).
+    pub(crate) fn leave(&mut self) {
         self.leaving = true;
         for slot in &mut self.slots {
             slot.session.logout();

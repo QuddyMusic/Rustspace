@@ -59,6 +59,8 @@ pub(super) enum Nav {
     Settings,
     /// Свой профиль (окно, как у других).
     OwnProfile,
+    /// Перейти на сохранённый аккаунт или добавить новый (`None`).
+    SwitchAccount(Option<usize>),
     /// Искать людей по строке (вкладка «Добавить»).
     SearchPeople(String),
     /// Войти в голосовой канал.
@@ -449,6 +451,8 @@ impl ChatScreen {
                 }
             }
             Nav::OwnProfile => self.open_own_profile(bridge),
+            // Обрабатывает приложение (см. конец `show`).
+            Nav::SwitchAccount(_) => {}
             Nav::VoiceJoin {
                 origin,
                 channel_id,
@@ -716,9 +720,9 @@ impl ChatScreen {
                     self.settings = None;
                     action = ChatAction::Logout;
                 }
-                SettingsAction::SwitchInstance => {
+                SettingsAction::AddAccount => {
                     self.settings = None;
-                    action = ChatAction::SwitchInstance;
+                    action = ChatAction::SwitchAccount(None);
                 }
                 SettingsAction::Connections(chosen) => route_connection(bridge, chosen),
             }
@@ -754,6 +758,9 @@ impl ChatScreen {
         self.show_bookmarks(&ctx, bridge);
         self.take_group_events(bridge);
         self.show_toast(&ctx, now);
+        if let Some(Nav::SwitchAccount(index)) = nav {
+            return ChatAction::SwitchAccount(index);
+        }
         if let Some(nav) = nav {
             self.apply_nav(nav, &items, bridge);
         }
