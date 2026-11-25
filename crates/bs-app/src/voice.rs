@@ -82,6 +82,8 @@ pub(crate) struct VoiceState {
     pub(crate) video_sent: (bool, bool),
     /// Ограничения стриминга по инстансам (приходят с токеном LiveKit).
     host_limits: std::collections::HashMap<usize, bs_api::StreamingLimits>,
+    /// Когда последний раз клали кадр превью своей трансляции.
+    preview_at: Option<std::time::Instant>,
     /// Битрейт микрофона по звонкам: (инстанс, канал или переписка).
     pub(crate) bitrates: std::collections::HashMap<(usize, String), bs_api::VoiceBitrate>,
 }
@@ -497,6 +499,44 @@ impl VoiceState {
     pub(crate) fn poll(&mut self, bridge: &mut Bridge) {
         self.poll_calls(bridge);
         self.sync_video(bridge);
+        self.push_preview(bridge);
+    }
+
+    /// Пока показываем экран в канале пространства, раз в несколько секунд
+    /// кладём маленький кадр для превью у тех, кто ещё не зашёл.
+    fn push_preview(&mut self, bridge: &mut Bridge) {
+        let Some(call) = self.call.as_ref().filter(|_| self.video.status().screen_on) else {
+            self.preview_at = None;
+            return;
+        };
+        if self
+            .preview_at
+            .is_some_and(|at| at.elapsed() < crate::stream_preview::UPLOAD_EVERY)
+        {
+            return;
+        }
+        let Some(jpeg) = self
+            .media
+            .as_ref()
+            .map(crate::video_media::VideoControl::feeds)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|feed| feed.local && feed.screen)
+            .and_then(|feed| feed.image)
+            .and_then(|image| crate::stream_preview::snapshot(image.size, image.rgba()))
+        else {
+            return;
+        };
+        self.preview_at = Some(std::time::Instant::now());
+        let previous = bridge.focus_index();
+        bridge.focus_on(call.origin);
+        bridge.request(BridgeRequest::StreamPreview(
+            crate::bridge::PreviewOp::Put {
+                channel_id: call.channel_id.clone(),
+                jpeg,
+            },
+        ));
+        bridge.focus_on(previous);
     }
 
     /// Звонок, в котором мы сейчас: инстанс и канал или переписка.

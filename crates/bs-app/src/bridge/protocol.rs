@@ -192,6 +192,15 @@ pub(crate) struct IssuedCredential {
     pub(crate) provisioned: bool,
 }
 
+/// Запрос превью трансляции.
+#[derive(Debug, Clone)]
+pub(crate) enum PreviewOp {
+    /// Положить свой кадр (JPEG).
+    Put { channel_id: String, jpeg: Vec<u8> },
+    /// Свежий кадр участника.
+    Get { channel_id: String, user_id: String },
+}
+
 /// REST-запрос, который GUI отправляет фоновой сессии.
 #[derive(Debug, Clone)]
 pub(crate) enum BridgeRequest {
@@ -369,6 +378,8 @@ pub(crate) enum BridgeRequest {
     Extras(super::extras::ExtrasOp),
     /// Свои профили участников пространства.
     SpaceProfiles(String),
+    /// Превью трансляции в голосовом канале.
+    StreamPreview(PreviewOp),
     /// Сменить свой профиль в пространстве.
     SetSpaceProfile {
         space_id: String,
@@ -1243,6 +1254,12 @@ pub(crate) enum BridgeResponse {
     SpaceProfileSaved {
         space_id: String,
         result: Result<Vec<bs_api::SpaceProfile>, String>,
+    },
+    /// Кадр трансляции для превью (`None` — кадра нет).
+    StreamPreview {
+        channel_id: String,
+        user_id: String,
+        jpeg: Option<Vec<u8>>,
     },
     /// Резервная копия ключа после запроса (`None` — копии нет).
     E2eeBackup(Result<Option<bs_api::E2eeBackup>, String>),

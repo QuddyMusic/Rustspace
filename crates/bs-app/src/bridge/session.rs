@@ -62,6 +62,7 @@ impl Session {
             gallery_pages: Vec::new(),
             space_profiles: HashMap::new(),
             space_profile_saved: None,
+            stream_previews: HashMap::new(),
             info: None,
             history: HashMap::new(),
             search: SearchState::default(),
@@ -332,6 +333,33 @@ impl Session {
                 .insert(space_id.to_owned(), (profiles, std::time::Instant::now()));
             self.request(BridgeRequest::SpaceProfiles(space_id.to_owned()));
         }
+    }
+
+    /// Свежий кадр трансляции участника: просит новый раз в несколько
+    /// секунд, пока на него смотрят. Поколение меняется с каждым кадром.
+    pub(crate) fn stream_preview(
+        &mut self,
+        channel_id: &str,
+        user_id: &str,
+    ) -> Option<(std::sync::Arc<[u8]>, u64)> {
+        let key = (channel_id.to_owned(), user_id.to_owned());
+        let stale = self
+            .stream_previews
+            .get(&key)
+            .is_none_or(|(_, at, _)| at.elapsed() >= std::time::Duration::from_secs(5));
+        if stale {
+            let entry = self
+                .stream_previews
+                .entry(key.clone())
+                .or_insert_with(|| (None, std::time::Instant::now(), 0));
+            entry.1 = std::time::Instant::now();
+            self.request(BridgeRequest::StreamPreview(super::PreviewOp::Get {
+                channel_id: key.0.clone(),
+                user_id: key.1.clone(),
+            }));
+        }
+        let (frame, _, generation) = self.stream_previews.get(&key)?;
+        frame.clone().map(|frame| (frame, *generation))
     }
 
     /// Меняет свой профиль в пространстве.

@@ -33,6 +33,7 @@ pub mod space_profiles;
 pub mod spaces;
 pub mod sticker_packs;
 pub mod stickers;
+pub mod stream_previews;
 pub mod twofactor;
 pub mod uploads;
 pub mod users;

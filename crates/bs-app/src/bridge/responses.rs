@@ -66,6 +66,16 @@ impl Session {
             BridgeResponse::Quiet => {}
             BridgeResponse::E2eeBackup(result) => self.e2ee_backup = Some(result),
             BridgeResponse::Gallery(page) => self.gallery_pages.push(page),
+            BridgeResponse::StreamPreview {
+                channel_id,
+                user_id,
+                jpeg,
+            } => {
+                if let Some(entry) = self.stream_previews.get_mut(&(channel_id, user_id)) {
+                    entry.0 = jpeg.map(std::sync::Arc::from);
+                    entry.2 += 1;
+                }
+            }
             BridgeResponse::SpaceProfiles { space_id, result } => {
                 if let Ok(list) = result {
                     let at = self

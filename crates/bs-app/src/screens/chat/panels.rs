@@ -485,6 +485,22 @@ impl ChatScreen {
             theme::muted_mark(ui, &row.rect);
         }
         channel_menu(&row, space, channel, nav);
+        let streamer = channel
+            .occupants
+            .iter()
+            .find(|o| o.flags.streaming && !o.me);
+        if let Some(streamer) = streamer.filter(|_| row.hovered()) {
+            crate::stream_preview::hovered(
+                ui.ctx(),
+                crate::stream_preview::Hover {
+                    origin: space.origin,
+                    channel_id: channel.id.clone(),
+                    user_id: streamer.id.clone(),
+                    name: streamer.name.clone(),
+                    rect: row.rect,
+                },
+            );
+        }
         if !channel_gear(ui, &row, space, channel, nav) && row.clicked() {
             *nav = Some(Nav::VoiceJoin {
                 origin: space.origin,
@@ -504,6 +520,18 @@ impl ChatScreen {
                 },
                 occupant.avatar.as_deref(),
             );
+            if occupant.flags.streaming && !occupant.me && row.hovered() {
+                crate::stream_preview::hovered(
+                    ui.ctx(),
+                    crate::stream_preview::Hover {
+                        origin: space.origin,
+                        channel_id: channel.id.clone(),
+                        user_id: occupant.id.clone(),
+                        name: occupant.name.clone(),
+                        rect: row.rect,
+                    },
+                );
+            }
             if !occupant.me {
                 let others: Vec<(String, String)> = space
                     .groups

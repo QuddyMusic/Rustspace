@@ -50,6 +50,7 @@ pub mod registry;
 pub mod saved;
 pub mod space_manage;
 pub mod sticker_packs;
+pub mod stream_preview;
 pub mod twofactor;
 pub mod webhooks;
 pub mod write;

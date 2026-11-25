@@ -223,6 +223,14 @@ pub fn app(state: AppState) -> Router {
         .route("/api/spaces/{id}/join", post(routes::spaces::join))
         .route("/api/spaces/{id}/members", get(routes::spaces::members))
         .route(
+            "/api/rustspace/voice/{channel}/preview",
+            axum::routing::put(routes::stream_previews::put),
+        )
+        .route(
+            "/api/rustspace/voice/{channel}/preview/{user}",
+            get(routes::stream_previews::get),
+        )
+        .route(
             "/api/rustspace/spaces/{id}/profiles",
             get(routes::space_profiles::list),
         )

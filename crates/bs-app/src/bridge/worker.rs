@@ -394,9 +394,8 @@ fn spawn_job(
                 let _ = tx.send(response);
             });
         }
-        // Чтения и настройки, от которых ничего не ждёт очередь: не стоят
-        // за медленным запросом (проверка обновлений, мосты, история) —
-        // разделы настроек открываются сразу.
+        // Чтения, настройки и превью трансляций не стоят за медленным
+        // запросом (мосты, история): разделы открываются сразу.
         request @ (BridgeRequest::Admin(_)
         | BridgeRequest::Extras(_)
         | BridgeRequest::InstanceInfo
@@ -404,6 +403,7 @@ fn spawn_job(
         | BridgeRequest::GifEnabled
         | BridgeRequest::Gifs { .. }
         | BridgeRequest::Stickers
+        | BridgeRequest::StreamPreview(_)
         | BridgeRequest::Profile(_)) => {
             jobs.spawn(async move {
                 let response = handle_request(&client, request).await;
@@ -1750,6 +1750,23 @@ async fn voice_request(
     request: BridgeRequest,
 ) -> Result<BridgeResponse, BridgeRequest> {
     match request {
+        BridgeRequest::StreamPreview(PreviewOp::Put { channel_id, jpeg }) => {
+            // Кадр не дошёл — придёт следующий, сказать пользователю нечего.
+            let _ = client.put_stream_preview(&channel_id, jpeg).await;
+            Ok(BridgeResponse::Quiet)
+        }
+        BridgeRequest::StreamPreview(PreviewOp::Get {
+            channel_id,
+            user_id,
+        }) => Ok(BridgeResponse::StreamPreview {
+            jpeg: client
+                .stream_preview(&channel_id, &user_id)
+                .await
+                .ok()
+                .flatten(),
+            channel_id,
+            user_id,
+        }),
         BridgeRequest::DmVoiceToken(dm_id) => {
             let result = client
                 .livekit_token_dm(&dm_id)

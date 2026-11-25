@@ -1845,5 +1845,6 @@
   "Выбрать…": "Choose…",
   "Сбросить всё": "Reset all",
   "Вернуть общий профиль в этом пространстве": "Use your main profile in this space again",
-  "Этот инстанс не поддерживает свой профиль в пространстве": "This instance doesn't support per-space profiles"
+  "Этот инстанс не поддерживает свой профиль в пространстве": "This instance doesn't support per-space profiles",
+  "Превью трансляции пока нет": "No stream preview yet"
 }

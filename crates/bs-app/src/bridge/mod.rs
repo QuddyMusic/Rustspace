@@ -149,6 +149,9 @@ pub(crate) struct Session {
     space_profiles: HashMap<String, (Vec<bs_api::SpaceProfile>, std::time::Instant)>,
     /// Итог последнего сохранения своего профиля в пространстве.
     space_profile_saved: Option<Result<(), String>>,
+    /// Кадры превью трансляций: (канал, пользователь) → (кадр, когда
+    /// спросили, поколение для текстуры).
+    stream_previews: HashMap<(String, String), StreamPreviewSlot>,
     /// Пришедшие страницы галереи вложений.
     gallery_pages: Vec<GalleryPage>,
     /// Резервная копия ключа шифрования на сервере (`None` — не спрашивали).
@@ -199,6 +202,9 @@ pub(crate) fn normalize_base(raw: &str) -> Option<String> {
     };
     Some(with_scheme)
 }
+
+/// Кадр превью трансляции, когда его спросили, и поколение для текстуры.
+type StreamPreviewSlot = (Option<std::sync::Arc<[u8]>>, std::time::Instant, u64);
 
 #[cfg(test)]
 mod tests;

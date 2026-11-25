@@ -327,6 +327,18 @@ impl Voice {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Голосовой канал пространства, в котором пользователь показывает экран.
+    #[must_use]
+    pub fn sharing_in(&self, user: &str) -> Option<String> {
+        let inner = self.lock();
+        let room_id = inner.user_room.get(user)?;
+        let sharing = inner.status.get(user).is_some_and(|status| status.screen);
+        match &inner.rooms.get(room_id)?.kind {
+            Kind::Space { .. } if sharing => Some(room_id.clone()),
+            _ => None,
+        }
+    }
+
     /// Комната, в которой сидит пользователь, и пространство, если это канал.
     #[must_use]
     pub fn user_space_room(&self, user: &str) -> Option<(String, String)> {

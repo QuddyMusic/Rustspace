@@ -654,6 +654,7 @@ impl ChatScreen {
     /// Окна поверх экрана: приглашение, просмотр, профиль, настройки пространства…
     fn show_overlays(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
         self.space_profiles(ctx, bridge);
+        crate::stream_preview::show(ctx, bridge);
         if let Some(draft) = self.forward.as_mut()
             && !forward::show(ctx, draft, bridge)
         {

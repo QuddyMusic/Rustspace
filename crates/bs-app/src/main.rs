@@ -56,6 +56,7 @@ mod share_quality;
 mod social;
 mod sounds;
 mod stage;
+mod stream_preview;
 mod theme;
 mod translate;
 mod updates;
