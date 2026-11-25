@@ -367,6 +367,16 @@ pub(crate) enum BridgeRequest {
     },
     /// «Избранное», закрепы, закладки.
     Extras(super::extras::ExtrasOp),
+    /// Свои профили участников пространства.
+    SpaceProfiles(String),
+    /// Сменить свой профиль в пространстве.
+    SetSpaceProfile {
+        space_id: String,
+        avatar: ImageChange,
+        banner: ImageChange,
+        /// `None` — не трогать, пусто — сбросить.
+        status: Option<String>,
+    },
     /// Страница галереи вложений: сообщения с файлами (`links == false`)
     /// или со ссылками.
     Gallery {
@@ -1224,6 +1234,16 @@ pub(crate) enum BridgeResponse {
     },
     /// Страница галереи вложений.
     Gallery(GalleryPage),
+    /// Свои профили участников пространства.
+    SpaceProfiles {
+        space_id: String,
+        result: Result<Vec<bs_api::SpaceProfile>, String>,
+    },
+    /// Итог смены своего профиля в пространстве: свежий список профилей.
+    SpaceProfileSaved {
+        space_id: String,
+        result: Result<Vec<bs_api::SpaceProfile>, String>,
+    },
     /// Резервная копия ключа после запроса (`None` — копии нет).
     E2eeBackup(Result<Option<bs_api::E2eeBackup>, String>),
     /// Запрос выполнен, показывать нечего.
@@ -1453,4 +1473,16 @@ pub(crate) struct GalleryPage {
     pub(crate) offset: u32,
     /// Всего сообщений (ошибка — текст).
     pub(crate) result: Result<(Vec<GalleryEntry>, i64), String>,
+}
+
+/// Что сделать с картинкой профиля.
+#[derive(Debug, Clone, Default)]
+pub(crate) enum ImageChange {
+    /// Оставить как есть.
+    #[default]
+    Keep,
+    /// Сбросить (взять из общего профиля).
+    Clear,
+    /// Загрузить новую: имя файла и байты.
+    Upload(String, Vec<u8>),
 }

@@ -74,6 +74,8 @@ pub(super) enum Nav {
     },
     /// Открыть окно над пространством.
     SpaceDialog(super::space_dialogs::SpaceDialog),
+    /// Свой профиль в пространстве.
+    SpaceProfile(super::space_profile::SpaceProfileDialog),
     /// Настройки пространства.
     SpaceSettings {
         /// Инстанс.
@@ -204,6 +206,8 @@ pub(crate) struct ChatScreen {
     picking: Option<forward::Picking>,
     /// Галерея вложений открытого чата.
     gallery: Option<gallery::Gallery>,
+    /// Окно своего профиля в пространстве.
+    space_profile: Option<super::space_profile::SpaceProfileDialog>,
     /// Сообщение, для которого открыт выбор реакции, и вкладка выбора.
     react_picker: Option<(String, usize)>,
     /// Имена пользователей для упоминаний (обновляется каждый кадр).
@@ -450,6 +454,7 @@ impl ChatScreen {
             Nav::Channel(selected) => self.open_channel(selected),
             Nav::CreateSpace => self.create_space = Some(CreateSpaceForm::default()),
             Nav::SpaceDialog(dialog) => self.space_dialog = Some(dialog),
+            Nav::SpaceProfile(dialog) => self.space_profile = Some(dialog),
             Nav::SpaceSettings { origin, space_id } => {
                 self.space_settings =
                     super::space_settings::SpaceSettings::open(bridge, origin, &space_id);
@@ -631,8 +636,24 @@ impl ChatScreen {
         }
     }
 
+    /// Свои профили участников открытого пространства (раз в две минуты) и
+    /// окно своего профиля в пространстве.
+    fn space_profiles(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
+        if let Some((origin, space_id)) = &self.active_space
+            && let Some(session) = bridge.e2ee_session(*origin)
+        {
+            session.want_space_profiles(space_id);
+        }
+        if let Some(dialog) = self.space_profile.as_mut()
+            && !dialog.show(ctx, bridge)
+        {
+            self.space_profile = None;
+        }
+    }
+
     /// Окна поверх экрана: приглашение, просмотр, профиль, настройки пространства…
     fn show_overlays(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
+        self.space_profiles(ctx, bridge);
         if let Some(draft) = self.forward.as_mut()
             && !forward::show(ctx, draft, bridge)
         {

@@ -1265,6 +1265,50 @@ async fn e2ee_backup(
     client.e2ee_backup().await.map_err(|e| upload_message(&e))
 }
 
+/// Загружает картинки и меняет свой профиль в пространстве.
+async fn set_space_profile(
+    client: &bs_api::ApiClient,
+    space_id: &str,
+    avatar: ImageChange,
+    banner: ImageChange,
+    status: Option<String>,
+) -> Result<(), String> {
+    async fn file(
+        client: &bs_api::ApiClient,
+        change: ImageChange,
+    ) -> Result<Option<String>, String> {
+        match change {
+            ImageChange::Keep => Ok(None),
+            ImageChange::Clear => Ok(Some(String::new())),
+            ImageChange::Upload(name, bytes) => {
+                let mime = crate::media::mime_for_name(&name);
+                client
+                    .upload_file(&name, mime, &bytes, |_, _| {})
+                    .await
+                    .map(|attachment| Some(attachment.filename))
+                    .map_err(|err| upload_message(&err))
+            }
+        }
+    }
+    let patch = bs_api::SpaceProfilePatch {
+        avatar: file(client, avatar).await?,
+        banner: file(client, banner).await?,
+        custom_status: status,
+    };
+    client
+        .set_space_profile(space_id, &patch)
+        .await
+        .map(drop)
+        .map_err(|err| {
+            if err.status() == Some(reqwest::StatusCode::NOT_FOUND) {
+                crate::i18n::tr("Этот инстанс не поддерживает свой профиль в пространстве")
+                    .to_owned()
+            } else {
+                upload_message(&err)
+            }
+        })
+}
+
 /// Страница галереи: поиск без текста с фильтром «есть файл» или «есть
 /// ссылка», по 50 сообщений.
 async fn gallery_page(
@@ -2178,6 +2222,29 @@ async fn history_request(
                     message: err.to_string(),
                 },
             }
+        }
+        BridgeRequest::SpaceProfiles(space_id) => BridgeResponse::SpaceProfiles {
+            result: client
+                .space_profiles(&space_id)
+                .await
+                .map_err(|err| space_message(&err)),
+            space_id,
+        },
+        BridgeRequest::SetSpaceProfile {
+            space_id,
+            avatar,
+            banner,
+            status,
+        } => {
+            let result = match set_space_profile(client, &space_id, avatar, banner, status).await {
+                // Свежий список — сессия сразу увидит своё.
+                Ok(()) => client
+                    .space_profiles(&space_id)
+                    .await
+                    .map_err(|err| space_message(&err)),
+                Err(err) => Err(err),
+            };
+            BridgeResponse::SpaceProfileSaved { space_id, result }
         }
         BridgeRequest::Gallery {
             channel_id,

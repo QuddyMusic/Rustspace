@@ -1833,5 +1833,17 @@
   "Здесь пока ничего нет": "Nothing here yet",
   "Загрузить ещё": "Load more",
   "К сообщению": "Go to message",
-  "Вложения: картинки, видео, аудио, GIF, ссылки, файлы": "Attachments: images, videos, audio, GIFs, links, files"
+  "Вложения: картинки, видео, аудио, GIF, ссылки, файлы": "Attachments: images, videos, audio, GIFs, links, files",
+  "Мой профиль здесь…": "My profile here…",
+  "Свои аватар, баннер и статус только для этого пространства": "Your own avatar, banner and status for this space only",
+  "Мой профиль в «{a0}»": "My profile in “{a0}”",
+  "Аватар, баннер и статус только для этого пространства. Пустое — как в общем профиле.": "Avatar, banner and status for this space only. Empty means the same as your main profile.",
+  "новый: {a0}": "new: {a0}",
+  "будет как в общем профиле": "will match your main profile",
+  "свой": "custom",
+  "как в общем профиле": "same as your main profile",
+  "Выбрать…": "Choose…",
+  "Сбросить всё": "Reset all",
+  "Вернуть общий профиль в этом пространстве": "Use your main profile in this space again",
+  "Этот инстанс не поддерживает свой профиль в пространстве": "This instance doesn't support per-space profiles"
 }

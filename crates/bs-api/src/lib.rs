@@ -105,7 +105,8 @@ pub use registry::{
 pub use saved::{Bookmark, BookmarkAttachment, BookmarkPage, BookmarkStatus, ChatKind, Pin};
 pub use space_manage::{
     Ban, ChannelUpdate, JoinRequest, NewChannel, NewRole, OverrideScope, PermissionOverride,
-    RoleSide, RoleUpdate, SpaceUpdate, invite_url, parse_invite_input,
+    RoleSide, RoleUpdate, SpaceProfile, SpaceProfilePatch, SpaceUpdate, invite_url,
+    parse_invite_input,
 };
 pub use sticker_packs::{StickerPack, StickerPacks};
 pub use twofactor::{E2eeBackup, E2eeKey, TwoFactorSetup, TwoFactorStatus};

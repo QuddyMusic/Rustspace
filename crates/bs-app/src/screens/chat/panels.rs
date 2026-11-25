@@ -213,6 +213,22 @@ pub(super) fn space_menu(ui: &mut egui::Ui, space: &SidebarSpace, nav: &mut Opti
         });
         ui.close();
     }
+    if ui
+        .button(tr("Мой профиль здесь…"))
+        .on_hover_text(tr(
+            "Свои аватар, баннер и статус только для этого пространства",
+        ))
+        .clicked()
+    {
+        *nav = Some(Nav::SpaceProfile(
+            crate::screens::space_profile::SpaceProfileDialog::open(
+                space.origin,
+                &space.id,
+                &space.name,
+            ),
+        ));
+        ui.close();
+    }
     if ui.button(tr("Настройки уведомлений")).clicked() {
         *nav = Some(Nav::Notifications {
             origin: space.origin,
@@ -837,13 +853,23 @@ impl ChatScreen {
     /// Строки правой панели: участники пространства или групповой беседы;
     /// `None` — панели здесь нет (личная беседа один на один).
     pub(super) fn member_panel_rows(&self, bridge: &Bridge) -> Option<Vec<MemberRow>> {
-        if let Some((_, space_id)) = &self.active_space {
-            return Some(
-                bridge
-                    .cache()
-                    .map(|cache| member_rows(cache, space_id))
-                    .unwrap_or_default(),
-            );
+        if let Some((origin, space_id)) = &self.active_space {
+            let mut rows = bridge
+                .cache()
+                .map(|cache| member_rows(cache, space_id))
+                .unwrap_or_default();
+            // Свой аватар участника в этом пространстве.
+            if let Some(session) = bridge.session_at(*origin) {
+                for row in &mut rows {
+                    if let Some(avatar) = session
+                        .space_profile(space_id, &row.user_id)
+                        .and_then(|p| p.avatar.clone())
+                    {
+                        row.avatar = Some(avatar);
+                    }
+                }
+            }
+            return Some(rows);
         }
         let selected = self
             .selected_channel

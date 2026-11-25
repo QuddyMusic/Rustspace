@@ -66,6 +66,22 @@ impl Session {
             BridgeResponse::Quiet => {}
             BridgeResponse::E2eeBackup(result) => self.e2ee_backup = Some(result),
             BridgeResponse::Gallery(page) => self.gallery_pages.push(page),
+            BridgeResponse::SpaceProfiles { space_id, result } => {
+                if let Ok(list) = result {
+                    let at = self
+                        .space_profiles
+                        .get(&space_id)
+                        .map_or_else(std::time::Instant::now, |(_, at)| *at);
+                    self.space_profiles.insert(space_id, (list, at));
+                }
+            }
+            BridgeResponse::SpaceProfileSaved { space_id, result } => {
+                self.space_profile_saved = Some(result.as_ref().map(drop).map_err(Clone::clone));
+                if let Ok(list) = result {
+                    self.space_profiles
+                        .insert(space_id, (list, std::time::Instant::now()));
+                }
+            }
             BridgeResponse::E2eePeerKey {
                 dm_channel_id,
                 public_key,

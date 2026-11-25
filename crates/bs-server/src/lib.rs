@@ -223,6 +223,14 @@ pub fn app(state: AppState) -> Router {
         .route("/api/spaces/{id}/join", post(routes::spaces::join))
         .route("/api/spaces/{id}/members", get(routes::spaces::members))
         .route(
+            "/api/rustspace/spaces/{id}/profiles",
+            get(routes::space_profiles::list),
+        )
+        .route(
+            "/api/rustspace/spaces/{id}/profile",
+            axum::routing::put(routes::space_profiles::put),
+        )
+        .route(
             "/api/spaces/{id}/members/{uid}",
             patch(routes::spaces::update_member).delete(routes::spaces::kick),
         )

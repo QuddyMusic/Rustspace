@@ -31,6 +31,10 @@ pub(crate) struct ProfileState {
     /// Пространство, из которого смотрят профиль: показать роли в нём.
     space: Option<(usize, String)>,
     name: String,
+    /// Общий профиль, как его отдал сервер.
+    general: Option<Box<User>>,
+    /// Что показывать: общий профиль со своим оформлением участника в
+    /// пространстве поверх (аватар, баннер, статус).
     user: Option<Box<User>>,
     error: Option<String>,
     mutuals: Option<Mutuals>,
@@ -59,6 +63,7 @@ impl ProfileState {
             anchor,
             space: None,
             name: name.to_owned(),
+            general: None,
             user: None,
             error: None,
             mutuals: None,
@@ -83,13 +88,33 @@ impl ProfileState {
             }
             match event.user {
                 Ok(user) => {
-                    self.user = Some(user);
+                    self.general = Some(user);
                     self.error = None;
                 }
                 Err(err) => self.error = Some(err),
             }
             self.mutuals = event.mutuals;
         }
+        let look = self.space.as_ref().and_then(|(origin, space_id)| {
+            bridge
+                .session_at(*origin)?
+                .space_profile(space_id, &self.user_id)
+                .cloned()
+        });
+        self.user = self.general.clone().map(|mut user| {
+            if let Some(look) = look {
+                if look.avatar.is_some() {
+                    user.avatar = look.avatar;
+                }
+                if look.banner.is_some() {
+                    user.banner = look.banner;
+                }
+                if look.custom_status.is_some() {
+                    user.custom_status = look.custom_status;
+                }
+            }
+            user
+        });
     }
 }
 

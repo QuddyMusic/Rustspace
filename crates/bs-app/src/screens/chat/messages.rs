@@ -354,15 +354,9 @@ impl ChatScreen {
                     .cloned()
                     .unwrap_or_default();
 
-                let (me, rows) = {
-                    let Some(cache) = bridge.cache() else {
-                        return;
-                    };
-                    self.names = name_map(cache);
-                    (
-                        cache.me().id.clone(),
-                        message_rows(cache, selected.kind, &channel_id, &self.names),
-                    )
+                let Some((me, rows)) = self.timeline_rows(bridge, selected.kind, &channel_id)
+                else {
+                    return;
                 };
                 let ack_key = format!("{}:{channel_id}", selected.origin);
                 let first_id = rows.first().map(|row| row.id.clone());
@@ -1267,6 +1261,40 @@ struct MenuChoice {
     mention: bool,
     /// Начать выбор сообщений с этого.
     pick: bool,
+}
+
+impl ChatScreen {
+    /// Строки ленты канала и свой id; аватары в пространстве — свои.
+    fn timeline_rows(
+        &mut self,
+        bridge: &Bridge,
+        kind: ChannelKind,
+        channel_id: &str,
+    ) -> Option<(String, Vec<MessageRow>)> {
+        let cache = bridge.cache()?;
+        self.names = name_map(cache);
+        let mut rows = message_rows(cache, kind, channel_id, &self.names);
+        if kind == ChannelKind::Space {
+            let space_id = cache.channel(channel_id).map(|c| c.space_id.clone());
+            space_avatars(bridge, space_id.as_deref(), &mut rows);
+        }
+        Some((cache.me().id.clone(), rows))
+    }
+}
+
+/// Свой аватар автора в этом пространстве — поверх общего.
+fn space_avatars(bridge: &Bridge, space_id: Option<&str>, rows: &mut [MessageRow]) {
+    let Some(space_id) = space_id else {
+        return;
+    };
+    for row in rows {
+        if let Some(avatar) = bridge
+            .space_profile(space_id, &row.author_id)
+            .and_then(|p| p.avatar.clone())
+        {
+            row.avatar = Some(avatar);
+        }
+    }
 }
 
 /// «Упомянуть» и «Ткнуть» автора (PR #463 и #384 оригинала): тычок — только

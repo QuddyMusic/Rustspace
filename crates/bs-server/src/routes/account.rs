@@ -383,7 +383,7 @@ static DOMAIN: LazyLock<Regex> = LazyLock::new(|| {
     .expect("regex")
 });
 
-fn valid_asset(value: &Value) -> bool {
+pub(crate) fn valid_asset(value: &Value) -> bool {
     match value {
         Value::Null => true,
         Value::String(url) => {

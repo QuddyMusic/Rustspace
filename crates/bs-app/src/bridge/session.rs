@@ -60,6 +60,8 @@ impl Session {
             opened_space: None,
             e2ee_backup: None,
             gallery_pages: Vec::new(),
+            space_profiles: HashMap::new(),
+            space_profile_saved: None,
             info: None,
             history: HashMap::new(),
             search: SearchState::default(),
@@ -300,6 +302,60 @@ impl Session {
         Ok(())
     }
 
+    /// Свой профиль участника в пространстве (если он его задал).
+    pub(crate) fn space_profile(
+        &self,
+        space_id: &str,
+        user_id: &str,
+    ) -> Option<&bs_api::SpaceProfile> {
+        self.space_profiles
+            .get(space_id)?
+            .0
+            .iter()
+            .find(|p| p.user_id == user_id)
+    }
+
+    /// Просит профили участников пространства, если не спрашивали больше
+    /// двух минут (чужие правки видны с этой задержкой).
+    pub(crate) fn want_space_profiles(&mut self, space_id: &str) {
+        let fresh = self
+            .space_profiles
+            .get(space_id)
+            .is_some_and(|(_, at)| at.elapsed() < std::time::Duration::from_secs(120));
+        if !fresh {
+            let profiles = self
+                .space_profiles
+                .remove(space_id)
+                .map(|(list, _)| list)
+                .unwrap_or_default();
+            self.space_profiles
+                .insert(space_id.to_owned(), (profiles, std::time::Instant::now()));
+            self.request(BridgeRequest::SpaceProfiles(space_id.to_owned()));
+        }
+    }
+
+    /// Меняет свой профиль в пространстве.
+    pub(crate) fn set_space_profile(
+        &mut self,
+        space_id: &str,
+        avatar: ImageChange,
+        banner: ImageChange,
+        status: Option<String>,
+    ) {
+        self.space_profile_saved = None;
+        self.request(BridgeRequest::SetSpaceProfile {
+            space_id: space_id.to_owned(),
+            avatar,
+            banner,
+            status,
+        });
+    }
+
+    /// Итог последнего сохранения своего профиля в пространстве.
+    pub(crate) fn take_space_profile_saved(&mut self) -> Option<Result<(), String>> {
+        self.space_profile_saved.take()
+    }
+
     /// Забирает пришедшие страницы галереи вложений.
     pub(crate) fn take_gallery_pages(&mut self) -> Vec<GalleryPage> {
         std::mem::take(&mut self.gallery_pages)
@@ -313,6 +369,7 @@ impl Session {
     /// Спросить сервер о резервной копии.
     pub(crate) fn load_e2ee_backup(&mut self) {
         self.e2ee_backup = None;
+        self.space_profiles.clear();
         self.request(BridgeRequest::E2eeBackup(super::E2eeBackupOp::Load));
     }
 

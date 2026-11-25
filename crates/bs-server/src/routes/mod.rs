@@ -29,6 +29,7 @@ pub mod saved;
 pub mod search;
 pub mod settings;
 pub mod social;
+pub mod space_profiles;
 pub mod spaces;
 pub mod sticker_packs;
 pub mod stickers;

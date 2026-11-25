@@ -145,6 +145,10 @@ pub(crate) struct Session {
     explore_loading: bool,
     /// Пространство, только что созданное или в которое вступили.
     opened_space: Option<String>,
+    /// Свои профили участников пространств и когда их спрашивали.
+    space_profiles: HashMap<String, (Vec<bs_api::SpaceProfile>, std::time::Instant)>,
+    /// Итог последнего сохранения своего профиля в пространстве.
+    space_profile_saved: Option<Result<(), String>>,
     /// Пришедшие страницы галереи вложений.
     gallery_pages: Vec<GalleryPage>,
     /// Резервная копия ключа шифрования на сервере (`None` — не спрашивали).

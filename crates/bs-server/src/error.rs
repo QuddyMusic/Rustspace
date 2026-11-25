@@ -125,6 +125,8 @@ fn extension_message(code: &str) -> Option<&'static str> {
         "e2ee_payload_invalid" => "Invalid encrypted message",
         "e2ee_backup_invalid" => "Invalid encryption key backup",
         "backup_not_found" => "No encryption key backup",
+        "custom_status_too_long" => "Custom status must be at most 128 characters",
+        "custom_status_invalid" => "Invalid custom status",
         _ => return None,
     })
 }

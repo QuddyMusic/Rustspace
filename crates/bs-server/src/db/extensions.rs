@@ -302,6 +302,22 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             )",
         ],
     ),
+    (
+        "0018_space_profiles",
+        &[
+            // Свой аватар, баннер и статус участника в пространстве (запрос
+            // оригинала #273); пустое поле — берётся из общего профиля.
+            "CREATE TABLE bs_space_profiles (
+                space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                avatar TEXT,
+                banner TEXT,
+                custom_status TEXT,
+                updated_at BIGINT NOT NULL,
+                PRIMARY KEY (space_id, user_id)
+            )",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

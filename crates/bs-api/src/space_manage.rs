@@ -644,3 +644,69 @@ mod tests {
         );
     }
 }
+
+/// Свой профиль участника в пространстве (расширение Rustspace): пустое поле
+/// — берётся из общего профиля.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceProfile {
+    /// Участник.
+    pub user_id: String,
+    /// Аватар (путь загрузки или адрес).
+    #[serde(default)]
+    pub avatar: Option<String>,
+    /// Баннер.
+    #[serde(default)]
+    pub banner: Option<String>,
+    /// Статус.
+    #[serde(default)]
+    pub custom_status: Option<String>,
+}
+
+/// Изменения своего профиля в пространстве: `None` — поле не трогается,
+/// `Some("")` — сбрасывается.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceProfilePatch {
+    /// Имя загруженного файла или пусто.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
+    /// Имя загруженного файла или пусто.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner: Option<String>,
+    /// Статус или пусто.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_status: Option<String>,
+}
+
+impl crate::ApiClient {
+    /// `GET /api/rustspace/spaces/:id/profiles`; сервер без расширения — пусто.
+    ///
+    /// # Errors
+    /// Сеть и отказ сервера (кроме 404).
+    pub async fn space_profiles(
+        &self,
+        space_id: &str,
+    ) -> Result<Vec<SpaceProfile>, crate::ApiError> {
+        match self
+            .get_json(&format!("/api/rustspace/spaces/{space_id}/profiles"))
+            .await
+        {
+            Err(err) if err.status() == Some(reqwest::StatusCode::NOT_FOUND) => Ok(Vec::new()),
+            other => other,
+        }
+    }
+
+    /// `PUT /api/rustspace/spaces/:id/profile`.
+    ///
+    /// # Errors
+    /// Сеть, отказ сервера; 404 — сервер без своих профилей в пространствах.
+    pub async fn set_space_profile(
+        &self,
+        space_id: &str,
+        patch: &SpaceProfilePatch,
+    ) -> Result<SpaceProfile, crate::ApiError> {
+        self.put_json(&format!("/api/rustspace/spaces/{space_id}/profile"), patch)
+            .await
+    }
+}
