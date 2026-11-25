@@ -7,6 +7,7 @@
 //! Токены — секреты: не логируйте содержимое файла и не кладите его в git.
 
 use std::collections::BTreeMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use bs_types::Origin;
@@ -87,6 +88,7 @@ impl CredentialStore {
         Ok(store)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Сохраняет токены в файл (атомарно, через временный файл).
     ///
     /// На Unix итоговый файл получает права `0600`; каталог создаётся, если
@@ -117,6 +119,7 @@ impl CredentialStore {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Загружает токены из файла. Отсутствующий файл — пустое хранилище.
     pub async fn load_from_path(path: &Path) -> Result<Self, PersistError> {
         let bytes = match tokio::fs::read(path).await {
@@ -129,6 +132,7 @@ impl CredentialStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Создаёт новый файл, доступный только владельцу (на Unix — `0600`).
 async fn open_private(path: &Path) -> Result<tokio::fs::File, std::io::Error> {
     let mut options = tokio::fs::OpenOptions::new();

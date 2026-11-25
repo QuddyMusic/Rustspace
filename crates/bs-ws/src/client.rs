@@ -2,15 +2,13 @@
 
 use std::time::Duration;
 
+use bs_rt::sync::mpsc;
 use bs_types::{ClientEvent, ClientKind, ServerEvent, TransportPolicy};
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async_with_config};
 use url::Url;
 
 use crate::error::WsError;
+use crate::transport::Frame;
 
 /// Интервал клиентского `ping` (сервер ждёт активности не реже ~65с).
 pub const CLIENT_PING_INTERVAL: Duration = Duration::from_secs(15);
@@ -27,9 +25,6 @@ pub const MAX_INCOMING_MESSAGE: usize = 8 * 1024 * 1024;
 /// Максимальный размер одного входящего фрейма.
 pub const MAX_INCOMING_FRAME: usize = 2 * 1024 * 1024;
 
-/// Тип потока tokio-tungstenite.
-pub type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
-
 /// Активное WebSocket-соединение с инстансом.
 #[derive(Debug)]
 pub struct WsConnection {
@@ -38,7 +33,7 @@ pub struct WsConnection {
     /// Входящий поток событий сервера.
     receiver: mpsc::Receiver<ServerEvent>,
     /// Задача, обслуживающая сокет.
-    task: tokio::task::JoinHandle<()>,
+    task: bs_rt::JoinHandle<()>,
 }
 
 impl WsConnection {
@@ -66,21 +61,17 @@ impl WsConnection {
     ) -> Result<(Self, ServerEvent), WsError> {
         let url = ws_url(base)?;
         policy.check(&url)?;
-        let config = WebSocketConfig::default()
-            .max_message_size(Some(MAX_INCOMING_MESSAGE))
-            .max_frame_size(Some(MAX_INCOMING_FRAME));
-        let (stream, _response) =
-            connect_async_with_config(url.as_str(), Some(config), false).await?;
-        let (mut sink, mut source) = stream.split();
+        let (mut sink, mut source) = crate::transport::open(&url).await?;
 
         let auth = ClientEvent::Auth {
             token: token.to_owned(),
             client,
         };
-        let payload = serde_json::to_string(&auth).map_err(tungstenite_json_error)?;
-        sink.send(WsMessage::Text(payload.into())).await?;
+        let payload =
+            serde_json::to_string(&auth).map_err(|err| WsError::Transport(err.to_string()))?;
+        sink.send(payload).await?;
 
-        let ready = tokio::time::timeout(READY_TIMEOUT, read_ready(&mut source)).await;
+        let ready = bs_rt::time::timeout(READY_TIMEOUT, read_ready(&mut source)).await;
         let ready = match ready {
             Ok(Ok(event)) => event,
             Ok(Err(err)) => return Err(err),
@@ -90,14 +81,13 @@ impl WsConnection {
         let (out_tx, mut out_rx) = mpsc::channel::<ClientEvent>(64);
         let (in_tx, in_rx) = mpsc::channel::<ServerEvent>(256);
 
-        let task = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(CLIENT_PING_INTERVAL);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let task = bs_rt::spawn(async move {
+            let mut next_ping = bs_rt::time::Instant::now() + CLIENT_PING_INTERVAL;
             loop {
-                tokio::select! {
+                bs_rt::select! {
                     incoming = source.next() => {
                         match incoming {
-                            Some(Ok(WsMessage::Text(text))) => {
+                            Some(Ok(Frame::Text(text))) => {
                                 match serde_json::from_str::<ServerEvent>(&text) {
                                     Ok(event) => {
                                         if in_tx.send(event).await.is_err() {
@@ -110,19 +100,20 @@ impl WsConnection {
                                     }
                                 }
                             }
-                            Some(Ok(WsMessage::Close(_)) | Err(_)) | None => break,
-                            Some(Ok(_)) => {}
+                            Some(Ok(Frame::Close) | Err(_)) | None => break,
+                            Some(Ok(Frame::Other)) => {}
                         }
                     }
                     outgoing = out_rx.recv() => {
                         let Some(event) = outgoing else { break };
                         let Ok(text) = serde_json::to_string(&event) else { continue };
-                        if sink.send(WsMessage::Text(text.into())).await.is_err() {
+                        if sink.send(text).await.is_err() {
                             break;
                         }
                     }
-                    _ = ticker.tick() => {
-                        if sink.send(WsMessage::Text("{\"type\":\"ping\"}".into())).await.is_err() {
+                    () = bs_rt::time::sleep_until(next_ping) => {
+                        next_ping = bs_rt::time::Instant::now() + CLIENT_PING_INTERVAL;
+                        if sink.send("{\"type\":\"ping\"}".to_owned()).await.is_err() {
                             break;
                         }
                     }
@@ -187,7 +178,7 @@ pub struct WsParts {
     /// Входящий поток событий сервера.
     pub receiver: mpsc::Receiver<ServerEvent>,
     /// Задача, обслуживающая сокет.
-    pub task: tokio::task::JoinHandle<()>,
+    pub task: bs_rt::JoinHandle<()>,
 }
 
 impl WsConnection {
@@ -225,11 +216,10 @@ fn ws_url(base: &str) -> Result<Url, WsError> {
 /// Ждёт `ready`, пропуская прочие события; `error` превращает в отказ.
 async fn read_ready<S>(source: &mut S) -> Result<ServerEvent, WsError>
 where
-    S: futures_util::Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
-        + Unpin,
+    S: futures_util::Stream<Item = Result<Frame, WsError>> + Unpin,
 {
     while let Some(message) = source.next().await {
-        let Ok(WsMessage::Text(text)) = message else {
+        let Ok(Frame::Text(text)) = message else {
             continue;
         };
         let Ok(event) = serde_json::from_str::<ServerEvent>(&text) else {
@@ -249,13 +239,6 @@ where
         }
     }
     Err(WsError::ClosedBeforeReady)
-}
-
-/// Обёртка для ошибки сериализации `auth`.
-fn tungstenite_json_error(err: serde_json::Error) -> WsError {
-    WsError::Transport(tokio_tungstenite::tungstenite::Error::Io(
-        std::io::Error::other(err),
-    ))
 }
 
 #[cfg(test)]

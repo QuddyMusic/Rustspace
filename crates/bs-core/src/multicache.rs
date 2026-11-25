@@ -34,11 +34,11 @@
 use std::collections::HashMap;
 
 use bs_instances::{InstanceEvent, OriginEvent};
+use bs_rt::sync::broadcast;
 use bs_types::{
     Channel, DmChannel, MessageWithUser, Origin, ReadyPayload, ServerEvent,
     SpaceWithChannelsAndMembers,
 };
-use tokio::sync::broadcast;
 
 use crate::apply::apply;
 use crate::state::Cache;

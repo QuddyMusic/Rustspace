@@ -1,14 +1,12 @@
 //! Ошибки WebSocket-клиента.
 
-use tokio_tungstenite::tungstenite;
-
 /// Ошибка WebSocket-соединения.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum WsError {
-    /// Не удалось установить соединение.
+    /// Не удалось установить соединение или сокет сломался.
     #[error("ошибка websocket: {0}")]
-    Transport(#[from] tungstenite::Error),
+    Transport(String),
 
     /// Не удалось собрать URL из базы инстанса.
     #[error("некорректный URL: {0}")]
@@ -34,4 +32,11 @@ pub enum WsError {
     /// Соединение разорвано.
     #[error("соединение разорвано")]
     Disconnected,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl From<tokio_tungstenite::tungstenite::Error> for WsError {
+    fn from(err: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::Transport(err.to_string())
+    }
 }

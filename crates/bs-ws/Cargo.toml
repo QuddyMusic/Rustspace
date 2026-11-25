@@ -13,11 +13,16 @@ bs-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
-tokio-tungstenite = { workspace = true }
-futures-util = { workspace = true }
+bs-rt = { workspace = true }
+futures-util = { workspace = true, features = ["sink"] }
 url = { workspace = true }
 tracing = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio-tungstenite = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-net = { version = "0.6", default-features = false, features = ["websocket"] }
 
 [dev-dependencies]
 tokio = { workspace = true }

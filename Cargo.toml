@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/bs-types",
+    "crates/bs-rt",
     "crates/bs-permissions",
     "crates/bs-api",
     "crates/bs-ws",
@@ -30,6 +31,7 @@ authors = ["Rustspace contributors"]
 [workspace.dependencies]
 # внутренние крейты
 bs-types = { path = "crates/bs-types" }
+bs-rt = { path = "crates/bs-rt" }
 bs-permissions = { path = "crates/bs-permissions" }
 bs-api = { path = "crates/bs-api" }
 bs-ws = { path = "crates/bs-ws" }

@@ -191,21 +191,14 @@ fn external_client() -> Result<&'static reqwest::Client, ApiError> {
     if let Some(client) = CLIENT.get() {
         return Ok(client);
     }
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .user_agent(crate::client::USER_AGENT)
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            // CDN иногда отвечает перенаправлением на соседний путь; идём
-            // только по ссылкам, которые сами бы приняли.
-            if attempt.previous().len() < 3 && AssetPath::external(attempt.url().as_str()).is_some()
-            {
-                attempt.follow()
-            } else {
-                attempt.stop()
-            }
-        }))
-        .https_only(true)
-        .build()?;
+    // CDN иногда отвечает перенаправлением на соседний путь; идём только по
+    // ссылкам, которые сами бы приняли.
+    let client = crate::client::guarded_redirects(
+        crate::client::http_builder(std::time::Duration::from_secs(20)),
+        3,
+        |url| AssetPath::external(url).is_some(),
+    )
+    .build()?;
     Ok(CLIENT.get_or_init(|| client))
 }
 
@@ -216,19 +209,12 @@ fn preview_client() -> Result<&'static reqwest::Client, ApiError> {
     if let Some(client) = CLIENT.get() {
         return Ok(client);
     }
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .user_agent(crate::client::USER_AGENT)
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() < 5 && AssetPath::preview(attempt.url().as_str()).is_some()
-            {
-                attempt.follow()
-            } else {
-                attempt.stop()
-            }
-        }))
-        .https_only(true)
-        .build()?;
+    let client = crate::client::guarded_redirects(
+        crate::client::http_builder(std::time::Duration::from_secs(20)),
+        5,
+        |url| AssetPath::preview(url).is_some(),
+    )
+    .build()?;
     Ok(CLIENT.get_or_init(|| client))
 }
 
@@ -329,9 +315,11 @@ impl ApiClient {
 
 /// Сколько секунд даём на скачивание одного файла (обычный таймаут клиента
 /// рассчитан на короткие запросы и оборвал бы большой файл).
+#[cfg(not(target_arch = "wasm32"))]
 const DOWNLOAD_TIMEOUT_SECS: u64 = 3600;
 
 impl ApiClient {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Скачивает файл на диск потоком, не держа его целиком в памяти.
     ///
     /// Данные пишутся во временный `<dest>.part`; после полного получения он

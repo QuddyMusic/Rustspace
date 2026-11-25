@@ -75,14 +75,10 @@ impl ApiClient {
         let parsed = Url::parse(&raw)?;
         policy.check(&parsed)?;
         let trimmed = parsed.as_str().trim_end_matches('/').to_owned();
-        let http = reqwest::Client::builder()
-            .timeout(DEFAULT_TIMEOUT)
-            .user_agent(USER_AGENT)
-            // Редирект с токеном или паролем — классический способ увести
-            // секреты на чужой хост или на открытый http. Эндпоинты API
-            // редиректов не используют, так что 3xx — это ошибка.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+        // Редирект с токеном или паролем — классический способ увести
+        // секреты на чужой хост или на открытый http. Эндпоинты API
+        // редиректов не используют, так что 3xx — это ошибка.
+        let http = no_redirects(http_builder(DEFAULT_TIMEOUT)).build()?;
         Ok(Self {
             http,
             base: trimmed,
@@ -245,23 +241,10 @@ impl ApiClient {
 /// Лишний `Content-Length` отсекается сразу, а для ответов без него (chunked)
 /// размер считается по мере поступления данных.
 pub(crate) async fn read_limited(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     limit: usize,
 ) -> Result<Vec<u8>, ApiError> {
-    if response
-        .content_length()
-        .is_some_and(|len| len > limit as u64)
-    {
-        return Err(ApiError::ResponseTooLarge { limit });
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await? {
-        if body.len().saturating_add(chunk.len()) > limit {
-            return Err(ApiError::ResponseTooLarge { limit });
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
+    read_body_limited(response, limit).await
 }
 
 /// Разбирает тело не-2xx ответа в [`ApiError`].
@@ -282,4 +265,91 @@ fn decode_error(status: StatusCode, bytes: &[u8]) -> ApiError {
         },
         |body| ApiError::Server { status, body },
     )
+}
+// Различия HTTP-клиента на десктопе и в браузере. В браузере reqwest работает
+// через `fetch`: таймаут, политику редиректов и `User-Agent` задаёт сам
+// браузер (при переходе на чужой источник он снимает `Authorization`), а тело
+// ответа читается целиком.
+
+/// Построитель клиента с таймаутом и `User-Agent` там, где они есть.
+#[cfg_attr(
+    target_arch = "wasm32",
+    allow(unused_variables, reason = "в браузере таймаут задаёт fetch")
+)]
+pub(crate) fn http_builder(timeout: std::time::Duration) -> reqwest::ClientBuilder {
+    let builder = reqwest::Client::builder();
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = builder.timeout(timeout).user_agent(USER_AGENT);
+    builder
+}
+
+/// Без редиректов (десктоп; в браузере — правила fetch).
+pub(crate) fn no_redirects(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = builder.redirect(reqwest::redirect::Policy::none());
+    builder
+}
+
+/// Только `https`, редиректы — туда, куда пускает `allowed`, не больше
+/// `max` раз (в браузере адрес проверяется до запроса, а редиректы ведёт
+/// fetch).
+#[cfg_attr(
+    target_arch = "wasm32",
+    allow(unused_variables, reason = "в браузере редиректы ведёт fetch")
+)]
+pub(crate) fn guarded_redirects(
+    builder: reqwest::ClientBuilder,
+    max: usize,
+    allowed: fn(&str) -> bool,
+) -> reqwest::ClientBuilder {
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = builder
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() < max && allowed(attempt.url().as_str()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
+        .https_only(true);
+    builder
+}
+
+/// Тело ответа, но не больше `limit` байт.
+///
+/// # Errors
+/// Сеть; [`crate::ApiError::ResponseTooLarge`] — тело больше лимита.
+async fn read_body_limited(
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(unused_mut, reason = "в браузере тело читается целиком")
+    )]
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, crate::ApiError> {
+    if response
+        .content_length()
+        .is_some_and(|len| len > limit as u64)
+    {
+        return Err(crate::ApiError::ResponseTooLarge { limit });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            if body.len().saturating_add(chunk.len()) > limit {
+                return Err(crate::ApiError::ResponseTooLarge { limit });
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let body = response.bytes().await?;
+        if body.len() > limit {
+            return Err(crate::ApiError::ResponseTooLarge { limit });
+        }
+        Ok(body.to_vec())
+    }
 }

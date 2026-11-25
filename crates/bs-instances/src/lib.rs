@@ -32,6 +32,13 @@
 //! # }
 //! ```
 
+#![cfg_attr(
+    target_arch = "wasm32",
+    allow(
+        clippy::future_not_send,
+        reason = "в браузере задачи живут в одном потоке"
+    )
+)]
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 

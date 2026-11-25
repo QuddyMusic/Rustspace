@@ -6,8 +6,8 @@
 //! [`CoreSession::pump_one`] (блокирующе, из фоновой задачи).
 
 use bs_instances::{InstanceEvent, InstanceHandle};
+use bs_rt::sync::broadcast;
 use bs_types::{ClientEvent, ServerEvent};
-use tokio::sync::broadcast;
 
 use crate::apply::apply;
 use crate::error::CoreError;

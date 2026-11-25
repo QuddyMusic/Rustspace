@@ -18,3 +18,8 @@ sha2 = "0.10"
 thiserror = { workspace = true }
 x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
 zeroize = { workspace = true }
+
+# Веб-версия: случайные числа из crypto.getRandomValues браузера.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }

@@ -32,5 +32,5 @@ pub enum InstanceError {
 
     /// Не удалось запустить async-задачу.
     #[error("не удалось запустить задачу: {0}")]
-    Join(#[from] tokio::task::JoinError),
+    Join(#[from] bs_rt::JoinError),
 }

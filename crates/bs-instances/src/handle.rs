@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use bs_api::ApiClient;
 use bs_identity::{AccessToken, CredentialStore, IdentityError, InstanceSession};
+use bs_rt::sync::{broadcast, mpsc, watch};
 use bs_types::{ClientEvent, ClientKind, Origin, ServerEvent, TransportPolicy, User};
 use bs_ws::{AuthFailure, WsConnection, WsError};
-use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::error::InstanceError;
 use crate::reconnect::ReconnectPolicy;
@@ -83,7 +83,7 @@ pub struct InstanceHandle {
     commands: mpsc::Sender<Command>,
     events: broadcast::Sender<InstanceEvent>,
     state: watch::Receiver<ConnectionState>,
-    task: tokio::task::JoinHandle<()>,
+    task: bs_rt::JoinHandle<()>,
 }
 
 impl InstanceHandle {
@@ -233,7 +233,7 @@ impl InstanceHandle {
 
         let base_for_task = base.clone();
         let evt_for_task = event_tx.clone();
-        let task = tokio::spawn(async move {
+        let task = bs_rt::spawn(async move {
             run_dispatcher(
                 base_for_task,
                 client_kind,
@@ -394,7 +394,7 @@ async fn wait_for_ready(
             }
         }
     };
-    tokio::time::timeout(INITIAL_READY_TIMEOUT, fut)
+    bs_rt::time::timeout(INITIAL_READY_TIMEOUT, fut)
         .await
         .map_err(|_| InstanceError::DispatcherClosed)?
 }
@@ -441,7 +441,7 @@ async fn run_dispatcher(
                 let mut rotate = false;
 
                 loop {
-                    tokio::select! {
+                    bs_rt::select! {
                         cmd = commands.recv() => match cmd {
                             Some(Command::Send(event)) => {
                                 if sender.send(event).await.is_err() {
@@ -531,7 +531,7 @@ async fn wait_for_token(
     state: &watch::Sender<ConnectionState>,
 ) -> bool {
     loop {
-        tokio::select! {
+        bs_rt::select! {
             changed = tokens.changed() => {
                 if changed.is_err() {
                     set_state(state, ConnectionState::Stopped);
@@ -556,10 +556,10 @@ async fn wait_backoff(
     commands: &mut mpsc::Receiver<Command>,
     state: &watch::Sender<ConnectionState>,
 ) {
-    let deadline = tokio::time::Instant::now() + delay;
+    let deadline = bs_rt::time::Instant::now() + delay;
     loop {
-        tokio::select! {
-            () = tokio::time::sleep_until(deadline) => return,
+        bs_rt::select! {
+            () = bs_rt::time::sleep_until(deadline) => return,
             cmd = commands.recv() => match cmd {
                 Some(Command::Shutdown) | None => {
                     set_state(state, ConnectionState::Stopped);

@@ -11,8 +11,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bs_rt::sync::broadcast;
 use bs_types::Origin;
-use tokio::sync::broadcast;
 
 use crate::handle::{ConnectionState, InstanceEvent};
 
@@ -32,7 +32,7 @@ pub struct OriginEvent {
 #[derive(Debug)]
 pub struct EventMultiplexer {
     tx: broadcast::Sender<OriginEvent>,
-    tasks: Vec<tokio::task::JoinHandle<()>>,
+    tasks: Vec<bs_rt::JoinHandle<()>>,
 }
 
 impl EventMultiplexer {
@@ -50,7 +50,7 @@ impl EventMultiplexer {
     pub fn attach(&mut self, origin: &Origin, mut rx: broadcast::Receiver<InstanceEvent>) {
         let tx = self.tx.clone();
         let origin = origin.clone();
-        let task = tokio::spawn(async move {
+        let task = bs_rt::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => {
