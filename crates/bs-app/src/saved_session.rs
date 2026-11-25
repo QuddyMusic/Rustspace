@@ -148,7 +148,6 @@ pub(crate) fn save(
     token: &str,
     transport: TransportPolicy,
 ) -> std::io::Result<()> {
-
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         crate::files::create_dir_all(parent)?;
     }

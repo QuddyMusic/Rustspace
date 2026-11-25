@@ -1429,10 +1429,17 @@ async fn passkeys(
                 .map_err(|e| upload_message(&e))?;
         }
         super::PasskeyOp::Add => {
-            let ticket = client
-                .passkey_register_ticket()
-                .await
-                .map_err(|e| upload_message(&e))?;
+            let ticket = client.passkey_register_ticket().await.map_err(|e| {
+                if e.code() == Some("passkeys_unavailable") {
+                    tr(
+                        "Сервер не знает свой публичный адрес: администратору нужно задать \
+                        PUBLIC_ORIGIN или DOMAIN в настройках сервера",
+                    )
+                    .to_owned()
+                } else {
+                    upload_message(&e)
+                }
+            })?;
             crate::sys::open_url(&ticket.url)?;
             let mut done = false;
             for _ in 0..150 {

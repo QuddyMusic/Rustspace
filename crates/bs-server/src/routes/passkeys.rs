@@ -82,12 +82,17 @@ fn tickets() -> std::sync::MutexGuard<'static, HashMap<String, Ticket>> {
     TICKETS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Сайт и id сайта WebAuthn: из `PUBLIC_ORIGIN`.
+/// Сайт и id сайта WebAuthn: из `PUBLIC_ORIGIN`, а без него — из `DOMAIN`
+/// (так настроены обычные установки за Caddy: `https://<домен>`).
 fn site(state: &AppState) -> ApiResult<(String, String)> {
     let origin = state
         .config
         .public_origin
         .clone()
+        .or_else(|| {
+            let domain = state.config.domain.as_deref()?.trim().trim_end_matches('/');
+            (!domain.is_empty() && domain != "localhost").then(|| format!("https://{domain}"))
+        })
         .ok_or_else(|| ApiError::conflict("passkeys_unavailable"))?;
     let host = url::Url::parse(&origin)
         .ok()

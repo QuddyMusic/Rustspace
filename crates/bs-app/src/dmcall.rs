@@ -233,6 +233,12 @@ impl VoiceState {
         // Голосовой канал не мешает: принятый звонок сам из него выйдет.
         if self.dm.is_some() || self.incoming.is_some() {
             // Заняты другим личным звонком: сразу отклоняем.
+            tracing::info!(
+                origin,
+                dm = ?dm_channel_id,
+                in_call = self.dm.is_some(),
+                "входящий звонок отклонён: заняты другим звонком"
+            );
             let previous = bridge.focus_index();
             bridge.focus_on(origin);
             bridge.send(ClientEvent::DmCallReject {
@@ -530,16 +536,25 @@ fn call_button(ui: &mut egui::Ui, color: egui::Color32, hang_up: bool) -> egui::
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Тот же входящий звонок: общий id федеративного звонка или та же беседа
-/// того же инстанса.
+/// Тот же входящий звонок: общий id федеративного звонка или та же беседа.
+/// Беседа сверяется и через другую сессию: если в клиенте две сессии к
+/// одному серверу (свой инстанс и он же среди пиров, второй аккаунт), звонок
+/// приходит по обеим с одним id беседы — отказ «занято» по второй оборвал бы
+/// его, и он стал бы «пропущенным».
 fn same_incoming(
     known: &IncomingCall,
     origin: usize,
     dm_id: Option<&String>,
     federated_id: Option<&String>,
 ) -> bool {
+    let other_call = matches!(
+        (known.federated_id.as_ref(), federated_id),
+        (Some(a), Some(b)) if a != b
+    );
     (known.federated_id.is_some() && known.federated_id.as_ref() == federated_id)
-        || (known.origin == origin && known.dm_id.is_some() && known.dm_id.as_ref() == dm_id)
+        || (known.dm_id.is_some()
+            && known.dm_id.as_ref() == dm_id
+            && (known.origin == origin || !other_call))
 }
 
 #[cfg(test)]
@@ -579,5 +594,7 @@ mod tests {
         assert!(super::same_incoming(&known, 0, dm.as_ref(), None));
         let fed2 = Some("f2".to_owned());
         assert!(!super::same_incoming(&known, 1, dm.as_ref(), fed2.as_ref()));
+        // Тот же сервер через вторую сессию: та же беседа, без id федерации.
+        assert!(super::same_incoming(&known, 1, dm.as_ref(), None));
     }
 }
