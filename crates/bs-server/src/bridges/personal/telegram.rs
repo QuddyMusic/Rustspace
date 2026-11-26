@@ -57,6 +57,11 @@ fn unreachable_message(state: &AppState) -> String {
 
 /// Файлы больше не скачиваются из Telegram.
 const MAX_FILE: usize = 50 * 1024 * 1024;
+/// Файлы из истории крупнее не переносим (пометка в тексте, файл остаётся
+/// в Telegram): история переносится вся, и диск сервера не резиновый.
+const HISTORY_FILE: usize = 20 * 1024 * 1024;
+/// Больше сообщений одного чата не переносим (каналы бывают огромными).
+const MAX_IMPORT: usize = 100_000;
 
 /// Сколько диалогов показывать при выборе.
 const MAX_DIALOGS: usize = 1000;
@@ -426,19 +431,23 @@ impl Account {
     }
 
     /// Последние сообщения чата, от старых к новым.
-    pub(super) async fn history(&self, account: &str, chat: &str, limit: usize) -> Vec<Remote> {
+    pub(super) async fn history(
+        &self,
+        account: &str,
+        chat: &str,
+        sink: tokio::sync::mpsc::Sender<Remote>,
+    ) {
         let Ok(peer) = self.peer(chat).await else {
-            return Vec::new();
+            return;
         };
-        let mut messages = self.client.iter_messages(peer).limit(limit);
-        let mut out = Vec::new();
-        loop {
+        // Сначала только сами сообщения (без файлов), от новых к старым:
+        // Telegram отдаёт историю в этом порядке, а переносить надо с начала,
+        // чтобы ответы находили свои исходные сообщения.
+        let mut messages = self.client.iter_messages(peer);
+        let mut all = Vec::new();
+        while all.len() < MAX_IMPORT {
             match messages.next().await {
-                Ok(Some(message)) => {
-                    if let Some(remote) = to_remote(&self.client, account, chat, &message).await {
-                        out.push(remote);
-                    }
-                }
+                Ok(Some(message)) => all.push(message),
                 Ok(None) => break,
                 Err(err) => {
                     tracing::warn!(account, %err, "личный мост Telegram: история не загрузилась");
@@ -446,8 +455,50 @@ impl Account {
                 }
             }
         }
-        out.reverse();
-        out
+        tracing::info!(
+            account,
+            chat,
+            count = all.len(),
+            "личный мост Telegram: перенос истории"
+        );
+        while let Some(message) = all.pop() {
+            if let Some(remote) =
+                to_remote(&self.client, account, chat, &message, HISTORY_FILE).await
+                && sink.send(remote).await.is_err()
+            {
+                return;
+            }
+        }
+    }
+
+    /// «В сети» собеседников личных чатов одним запросом.
+    pub(super) async fn presence(&self, chats: &[String]) -> Vec<(String, bool)> {
+        let mut users = Vec::new();
+        for chat in chats.iter().filter(|chat| !chat.starts_with('-')) {
+            if let Ok(peer) = self.peer(chat).await {
+                users.push((&peer).into());
+            }
+        }
+        if users.is_empty() {
+            return Vec::new();
+        }
+        let Ok(found) = self
+            .client
+            .invoke(&tl::functions::users::GetUsers { id: users })
+            .await
+        else {
+            return Vec::new();
+        };
+        found
+            .into_iter()
+            .filter_map(|user| match user {
+                tl::enums::User::User(user) => Some((
+                    user.id.to_string(),
+                    user.status.as_ref().is_some_and(is_online),
+                )),
+                tl::enums::User::Empty(_) => None,
+            })
+            .collect()
     }
 
     /// Фото, «о себе» и «в сети» собеседника; фото с id `photo_known` не
@@ -461,7 +512,7 @@ impl Account {
         let peer = self.client.resolve_peer(peer_ref).await.ok()?;
         let mut profile = RemoteProfile::default();
         if let Peer::User(user) = &peer {
-            profile.online = Some(matches!(user.status(), tl::enums::UserStatus::Online(_)));
+            profile.online = Some(is_online(user.status()));
             let full = self
                 .client
                 .invoke(&tl::functions::users::GetFullUser {
@@ -674,7 +725,8 @@ async fn listen(
                 if message.outgoing() && was_sent(&sent, &chat, message.text().trim()) {
                     continue;
                 }
-                if let Some(remote) = to_remote(&client, &account, &chat, &message).await {
+                if let Some(remote) = to_remote(&client, &account, &chat, &message, MAX_FILE).await
+                {
                     deliver(&state, remote).await;
                 }
             }
@@ -724,9 +776,16 @@ async fn to_remote(
     account: &str,
     chat: &str,
     message: &Message,
+    limit: usize,
 ) -> Option<Remote> {
-    let text = message.text().trim().to_owned();
-    let files = message_files(client, message).await;
+    let mut text = message.text().trim().to_owned();
+    let (files, skipped) = message_files(client, message, limit).await;
+    if let Some(note) = skipped {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&note);
+    }
     if text.is_empty() && files.is_empty() {
         return None;
     }
@@ -753,9 +812,14 @@ async fn to_remote(
 }
 
 /// Фото, файл, видео, голосовое или стикер сообщения.
-async fn message_files(client: &Client, message: &Message) -> Vec<RemoteFile> {
+/// Файлы сообщения и пометка о пропущенном (слишком большом) файле.
+async fn message_files(
+    client: &Client,
+    message: &Message,
+    limit: usize,
+) -> (Vec<RemoteFile>, Option<String>) {
     let Some(media) = message.media() else {
-        return Vec::new();
+        return (Vec::new(), None);
     };
     let id = message.id();
     let name = match &media {
@@ -771,17 +835,32 @@ async fn message_files(client: &Client, message: &Message) -> Vec<RemoteFile> {
             let mime = sticker.document.mime_type().unwrap_or_default();
             if mime != "image/webp" {
                 // Анимированные (tgs) и видео-стикеры показать нечем.
-                return Vec::new();
+                return (Vec::new(), None);
             }
             format!("sticker_{id}.webp")
         }
-        _ => return Vec::new(),
+        _ => return (Vec::new(), None),
     };
-    let bytes = download(client, &media, MAX_FILE).await;
-    if bytes.is_empty() {
-        return Vec::new();
+    // Размер известен заранее: большой файл даже не начинаем качать.
+    if let Some(size) = media.size().filter(|size| *size > limit) {
+        let mb = size.div_ceil(1024 * 1024);
+        return (
+            Vec::new(),
+            Some(format!(
+                "📎 {name}, {mb} МБ — файл слишком большой, он остался в Telegram"
+            )),
+        );
     }
-    vec![RemoteFile { name, bytes }]
+    let bytes = download(client, &media, limit).await;
+    if bytes.is_empty() {
+        return (
+            Vec::new(),
+            Some(format!(
+                "📎 {name} — файл не перенесён, он остался в Telegram"
+            )),
+        );
+    }
+    (vec![RemoteFile { name, bytes }], None)
 }
 
 fn extension_for(mime: &str) -> &'static str {
@@ -825,6 +904,17 @@ async fn download<D: grammers_client::media::Downloadable + Sync>(
     }
 }
 
+/// «В сети»: Telegram помечает это сроком, после которого человек уже не в
+/// сети, даже если обновления «вышел» не пришло.
+fn is_online(status: &tl::enums::UserStatus) -> bool {
+    match status {
+        tl::enums::UserStatus::Online(online) => {
+            i64::from(online.expires) * 1000 > crate::state::now_ms()
+        }
+        _ => false,
+    }
+}
+
 /// Обновления без своей обёртки в grammers: реакции и «в сети».
 async fn raw_update(state: &AppState, account: &str, update: tl::enums::Update) {
     match update {
@@ -851,7 +941,7 @@ async fn raw_update(state: &AppState, account: &str, update: tl::enums::Update) 
         }
         tl::enums::Update::UserStatus(update) => {
             if let Some(chat) = PeerId::user(update.user_id).and_then(PeerId::bot_api_dialog_id) {
-                let online = matches!(update.status, tl::enums::UserStatus::Online(_));
+                let online = is_online(&update.status);
                 super::sync::remote_presence(state, account, &chat.to_string(), online).await;
             }
         }
@@ -1117,7 +1207,10 @@ async fn finish(
     .await
     .map_err(|err| format!("{err:?}"))?;
     match resume(state, &account, &secret).await {
-        Ok(link) => state.personal.insert(&account, super::Link::Telegram(link)),
+        Ok(link) => {
+            state.personal.insert(&account, super::Link::Telegram(link));
+            super::sync::connected(state, &account);
+        }
         Err(err) => set_error(state, &account, &err).await,
     }
     let view = super::account_view(state, &login.user, &account)

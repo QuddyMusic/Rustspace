@@ -568,6 +568,8 @@ pub fn app(state: AppState) -> Router {
         .route("/api/rustspace/webhooks/{hookId}", delete(routes::webhooks::remove))
         .route("/api/rustspace/channels/{id}/cards", post(routes::webhooks::send_cards))
         .route("/api/rustspace/dm/{id}/cards", post(routes::webhooks::send_dm_cards))
+        .route("/api/rustspace/dm/{id}", delete(routes::dm::delete_own))
+        .route("/api/rustspace/dm/{id}/resync", post(routes::dm::resync))
         .route("/api/webhooks/{hookId}/{token}", post(routes::webhooks::execute))
         .route("/api/rustspace/channels/{id}/nsfw", put(routes::channels::set_nsfw))
         .route("/api/rustspace/saved", get(routes::saved::saved))

@@ -157,11 +157,19 @@ impl Link {
         }
     }
 
-    /// Последние сообщения чата, от старых к новым.
-    async fn history(&self, account: &str, chat: &str, limit: usize) -> Vec<Remote> {
+    /// Вся история чата, от старых к новым, по одному сообщению в `sink`.
+    async fn history(&self, account: &str, chat: &str, sink: tokio::sync::mpsc::Sender<Remote>) {
+        match self {
+            Self::Matrix(_) => {}
+            Self::Telegram(link) => link.history(account, chat, sink).await,
+        }
+    }
+
+    /// Кто из собеседников (личные чаты) сейчас в сети.
+    async fn presence(&self, chats: &[String]) -> Vec<(String, bool)> {
         match self {
             Self::Matrix(_) => Vec::new(),
-            Self::Telegram(link) => link.history(account, chat, limit).await,
+            Self::Telegram(link) => link.presence(chats).await,
         }
     }
 
@@ -322,7 +330,7 @@ pub fn spawn(state: &AppState) {
                     app.personal.insert(&id, link);
                     // Фото и «о себе» собеседников могли смениться, пока
                     // сервер стоял.
-                    sync::refresh_profiles(&app, &id);
+                    sync::connected(&app, &id);
                 }
                 Err(err) => set_error(&app, &id, &err).await,
             }
@@ -655,6 +663,61 @@ pub(crate) async fn unlink_chat(
             Ok(())
         })
         .await
+}
+
+/// Удаляет связанную с мостом переписку у себя целиком: связь с чатом,
+/// историю и файлы. В самой сети (Telegram и т. п.) чат не трогается.
+/// `false` — это не мостовая переписка этого пользователя.
+///
+/// # Errors
+/// Ошибка базы.
+pub(crate) async fn delete_bridged_dm(state: &AppState, user: &str, dm: &str) -> ApiResult<bool> {
+    let (user, dm) = (user.to_owned(), dm.to_owned());
+    let files = state
+        .run(move |tx, out| {
+            let Some(row) = tx.query_one(
+                "SELECT c.account_id, c.remote_chat FROM bs_personal_chats c \
+                 JOIN bs_personal_accounts a ON a.id = c.account_id \
+                 WHERE c.dm_channel_id = ? AND a.user_id = ?",
+                params![&dm, &user],
+            )?
+            else {
+                return Ok(None);
+            };
+            let (account, chat) = (row.text("account_id")?, row.text("remote_chat")?);
+            let mut files = Vec::new();
+            for row in tx.query(
+                "SELECT a.filename, a.thumbnail_filename FROM attachments a \
+                 JOIN dm_messages m ON m.id = a.dm_message_id WHERE m.dm_channel_id = ?",
+                params![&dm],
+            )? {
+                files.push(row.text("filename")?);
+                files.extend(row.opt_text("thumbnail_filename")?);
+            }
+            tx.execute(
+                "DELETE FROM bs_personal_messages WHERE account_id = ? AND remote_chat = ?",
+                params![&account, &chat],
+            )?;
+            tx.execute(
+                "DELETE FROM bs_personal_chats WHERE account_id = ? AND remote_chat = ?",
+                params![&account, &chat],
+            )?;
+            // Сообщения, реакции и вложения уходят каскадом.
+            tx.execute("DELETE FROM dm_channels WHERE id = ?", params![&dm])?;
+            out.to_user(
+                &user,
+                &serde_json::json!({"type": "dm_channel_closed", "dmChannelId": dm}),
+            );
+            Ok(Some(files))
+        })
+        .await?;
+    let Some(files) = files else {
+        return Ok(false);
+    };
+    for name in files {
+        crate::files::delete_upload_file(&state.config, &name).await;
+    }
+    Ok(true)
 }
 
 /// Марионетка чата: одна на (аккаунт, чат), имя — «Название · Сеть».

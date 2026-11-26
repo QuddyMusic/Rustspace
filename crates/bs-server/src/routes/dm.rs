@@ -424,6 +424,34 @@ pub async fn close(
         .await
 }
 
+/// `DELETE /api/rustspace/dm/:id` — удалить переписку у себя. Связанная с
+/// личным мостом удаляется целиком (история и файлы, в самой сети чат
+/// остаётся); обычная закрывается, как `DELETE /api/dm/:id`, — у
+/// собеседника история не пропадает.
+pub async fn delete_own(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    if crate::bridges::personal::delete_bridged_dm(&state, &user.id, &id).await? {
+        return Ok(Json(json!({"success": true, "deleted": true})));
+    }
+    close(State(state), user, Path(id)).await
+}
+
+/// `POST /api/rustspace/dm/:id/resync` — перечитать историю переписки,
+/// связанной с личным мостом: недостающие сообщения дописываются в фоне.
+pub async fn resync(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    if crate::bridges::personal::sync::resync_dm(&state, &user.id, &id).await? {
+        return Ok(Json(json!({"success": true})));
+    }
+    Err(ApiError::not_found("personal_bridge_chat_not_found"))
+}
+
 /// `POST /api/dm/:id/members`.
 pub async fn add_member(
     State(state): State<AppState>,

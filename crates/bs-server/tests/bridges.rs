@@ -686,6 +686,35 @@ async fn personal_matrix_chat_becomes_a_dm() {
         .await;
     assert_eq!(list["accounts"][0]["chats"][0]["dmChannelId"], dm.as_str());
     assert_eq!(list["networks"]["telegram"]["serverKeys"], false);
+    // Удаление чата у себя: связь и история пропадают, аккаунт остаётся.
+    let (status, deleted) = server
+        .call(
+            reqwest::Method::DELETE,
+            &format!("/api/rustspace/dm/{dm}"),
+            &token,
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{deleted}");
+    assert_eq!(deleted["deleted"], true);
+    let (status, _) = server
+        .call(
+            reqwest::Method::GET,
+            &format!("/api/dm/{dm}/messages"),
+            &token,
+            None,
+        )
+        .await;
+    assert_ne!(status, 200);
+    let (_, list) = server
+        .call(
+            reqwest::Method::GET,
+            "/api/rustspace/personal-bridges",
+            &token,
+            None,
+        )
+        .await;
+    assert_eq!(list["accounts"][0]["chats"], json!([]));
     let (status, _) = server
         .call(
             reqwest::Method::DELETE,

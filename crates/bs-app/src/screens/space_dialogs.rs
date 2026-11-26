@@ -154,7 +154,7 @@ impl SpaceDialog {
 }
 
 /// Рамка модального окна с заголовком и крестиком; `body` рисует содержимое.
-fn modal(
+pub(crate) fn modal(
     ctx: &egui::Context,
     id: &'static str,
     title: &str,

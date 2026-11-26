@@ -9,6 +9,7 @@ pub(crate) mod channel_settings;
 pub(crate) mod chat;
 pub(crate) mod composer;
 pub(crate) mod connections;
+pub(crate) mod delete_dm;
 pub(crate) mod dialogs;
 pub(crate) mod e2ee_dialog;
 pub(crate) mod format_bar;

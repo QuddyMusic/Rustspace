@@ -45,7 +45,7 @@ pub fn attachment_json(
         "width": row.opt_number("width")?,
         "height": row.opt_number("height")?,
         "duration": row.opt_number("duration")?,
-        "playable": row.opt_number("playable")?,
+        "playable": row.opt_flag("playable")?,
         "createdAt": row.int("created_at")?,
     });
     attachment[owner_key] = json!(stored_owner.unwrap_or_else(|| owner_id.to_owned()));
@@ -375,12 +375,24 @@ pub fn select_page(
 ) -> DbResult<Vec<Row>> {
     match page {
         Page::After(cursor, limit) => {
-            let rows = tx.query(
-                &format!(
-                    "SELECT {columns} FROM {table} WHERE {scope} = ? AND id > ? ORDER BY id ASC LIMIT ?"
-                ),
-                params![channel_id, cursor, *limit],
-            )?;
+            // Курсор — по времени, а не по id: у перенесённых из мостов
+            // сообщений id новые, а время — исходное.
+            let rows = match cursor_time(tx, table, cursor)? {
+                Some(at) => tx.query(
+                    &format!(
+                        "SELECT {columns} FROM {table} WHERE {scope} = ? \
+                         AND (created_at > ? OR (created_at = ? AND id > ?)) \
+                         ORDER BY created_at ASC, id ASC LIMIT ?"
+                    ),
+                    params![channel_id, at, at, cursor, *limit],
+                )?,
+                None => tx.query(
+                    &format!(
+                        "SELECT {columns} FROM {table} WHERE {scope} = ? AND id > ? ORDER BY id ASC LIMIT ?"
+                    ),
+                    params![channel_id, cursor, *limit],
+                )?,
+            };
             let mut keyed: Vec<(i64, String, Row)> = Vec::with_capacity(rows.len());
             for row in rows {
                 keyed.push((row.int("created_at")?, row.text("id")?, row));
@@ -389,13 +401,23 @@ pub fn select_page(
             Ok(keyed.into_iter().map(|(_, _, row)| row).collect())
         }
         Page::Before(cursor, limit) => {
-            let mut rows = tx.query(
-                &format!(
-                    "SELECT {columns} FROM {table} WHERE {scope} = ? AND id < ? \
-                     ORDER BY created_at DESC, id DESC LIMIT ?"
-                ),
-                params![channel_id, cursor, *limit],
-            )?;
+            let mut rows = match cursor_time(tx, table, cursor)? {
+                Some(at) => tx.query(
+                    &format!(
+                        "SELECT {columns} FROM {table} WHERE {scope} = ? \
+                         AND (created_at < ? OR (created_at = ? AND id < ?)) \
+                         ORDER BY created_at DESC, id DESC LIMIT ?"
+                    ),
+                    params![channel_id, at, at, cursor, *limit],
+                )?,
+                None => tx.query(
+                    &format!(
+                        "SELECT {columns} FROM {table} WHERE {scope} = ? AND id < ? \
+                         ORDER BY created_at DESC, id DESC LIMIT ?"
+                    ),
+                    params![channel_id, cursor, *limit],
+                )?,
+            };
             rows.reverse();
             Ok(rows)
         }
@@ -411,6 +433,16 @@ pub fn select_page(
             Ok(rows)
         }
     }
+}
+
+/// Время сообщения-курсора; `None` — его уже нет (тогда листаем по id).
+fn cursor_time(tx: &mut dyn Tx, table: &str, cursor: &str) -> DbResult<Option<i64>> {
+    tx.query_one(
+        &format!("SELECT created_at FROM {table} WHERE id = ?"),
+        params![cursor],
+    )?
+    .map(|row| row.int("created_at"))
+    .transpose()
 }
 
 /// Содержимое системного сообщения «тычок» (`channelSystemContent`).

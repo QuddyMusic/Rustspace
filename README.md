@@ -571,8 +571,10 @@ In group chats the author's name precedes the text.
   their own when signing in.
   The MTProto client is [grammers](https://github.com/Lonami/grammers) (MIT/Apache-2.0,
   Lonami and contributors).
-  Nearly everything syncs: linking a chat brings in its last 50 messages, the contact's photo
-  and bio (a group's chat photo) and whether they are online; attachments (photos, files,
+  Nearly everything syncs: linking a chat brings in its whole history (up to 100 000
+  messages; files over 20 MB stay in Telegram with a note; the chat's context menu has
+  “Reload history” to fill in anything missing and “Delete chat” to remove it from Rustspace
+  only), the contact's photo and bio (a group's chat photo) and whether they are online; attachments (photos, files,
   videos, voice messages, WebP stickers) travel as files both ways; edits, deletions, replies
   and reactions go both ways too (Telegram takes one reaction, your latest). Messages that
   arrived while the server was down are fetched on start. Contacts' photos refresh on every

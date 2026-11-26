@@ -172,6 +172,8 @@ pub(crate) struct SidebarDm {
     pub(crate) avatar: Option<String>,
     /// Ключ цвета заглушки и `avatarColor` (собеседник или сама группа).
     pub(crate) face: (String, Option<String>),
+    /// Чат из личного моста (Telegram и т. п.).
+    pub(crate) bridged: bool,
 }
 
 /// Кто сидит в голосовом канале, с флагами микрофона и звука.
@@ -302,6 +304,10 @@ pub(crate) fn dm_sidebar_items(cache: &Cache) -> Vec<SidebarDm> {
             },
             preview: dm_last_text(dm),
             at: dm_last_at(dm),
+            bridged: dm
+                .members
+                .iter()
+                .any(|m| super::panels::is_bridge_puppet(&m.username)),
             avatar: {
                 let mut others = dm.members.iter().filter(|m| m.id != me);
                 match (others.next(), others.next()) {

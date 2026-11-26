@@ -177,6 +177,36 @@ impl ApiClient {
         self.delete_json(&format!("/api/dm/{id}/members")).await
     }
 
+    /// `DELETE /api/rustspace/dm/:id` — удалить переписку у себя: мостовая
+    /// удаляется с историей, обычная закрывается. Сервер без расширения
+    /// (оригинальный Backspace) — просто закрываем (`DELETE /api/dm/:id`).
+    ///
+    /// # Errors
+    /// Не участник или сервер недоступен.
+    pub async fn delete_own_dm(&self, id: &str) -> Result<serde_json::Value, ApiError> {
+        match self.delete_json(&format!("/api/rustspace/dm/{id}")).await {
+            Err(err)
+                if err.status() == Some(reqwest::StatusCode::NOT_FOUND) && err.code().is_none() =>
+            {
+                self.delete_json(&format!("/api/dm/{id}")).await
+            }
+            other => other,
+        }
+    }
+
+    /// `POST /api/rustspace/dm/:id/resync` — перечитать историю переписки,
+    /// связанной с личным мостом (недостающее дописывается в фоне).
+    ///
+    /// # Errors
+    /// Это не мостовая переписка, мост не подключён или сервер недоступен.
+    pub async fn resync_dm(&self, id: &str) -> Result<serde_json::Value, ApiError> {
+        self.post_json(
+            &format!("/api/rustspace/dm/{id}/resync"),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
     /// `POST /api/dm/:id/transfer` — передать права владельца.
     ///
     /// # Errors

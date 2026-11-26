@@ -239,6 +239,12 @@ fn report_login_failure(
             .is_some_and(|code| code.starts_with("two_factor_"))
     {
         crate::logic::describe_server_error(api.code(), &err.to_string())
+    } else if let Some(status) = gateway_status(err) {
+        tracing::warn!(%err, "прокси перед инстансом не достучался до сервера");
+        crate::tf!(
+            "Сервер не отвечает (HTTP {status}): прокси перед ним работает, а сам Rustspace — нет. Он перезапускается или упал — загляните в журнал сервера.",
+            status = status.to_string()
+        )
     } else if is_network_error(err) {
         // Технические подробности — в журнал, человеку — что делать.
         tracing::warn!(%err, "не удалось подключиться к инстансу");
@@ -458,6 +464,19 @@ pub(super) enum RegisterOutcome {
     Closed,
     /// Другая ошибка; текст уже отправлен в GUI.
     Failed,
+}
+
+/// 502/503/504 от обратного прокси: сам инстанс лежит или перезапускается.
+fn gateway_status(err: &bs_instances::InstanceError) -> Option<u16> {
+    use bs_instances::InstanceError;
+    let (InstanceError::Api(api) | InstanceError::Identity(bs_identity::IdentityError::Api(api))) =
+        err
+    else {
+        return None;
+    };
+    api.status()
+        .map(|status| status.as_u16())
+        .filter(|status| matches!(status, 502..=504))
 }
 
 /// Сетевая ли это ошибка (инстанс не ответил), а не отказ сервера.
@@ -1699,6 +1718,8 @@ pub(super) async fn group_admin(
         GroupOp::Add(user) => client.add_group_member(&dm_id, user).await.map(|_| ()),
         GroupOp::Remove(user) => client.remove_group_member(&dm_id, user).await.map(|_| ()),
         GroupOp::Leave => client.leave_group_dm(&dm_id).await.map(|_| ()),
+        GroupOp::Delete => client.delete_own_dm(&dm_id).await.map(|_| ()),
+        GroupOp::Resync => client.resync_dm(&dm_id).await.map(|_| ()),
         GroupOp::Transfer(user) => client.transfer_group_owner(&dm_id, user).await.map(|_| ()),
         GroupOp::Icon(bytes) => match group_icon(client, &dm_id, bytes.as_deref()).await {
             Ok(()) => Ok(()),

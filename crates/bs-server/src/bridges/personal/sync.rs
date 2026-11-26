@@ -13,8 +13,14 @@ use crate::routes::users::{USER_COLUMNS, sanitize_user};
 use crate::state::{AppState, now_ms};
 use crate::{broadcast, dm, params, ws};
 
-/// Сколько сообщений истории забирать при связывании чата.
-const HISTORY: usize = 50;
+/// Сколько последних сообщений переносимой истории клиенты видят сразу.
+const LIVE_TAIL: usize = 50;
+/// Как часто спрашивать «в сети» собеседников.
+const PRESENCE_EVERY: std::time::Duration = std::time::Duration::from_mins(1);
+
+/// Тяжёлая работа мостов (история, профили) идёт по одной: при связывании
+/// сотни чатов разом параллельные загрузки съедали память сервера.
+static HEAVY: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 // ─── Файлы ────────────────────────────────────────────────────────────────────
 
@@ -146,6 +152,13 @@ fn remote_of(tx: &mut dyn Tx, message_id: &str) -> DbResult<Option<(String, Stri
 
 /// Пишет сообщение с той стороны в связанную переписку.
 pub(crate) async fn deliver(state: &AppState, message: Remote) {
+    deliver_as(state, message, true).await;
+}
+
+/// `live == false` — старое сообщение из истории: пишется молча, без
+/// событий клиентам (иначе перенос тысяч сообщений засыпал бы их событиями);
+/// клиент увидит его, когда подгрузит историю.
+async fn deliver_as(state: &AppState, message: Remote, live: bool) {
     if let Some(remote_id) = message.id.clone() {
         let (account, chat) = (message.account.clone(), message.chat.clone());
         let known = state
@@ -196,9 +209,10 @@ pub(crate) async fn deliver(state: &AppState, message: Remote) {
                 attachments: attachments.clone(),
                 reply_to,
             };
+            let mut quiet = crate::hub::Outbox::new();
             let created = dm::create_message_at(
                 tx,
-                out,
+                if live { out } else { &mut quiet },
                 &app.config,
                 &app.ids,
                 &channel,
@@ -516,14 +530,113 @@ async fn apply_profile(state: &AppState, account: &str, chat: &str, profile: Rem
 pub(crate) fn after_link(state: &AppState, account: &str, chat: &str) {
     let (app, account, chat) = (state.clone(), account.to_owned(), chat.to_owned());
     tokio::spawn(async move {
+        let Ok(_permit) = HEAVY.acquire().await else {
+            return;
+        };
         let Some(link) = app.personal.link(&account) else {
             return;
         };
         if let Some(profile) = link.profile(&chat, None).await {
             apply_profile(&app, &account, &chat, profile).await;
         }
-        for message in link.history(&account, &chat, HISTORY).await {
-            deliver(&app, message).await;
+        import_history(&app, &link, &account, &chat).await;
+    });
+}
+
+/// Переносит всю историю чата. Уже перенесённые сообщения пропускаются
+/// (`deliver` знает их номера), так что повторный вызов только дополняет.
+async fn import_history(app: &AppState, link: &super::Link, account: &str, chat: &str) {
+    let (sink, mut incoming) = tokio::sync::mpsc::channel(4);
+    let consume = async {
+        let mut batch = Vec::new();
+        while let Some(message) = incoming.recv().await {
+            batch.push(message);
+            // Последние сообщения клиенты получат сразу, остальные молча.
+            if batch.len() > LIVE_TAIL {
+                deliver_as(app, batch.remove(0), false).await;
+            }
+        }
+        for message in batch {
+            deliver_as(app, message, true).await;
+        }
+    };
+    tokio::join!(link.history(account, chat, sink), consume);
+}
+
+/// Перечитать историю связанного чата (по id переписки у себя).
+/// `false` — это не мостовая переписка пользователя или мост не подключён.
+pub(crate) async fn resync_dm(
+    state: &AppState,
+    user: &str,
+    dm: &str,
+) -> crate::error::ApiResult<bool> {
+    let (owner, dm) = (user.to_owned(), dm.to_owned());
+    let found = state
+        .run(move |tx, _| {
+            Ok(tx
+                .query_one(
+                    "SELECT c.account_id, c.remote_chat FROM bs_personal_chats c \
+                     JOIN bs_personal_accounts a ON a.id = c.account_id \
+                     WHERE c.dm_channel_id = ? AND a.user_id = ?",
+                    params![&dm, &owner],
+                )?
+                .map(|row| {
+                    Ok::<_, crate::db::DbError>((row.text("account_id")?, row.text("remote_chat")?))
+                })
+                .transpose()?)
+        })
+        .await?;
+    let Some((account, chat)) = found else {
+        return Ok(false);
+    };
+    if state.personal.link(&account).is_none() {
+        return Ok(false);
+    }
+    after_link(state, &account, &chat);
+    Ok(true)
+}
+
+/// Аккаунт подключился: обновить профили и следить за «в сети».
+pub(crate) fn connected(state: &AppState, account: &str) {
+    refresh_profiles(state, account);
+    poll_presence(state, account);
+}
+
+/// Telegram шлёт «в сети» только сеансам, которые сами в сети, а мост
+/// невидим — поэтому статусы собеседников спрашиваем раз в минуту.
+fn poll_presence(state: &AppState, account: &str) {
+    let (app, account) = (state.clone(), account.to_owned());
+    let Some(link) = app.personal.link(&account) else {
+        return;
+    };
+    tokio::spawn(async move {
+        loop {
+            // Аккаунт отключили или переподключили — этот опрос больше не нужен.
+            if !app
+                .personal
+                .link(&account)
+                .is_some_and(|now| std::sync::Arc::ptr_eq(&now, &link))
+            {
+                return;
+            }
+            let lookup = account.clone();
+            let chats = app
+                .run(move |tx, _| {
+                    tx.query(
+                        "SELECT remote_chat FROM bs_personal_chats WHERE account_id = ? AND grouped = 0",
+                        params![&lookup],
+                    )?
+                    .iter()
+                    .map(|row| row.text("remote_chat"))
+                    .collect::<DbResult<Vec<_>>>()
+                    .map_err(Into::into)
+                })
+                .await
+                .unwrap_or_default();
+            for (chat, online) in link.presence(&chats).await {
+                remote_presence(&app, &account, &chat, online).await;
+            }
+            tokio::time::sleep(PRESENCE_EVERY).await;
         }
     });
 }
@@ -533,6 +646,9 @@ pub(crate) fn after_link(state: &AppState, account: &str, chat: &str) {
 pub(crate) fn refresh_profiles(state: &AppState, account: &str) {
     let (app, account) = (state.clone(), account.to_owned());
     tokio::spawn(async move {
+        let Ok(_permit) = HEAVY.acquire().await else {
+            return;
+        };
         let lookup = account.clone();
         let Ok(chats) = app
             .run(move |tx, _| {

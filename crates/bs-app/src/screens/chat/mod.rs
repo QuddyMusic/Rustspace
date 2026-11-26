@@ -107,6 +107,10 @@ pub(super) enum Nav {
     Invite { origin: usize, space_id: String },
     /// Пригласить собеседника беседы один на один в одно из своих пространств.
     InvitePerson { origin: usize, dm_id: String },
+    /// Перечитать историю мостового чата.
+    ResyncDm { origin: usize, dm_id: String },
+    /// Удалить переписку у себя (после подтверждения).
+    DeleteDm(super::delete_dm::DeleteDm),
     /// Действие панели голоса.
     Voice(crate::voice::DockAction),
     /// Локальная громкость участника.
@@ -169,6 +173,8 @@ pub(crate) struct ChatScreen {
     channel_settings: Option<super::channel_settings::ChannelSettings>,
     notification_settings: Option<super::notification_settings::NotificationSettings>,
     group_dialog: Option<super::group_dm::GroupDialog>,
+    /// Подтверждение «Удалить чат».
+    delete_dm: Option<super::delete_dm::DeleteDm>,
     /// Открытое окно шифрования переписки.
     e2ee_dialog: Option<super::e2ee_dialog::E2eeDialog>,
     /// Открытые настройки.
@@ -427,6 +433,13 @@ impl ChatScreen {
         }
     }
 
+    /// Открывает настройки своего аккаунта.
+    fn open_settings(&mut self, bridge: &Bridge) {
+        self.settings = bridge
+            .cache_at(0)
+            .map(|cache| SettingsState::from_user(cache.me()));
+    }
+
     fn apply_nav(&mut self, nav: Nav, items: &[SidebarSpace], bridge: &mut Bridge) {
         match nav {
             Nav::Saved => self.open_saved(items, bridge),
@@ -491,11 +504,9 @@ impl ChatScreen {
                 ));
             }
             Nav::InvitePerson { origin, dm_id } => self.open_person_invite(bridge, origin, &dm_id),
-            Nav::Settings => {
-                if let Some(cache) = bridge.cache_at(0) {
-                    self.settings = Some(SettingsState::from_user(cache.me()));
-                }
-            }
+            Nav::DeleteDm(dialog) => self.delete_dm = Some(dialog),
+            Nav::ResyncDm { origin, dm_id } => resync_dm(bridge, origin, dm_id),
+            Nav::Settings => self.open_settings(bridge),
             Nav::OwnProfile => self.open_own_profile(bridge),
             // Обрабатывает приложение (см. конец `show`).
             Nav::SwitchAccount(_) => {}
@@ -741,10 +752,20 @@ impl ChatScreen {
         {
             self.notification_settings = None;
         }
+        self.show_dm_dialogs(ctx, bridge);
+    }
+
+    /// Окна личных бесед: группа, удаление, шифрование.
+    fn show_dm_dialogs(&mut self, ctx: &egui::Context, bridge: &mut Bridge) {
         if let Some(dialog) = self.group_dialog.as_mut()
             && !super::group_dm::show(ctx, dialog, bridge)
         {
             self.group_dialog = None;
+        }
+        if let Some(dialog) = self.delete_dm.as_mut()
+            && !super::delete_dm::show(ctx, dialog, bridge)
+        {
+            self.delete_dm = None;
         }
         if let Some(dialog) = self.e2ee_dialog.as_mut()
             && !super::e2ee_dialog::show(ctx, dialog, bridge)
@@ -847,13 +868,33 @@ impl ChatScreen {
     fn take_group_events(&mut self, bridge: &mut Bridge) {
         use super::group_dm::Outcome;
         for (origin, event) in bridge.take_group_events() {
+            if matches!(event.op, crate::bridge::GroupOp::Resync) {
+                bridge.set_info(match &event.result {
+                    Ok(()) => tr("История перечитывается — недостающие сообщения появятся в чате")
+                        .to_owned(),
+                    Err(err) => {
+                        crate::tf!("Не удалось перечитать историю: {err}", err = err.clone())
+                    }
+                });
+                continue;
+            }
+            if self
+                .delete_dm
+                .as_mut()
+                .is_some_and(|dialog| dialog.apply(&event))
+            {
+                self.delete_dm = None;
+            }
             let outcome = self
                 .group_dialog
                 .as_mut()
                 .map_or(Outcome::Keep, |dialog| dialog.apply(&event));
             let left = matches!(
                 (&event.op, &event.result),
-                (crate::bridge::GroupOp::Leave, Ok(()))
+                (
+                    crate::bridge::GroupOp::Leave | crate::bridge::GroupOp::Delete,
+                    Ok(())
+                )
             );
             if left
                 && self
@@ -1045,6 +1086,15 @@ fn main_module<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R 
         .inner
 }
 
+
+/// Просит сервер перечитать историю мостового чата.
+fn resync_dm(bridge: &mut Bridge, origin: usize, dm_id: String) {
+    bridge.focus_on(origin);
+    bridge.request(BridgeRequest::GroupAdmin {
+        dm_id,
+        op: crate::bridge::GroupOp::Resync,
+    });
+}
 #[cfg(test)]
 mod tests {
     use bs_core::Cache;
@@ -1135,6 +1185,7 @@ mod tests {
             at: Some(at),
             avatar: Some("a.png".to_owned()),
             face: (id.to_owned(), None),
+            bridged: false,
         }
     }
 

@@ -200,7 +200,7 @@ impl Session {
                         cache.upsert_dm_channel(*channel);
                     }
                 }
-                (GroupOp::Leave, Ok(())) => {
+                (GroupOp::Leave | GroupOp::Delete, Ok(())) => {
                     cache.remove_dm_channel(&event.dm_id);
                 }
                 _ => {}

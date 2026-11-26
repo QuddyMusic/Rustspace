@@ -92,7 +92,8 @@ pub struct Attachment {
     /// Длительность в секундах; в БД сервера колонка `real`, поэтому дробная.
     pub duration: Option<f64>,
     /// Воспроизводимость видео в браузере; `null` — неизвестно (оптимистично).
-    #[serde(default)]
+    /// Старые серверы отдавали флаг числом `0/1` — принимаем и так.
+    #[serde(default, deserialize_with = "flag_or_number")]
     pub playable: Option<bool>,
     #[serde(default)]
     pub federation_status: Option<String>,
@@ -536,5 +537,49 @@ mod tests {
         let c: ActiveCallInfo = serde_json::from_str(json).unwrap();
         assert_eq!(c.state, CallState::Ringing);
         assert_eq!(c.participants.len(), 2);
+    }
+}
+
+/// `true`/`false`, `0`/`1` или `null`.
+fn flag_or_number<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Flag {
+        Bool(bool),
+        Int(i64),
+    }
+    Ok(
+        Option::<Flag>::deserialize(deserializer)?.map(|flag| match flag {
+            Flag::Bool(value) => value,
+            Flag::Int(value) => value != 0,
+        }),
+    )
+}
+
+#[cfg(test)]
+mod flag_tests {
+    use super::*;
+
+    #[derive(Deserialize)]
+    struct Probe {
+        #[serde(default, deserialize_with = "flag_or_number")]
+        playable: Option<bool>,
+    }
+
+    #[allow(clippy::expect_used, reason = "тесты")]
+    fn parse(json: &str) -> Option<bool> {
+        serde_json::from_str::<Probe>(json).expect("json").playable
+    }
+
+    #[test]
+    fn playable_accepts_numbers() {
+        assert_eq!(parse(r#"{"playable": 1}"#), Some(true));
+        assert_eq!(parse(r#"{"playable": 0}"#), Some(false));
+        assert_eq!(parse(r#"{"playable": true}"#), Some(true));
+        assert_eq!(parse(r#"{"playable": null}"#), None);
+        assert_eq!(parse("{}"), None);
     }
 }

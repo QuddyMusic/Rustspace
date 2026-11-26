@@ -1877,5 +1877,12 @@
   "Многоканальный Opus не поддерживается": "Multichannel Opus is not supported",
   "Эта сборка собрана без звука": "This build has no audio support",
   "Браузер не смог открыть файл": "The browser could not open the file",
-  "Браузер не умеет этот формат": "The browser cannot play this format"
+  "Браузер не умеет этот формат": "The browser cannot play this format",
+  "Сервер не отвечает (HTTP {status}): прокси перед ним работает, а сам Rustspace — нет. Он перезапускается или упал — загляните в журнал сервера.": "The server is not responding (HTTP {status}): the proxy in front of it works, but Rustspace itself does not. It is restarting or has crashed — check the server log.",
+  "Удалить чат": "Delete chat",
+  "Удалить «{name}» из Rustspace? Чат из Telegram или другого моста удаляется вместе с историей и файлами — в самой сети он останется. Обычная переписка скрывается: у собеседника история сохранится, а новое сообщение вернёт её в список.": "Delete “{name}” from Rustspace? A chat from Telegram or another bridge is deleted together with its history and files — it stays in the network itself. A regular conversation is hidden: the other person keeps the history, and a new message brings it back to the list.",
+  "Удаление…": "Deleting…",
+  "Перечитать историю": "Reload history",
+  "История перечитывается — недостающие сообщения появятся в чате": "Reloading history — missing messages will appear in the chat",
+  "Не удалось перечитать историю: {err}": "Could not reload history: {err}"
 }

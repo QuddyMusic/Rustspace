@@ -102,19 +102,35 @@ pub(super) fn channel_gear(
     clicked
 }
 
-/// ПКМ по беседе один на один: позвать собеседника в своё пространство
-/// (PR #485 оригинала).
+/// ПКМ по беседе: позвать собеседника в своё пространство (один на один,
+/// PR #485 оригинала) и удалить чат у себя.
 fn dm_menu(response: &egui::Response, dm: &SidebarDm, nav: &mut Option<Nav>) {
-    if dm.status.is_none() {
-        return;
-    }
     response.context_menu(|ui| {
         crate::widgets::menu_spacing(ui);
-        if ui.button(tr("Пригласить в пространство…")).clicked() {
+        if dm.status.is_some() && ui.button(tr("Пригласить в пространство…")).clicked()
+        {
             *nav = Some(Nav::InvitePerson {
                 origin: dm.origin,
                 dm_id: dm.id.clone(),
             });
+            ui.close();
+        }
+        if dm.bridged && ui.button(tr("Перечитать историю")).clicked() {
+            *nav = Some(Nav::ResyncDm {
+                origin: dm.origin,
+                dm_id: dm.id.clone(),
+            });
+            ui.close();
+        }
+        if ui
+            .button(RichText::new(tr("Удалить чат")).color(theme::rose()))
+            .clicked()
+        {
+            *nav = Some(Nav::DeleteDm(crate::screens::delete_dm::DeleteDm::new(
+                dm.origin,
+                dm.id.clone(),
+                dm.label.clone(),
+            )));
             ui.close();
         }
     });
