@@ -315,7 +315,11 @@ pub(crate) fn show_attachment(
     downloads: &mut Vec<DownloadHit>,
 ) -> Option<Hit> {
     if !att.is_image() {
-        file_card(ui, att, downloads);
+        if crate::player::is_playable(&att.mimetype, &att.name, att.size) {
+            audio_card(ui, att, downloads);
+        } else {
+            file_card(ui, att, downloads);
+        }
         return None;
     }
     // Для статичных картинок берём превью, для GIF — сам файл (анимация).
@@ -533,6 +537,159 @@ fn file_card(ui: &mut egui::Ui, att: &AttachmentView, downloads: &mut Vec<Downlo
                 downloads.push((button, Click::One(target_of(att))));
             });
         });
+}
+
+/// Ширина полосы перемотки.
+const SEEK_WIDTH: f32 = 220.0;
+
+/// Аудиовложение: кнопка «играть/пауза», полоса перемотки, время и скачивание.
+/// Строка сообщения перекрывает виджеты, поэтому щелчки ловим по положению
+/// указателя.
+fn audio_card(ui: &mut egui::Ui, att: &AttachmentView, downloads: &mut Vec<DownloadHit>) {
+    let state = download_of(ui, att);
+    let hub = crate::player::AudioHub::of(ui.ctx());
+    let view = hub.as_ref().and_then(|hub| hub.view(&att.filename));
+    let clicked = ui.input(|i| i.pointer.primary_clicked());
+    egui::Frame::new()
+        .fill(theme::bg_bubble())
+        .stroke(egui::Stroke::new(1.0, theme::border()))
+        .corner_radius(crate::theme::rounded(10))
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let (button, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
+                let status = view.as_ref().map(|view| &view.status);
+                play_button(ui, button, status);
+                if clicked
+                    && ui.rect_contains_pointer(button)
+                    && let Some(hub) = &hub
+                {
+                    hub.toggle(&att.filename);
+                }
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    ui.label(
+                        egui::RichText::new(theme::truncate_chars(&att.name, 40))
+                            .color(theme::sky()),
+                    );
+                    let (bar, _) =
+                        ui.allocate_exact_size(Vec2::new(SEEK_WIDTH, 10.0), Sense::hover());
+                    seek_bar(ui, bar, view.as_ref());
+                    if clicked
+                        && ui.rect_contains_pointer(bar)
+                        && let (Some(hub), Some(len), Some(pos)) = (
+                            &hub,
+                            view.as_ref().and_then(|view| view.len),
+                            ui.ctx().pointer_interact_pos(),
+                        )
+                    {
+                        let frac = ((pos.x - bar.min.x) / bar.width()).clamp(0.0, 1.0);
+                        hub.seek(&att.filename, frac * len);
+                    }
+                    ui.label(theme::muted(audio_caption(att, view.as_ref())).size(11.5));
+                });
+                ui.add_space(6.0);
+                let (button, badge) =
+                    ui.allocate_exact_size(Vec2::splat(DL_BUTTON), Sense::hover());
+                download_badge(ui, button, badge.id, state.as_ref(), false);
+                downloads.push((button, Click::One(target_of(att))));
+            });
+        });
+}
+
+/// Подпись под полосой: время, «загрузка» или причина ошибки.
+fn audio_caption(att: &AttachmentView, view: Option<&crate::player::View>) -> String {
+    use crate::player::{Status, clock};
+    view.map_or_else(
+        || human_size(att.size),
+        |view| match &view.status {
+            Status::Loading => tr("Загрузка…").to_owned(),
+            Status::Failed(err) => theme::truncate_chars(err, 60),
+            Status::Playing | Status::Paused => view.len.map_or_else(
+                || clock(view.pos),
+                |len| format!("{} / {}", clock(view.pos), clock(len)),
+            ),
+        },
+    )
+}
+
+/// Круглая кнопка: треугольник, две черты паузы или многоточие загрузки.
+fn play_button(ui: &egui::Ui, rect: Rect, status: Option<&crate::player::Status>) {
+    use crate::player::Status;
+    let hover = ui.rect_contains_pointer(rect);
+    let painter = ui.painter();
+    let fill = if hover {
+        theme::sky()
+    } else {
+        theme::sky().gamma_multiply(0.85)
+    };
+    painter.circle_filled(rect.center(), rect.width() / 2.0, fill);
+    let c = rect.center();
+    let ink = theme::bg_bubble();
+    match status {
+        Some(Status::Playing) => {
+            for dx in [-3.5, 3.5] {
+                painter.rect_filled(
+                    Rect::from_center_size(c + Vec2::new(dx, 0.0), Vec2::new(3.5, 12.0)),
+                    1.0,
+                    ink,
+                );
+            }
+        }
+        Some(Status::Loading) => {
+            painter.text(
+                c,
+                Align2::CENTER_CENTER,
+                "…",
+                FontId::proportional(14.0),
+                ink,
+            );
+            ui.ctx().request_repaint();
+        }
+        _ => {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    c + Vec2::new(-4.0, -7.0),
+                    c + Vec2::new(8.0, 0.0),
+                    c + Vec2::new(-4.0, 7.0),
+                ],
+                ink,
+                egui::Stroke::NONE,
+            ));
+        }
+    }
+    if hover {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+}
+
+/// Полоса перемотки с ручкой.
+fn seek_bar(ui: &egui::Ui, rect: Rect, view: Option<&crate::player::View>) {
+    let painter = ui.painter();
+    let line = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
+    painter.rect_filled(line, 2.0, theme::bg_input());
+    let frac = view
+        .and_then(|view| view.len.filter(|len| *len > 0.0).map(|len| view.pos / len))
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    let x = line.width().mul_add(frac, line.min.x);
+    painter.rect_filled(
+        Rect::from_min_max(line.min, egui::pos2(x, line.max.y)),
+        2.0,
+        theme::sky(),
+    );
+    if view.is_some_and(|view| view.len.is_some()) {
+        let hover = ui.rect_contains_pointer(rect);
+        painter.circle_filled(
+            egui::pos2(x, line.center().y),
+            if hover { 6.0 } else { 4.5 },
+            theme::sky(),
+        );
+        if hover {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
 }
 
 /// Картинка на весь экран; закрывается кликом, Esc или крестиком.

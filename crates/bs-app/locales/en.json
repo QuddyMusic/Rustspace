@@ -1867,5 +1867,15 @@
   "бот": "bot",
   "Имя, название или @имя": "Name, title or @username",
   "Ничего не нашлось": "Nothing found",
-  "Сервер не ответил: профиль не загрузился": "The server did not answer: the profile did not load"
+  "Сервер не ответил: профиль не загрузился": "The server did not answer: the profile did not load",
+  "Сервер не подключён": "Server is not connected",
+  "Звуковое устройство недоступно: {err}": "Audio device unavailable: {err}",
+  "Звуковое устройство недоступно": "Audio device unavailable",
+  "Формат не поддерживается: {err}": "Unsupported format: {err}",
+  "Нет файла": "No file",
+  "Файл Opus повреждён": "The Opus file is damaged",
+  "Многоканальный Opus не поддерживается": "Multichannel Opus is not supported",
+  "Эта сборка собрана без звука": "This build has no audio support",
+  "Браузер не смог открыть файл": "The browser could not open the file",
+  "Браузер не умеет этот формат": "The browser cannot play this format"
 }

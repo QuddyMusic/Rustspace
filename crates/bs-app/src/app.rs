@@ -34,6 +34,7 @@ pub(crate) struct BackspaceApp {
     pub(crate) chat: ChatScreen,
     /// Общий кэш картинок.
     images: ImageHub,
+    audio: crate::player::Engine,
     /// Трей и глобальные клавиши.
     desktop: crate::desktop::Desktop,
     /// Переключение аккаунта ждёт, пока закроется текущая сессия.
@@ -77,6 +78,7 @@ impl BackspaceApp {
             login,
             chat: ChatScreen::with_prefs(),
             images: ImageHub::default(),
+            audio: crate::player::Engine::default(),
             desktop: crate::desktop::Desktop::start(ctx),
             pending_switch: None,
             resume,
@@ -228,6 +230,10 @@ impl BackspaceApp {
     /// Завершает скачивания: картинка в буфер обмена или стикер в коллекцию.
     fn finish_raw(&mut self, ctx: &egui::Context) {
         for (purpose, result) in self.images.take_raw_done() {
+            if let crate::images::RawPurpose::Audio(file) = &purpose {
+                self.audio.loaded(file, result);
+                continue;
+            }
             let bytes = match result {
                 Ok(bytes) => bytes,
                 Err(err) => {
@@ -264,6 +270,7 @@ impl BackspaceApp {
                         });
                     self.bridge.set_info(tr("Стикер сохраняется…").to_owned());
                 }
+                crate::images::RawPurpose::Audio(_) => {}
             }
         }
     }
@@ -514,6 +521,7 @@ impl BackspaceApp {
         }
         self.finish_downloads();
         self.finish_raw(ui.ctx());
+        self.audio.pump(ui.ctx(), &self.images);
         if lost {
             // Кэш и каналы мост уже сбросил сам, когда сессия закрылась.
             self.chat.reset();

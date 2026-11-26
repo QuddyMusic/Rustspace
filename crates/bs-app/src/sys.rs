@@ -75,7 +75,11 @@ fn reveal_linux(path: &std::path::Path) -> Result<(), String> {
     // Для папок в mimeapps.list ничего не назначено (частый случай на
     // тайлинговых оболочках) — xdg-open тогда молча ничего не делает.
     for manager in FILE_MANAGERS {
-        if std::process::Command::new(manager).arg(parent).spawn().is_ok() {
+        if std::process::Command::new(manager)
+            .arg(parent)
+            .spawn()
+            .is_ok()
+        {
             return Ok(());
         }
     }
@@ -86,7 +90,14 @@ fn reveal_linux(path: &std::path::Path) -> Result<(), String> {
 /// знает, чем открывать папки.
 #[cfg(target_os = "linux")]
 const FILE_MANAGERS: [&str; 8] = [
-    "nautilus", "dolphin", "thunar", "nemo", "pcmanfm-qt", "pcmanfm", "caja", "spacefm",
+    "nautilus",
+    "dolphin",
+    "thunar",
+    "nemo",
+    "pcmanfm-qt",
+    "pcmanfm",
+    "caja",
+    "spacefm",
 ];
 
 /// Назначено ли приложение для `inode/directory`.
@@ -99,7 +110,10 @@ fn has_folder_handler() -> bool {
 }
 
 /// `ShowItems` у работающего файлового менеджера.
-#[cfg(all(target_os = "linux", any(feature = "presence", feature = "global-hotkeys")))]
+#[cfg(all(
+    target_os = "linux",
+    any(feature = "presence", feature = "global-hotkeys")
+))]
 fn show_items(path: &std::path::Path) -> bool {
     const NAME: &str = "org.freedesktop.FileManager1";
     let Ok(bus) = zbus::blocking::Connection::session() else {

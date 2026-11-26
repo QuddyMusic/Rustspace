@@ -97,6 +97,9 @@ original server.
   checkout.
 
 ### This iteration
+- **Built-in audio player.** WAV, MP3, FLAC, Ogg Vorbis, Ogg Opus (Telegram voice messages)
+  and AAC/M4A attachments play right in the chat: play/pause, seek bar and time; the web
+  version uses the browser's own `<audio>`.
 - **Screen sharing rebuilt.** Capture now uses libwebrtc's own desktop capturer instead of
   xcap: on Wayland it goes through the ScreenCast portal (the system dialog picks the screen
   or window, so the right one is shared), elsewhere monitors and windows are listed directly.

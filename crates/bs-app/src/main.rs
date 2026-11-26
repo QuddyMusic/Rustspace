@@ -60,6 +60,7 @@ mod markdown;
 mod media;
 mod notify;
 mod offline_mt;
+mod player;
 #[cfg(all(feature = "global-hotkeys", target_os = "linux"))]
 mod portal_keys;
 mod prefs;

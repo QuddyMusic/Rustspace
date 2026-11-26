@@ -273,7 +273,7 @@ cargo run -p bs-tui -- --allow-insecure                # аргументы по
 
 | Флаг | Что добавляет | Что нужно для сборки |
 |---|---|---|
-| `sounds` | звуки интерфейса (rodio) | Linux: `libasound2-dev` |
+| `sounds` | звуки интерфейса и встроенный проигрыватель аудио (rodio/symphonia; Ogg Opus — `opus-decoder` на чистом Rust) | Linux: `libasound2-dev` |
 | `voice` | голос, демонстрация экрана, сцена звонка (включает `sounds`) | clang **21+**, `libclang`, `pkg-config`; Linux: PipeWire, заголовки X11/Wayland; `libwebrtc` скачивается при сборке |
 | `camera` | веб-камера через nokhwa (V4L2, Media Foundation, AVFoundation; включает `voice`) | — |
 | `tray` | значок в трее и сворачивание в него | Linux: `libgtk-3-dev`, `libayatana-appindicator3-dev` |

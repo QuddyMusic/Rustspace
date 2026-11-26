@@ -42,8 +42,9 @@ bins = []
 voice = ["dep:bs-voice", "sounds"]
 # Камера (nokhwa); вместе с голосом.
 camera = ["voice", "bs-voice/camera"]
-# Звуки интерфейса (rodio): нужна библиотека ALSA на Linux (libasound2-dev).
-sounds = ["dep:rodio"]
+# Звуки интерфейса и проигрыватель аудиовложений (rodio, symphonia, Opus):
+# нужна библиотека ALSA на Linux (libasound2-dev).
+sounds = ["dep:rodio", "dep:ogg", "dep:opus-decoder"]
 # Глобальные горячие клавиши (X11, Windows, macOS; под Wayland — только в окне).
 global-hotkeys = ["dep:global-hotkey", "dep:zbus"]
 # Значок в трее и сворачивание в него; на Linux нужны GTK 3 и appindicator.
@@ -58,7 +59,10 @@ desktop = ["global-hotkeys", "tray", "presence"]
 ruzstd = "0.9.1"
 whatlang = "0.18"
 bs-voice = { workspace = true, optional = true }
-rodio = { version = "0.23", default-features = false, features = ["playback", "vorbis"], optional = true }
+rodio = { version = "0.23", default-features = false, features = ["playback", "vorbis", "wav", "mp3", "flac", "mp4"], optional = true }
+# Ogg Opus (голосовые из Telegram и др.): контейнер и декодер на чистом Rust.
+ogg = { version = "0.9", optional = true }
+opus-decoder = { version = "0.1", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 bs-api = { workspace = true }

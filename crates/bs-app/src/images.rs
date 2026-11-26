@@ -191,6 +191,8 @@ pub(crate) enum RawPurpose {
     Copy,
     /// Добавить в личные стикеры под этим именем.
     Sticker(String),
+    /// Проиграть встроенным проигрывателем (имя файла на сервере).
+    Audio(String),
 }
 
 impl ImageHub {
