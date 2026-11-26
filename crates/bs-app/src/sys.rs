@@ -41,7 +41,11 @@ pub(crate) fn open_path(path: &std::path::Path) -> Result<(), String> {
 /// # Errors
 /// Система не смогла показать файл (в браузере файлов на диске нет).
 pub(crate) fn reveal_path(path: &std::path::Path) -> Result<(), String> {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(target_os = "linux")]
+    {
+        reveal_linux(path)
+    }
+    #[cfg(not(any(target_os = "linux", target_arch = "wasm32")))]
     {
         opener::reveal(path).map_err(|err| err.to_string())
     }
@@ -50,6 +54,79 @@ pub(crate) fn reveal_path(path: &std::path::Path) -> Result<(), String> {
         let _ = path;
         Err(crate::i18n::tr("В браузере файл открывается из загрузок браузера").to_owned())
     }
+}
+
+/// Linux: файловый менеджер, который уже запущен и умеет
+/// `org.freedesktop.FileManager1`, выделяет файл; иначе папка открывается
+/// приложением по умолчанию (xdg-open). Вызов FileManager1 «на авось»
+/// (через D-Bus-активацию) на Hyprland и других оболочках без такого
+/// менеджера отвечал успехом, но ничего не показывал.
+#[cfg(target_os = "linux")]
+fn reveal_linux(path: &std::path::Path) -> Result<(), String> {
+    let path = path.canonicalize().map_err(|err| err.to_string())?;
+    #[cfg(any(feature = "presence", feature = "global-hotkeys"))]
+    if show_items(&path) {
+        return Ok(());
+    }
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("/"));
+    if has_folder_handler() {
+        return opener::open(parent).map_err(|err| err.to_string());
+    }
+    // Для папок в mimeapps.list ничего не назначено (частый случай на
+    // тайлинговых оболочках) — xdg-open тогда молча ничего не делает.
+    for manager in FILE_MANAGERS {
+        if std::process::Command::new(manager).arg(parent).spawn().is_ok() {
+            return Ok(());
+        }
+    }
+    opener::open(parent).map_err(|err| err.to_string())
+}
+
+/// Известные файловые менеджеры: пробуем по порядку, если система не
+/// знает, чем открывать папки.
+#[cfg(target_os = "linux")]
+const FILE_MANAGERS: [&str; 8] = [
+    "nautilus", "dolphin", "thunar", "nemo", "pcmanfm-qt", "pcmanfm", "caja", "spacefm",
+];
+
+/// Назначено ли приложение для `inode/directory`.
+#[cfg(target_os = "linux")]
+fn has_folder_handler() -> bool {
+    std::process::Command::new("xdg-mime")
+        .args(["query", "default", "inode/directory"])
+        .output()
+        .is_ok_and(|out| out.status.success() && !out.stdout.trim_ascii().is_empty())
+}
+
+/// `ShowItems` у работающего файлового менеджера.
+#[cfg(all(target_os = "linux", any(feature = "presence", feature = "global-hotkeys")))]
+fn show_items(path: &std::path::Path) -> bool {
+    const NAME: &str = "org.freedesktop.FileManager1";
+    let Ok(bus) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    let Ok(dbus) = zbus::blocking::fdo::DBusProxy::new(&bus) else {
+        return false;
+    };
+    let running = NAME
+        .try_into()
+        .ok()
+        .and_then(|name| dbus.name_has_owner(name).ok())
+        .unwrap_or(false);
+    let Some(uri) = running
+        .then(|| url::Url::from_file_path(path).ok())
+        .flatten()
+    else {
+        return false;
+    };
+    bus.call_method(
+        Some(NAME),
+        "/org/freedesktop/FileManager1",
+        Some(NAME),
+        "ShowItems",
+        &(vec![uri.as_str()], ""),
+    )
+    .is_ok()
 }
 
 /// Сохраняет файл: на десктопе — по пути `dest`, в браузере — обычной
