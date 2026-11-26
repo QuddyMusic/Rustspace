@@ -531,6 +531,17 @@ cannot log in. Files go out as links to the server.
 `TELEGRAM_API_URL` and `DISCORD_API_URL` change the API address (a local Bot API server,
 tests).
 
+**Telegram blocked at the host.** Set a SOCKS5 proxy `TELEGRAM_PROXY=socks5://host:port`
+(`socks5://user:password@host:port` works too; `setup.sh --telegram-proxy URL`): both the channel
+bridge and personal bridges go through it. The proxy has to reach Telegram itself: a container
+next to the server on the same network does not help if its traffic leaves the same way. The
+usual setup is [shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust) (MIT):
+`ssserver` on a VPS abroad, `sslocal` with SOCKS5 in a neighbouring container (`sslocal -b
+0.0.0.0:1080 -s VPS:8388 -m chacha20-ietf-poly1305 -k PASSWORD`), and
+`TELEGRAM_PROXY=socks5://container:1080` in `rustspace.env`. MTProto proxies (`tg://proxy`) do
+not fit: SOCKS5 is needed. If Telegram does not answer within 25 seconds, signing in to a
+personal bridge says so instead of failing with a network error.
+
 ### Personal bridges: your own Matrix and Telegram accounts in DMs
 
 *(bs-server)* Besides channel bridges, anyone can connect **their own** account: in the client,

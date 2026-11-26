@@ -126,6 +126,10 @@ pub struct BridgeConfig {
     pub telegram_api_id: Option<i32>,
     /// `TELEGRAM_API_HASH` к нему.
     pub telegram_api_hash: Option<String>,
+    /// `TELEGRAM_PROXY`: SOCKS5-прокси до Telegram (`socks5://хост:порт`,
+    /// можно с `логин:пароль@`) — для мостов через бота и личных, когда
+    /// Telegram недоступен напрямую.
+    pub telegram_proxy: Option<String>,
 }
 
 impl std::fmt::Debug for BridgeConfig {
@@ -228,6 +232,7 @@ pub fn spawn(state: &AppState) {
         senders.telegram = Some(telegram::start(
             &config.telegram_api,
             token,
+            config.telegram_proxy.as_deref(),
             incoming_tx.clone(),
         ));
     }
@@ -490,11 +495,21 @@ fn asks_id(text: &str) -> bool {
 
 /// HTTP-клиент мостов.
 fn client(timeout: std::time::Duration) -> reqwest::Client {
-    reqwest::Client::builder()
+    proxied_client(timeout, None)
+}
+
+/// HTTP-клиент мостов через прокси (если задан).
+fn proxied_client(timeout: std::time::Duration, proxy: Option<&str>) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder()
         .timeout(timeout)
-        .user_agent(concat!("rustspace-server/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .unwrap_or_default()
+        .user_agent(concat!("rustspace-server/", env!("CARGO_PKG_VERSION")));
+    if let Some(proxy) = proxy {
+        match reqwest::Proxy::all(proxy) {
+            Ok(proxy) => builder = builder.proxy(proxy),
+            Err(err) => tracing::warn!(%err, "прокси моста пропущен"),
+        }
+    }
+    builder.build().unwrap_or_default()
 }
 
 /// Пауза перед новой попыткой: растёт до минуты.
@@ -534,6 +549,13 @@ pub(crate) fn config_from(get: &dyn Fn(&str) -> Option<String>) -> BridgeConfig 
             .and_then(|v| v.parse().ok()),
         telegram_api_hash: non_empty("TELEGRAM_API_HASH")
             .or_else(|| built_in(option_env!("RUSTSPACE_TELEGRAM_API_HASH"))),
+        telegram_proxy: non_empty("TELEGRAM_PROXY").filter(|url| {
+            let ok = url.starts_with("socks5://") || url.starts_with("socks5h://");
+            if !ok {
+                tracing::warn!("TELEGRAM_PROXY пропущен: нужен адрес socks5://хост:порт");
+            }
+            ok
+        }),
     }
 }
 
@@ -616,6 +638,21 @@ mod tests {
         assert!(asks_id("/rustspace_id@my_bot please"));
         assert!(asks_id("!rustspace_id"));
         assert!(!asks_id("what is /rustspace_id"));
+    }
+
+    #[test]
+    fn telegram_proxy_must_be_socks5() {
+        let with = |value: &'static str| {
+            config_from(&move |key| (key == "TELEGRAM_PROXY").then(|| value.to_owned()))
+                .telegram_proxy
+        };
+        assert_eq!(
+            with("socks5://10.0.0.5:1080").as_deref(),
+            Some("socks5://10.0.0.5:1080")
+        );
+        assert!(with("socks5h://user:pass@proxy:1080").is_some());
+        assert!(with("http://proxy:8080").is_none());
+        assert!(with("  ").is_none());
     }
 
     #[test]

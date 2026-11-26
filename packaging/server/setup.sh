@@ -44,6 +44,7 @@ DATA_FROM=""
 DB_CHOICE=""
 EXTERNAL_DB_URL=""
 TELEGRAM_APP=""
+TELEGRAM_PROXY_URL=""
 ASSUME_YES=0
 JOBS=""
 LIVEKIT_VERSION="1.13.11"
@@ -96,7 +97,8 @@ FEDERATION_ALLOW_PRIVATE_PEERS HOST JWT_EXPIRES_IN JWT_SECRET LIVEKIT_API_KEY
 LIVEKIT_API_SECRET LIVEKIT_URL MAX_UPLOAD_SIZE PORT PUBLIC_ORIGIN
 REGISTRATION_OPEN TRUSTED_PROXY_HOPS TUS_EXPIRATION_HOURS UPLOAD_DIR
 TELEGRAM_BOT_TOKEN TELEGRAM_API_URL DISCORD_BOT_TOKEN DISCORD_API_URL
-MATRIX_HOMESERVER MATRIX_ACCESS_TOKEN PERSONAL_BRIDGES TELEGRAM_API_ID TELEGRAM_API_HASH"
+MATRIX_HOMESERVER MATRIX_ACCESS_TOKEN PERSONAL_BRIDGES TELEGRAM_API_ID TELEGRAM_API_HASH
+TELEGRAM_PROXY"
 # Их скрипт задаёт сам.
 MANAGED_VARS="BS_UPDATER_DIR DOMAIN HOST PORT TRUSTED_PROXY_HOPS DB_PATH DATABASE_URL UPLOAD_DIR
 JWT_SECRET LIVEKIT_URL LIVEKIT_API_KEY LIVEKIT_API_SECRET BS_WEB_DIST"
@@ -142,6 +144,8 @@ usage() {
   --no-updater           не ставить помощника обновления из клиента
   --telegram-app ID:HASH ключи приложения Telegram (my.telegram.org) для личных
                          мостов — одни на весь сервер, пользователям свои не нужны
+  --telegram-proxy URL   SOCKS5-прокси до Telegram (socks5://хост:порт), если
+                         Telegram недоступен с сервера напрямую
   -y, --yes              не задавать вопросов
   -h, --help             эта справка
 EOF
@@ -173,6 +177,7 @@ while [ $# -gt 0 ]; do
         --jobs) JOBS="${2:-}"; shift 2 ;;
         --no-updater) WITH_UPDATER=0; shift ;;
         --telegram-app) TELEGRAM_APP="${2:-}"; shift 2 ;;
+        --telegram-proxy) TELEGRAM_PROXY_URL="${2:-}"; shift 2 ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Неизвестный параметр: $1" >&2; usage >&2; exit 2 ;;
@@ -844,6 +849,14 @@ if [ -n "$TELEGRAM_APP" ]; then
     printf '%s' "$tg_hash" | grep -Eq '^[0-9a-fA-F]{32}$' \
         || die "--telegram-app: HASH — 32 шестнадцатеричных символа"
     printf 'TELEGRAM_API_ID=%s\nTELEGRAM_API_HASH=%s\n' "$tg_id" "$tg_hash" >> "$CARRY"
+fi
+
+if [ -n "$TELEGRAM_PROXY_URL" ]; then
+    case "$TELEGRAM_PROXY_URL" in
+        socks5://?*|socks5h://?*) ;;
+        *) die "--telegram-proxy: нужен адрес socks5://хост:порт" ;;
+    esac
+    printf 'TELEGRAM_PROXY=%s\n' "$TELEGRAM_PROXY_URL" >> "$CARRY"
 fi
 
 # Веб-клиент копируется к данным: служба не видит домашние каталоги.

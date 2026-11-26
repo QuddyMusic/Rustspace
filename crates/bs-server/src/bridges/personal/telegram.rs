@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 
 use grammers_client::client::{LoginToken, PasswordToken};
 use grammers_client::peer::Peer;
-use grammers_client::sender::{SenderPool, SenderPoolFatHandle, UpdatesConfiguration};
+use grammers_client::sender::{
+    ConnectionParams, SenderPool, SenderPoolFatHandle, UpdatesConfiguration,
+};
 use grammers_client::update::Update;
 use grammers_client::{Client, SignInError};
 use grammers_session::types::{
@@ -28,6 +30,23 @@ use crate::state::AppState;
 
 /// Незаконченный вход живёт не дольше.
 const LOGIN_TTL: Duration = Duration::from_mins(10);
+/// Сколько ждать ответа Telegram на запрос кода: дольше — значит, сервер до
+/// него не достаёт (блокировка у хостера), и клиент получит понятный ответ,
+/// а не обрыв по сроку.
+const LOGIN_REACH: Duration = Duration::from_secs(25);
+
+/// Telegram не ответил серверу.
+fn unreachable_message(state: &AppState) -> String {
+    if state.config.bridges.telegram_proxy.is_some() {
+        "Telegram не отвечает серверу и через TELEGRAM_PROXY: проверьте, что прокси работает \
+         и сам выходит в Telegram"
+            .to_owned()
+    } else {
+        "Telegram не отвечает серверу — похоже, он заблокирован у хостера. Администратор может \
+         задать SOCKS5-прокси: TELEGRAM_PROXY=socks5://хост:порт в rustspace.env"
+            .to_owned()
+    }
+}
 /// Сколько диалогов показывать при выборе.
 const MAX_DIALOGS: usize = 100;
 /// Сколько своих отправленных сообщений помнить, чтобы не вернуть их эхом.
@@ -212,13 +231,17 @@ struct Connection {
     runner: tokio::task::AbortHandle,
 }
 
-fn connect(api_id: i32, snapshot: Option<Snapshot>) -> Connection {
+fn connect(state: &AppState, api_id: i32, snapshot: Option<Snapshot>) -> Connection {
     let session = Arc::new(DbSession::new(snapshot));
+    let params = ConnectionParams {
+        proxy_url: state.config.bridges.telegram_proxy.clone(),
+        ..ConnectionParams::default()
+    };
     let SenderPool {
         runner,
         handle,
         updates,
-    } = SenderPool::new(Arc::clone(&session), api_id);
+    } = SenderPool::with_configuration(Arc::clone(&session), api_id, params);
     let client = Client::new(handle.clone());
     let runner = tokio::spawn(runner.run()).abort_handle();
     Connection {
@@ -360,7 +383,7 @@ fn app_keys(state: &AppState, secret: &Value) -> Result<(i32, String), String> {
 pub async fn resume(state: &AppState, account: &str, secret: &Value) -> Result<Account, String> {
     let (api_id, _) = app_keys(state, secret)?;
     let snapshot: Option<Snapshot> = serde_json::from_value(secret["session"].clone()).ok();
-    let mut connection = connect(api_id, snapshot);
+    let mut connection = connect(state, api_id, snapshot);
     if !connection
         .client
         .is_authorized()
@@ -544,12 +567,21 @@ pub async fn start_login(
     if phone.len() < 6 {
         return Err("неверный номер телефона".to_owned());
     }
-    let connection = connect(api_id, None);
-    let token = match connection.client.request_login_code(&phone, &hash).await {
-        Ok(token) => token,
-        Err(err) => {
+    let connection = connect(state, api_id, None);
+    let asked = tokio::time::timeout(
+        LOGIN_REACH,
+        connection.client.request_login_code(&phone, &hash),
+    )
+    .await;
+    let token = match asked {
+        Ok(Ok(token)) => token,
+        Ok(Err(err)) => {
             connection.close();
             return Err(explain(&err.to_string()));
+        }
+        Err(_) => {
+            connection.close();
+            return Err(unreachable_message(state));
         }
     };
     let id = uuid::Uuid::new_v4().to_string();

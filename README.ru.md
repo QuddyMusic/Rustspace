@@ -538,6 +538,16 @@ Matrix: сообщения канала уходят туда, а оттуда �
 
 `TELEGRAM_API_URL` и `DISCORD_API_URL` меняют адрес API (свой Bot API сервер, тесты).
 
+**Telegram заблокирован у хостера.** Задайте SOCKS5-прокси `TELEGRAM_PROXY=socks5://хост:порт`
+(можно `socks5://логин:пароль@хост:порт`; `setup.sh --telegram-proxy URL`) — через него
+ходят и мост канала, и личные мосты. Прокси должен сам выходить в Telegram: контейнер рядом с
+сервером в той же сети не поможет, если трафик из него идёт тем же путём. Обычная схема —
+[shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust) (MIT): `ssserver` на VPS за
+границей, `sslocal` с SOCKS5 в соседнем контейнере (`sslocal -b 0.0.0.0:1080 -s VPS:8388 -m
+chacha20-ietf-poly1305 -k ПАРОЛЬ`), а в `rustspace.env` — `TELEGRAM_PROXY=socks5://контейнер:1080`.
+MTProto-прокси (`tg://proxy`) не подходят: нужен SOCKS5. Если Telegram не ответил за 25 секунд,
+вход в личный мост сообщает об этом, а не обрывается сетевой ошибкой.
+
 ### Личные мосты: свои аккаунты Matrix и Telegram в ЛС
 
 *(bs-server)* Кроме мостов каналов, каждый может подключить **свой** аккаунт: в клиенте

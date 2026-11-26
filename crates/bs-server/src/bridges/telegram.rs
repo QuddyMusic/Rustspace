@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use super::{Incoming, Kind, Outgoing, asks_id, backoff, client, id_reply};
+use super::{Incoming, Kind, Outgoing, asks_id, backoff, id_reply, proxied_client};
 
 /// Отправка в Telegram.
 #[derive(Clone)]
@@ -62,9 +62,14 @@ impl Sender {
 }
 
 /// Запускает опрос и возвращает отправителя.
-pub(super) fn start(api: &str, token: String, incoming: mpsc::UnboundedSender<Incoming>) -> Sender {
+pub(super) fn start(
+    api: &str,
+    token: String,
+    proxy: Option<&str>,
+    incoming: mpsc::UnboundedSender<Incoming>,
+) -> Sender {
     let sender = Sender {
-        http: client(Duration::from_secs(70)),
+        http: proxied_client(Duration::from_secs(70), proxy),
         base: format!("{api}/bot{token}"),
     };
     let poller = sender.clone();
