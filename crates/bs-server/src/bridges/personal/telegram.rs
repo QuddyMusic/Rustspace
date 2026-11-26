@@ -43,10 +43,12 @@ fn unreachable_message(state: &AppState) -> String {
             .to_owned()
     } else {
         "Telegram не отвечает серверу — похоже, он заблокирован у хостера. Администратор может \
-         задать SOCKS5-прокси: TELEGRAM_PROXY=socks5://хост:порт в rustspace.env"
+         задать прокси в rustspace.env: TELEGRAM_PROXY=tg://proxy?… (MTProto, например \
+         tg-ws-proxy на роутере) или socks5://хост:порт"
             .to_owned()
     }
 }
+
 /// Сколько диалогов показывать при выборе.
 const MAX_DIALOGS: usize = 100;
 /// Сколько своих отправленных сообщений помнить, чтобы не вернуть их эхом.
@@ -109,6 +111,7 @@ impl DbSession {
                 updates: UpdatesState::default(),
             },
         };
+        super::mtproxy::remember_defaults(&data.dc_options.values().cloned().collect::<Vec<_>>());
         Self {
             data: Mutex::new(data),
             dirty: AtomicBool::new(false),
@@ -163,6 +166,7 @@ impl Session for DbSession {
     fn set_dc_option(&self, dc_option: &DcOption) -> BoxFuture<'_, Result<(), Infallible>> {
         let dc_option = dc_option.clone();
         Box::pin(async move {
+            super::mtproxy::remember_defaults(std::slice::from_ref(&dc_option));
             self.data().dc_options.insert(dc_option.id, dc_option);
             self.touch();
             Ok(())
@@ -231,12 +235,27 @@ struct Connection {
     runner: tokio::task::AbortHandle,
 }
 
-fn connect(state: &AppState, api_id: i32, snapshot: Option<Snapshot>) -> Connection {
+async fn connect(state: &AppState, api_id: i32, snapshot: Option<Snapshot>) -> Connection {
     let session = Arc::new(DbSession::new(snapshot));
-    let params = ConnectionParams {
-        proxy_url: state.config.bridges.telegram_proxy.clone(),
-        ..ConnectionParams::default()
-    };
+    let raw = state.config.bridges.telegram_proxy.as_deref();
+    let mut params = ConnectionParams::default();
+    if let Some(proxy) = super::mtproxy::configured(raw) {
+        // MTProto-прокси: grammers идёт через свой SOCKS5 на 127.0.0.1,
+        // транспортом Intermediate, который прокси и ждёт.
+        match super::mtproxy::local_socks(proxy).await {
+            Ok(url) => {
+                params.proxy_url = Some(url);
+                params.transport =
+                    Box::new(|| Box::new(grammers_mtproto::transport::Intermediate::new()));
+            }
+            Err(err) => tracing::warn!(%err, "SOCKS5 для MTProto-прокси не поднялся"),
+        }
+    } else if let Some(url) = raw {
+        // SOCKS5: тоже Intermediate — SOCKS-вход tg-ws-proxy, например,
+        // транспорт Full не принимает.
+        params.proxy_url = Some(url.to_owned());
+        params.transport = Box::new(|| Box::new(grammers_mtproto::transport::Intermediate::new()));
+    }
     let SenderPool {
         runner,
         handle,
@@ -383,7 +402,7 @@ fn app_keys(state: &AppState, secret: &Value) -> Result<(i32, String), String> {
 pub async fn resume(state: &AppState, account: &str, secret: &Value) -> Result<Account, String> {
     let (api_id, _) = app_keys(state, secret)?;
     let snapshot: Option<Snapshot> = serde_json::from_value(secret["session"].clone()).ok();
-    let mut connection = connect(state, api_id, snapshot);
+    let mut connection = connect(state, api_id, snapshot).await;
     if !connection
         .client
         .is_authorized()
@@ -567,7 +586,7 @@ pub async fn start_login(
     if phone.len() < 6 {
         return Err("неверный номер телефона".to_owned());
     }
-    let connection = connect(state, api_id, None);
+    let connection = connect(state, api_id, None).await;
     let asked = tokio::time::timeout(
         LOGIN_REACH,
         connection.client.request_login_code(&phone, &hash),

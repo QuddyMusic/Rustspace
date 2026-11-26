@@ -126,9 +126,10 @@ pub struct BridgeConfig {
     pub telegram_api_id: Option<i32>,
     /// `TELEGRAM_API_HASH` к нему.
     pub telegram_api_hash: Option<String>,
-    /// `TELEGRAM_PROXY`: SOCKS5-прокси до Telegram (`socks5://хост:порт`,
-    /// можно с `логин:пароль@`) — для мостов через бота и личных, когда
-    /// Telegram недоступен напрямую.
+    /// `TELEGRAM_PROXY`: прокси до Telegram, когда он недоступен напрямую.
+    /// SOCKS5 (`socks5://хост:порт`, можно с `логин:пароль@`) — для моста
+    /// через бота и личных; MTProto-прокси (`tg://proxy?…`, например
+    /// tg-ws-proxy на роутере) — только для личных.
     pub telegram_proxy: Option<String>,
 }
 
@@ -232,7 +233,8 @@ pub fn spawn(state: &AppState) {
         senders.telegram = Some(telegram::start(
             &config.telegram_api,
             token,
-            config.telegram_proxy.as_deref(),
+            // Bot API — это HTTPS: через MTProto-прокси он не ходит.
+            config.telegram_proxy.as_deref().filter(|url| is_socks(url)),
             incoming_tx.clone(),
         ));
     }
@@ -498,6 +500,11 @@ fn client(timeout: std::time::Duration) -> reqwest::Client {
     proxied_client(timeout, None)
 }
 
+/// SOCKS5-прокси (а не ссылка на MTProto-прокси).
+fn is_socks(url: &str) -> bool {
+    url.starts_with("socks5://") || url.starts_with("socks5h://")
+}
+
 /// HTTP-клиент мостов через прокси (если задан).
 fn proxied_client(timeout: std::time::Duration, proxy: Option<&str>) -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
@@ -550,9 +557,11 @@ pub(crate) fn config_from(get: &dyn Fn(&str) -> Option<String>) -> BridgeConfig 
         telegram_api_hash: non_empty("TELEGRAM_API_HASH")
             .or_else(|| built_in(option_env!("RUSTSPACE_TELEGRAM_API_HASH"))),
         telegram_proxy: non_empty("TELEGRAM_PROXY").filter(|url| {
-            let ok = url.starts_with("socks5://") || url.starts_with("socks5h://");
+            let ok = is_socks(url) || personal::mtproxy::MtProxy::parse(url).is_some();
             if !ok {
-                tracing::warn!("TELEGRAM_PROXY пропущен: нужен адрес socks5://хост:порт");
+                tracing::warn!(
+                    "TELEGRAM_PROXY пропущен: нужен socks5://хост:порт или ссылка tg://proxy?…"
+                );
             }
             ok
         }),
@@ -652,6 +661,12 @@ mod tests {
         );
         assert!(with("socks5h://user:pass@proxy:1080").is_some());
         assert!(with("http://proxy:8080").is_none());
+        assert!(
+            with(
+                "tg://proxy?server=192.168.1.1&port=1443&secret=dd0123456789abcdef0123456789abcdef"
+            )
+            .is_some()
+        );
         assert!(with("  ").is_none());
     }
 

@@ -58,6 +58,11 @@ tokio-tungstenite = { workspace = true }
 # Личные мосты в Telegram: клиент MTProto на чистом Rust (grammers,
 # MIT/Apache-2.0, Lonami и участники). Хранилище сессии — своё, в базе.
 grammers-client = { version = "0.12", default-features = false, features = ["proxy"] }
+# Транспорт Intermediate и шифр obfuscated2 — для MTProto-прокси
+# (те же версии, что у grammers).
+grammers-mtproto = { version = "0.12", default-features = false }
+aes = "0.9"
+ctr = "0.10"
 grammers-session = { version = "0.12", default-features = false, features = ["serde"] }
 
 [dev-dependencies]

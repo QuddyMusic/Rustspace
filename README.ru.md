@@ -538,15 +538,25 @@ Matrix: сообщения канала уходят туда, а оттуда �
 
 `TELEGRAM_API_URL` и `DISCORD_API_URL` меняют адрес API (свой Bot API сервер, тесты).
 
-**Telegram заблокирован у хостера.** Задайте SOCKS5-прокси `TELEGRAM_PROXY=socks5://хост:порт`
-(можно `socks5://логин:пароль@хост:порт`; `setup.sh --telegram-proxy URL`) — через него
-ходят и мост канала, и личные мосты. Прокси должен сам выходить в Telegram: контейнер рядом с
-сервером в той же сети не поможет, если трафик из него идёт тем же путём. Обычная схема —
-[shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust) (MIT): `ssserver` на VPS за
-границей, `sslocal` с SOCKS5 в соседнем контейнере (`sslocal -b 0.0.0.0:1080 -s VPS:8388 -m
-chacha20-ietf-poly1305 -k ПАРОЛЬ`), а в `rustspace.env` — `TELEGRAM_PROXY=socks5://контейнер:1080`.
-MTProto-прокси (`tg://proxy`) не подходят: нужен SOCKS5. Если Telegram не ответил за 25 секунд,
-вход в личный мост сообщает об этом, а не обрывается сетевой ошибкой.
+**Telegram заблокирован у хостера.** Задайте прокси в `TELEGRAM_PROXY` (или
+`setup.sh --telegram-proxy URL`):
+
+- **MTProto-прокси в локальной сети**, например
+  [tg-ws-proxy-rs](https://github.com/valnesfjord/tg-ws-proxy-rs) (MIT) на роутере, который ведёт
+  Telegram через WebSocket: вставьте ссылку, которую он печатает при запуске, —
+  `TELEGRAM_PROXY='tg://proxy?server=192.168.1.1&port=1443&secret=dd…'` (подходят и
+  `https://t.me/proxy?…`). Мост поднимает у себя крошечный SOCKS5 на 127.0.0.1 и говорит с
+  прокси по протоколу obfuscated2 с его секретом. Секреты fake-TLS (`ee…`) не поддерживаются.
+  Работает для личных мостов: Bot API — это HTTPS, через MTProto-прокси он не ходит.
+- **SOCKS5** `socks5://хост:порт` (можно `socks5://логин:пароль@хост:порт`) — и для моста через
+  бота, и для личных. У tg-ws-proxy есть и такой вход: `--socks-enabled --socks-host 0.0.0.0`,
+  тогда `TELEGRAM_PROXY=socks5://роутер:1080`, но Bot API через него не пойдёт (он только для
+  MTProto). Для бота нужен обычный SOCKS5 с выходом наружу — например,
+  [shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust): `ssserver` на VPS за
+  границей и `sslocal -b 0.0.0.0:1080 …` в соседнем контейнере.
+
+Если Telegram не ответил за 25 секунд, вход в личный мост сообщает об этом, а не обрывается
+сетевой ошибкой.
 
 ### Личные мосты: свои аккаунты Matrix и Telegram в ЛС
 

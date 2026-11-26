@@ -13,6 +13,7 @@
 //! личным аккаунтом нарушает его правила.
 
 pub mod matrix;
+pub mod mtproxy;
 pub mod telegram;
 
 use std::collections::HashMap;

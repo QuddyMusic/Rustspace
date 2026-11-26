@@ -144,8 +144,10 @@ usage() {
   --no-updater           не ставить помощника обновления из клиента
   --telegram-app ID:HASH ключи приложения Telegram (my.telegram.org) для личных
                          мостов — одни на весь сервер, пользователям свои не нужны
-  --telegram-proxy URL   SOCKS5-прокси до Telegram (socks5://хост:порт), если
-                         Telegram недоступен с сервера напрямую
+  --telegram-proxy URL   прокси до Telegram, если с сервера он недоступен:
+                         ссылка MTProto-прокси 'tg://proxy?server=…&port=…&secret=…'
+                         (например, tg-ws-proxy на роутере; только личные
+                         мосты) или socks5://хост:порт (и мост через бота)
   -y, --yes              не задавать вопросов
   -h, --help             эта справка
 EOF
@@ -853,8 +855,8 @@ fi
 
 if [ -n "$TELEGRAM_PROXY_URL" ]; then
     case "$TELEGRAM_PROXY_URL" in
-        socks5://?*|socks5h://?*) ;;
-        *) die "--telegram-proxy: нужен адрес socks5://хост:порт" ;;
+        socks5://?*|socks5h://?*|tg://proxy?*|https://t.me/proxy?*|mtproto://?*) ;;
+        *) die "--telegram-proxy: нужен socks5://хост:порт или ссылка tg://proxy?…" ;;
     esac
     printf 'TELEGRAM_PROXY=%s\n' "$TELEGRAM_PROXY_URL" >> "$CARRY"
 fi

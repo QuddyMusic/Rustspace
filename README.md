@@ -531,16 +531,25 @@ cannot log in. Files go out as links to the server.
 `TELEGRAM_API_URL` and `DISCORD_API_URL` change the API address (a local Bot API server,
 tests).
 
-**Telegram blocked at the host.** Set a SOCKS5 proxy `TELEGRAM_PROXY=socks5://host:port`
-(`socks5://user:password@host:port` works too; `setup.sh --telegram-proxy URL`): both the channel
-bridge and personal bridges go through it. The proxy has to reach Telegram itself: a container
-next to the server on the same network does not help if its traffic leaves the same way. The
-usual setup is [shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust) (MIT):
-`ssserver` on a VPS abroad, `sslocal` with SOCKS5 in a neighbouring container (`sslocal -b
-0.0.0.0:1080 -s VPS:8388 -m chacha20-ietf-poly1305 -k PASSWORD`), and
-`TELEGRAM_PROXY=socks5://container:1080` in `rustspace.env`. MTProto proxies (`tg://proxy`) do
-not fit: SOCKS5 is needed. If Telegram does not answer within 25 seconds, signing in to a
-personal bridge says so instead of failing with a network error.
+**Telegram blocked at the host.** Set a proxy in `TELEGRAM_PROXY` (or
+`setup.sh --telegram-proxy URL`):
+
+- **An MTProto proxy on the local network**, for example
+  [tg-ws-proxy-rs](https://github.com/valnesfjord/tg-ws-proxy-rs) (MIT) on a router, which carries
+  Telegram over WebSocket: paste the link it prints at startup —
+  `TELEGRAM_PROXY='tg://proxy?server=192.168.1.1&port=1443&secret=dd…'` (`https://t.me/proxy?…`
+  works too). The bridge runs a tiny SOCKS5 on 127.0.0.1 and talks obfuscated2 with the proxy's
+  secret. Fake-TLS secrets (`ee…`) are not supported. This covers personal bridges: the Bot API
+  is HTTPS and does not go through an MTProto proxy.
+- **SOCKS5** `socks5://host:port` (`socks5://user:password@host:port` works too) — for the bot
+  bridge and personal bridges. tg-ws-proxy has such an input as well (`--socks-enabled
+  --socks-host 0.0.0.0`, then `TELEGRAM_PROXY=socks5://router:1080`), but it only carries
+  MTProto, not the Bot API. For the bot you need an ordinary SOCKS5 with a way out — for
+  example [shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust): `ssserver` on a
+  VPS abroad and `sslocal -b 0.0.0.0:1080 …` in a neighbouring container.
+
+If Telegram does not answer within 25 seconds, signing in to a personal bridge says so instead
+of failing with a network error.
 
 ### Personal bridges: your own Matrix and Telegram accounts in DMs
 

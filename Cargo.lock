@@ -1116,14 +1116,17 @@ dependencies = [
 name = "bs-server"
 version = "0.3.0"
 dependencies = [
+ "aes 0.9.4",
  "axum",
  "base64 0.22.1",
  "bcrypt",
  "bs-bot",
  "bs-permissions",
  "chacha20poly1305",
+ "ctr",
  "futures-util",
  "grammers-client",
+ "grammers-mtproto",
  "grammers-session",
  "hex",
  "hkdf",
