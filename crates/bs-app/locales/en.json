@@ -1860,5 +1860,11 @@
   "браузер не дал микрофон": "the browser did not give access to the microphone",
   "нет окна браузера": "no browser window",
   "Код на странице в браузере должен быть таким:": "The code on the browser page should be:",
-  "Это не код двухфакторной аутентификации: он только связывает окно с этой страницей.": "This is not a two-factor code: it only links this window to that page."
+  "Это не код двухфакторной аутентификации: он только связывает окно с этой страницей.": "This is not a two-factor code: it only links this window to that page.",
+  "Группы": "Groups",
+  "Каналы": "Channels",
+  "канал": "channel",
+  "бот": "bot",
+  "Имя, название или @имя": "Name, title or @username",
+  "Ничего не нашлось": "Nothing found"
 }

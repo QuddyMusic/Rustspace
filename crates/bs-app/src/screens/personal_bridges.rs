@@ -63,6 +63,8 @@ pub(crate) struct PersonalUi {
     /// Аккаунт, у которого открыт выбор чатов.
     picking: Option<String>,
     filter: String,
+    /// Какие чаты показывать в выборе.
+    kind: ChatKind,
     confirm_remove: Option<String>,
     /// Ждём ответа на подключение Matrix: форма закроется при успехе.
     matrix_pending: bool,
@@ -303,6 +305,7 @@ fn account_card(
                     } else {
                         state.picking = Some(account.id.clone());
                         state.filter.clear();
+                        state.kind = ChatKind::All;
                         state.chats.insert(account.id.clone(), Chats::Loading);
                         send(bridge, PersonalOp::RemoteChats(account.id.clone()));
                     }
@@ -345,6 +348,76 @@ fn account_card(
     });
 }
 
+/// Разбивка чатов в выборе.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum ChatKind {
+    #[default]
+    All,
+    People,
+    Groups,
+    Channels,
+    Bots,
+}
+
+impl ChatKind {
+    const ALL: [Self; 5] = [
+        Self::All,
+        Self::People,
+        Self::Groups,
+        Self::Channels,
+        Self::Bots,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => tr("Все"),
+            Self::People => tr("Люди"),
+            Self::Groups => tr("Группы"),
+            Self::Channels => tr("Каналы"),
+            Self::Bots => tr("Боты"),
+        }
+    }
+
+    /// Вид чата; старые серверы присылают только «группа или нет».
+    fn of(chat: &RemoteChat) -> Self {
+        match chat.kind.as_str() {
+            "person" => Self::People,
+            "bot" => Self::Bots,
+            "group" => Self::Groups,
+            "channel" => Self::Channels,
+            _ if chat.group => Self::Groups,
+            _ => Self::People,
+        }
+    }
+
+    fn holds(self, chat: &RemoteChat) -> bool {
+        self == Self::All || Self::of(chat) == self
+    }
+
+    /// Подпись у чата в общем списке.
+    fn badge(self) -> Option<&'static str> {
+        match self {
+            Self::All | Self::People => None,
+            Self::Groups => Some(tr("группа")),
+            Self::Channels => Some(tr("канал")),
+            Self::Bots => Some(tr("бот")),
+        }
+    }
+}
+
+/// Чат подходит под поиск: по названию или @имени, без учёта регистра и
+/// «ё».
+fn matches(chat: &RemoteChat, needle: &str) -> bool {
+    let norm = |text: &str| text.to_lowercase().replace('ё', "е");
+    let needle = norm(needle.trim().trim_start_matches('@'));
+    needle.is_empty()
+        || norm(&chat.title).contains(&needle)
+        || chat
+            .username
+            .as_deref()
+            .is_some_and(|name| norm(name).contains(&needle))
+}
+
 fn chat_picker(ui: &mut egui::Ui, state: &mut PersonalUi, bridge: &Bridge, account: &str) {
     widgets::section_label(ui, tr("Чаты аккаунта"));
     let chats = match state.chats.get(account) {
@@ -361,21 +434,41 @@ fn chat_picker(ui: &mut egui::Ui, state: &mut PersonalUi, bridge: &Bridge, accou
         }
         Some(Chats::Ready(chats)) => chats.clone(),
     };
-    widgets::search_box(ui, &mut state.filter, tr("Найти чат"));
-    let needle = state.filter.trim().to_lowercase();
+    widgets::search_box(ui, &mut state.filter, tr("Имя, название или @имя"));
+    ui.horizontal_wrapped(|ui| {
+        for kind in ChatKind::ALL {
+            let count = chats.iter().filter(|c| kind.holds(c)).count();
+            if kind != ChatKind::All && count == 0 {
+                continue;
+            }
+            let label = format!("{} {count}", kind.label());
+            if widgets::pill_tab(ui, &label, state.kind == kind).clicked() {
+                state.kind = kind;
+            }
+        }
+    });
+    let shown: Vec<&RemoteChat> = chats
+        .iter()
+        .filter(|c| state.kind.holds(c) && matches(c, &state.filter))
+        .collect();
+    if shown.is_empty() {
+        ui.label(theme::muted(tr("Ничего не нашлось")));
+    }
     let mut link = None;
     egui::ScrollArea::vertical()
         .id_salt(("personal_chats", account))
-        .max_height(280.0)
+        .max_height(360.0)
         .show(ui, |ui| {
-            for chat in chats
-                .iter()
-                .filter(|c| needle.is_empty() || c.title.to_lowercase().contains(&needle))
-            {
+            for chat in shown {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(&chat.title).color(theme::text()));
-                    if chat.group {
-                        ui.label(theme::muted(tr("группа")).size(11.5));
+                    if let Some(name) = chat.username.as_deref() {
+                        ui.label(theme::muted(format!("@{name}")).size(11.5));
+                    }
+                    if state.kind == ChatKind::All
+                        && let Some(badge) = ChatKind::of(chat).badge()
+                    {
+                        ui.label(theme::muted(badge).size(11.5));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if chat.linked {

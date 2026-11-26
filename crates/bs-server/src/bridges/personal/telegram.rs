@@ -50,7 +50,7 @@ fn unreachable_message(state: &AppState) -> String {
 }
 
 /// Сколько диалогов показывать при выборе.
-const MAX_DIALOGS: usize = 100;
+const MAX_DIALOGS: usize = 1000;
 /// Сколько своих отправленных сообщений помнить, чтобы не вернуть их эхом.
 const SENT_MEMORY: usize = 200;
 
@@ -335,10 +335,18 @@ impl Account {
             let Some(id) = peer.id().bot_api_dialog_id() else {
                 continue;
             };
+            let kind = match peer {
+                Peer::User(user) if user.is_bot() => "bot",
+                Peer::User(_) => "person",
+                Peer::Group(_) | Peer::Community(_) => "group",
+                Peer::Channel(_) => "channel",
+            };
             out.push(RemoteChat {
                 id: id.to_string(),
                 title: peer_name(peer),
                 group: !matches!(peer, Peer::User(_)),
+                kind,
+                username: peer.username().map(str::to_owned),
             });
         }
         Ok(out)

@@ -123,6 +123,8 @@ impl Account {
                 id: room.to_owned(),
                 title,
                 group: others.len() > 1,
+                kind: if others.len() > 1 { "group" } else { "person" },
+                username: None,
             });
         }
         Ok(out)

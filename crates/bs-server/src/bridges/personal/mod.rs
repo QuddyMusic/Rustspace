@@ -60,6 +60,11 @@ pub(crate) struct RemoteChat {
     pub(crate) title: String,
     /// Групповой чат: тогда к тексту добавляется имя автора.
     pub(crate) group: bool,
+    /// Что это: `person`, `bot`, `group` или `channel` — для разбивки в
+    /// выборе чатов.
+    pub(crate) kind: &'static str,
+    /// Имя пользователя или чата (`@…`), если есть — для поиска.
+    pub(crate) username: Option<String>,
 }
 
 /// Работающее подключение.
@@ -468,6 +473,8 @@ pub(crate) async fn remote_chats(state: &AppState, user: &str, id: &str) -> ApiR
                 "id": chat.id,
                 "title": chat.title,
                 "group": chat.group,
+                "kind": chat.kind,
+                "username": chat.username,
                 "linked": linked.contains(&chat.id),
             })
         })

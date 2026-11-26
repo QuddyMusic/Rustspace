@@ -93,6 +93,12 @@ pub struct RemoteChat {
     /// Групповой.
     #[serde(default)]
     pub group: bool,
+    /// `person`, `bot`, `group` или `channel` (старые серверы не присылают).
+    #[serde(default)]
+    pub kind: String,
+    /// `@имя`, если есть.
+    #[serde(default)]
+    pub username: Option<String>,
     /// Уже связан.
     #[serde(default)]
     pub linked: bool,
