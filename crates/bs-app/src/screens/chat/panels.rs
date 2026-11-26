@@ -1211,6 +1211,11 @@ impl ChatScreen {
         if !crate::bridge::e2ee::is_direct(dm) {
             return;
         }
+        // Переписка с чатом личного моста: шифровать некому, а сервер и так
+        // пересылает её в Telegram или Matrix.
+        if dm.members.iter().any(|m| is_bridge_puppet(&m.username)) {
+            return;
+        }
         let me = bridge.cache_at(selected.origin).map(|c| c.me().id.clone());
         let remote = dm
             .members
@@ -1364,6 +1369,16 @@ fn user_bar_buttons(ui: &mut egui::Ui, muted: bool, deafened: bool, nav: &mut Op
     }
 }
 
+/// Служебный пользователь моста («Анна · Telegram»): имя вида `tg_p…`,
+/// `mx_p…`, `dc_p…` и цифры.
+pub(crate) fn is_bridge_puppet(username: &str) -> bool {
+    ["tg_p", "mx_p", "dc_p"].iter().any(|prefix| {
+        username
+            .strip_prefix(prefix)
+            .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+    })
+}
+
 /// Текст предупреждения о незашифрованной переписке; `None` — шифрование
 /// включено и предупреждать не о чем.
 fn plaintext_notice(
@@ -1392,6 +1407,15 @@ fn plaintext_notice(
 mod plaintext_tests {
     use super::plaintext_notice;
     use crate::bridge::e2ee::ChatStatus;
+
+    #[test]
+    fn bridge_puppets_are_recognized() {
+        assert!(super::is_bridge_puppet("tg_p384264417637748736"));
+        assert!(super::is_bridge_puppet("mx_p1"));
+        assert!(!super::is_bridge_puppet("tg_p"));
+        assert!(!super::is_bridge_puppet("tg_pavel"));
+        assert!(!super::is_bridge_puppet("quddy"));
+    }
 
     #[test]
     fn notice_only_while_unencrypted() {

@@ -401,6 +401,10 @@ fn parse(account: &str, room: &str, event: &Value, me: &str) -> Option<Remote> {
         sender: local_part(sender),
         text,
         mine,
+        id: None,
+        date: None,
+        files: Vec::new(),
+        reply_to: None,
     })
 }
 

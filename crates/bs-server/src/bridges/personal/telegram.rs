@@ -24,7 +24,13 @@ use grammers_session::types::{
 use grammers_session::{BoxFuture, Session, SessionData};
 use serde_json::{Value, json};
 
-use super::{Remote, RemoteChat, deliver, save_secret, set_error};
+use grammers_client::media::Media;
+use grammers_client::message::{InputMessage, InputReactions, Message};
+use grammers_client::tl;
+
+use super::{
+    Outgoing, Remote, RemoteChat, RemoteFile, RemoteProfile, deliver, save_secret, set_error,
+};
 use crate::bridges::backoff;
 use crate::state::AppState;
 
@@ -48,6 +54,9 @@ fn unreachable_message(state: &AppState) -> String {
             .to_owned()
     }
 }
+
+/// Файлы больше не скачиваются из Telegram.
+const MAX_FILE: usize = 50 * 1024 * 1024;
 
 /// Сколько диалогов показывать при выборе.
 const MAX_DIALOGS: usize = 1000;
@@ -304,24 +313,182 @@ impl std::fmt::Debug for PendingLogin {
 }
 
 impl Account {
-    pub(super) async fn send(&self, chat: &str, text: &str) -> Result<(), String> {
+    /// Чат по его id в формате Bot API.
+    async fn peer(&self, chat: &str) -> Result<grammers_session::types::PeerRef, String> {
         let id = chat
             .parse::<i64>()
             .ok()
             .and_then(PeerId::from_bot_api_dialog_id)
             .ok_or_else(|| "неверный чат".to_owned())?;
-        let peer = self
-            .session
+        self.session
             .peer_ref(id)
             .await
             .ok()
             .flatten()
-            .ok_or_else(|| "чат неизвестен сессии: откройте список чатов ещё раз".to_owned())?;
-        remember(&self.sent, chat, text);
-        Box::pin(self.client.send_message(peer, text))
+            .ok_or_else(|| "чат неизвестен сессии: откройте список чатов ещё раз".to_owned())
+    }
+
+    /// Отправляет текст и файлы (первый — с подписью и ответом). Номер
+    /// первого отправленного сообщения.
+    pub(super) async fn send_full(
+        &self,
+        chat: &str,
+        message: &Outgoing,
+    ) -> Result<Option<String>, String> {
+        let peer = self.peer(chat).await?;
+        let reply = message
+            .reply_to
+            .as_deref()
+            .and_then(|id| id.parse::<i32>().ok());
+        if message.files.is_empty() {
+            remember(&self.sent, chat, &message.text);
+            let input = InputMessage::new()
+                .text(message.text.as_str())
+                .reply_to(reply);
+            let sent = Box::pin(self.client.send_message(peer, input))
+                .await
+                .map_err(|err| err.to_string())?;
+            return Ok(Some(sent.id().to_string()));
+        }
+        let mut first = None;
+        for (index, (name, path, mime)) in message.files.iter().enumerate() {
+            let caption = if index == 0 {
+                message.text.as_str()
+            } else {
+                ""
+            };
+            let mut file = tokio::fs::File::open(path)
+                .await
+                .map_err(|err| err.to_string())?;
+            let size = file.metadata().await.map_err(|err| err.to_string())?.len();
+            let uploaded = self
+                .client
+                .upload_stream(
+                    &mut file,
+                    usize::try_from(size).unwrap_or(usize::MAX),
+                    name.clone(),
+                )
+                .await
+                .map_err(|err| err.to_string())?;
+            let mut input = InputMessage::new().text(caption);
+            if index == 0 {
+                input = input.reply_to(reply);
+            }
+            input = if matches!(mime.as_str(), "image/jpeg" | "image/png") {
+                input.photo(uploaded)
+            } else {
+                input.document(uploaded).mime_type(mime)
+            };
+            remember(&self.sent, chat, caption);
+            let sent = Box::pin(self.client.send_message(peer, input))
+                .await
+                .map_err(|err| err.to_string())?;
+            first.get_or_insert_with(|| sent.id().to_string());
+        }
+        Ok(first)
+    }
+
+    /// Своя реакция (`None` — снять).
+    pub(super) async fn react(
+        &self,
+        chat: &str,
+        remote_id: &str,
+        emoji: Option<&str>,
+    ) -> Result<(), String> {
+        let peer = self.peer(chat).await?;
+        let id = remote_id.parse::<i32>().map_err(|err| err.to_string())?;
+        let reactions = emoji.map_or_else(InputReactions::remove, InputReactions::emoticon);
+        self.client
+            .send_reactions(peer, id, reactions)
+            .await
+            .map_err(|err| err.to_string())
+    }
+
+    pub(super) async fn edit(&self, chat: &str, remote_id: &str, text: &str) -> Result<(), String> {
+        let peer = self.peer(chat).await?;
+        let id = remote_id.parse::<i32>().map_err(|err| err.to_string())?;
+        Box::pin(
+            self.client
+                .edit_message(peer, id, InputMessage::new().text(text)),
+        )
+        .await
+        .map_err(|err| err.to_string())
+    }
+
+    pub(super) async fn delete(&self, chat: &str, remote_id: &str) -> Result<(), String> {
+        let peer = self.peer(chat).await?;
+        let id = remote_id.parse::<i32>().map_err(|err| err.to_string())?;
+        self.client
+            .delete_messages(peer, &[id])
             .await
             .map(drop)
             .map_err(|err| err.to_string())
+    }
+
+    /// Последние сообщения чата, от старых к новым.
+    pub(super) async fn history(&self, account: &str, chat: &str, limit: usize) -> Vec<Remote> {
+        let Ok(peer) = self.peer(chat).await else {
+            return Vec::new();
+        };
+        let mut messages = self.client.iter_messages(peer).limit(limit);
+        let mut out = Vec::new();
+        loop {
+            match messages.next().await {
+                Ok(Some(message)) => {
+                    if let Some(remote) = to_remote(&self.client, account, chat, &message).await {
+                        out.push(remote);
+                    }
+                }
+                Ok(None) => break,
+                Err(err) => {
+                    tracing::warn!(account, %err, "личный мост Telegram: история не загрузилась");
+                    break;
+                }
+            }
+        }
+        out.reverse();
+        out
+    }
+
+    /// Фото, «о себе» и «в сети» собеседника; фото с id `photo_known` не
+    /// скачивается заново.
+    pub(super) async fn profile(
+        &self,
+        chat: &str,
+        photo_known: Option<&str>,
+    ) -> Option<RemoteProfile> {
+        let peer_ref = self.peer(chat).await.ok()?;
+        let peer = self.client.resolve_peer(peer_ref).await.ok()?;
+        let mut profile = RemoteProfile::default();
+        if let Peer::User(user) = &peer {
+            profile.online = Some(matches!(user.status(), tl::enums::UserStatus::Online(_)));
+            let full = self
+                .client
+                .invoke(&tl::functions::users::GetFullUser {
+                    id: (&peer_ref).into(),
+                })
+                .await;
+            if let Ok(tl::enums::users::UserFull::Full(full)) = full {
+                let tl::enums::UserFull::Full(about) = full.full_user;
+                profile.bio = about.about.filter(|text| !text.trim().is_empty());
+            }
+        }
+        let photo_id = match &peer {
+            Peer::User(user) => user.photo().map(|photo| photo.photo_id),
+            Peer::Group(group) => group.photo().map(|photo| photo.photo_id),
+            Peer::Channel(channel) => channel.photo().map(|photo| photo.photo_id),
+            Peer::Community(community) => community.photo().map(|photo| photo.photo_id),
+        };
+        if let Some(photo_id) = photo_id.map(|id| id.to_string())
+            && photo_known != Some(photo_id.as_str())
+            && let Ok(Some(photo)) = peer.photo(false).await
+        {
+            let bytes = download(&self.client, &photo, MAX_FILE).await;
+            if !bytes.is_empty() {
+                profile.photo = Some((photo_id, bytes));
+            }
+        }
+        Some(profile)
     }
 
     pub(super) async fn chats(&self) -> Result<Vec<RemoteChat>, String> {
@@ -483,7 +650,7 @@ async fn listen(
         }
     }
     let mut stream = match client
-        .stream_updates(updates, UpdatesConfiguration { catch_up: false })
+        .stream_updates(updates, UpdatesConfiguration { catch_up: true })
         .await
     {
         Ok(stream) => stream,
@@ -497,35 +664,46 @@ async fn listen(
         match stream.next().await {
             Ok(Update::NewMessage(message)) => {
                 attempt = 0;
-                let Some(chat) = message.peer_id().bot_api_dialog_id() else {
+                let Some(chat) = message
+                    .peer_id()
+                    .bot_api_dialog_id()
+                    .map(|id| id.to_string())
+                else {
                     continue;
                 };
-                let chat = chat.to_string();
-                let text = message.text().trim().to_owned();
-                if text.is_empty() {
+                if message.outgoing() && was_sent(&sent, &chat, message.text().trim()) {
                     continue;
                 }
-                let mine = message.outgoing();
-                if mine && was_sent(&sent, &chat, &text) {
-                    continue;
+                if let Some(remote) = to_remote(&client, &account, &chat, &message).await {
+                    deliver(&state, remote).await;
                 }
-                let sender = message
-                    .sender()
-                    .map(peer_name)
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or_else(|| "Telegram".to_owned());
-                deliver(
-                    &state,
-                    Remote {
-                        account: account.clone(),
-                        chat,
-                        sender,
-                        text,
-                        mine,
-                    },
-                )
-                .await;
             }
+            Ok(Update::MessageEdited(message)) => {
+                if let Some(chat) = message.peer_id().bot_api_dialog_id() {
+                    super::sync::remote_edit(
+                        &state,
+                        &account,
+                        &chat.to_string(),
+                        &message.id().to_string(),
+                        message.text(),
+                    )
+                    .await;
+                }
+            }
+            Ok(Update::MessageDeleted(deletion)) => {
+                let chat = deletion
+                    .channel_id()
+                    .and_then(PeerId::channel)
+                    .and_then(PeerId::bot_api_dialog_id)
+                    .map(|id| id.to_string());
+                let ids: Vec<String> = deletion
+                    .messages()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect();
+                super::sync::remote_delete(&state, &account, chat.as_deref(), &ids).await;
+            }
+            Ok(Update::Raw(raw)) => raw_update(&state, &account, raw.raw).await,
             Ok(_) => {}
             Err(err) => {
                 attempt += 1;
@@ -538,6 +716,169 @@ async fn listen(
             }
         }
     }
+}
+
+/// Сообщение Telegram → сообщение моста (с файлами).
+async fn to_remote(
+    client: &Client,
+    account: &str,
+    chat: &str,
+    message: &Message,
+) -> Option<Remote> {
+    let text = message.text().trim().to_owned();
+    let files = message_files(client, message).await;
+    if text.is_empty() && files.is_empty() {
+        return None;
+    }
+    let sender = message
+        .sender()
+        .map(peer_name)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "Telegram".to_owned());
+    let date = match &message.raw {
+        tl::enums::Message::Message(raw) => Some(i64::from(raw.date) * 1000),
+        _ => None,
+    };
+    Some(Remote {
+        account: account.to_owned(),
+        chat: chat.to_owned(),
+        sender,
+        text,
+        mine: message.outgoing(),
+        id: Some(message.id().to_string()),
+        date,
+        files,
+        reply_to: message.reply_to_message_id().map(|id| id.to_string()),
+    })
+}
+
+/// Фото, файл, видео, голосовое или стикер сообщения.
+async fn message_files(client: &Client, message: &Message) -> Vec<RemoteFile> {
+    let Some(media) = message.media() else {
+        return Vec::new();
+    };
+    let id = message.id();
+    let name = match &media {
+        Media::Photo(_) => format!("photo_{id}.jpg"),
+        Media::Document(document) => match document.name().filter(|name| !name.trim().is_empty()) {
+            Some(name) => name.to_owned(),
+            None => format!(
+                "file_{id}{}",
+                extension_for(document.mime_type().unwrap_or_default())
+            ),
+        },
+        Media::Sticker(sticker) => {
+            let mime = sticker.document.mime_type().unwrap_or_default();
+            if mime != "image/webp" {
+                // Анимированные (tgs) и видео-стикеры показать нечем.
+                return Vec::new();
+            }
+            format!("sticker_{id}.webp")
+        }
+        _ => return Vec::new(),
+    };
+    let bytes = download(client, &media, MAX_FILE).await;
+    if bytes.is_empty() {
+        return Vec::new();
+    }
+    vec![RemoteFile { name, bytes }]
+}
+
+fn extension_for(mime: &str) -> &'static str {
+    match mime {
+        "image/jpeg" => ".jpg",
+        "image/png" => ".png",
+        "image/webp" => ".webp",
+        "image/gif" => ".gif",
+        "video/mp4" => ".mp4",
+        "video/webm" => ".webm",
+        "audio/ogg" => ".ogg",
+        "audio/mpeg" => ".mp3",
+        "audio/mp4" => ".m4a",
+        "application/pdf" => ".pdf",
+        _ => "",
+    }
+}
+
+/// Скачивает целиком (пусто — не вышло или больше `limit`).
+async fn download<D: grammers_client::media::Downloadable + Sync>(
+    client: &Client,
+    item: &D,
+    limit: usize,
+) -> Vec<u8> {
+    let mut parts = client.iter_download(item);
+    let mut bytes = Vec::new();
+    loop {
+        match parts.next().await {
+            Ok(Some(chunk)) => {
+                bytes.extend_from_slice(&chunk);
+                if bytes.len() > limit {
+                    return Vec::new();
+                }
+            }
+            Ok(None) => return bytes,
+            Err(err) => {
+                tracing::debug!(%err, "личный мост Telegram: файл не скачался");
+                return Vec::new();
+            }
+        }
+    }
+}
+
+/// Обновления без своей обёртки в grammers: реакции и «в сети».
+async fn raw_update(state: &AppState, account: &str, update: tl::enums::Update) {
+    match update {
+        tl::enums::Update::MessageReactions(update) => {
+            let chat = match update.peer {
+                tl::enums::Peer::User(user) => PeerId::user(user.user_id),
+                tl::enums::Peer::Chat(chat) => PeerId::chat(chat.chat_id),
+                tl::enums::Peer::Channel(channel) => PeerId::channel(channel.channel_id),
+            }
+            .and_then(PeerId::bot_api_dialog_id);
+            let Some(chat) = chat.map(|id| id.to_string()) else {
+                return;
+            };
+            let (theirs, mine) = split_reactions(&update.reactions);
+            super::sync::remote_reactions(
+                state,
+                account,
+                &chat,
+                &update.msg_id.to_string(),
+                theirs,
+                mine,
+            )
+            .await;
+        }
+        tl::enums::Update::UserStatus(update) => {
+            if let Some(chat) = PeerId::user(update.user_id).and_then(PeerId::bot_api_dialog_id) {
+                let online = matches!(update.status, tl::enums::UserStatus::Online(_));
+                super::sync::remote_presence(state, account, &chat.to_string(), online).await;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Реакции сообщения: (чужие, свои). Свои — помеченные `chosen_order`;
+/// чужая есть, если счётчик больше своей.
+fn split_reactions(reactions: &tl::enums::MessageReactions) -> (Vec<String>, Vec<String>) {
+    let tl::enums::MessageReactions::Reactions(reactions) = reactions;
+    let mut theirs = Vec::new();
+    let mut mine = Vec::new();
+    for result in &reactions.results {
+        let tl::enums::ReactionCount::Count(count) = result;
+        let tl::enums::Reaction::Emoji(emoji) = &count.reaction else {
+            continue;
+        };
+        let chosen = count.chosen_order.is_some();
+        if chosen {
+            mine.push(emoji.emoticon.clone());
+        }
+        if count.count > i32::from(chosen) {
+            theirs.push(emoji.emoticon.clone());
+        }
+    }
+    (theirs, mine)
 }
 
 // ─── Вход ─────────────────────────────────────────────────────────────────────
@@ -818,5 +1159,34 @@ mod tests {
         assert!(was_sent(&sent, "42", "привет"));
         assert!(!was_sent(&sent, "42", "привет"));
         assert!(!was_sent(&sent, "7", "привет"));
+    }
+
+    #[test]
+    fn reactions_split_into_theirs_and_mine() {
+        use super::tl;
+        let count = |emoji: &str, count: i32, chosen: bool| {
+            tl::enums::ReactionCount::Count(tl::types::ReactionCount {
+                chosen_order: chosen.then_some(0),
+                reaction: tl::enums::Reaction::Emoji(tl::types::ReactionEmoji {
+                    emoticon: emoji.to_owned(),
+                }),
+                count,
+            })
+        };
+        let reactions = tl::enums::MessageReactions::Reactions(tl::types::MessageReactions {
+            min: false,
+            can_see_list: false,
+            reactions_as_tags: false,
+            results: vec![
+                count("👍", 2, true),
+                count("❤", 1, true),
+                count("🔥", 1, false),
+            ],
+            recent_reactions: None,
+            top_reactors: None,
+        });
+        let (theirs, mine) = super::split_reactions(&reactions);
+        assert_eq!(theirs, vec!["👍".to_owned(), "🔥".to_owned()]);
+        assert_eq!(mine, vec!["👍".to_owned(), "❤".to_owned()]);
     }
 }

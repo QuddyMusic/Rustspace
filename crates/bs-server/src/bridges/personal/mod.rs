@@ -14,6 +14,7 @@
 
 pub mod matrix;
 pub mod mtproxy;
+pub mod sync;
 pub mod telegram;
 
 use std::collections::HashMap;
@@ -49,6 +50,47 @@ pub(crate) struct Remote {
     pub(crate) text: String,
     /// Написал сам владелец аккаунта (с другого устройства).
     pub(crate) mine: bool,
+    /// Номер сообщения на той стороне (для правок, удалений и реакций).
+    pub(crate) id: Option<String>,
+    /// Когда написано, мс (история); `None` — сейчас.
+    pub(crate) date: Option<i64>,
+    /// Вложения.
+    pub(crate) files: Vec<RemoteFile>,
+    /// На какое сообщение той стороны ответ.
+    pub(crate) reply_to: Option<String>,
+}
+
+/// Файл из чата на той стороне.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RemoteFile {
+    /// Имя файла.
+    pub(crate) name: String,
+    /// Содержимое.
+    pub(crate) bytes: Vec<u8>,
+}
+
+/// Профиль собеседника на той стороне.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct RemoteProfile {
+    /// Фото: (стабильный id, байты JPEG); `None` — фото нет.
+    pub(crate) photo: Option<(String, Vec<u8>)>,
+    /// «О себе».
+    pub(crate) bio: Option<String>,
+    /// В сети ли сейчас (`None` — не знаем: группа, канал).
+    pub(crate) online: Option<bool>,
+}
+
+/// Сообщение отсюда — наружу.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Outgoing {
+    /// Текст.
+    pub(crate) text: String,
+    /// Вложения: (имя, путь на диске, MIME).
+    pub(crate) files: Vec<(String, std::path::PathBuf, String)>,
+    /// Ссылки на вложения — для сетей, куда файлы не уходят.
+    pub(crate) links: Vec<String>,
+    /// Ответ на сообщение той стороны.
+    pub(crate) reply_to: Option<String>,
 }
 
 /// Чат на той стороне, который можно связать.
@@ -76,10 +118,58 @@ pub(crate) enum Link {
 }
 
 impl Link {
-    async fn send(&self, chat: &str, text: &str) -> Result<(), String> {
+    /// Отправляет; номер нового сообщения той стороны, если он известен.
+    async fn send(&self, chat: &str, message: &Outgoing) -> Result<Option<String>, String> {
         match self {
-            Self::Matrix(account) => account.send(chat, text).await,
-            Self::Telegram(account) => Box::pin(account.send(chat, text)).await,
+            Self::Matrix(account) => {
+                let mut text = message.text.clone();
+                for link in &message.links {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(link);
+                }
+                account.send(chat, &text).await.map(|()| None)
+            }
+            Self::Telegram(account) => Box::pin(account.send_full(chat, message)).await,
+        }
+    }
+
+    /// Своя реакция на сообщение той стороны (`None` — снять).
+    async fn react(&self, chat: &str, remote_id: &str, emoji: Option<&str>) -> Result<(), String> {
+        match self {
+            Self::Matrix(_) => Ok(()),
+            Self::Telegram(account) => account.react(chat, remote_id, emoji).await,
+        }
+    }
+
+    async fn edit(&self, chat: &str, remote_id: &str, text: &str) -> Result<(), String> {
+        match self {
+            Self::Matrix(_) => Ok(()),
+            Self::Telegram(account) => account.edit(chat, remote_id, text).await,
+        }
+    }
+
+    async fn delete(&self, chat: &str, remote_id: &str) -> Result<(), String> {
+        match self {
+            Self::Matrix(_) => Ok(()),
+            Self::Telegram(account) => account.delete(chat, remote_id).await,
+        }
+    }
+
+    /// Последние сообщения чата, от старых к новым.
+    async fn history(&self, account: &str, chat: &str, limit: usize) -> Vec<Remote> {
+        match self {
+            Self::Matrix(_) => Vec::new(),
+            Self::Telegram(link) => link.history(account, chat, limit).await,
+        }
+    }
+
+    /// Профиль собеседника; `photo_known` — id уже загруженного фото.
+    async fn profile(&self, chat: &str, photo_known: Option<&str>) -> Option<RemoteProfile> {
+        match self {
+            Self::Matrix(_) => None,
+            Self::Telegram(account) => account.profile(chat, photo_known).await,
         }
     }
 
@@ -228,7 +318,12 @@ pub fn spawn(state: &AppState) {
                 _ => continue,
             };
             match started {
-                Ok(link) => app.personal.insert(&id, link),
+                Ok(link) => {
+                    app.personal.insert(&id, link);
+                    // Фото и «о себе» собеседников могли смениться, пока
+                    // сервер стоял.
+                    sync::refresh_profiles(&app, &id);
+                }
                 Err(err) => set_error(&app, &id, &err).await,
             }
         }
@@ -500,7 +595,8 @@ pub(crate) async fn link_chat(
     group: bool,
 ) -> ApiResult<Value> {
     let (app, user, id) = (state.clone(), user.to_owned(), id.to_owned());
-    state
+    let (account, chat) = (id.clone(), remote_chat.clone());
+    let linked = state
         .run(move |tx, out| {
             let kind = own_account(tx, &user, &id)?;
             if let Some(row) = tx.query_one(
@@ -533,7 +629,12 @@ pub(crate) async fn link_chat(
             }
             Ok(json!({"id": chat_id, "dmChannelId": channel}))
         })
-        .await
+        .await?;
+    // Новая связь: история чата и профиль собеседника — в фоне.
+    if linked.get("id").is_some() {
+        sync::after_link(state, &account, &chat);
+    }
+    Ok(linked)
 }
 
 /// Отвязывает чат (переписка остаётся).
@@ -593,127 +694,7 @@ fn chat_puppet(
     Ok(id)
 }
 
-// ─── Внутрь ───────────────────────────────────────────────────────────────────
-
-/// Пишет сообщение с той стороны в связанную переписку.
-pub(crate) async fn deliver(state: &AppState, message: Remote) {
-    let app = state.clone();
-    let result = state
-        .run(move |tx, out| {
-            let Some(row) = tx.query_one(
-                "SELECT c.dm_channel_id, c.puppet_id, c.grouped, a.user_id \
-                 FROM bs_personal_chats c JOIN bs_personal_accounts a ON a.id = c.account_id \
-                 WHERE c.account_id = ? AND c.remote_chat = ?",
-                params![&message.account, &message.chat],
-            )?
-            else {
-                return Ok(());
-            };
-            let channel = row.text("dm_channel_id")?;
-            let (author, content) = if message.mine {
-                (row.text("user_id")?, message.text.clone())
-            } else if row.int("grouped")? != 0 {
-                (
-                    row.text("puppet_id")?,
-                    format!("**{}**: {}", super::clip(&message.sender, 48), message.text),
-                )
-            } else {
-                (row.text("puppet_id")?, message.text.clone())
-            };
-            let content: String = content.chars().take(4000).collect();
-            let new = dm::NewMessage {
-                content: Some(content),
-                attachments: Vec::new(),
-                reply_to: None,
-            };
-            dm::create_message(tx, out, &app.config, &app.ids, &channel, &author, &new)?;
-            Ok(())
-        })
-        .await;
-    if let Err(err) = result {
-        tracing::warn!(?err, "личный мост: не удалось записать сообщение");
-    }
-}
-
-// ─── Наружу ───────────────────────────────────────────────────────────────────
-
-/// Новое личное сообщение: если переписка связана и написал владелец
-/// аккаунта, оно уходит в чат на той стороне.
-pub fn notify_dm(state: &AppState, message_id: &str) {
-    if !enabled(state) {
-        return;
-    }
-    let (app, message_id) = (state.clone(), message_id.to_owned());
-    tokio::spawn(async move {
-        let origin = crate::federation::our_origin(&app.config);
-        let found = app
-            .run(move |tx, _| Ok(outgoing(tx, &origin, &message_id)?))
-            .await;
-        let Ok(Some((account, chat, text))) = found else {
-            return;
-        };
-        let Some(link) = app.personal.link(&account) else {
-            tracing::warn!(
-                account,
-                "личный мост: аккаунт не подключён, сообщение не ушло"
-            );
-            return;
-        };
-        if let Err(err) = Box::pin(link.send(&chat, &text)).await {
-            tracing::warn!(account, %err, "личный мост: сообщение не ушло");
-        }
-    });
-}
-
-/// Аккаунт, чат и текст для отправки наружу.
-fn outgoing(
-    tx: &mut dyn Tx,
-    origin: &str,
-    message_id: &str,
-) -> DbResult<Option<(String, String, String)>> {
-    let Some(row) = tx.query_one(
-        "SELECT m.dm_channel_id, m.user_id, m.content, m.type, m.edited_at FROM dm_messages m WHERE m.id = ?",
-        params![message_id],
-    )?
-    else {
-        return Ok(None);
-    };
-    // Правки наружу не уходят (на той стороне это был бы дубль).
-    if row.opt_int("edited_at")?.is_some() {
-        return Ok(None);
-    }
-    if row.opt_text("type")?.is_some_and(|kind| kind == "system") {
-        return Ok(None);
-    }
-    let Some(link) = tx.query_one(
-        "SELECT c.account_id, c.remote_chat FROM bs_personal_chats c \
-         JOIN bs_personal_accounts a ON a.id = c.account_id \
-         WHERE c.dm_channel_id = ? AND a.user_id = ?",
-        params![&row.text("dm_channel_id")?, &row.text("user_id")?],
-    )?
-    else {
-        return Ok(None);
-    };
-    let mut text = row.opt_text("content")?.unwrap_or_default();
-    for file in tx.query(
-        "SELECT filename, original_name FROM attachments WHERE dm_message_id = ? ORDER BY created_at",
-        params![message_id],
-    )? {
-        let url = format!("{origin}/api/uploads/{}", file.text("filename")?);
-        if !text.is_empty() {
-            text.push('\n');
-        }
-        text.push_str(&format!("📎 {}: {url}", file.text("original_name")?));
-    }
-    if text.trim().is_empty() {
-        return Ok(None);
-    }
-    Ok(Some((
-        link.text("account_id")?,
-        link.text("remote_chat")?,
-        text,
-    )))
-}
+pub(crate) use sync::{deliver, notify_delete, notify_dm, notify_edit, notify_reaction};
 
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "тесты")]

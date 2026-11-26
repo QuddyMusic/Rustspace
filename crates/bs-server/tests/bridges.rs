@@ -607,7 +607,8 @@ async fn personal_matrix_chat_becomes_a_dm() {
     assert_eq!(status, 200, "{chats}");
     assert_eq!(
         chats,
-        json!([{"id": "!dm:hs.test", "title": "Анна", "group": false, "linked": false}])
+        json!([{"id": "!dm:hs.test", "title": "Анна", "group": false, "kind": "person",
+                "username": null, "linked": false}])
     );
     let (status, linked) = server
         .call(

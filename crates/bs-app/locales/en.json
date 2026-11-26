@@ -1866,5 +1866,6 @@
   "канал": "channel",
   "бот": "bot",
   "Имя, название или @имя": "Name, title or @username",
-  "Ничего не нашлось": "Nothing found"
+  "Ничего не нашлось": "Nothing found",
+  "Сервер не ответил: профиль не загрузился": "The server did not answer: the profile did not load"
 }

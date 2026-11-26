@@ -318,6 +318,23 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             )",
         ],
     ),
+    (
+        "0019_personal_messages",
+        &[
+            // Сообщения личных мостов: какое сообщение той стороны каким
+            // стало здесь — для правок, удалений, ответов и реакций.
+            "CREATE TABLE bs_personal_messages (
+                account_id TEXT NOT NULL,
+                remote_chat TEXT NOT NULL,
+                remote_id TEXT NOT NULL,
+                dm_message_id TEXT NOT NULL,
+                PRIMARY KEY (account_id, remote_chat, remote_id)
+            )",
+            "CREATE INDEX bs_personal_messages_local ON bs_personal_messages (dm_message_id)",
+            // Последняя загруженная фотография чата: не качать её заново.
+            "ALTER TABLE bs_personal_chats ADD COLUMN photo_id TEXT",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

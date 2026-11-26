@@ -118,6 +118,7 @@ pub fn handle(
             match dm::check_delete(tx, message_id, &cx.user_id)? {
                 Err(refusal) => refuse(out, cx, refusal.code, refusal.details),
                 Ok(row) => {
+                    crate::bridges::personal::notify_delete(app, tx, message_id, &cx.user_id);
                     *stale_files =
                         dm::delete_message(tx, out, &app.config, &app.ids, &row, &cx.user_id)?;
                 }
@@ -186,6 +187,7 @@ pub fn reaction(
         if inserted == 0 {
             return Ok(());
         }
+        crate::bridges::personal::notify_reaction(app, message_id, &cx.user_id);
         let mut reaction = json!({
             "id": reaction_id,
             "messageId": message_id,
@@ -224,6 +226,7 @@ pub fn reaction(
     if removed == 0 {
         return Ok(());
     }
+    crate::bridges::personal::notify_reaction(app, message_id, &cx.user_id);
     broadcast::to_dm_members(
         tx,
         out,

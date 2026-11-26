@@ -2037,12 +2037,19 @@ async fn social_request(
             Err(err) => BridgeResponse::Failed(err.to_string()),
         },
         BridgeRequest::Profile(user_id) => {
-            let user = client
-                .user(&user_id)
+            // Без срока окно профиля висело бы на «Загрузка…», если
+            // сервер не отвечает.
+            let wait = std::time::Duration::from_secs(15);
+            let user = bs_rt::time::timeout(wait, client.user(&user_id))
                 .await
-                .map(Box::new)
-                .map_err(|err| upload_message(&err));
-            let mutuals = client.mutuals(&user_id).await.ok();
+                .map_or_else(
+                    |_| Err(tr("Сервер не ответил: профиль не загрузился").to_owned()),
+                    |user| user.map(Box::new).map_err(|err| upload_message(&err)),
+                );
+            let mutuals = bs_rt::time::timeout(wait, client.mutuals(&user_id))
+                .await
+                .ok()
+                .and_then(Result::ok);
             BridgeResponse::UserProfile(ProfileEvent {
                 user_id,
                 user,

@@ -842,11 +842,29 @@ pub fn create_message(
     user: &str,
     new: &NewMessage,
 ) -> DbResult<Option<Value>> {
+    create_message_at(tx, out, config, ids, channel, user, new, now_ms())
+}
+
+/// То же, со своим временем (история из личного моста).
+///
+/// # Errors
+/// Ошибка базы.
+#[allow(clippy::too_many_arguments, reason = "create_message и время")]
+pub fn create_message_at(
+    tx: &mut dyn Tx,
+    out: &mut Outbox,
+    config: &Config,
+    ids: &Snowflake,
+    channel: &str,
+    user: &str,
+    new: &NewMessage,
+    created_at: i64,
+) -> DbResult<Option<Value>> {
     let id = ids.next();
     tx.execute(
         "INSERT INTO dm_messages (id, dm_channel_id, user_id, reply_to_id, content, created_at) \
          VALUES (?, ?, ?, ?, ?, ?)",
-        params![&id, channel, user, &new.reply_to, &new.content, now_ms()],
+        params![&id, channel, user, &new.reply_to, &new.content, created_at],
     )?;
     for attachment in &new.attachments {
         tx.execute(

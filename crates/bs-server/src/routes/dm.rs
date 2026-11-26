@@ -754,6 +754,7 @@ pub async fn update_message(
             })
         })
         .await?;
+    crate::bridges::personal::notify_edit(&state, message["id"].as_str().unwrap_or_default());
     embeds::schedule(
         &state,
         message["id"].as_str().unwrap_or_default().to_owned(),
@@ -778,6 +779,7 @@ pub async fn delete_message(
     let stale = state
         .run(move |tx, out| {
             let row = dm::check_delete(tx, &id, &user.id)?.map_err(dm::Refusal::into_api)?;
+            crate::bridges::personal::notify_delete(&app, tx, &id, &user.id);
             Ok(dm::delete_message(
                 tx,
                 out,

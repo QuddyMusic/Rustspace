@@ -136,7 +136,7 @@ fn strict_field(raw: &str, name: &str) -> Option<String> {
 }
 
 /// Расширение имени в нижнем регистре (`extractExtension`).
-fn extension(original: &str) -> String {
+pub(crate) fn extension(original: &str) -> String {
     let base = original
         .trim_end_matches('/')
         .rsplit('/')

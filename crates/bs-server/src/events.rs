@@ -174,7 +174,10 @@ pub async fn handle(
     if let Some((message_id, content, place)) = after.embeds {
         match place {
             embeds::Place::Channel { .. } => crate::bridges::notify(state, &message_id),
-            embeds::Place::Dm { .. } => crate::bridges::personal::notify_dm(state, &message_id),
+            embeds::Place::Dm { .. } => {
+                crate::bridges::personal::notify_dm(state, &message_id);
+                crate::bridges::personal::notify_edit(state, &message_id);
+            }
         }
         embeds::schedule(state, message_id, content, place);
     }
