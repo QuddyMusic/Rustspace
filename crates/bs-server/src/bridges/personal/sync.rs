@@ -172,8 +172,17 @@ async fn deliver_as(state: &AppState, message: Remote, live: bool) {
         }
     }
     let attachments = store_files(state, message.files.clone()).await;
-    let app = state.clone();
-    let result = state
+    // Если запись не прошла, пробуем ещё раз без ответа: лучше сообщение без
+    // цитаты, чем никакого.
+    let (account, chat, remote, has_reply) = (
+        message.account.clone(),
+        message.chat.clone(),
+        message.id.clone(),
+        message.reply_to.is_some(),
+    );
+    for keep_reply in [true, false] {
+        let (app, message, attachments) = (state.clone(), message.clone(), attachments.clone());
+        let result = state
         .run(move |tx, out| {
             let Some(row) = tx.query_one(
                 "SELECT c.dm_channel_id, c.puppet_id, c.grouped, a.user_id \
@@ -204,8 +213,10 @@ async fn deliver_as(state: &AppState, message: Remote, live: bool) {
                 return Ok(());
             }
             let reply_to = match &message.reply_to {
-                Some(remote) => local_of(tx, &message.account, Some(&message.chat), remote)?,
-                None => None,
+                Some(remote) if keep_reply => {
+                    local_of(tx, &message.account, Some(&message.chat), remote)?
+                }
+                _ => None,
             };
             let unresolved = message.reply_to.is_some() && reply_to.is_none();
             let new = dm::NewMessage {
@@ -241,8 +252,20 @@ async fn deliver_as(state: &AppState, message: Remote, live: bool) {
             Ok(())
         })
         .await;
-    if let Err(err) = result {
-        tracing::warn!(?err, "личный мост: не удалось записать сообщение");
+        match result {
+            Ok(()) => return,
+            Err(err) => tracing::warn!(
+                ?err,
+                account,
+                chat,
+                remote,
+                keep_reply,
+                "личный мост: не удалось записать сообщение"
+            ),
+        }
+        if !has_reply {
+            return;
+        }
     }
 }
 

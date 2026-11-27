@@ -776,6 +776,18 @@ async fn to_remote(
     limit: usize,
 ) -> Option<Remote> {
     let mut text = message.text().trim().to_owned();
+    // Пересланное помечаем, иначе в переписке не понять, чьи это слова.
+    if let Some(tl::enums::MessageFwdHeader::Header(header)) = message.forward_header() {
+        let from = header
+            .from_name
+            .or(header.post_author)
+            .map_or_else(String::new, |name| format!(" от {name}"));
+        text = if text.is_empty() {
+            format!("↪ Переслано{from}")
+        } else {
+            format!("↪ Переслано{from}\n{text}")
+        };
+    }
     let (files, skipped) = message_files(client, message, limit).await;
     if let Some(note) = skipped {
         if !text.is_empty() {
@@ -784,7 +796,14 @@ async fn to_remote(
         text.push_str(&note);
     }
     if text.is_empty() && files.is_empty() {
-        return None;
+        // Что-то новое, чего grammers ещё не знает (истории, розыгрыши и т. п.):
+        // не теряем сообщение молча.
+        let has_media =
+            matches!(&message.raw, tl::enums::Message::Message(raw) if raw.media.is_some());
+        if !has_media {
+            return None;
+        }
+        text = "[сообщение Telegram, которое здесь не показать]".to_owned();
     }
     let sender = message
         .sender()
@@ -805,6 +824,24 @@ async fn to_remote(
         date,
         files,
         reply_to: message.reply_to_message_id().map(|id| id.to_string()),
+    })
+}
+
+/// Подпись для того, что файлом не перенести: опрос, контакт, место, кубик.
+fn media_note(media: &Media) -> Option<String> {
+    Some(match media {
+        Media::Poll(poll) => match poll.question() {
+            tl::enums::TextWithEntities::Entities(question) => {
+                format!("📊 Опрос: {}", question.text)
+            }
+        },
+        Media::Contact(_) => "👤 Контакт".to_owned(),
+        Media::Geo(_) | Media::GeoLive(_) => "📍 Геопозиция".to_owned(),
+        Media::Venue(_) => "📍 Место".to_owned(),
+        Media::Dice(dice) => dice.emoji().to_owned(),
+        // Превью ссылки: сама ссылка уже в тексте.
+        Media::WebPage(_) => return None,
+        _ => "[вложение Telegram, которое здесь не показать]".to_owned(),
     })
 }
 
@@ -843,12 +880,12 @@ async fn message_files(
         Media::Sticker(sticker) => {
             let mime = sticker.document.mime_type().unwrap_or_default();
             if mime != "image/webp" {
-                // Анимированные (tgs) и видео-стикеры показать нечем.
-                return (Vec::new(), None);
+                // Анимированные (tgs) и видео-стикеры показать нечем: хотя бы эмодзи.
+                return (Vec::new(), Some(format!("[стикер {}]", sticker.emoji())));
             }
             format!("sticker_{id}.webp")
         }
-        _ => return (Vec::new(), None),
+        other => return (Vec::new(), media_note(other)),
     };
     // Размер известен заранее: большой файл даже не начинаем качать.
     if let Some(size) = media.size().filter(|size| *size > limit) {
