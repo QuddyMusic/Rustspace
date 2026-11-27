@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/QuddyMusic/Rustspace/main/packaging
 необходимости Rust через rustup, скачает исходники в `~/.local/src/rustspace`, соберёт клиент и
 положит его в `~/.local/bin` с пунктом в меню (`--system` — в `/usr/local`). Голосу и камере
 нужен clang 21+; без него клиент соберётся без них и скрипт подскажет, что поставить.
-Обновление — тот же запуск ещё раз. Параметры: `--ref v0.3.0`, `--no-voice`, `--uninstall`,
+Обновление — тот же запуск ещё раз. Параметры: `--ref v0.4.0`, `--no-voice`, `--uninstall`,
 `--help`. Сборке нужно около 10 ГБ места и несколько минут.
 
 Готовые сборки — на [странице релизов](https://github.com/QuddyMusic/Rustspace/releases):
@@ -316,7 +316,7 @@ cargo run -p bs-tui -- --allow-insecure                # аргументы по
 заметки к выпуску), закоммитьте и отправьте тег с тем же номером:
 
 ```sh
-git tag v0.3.0 && git push origin v0.3.0
+git tag v0.4.0 && git push origin v0.4.0
 ```
 
 `.github/workflows/release.yml` проверит, что тег совпадает с `Cargo.toml`, соберёт сервер

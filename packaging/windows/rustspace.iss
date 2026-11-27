@@ -1,7 +1,7 @@
 ; Установщик Rustspace для Windows (Inno Setup 6).
 ; Ставит в профиль пользователя (без прав администратора), поэтому клиент
 ; потом обновляется сам: скачивает этот же установщик и запускает тихо.
-;   iscc /DVersion=0.3.0 /DSource=..\..\target\release packaging\windows\rustspace.iss
+;   iscc /DVersion=0.4.0 /DSource=..\..\target\release packaging\windows\rustspace.iss
 
 #ifndef Version
   #define Version "0.0.0"

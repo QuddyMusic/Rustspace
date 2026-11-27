@@ -96,7 +96,7 @@ original server.
 - Windows: no console window, notifications signed "Rustspace"; Arch package builds from the
   checkout.
 
-### This iteration
+### Version 0.4.0
 - **Chat folders.** Tabs above the direct messages: All, Unread, People, Groups and one tab
   per bridge (Telegram, Matrix, Discord), plus your own folders (the "+" tab or a chat's
   context menu → "Add to folder"). Stored in the client settings.
@@ -107,6 +107,12 @@ original server.
 - **Built-in audio player.** WAV, MP3, FLAC, Ogg Vorbis, Ogg Opus (Telegram voice messages)
   and AAC/M4A attachments play right in the chat: play/pause, seek bar and time; the web
   version uses the browser's own `<audio>`.
+- **Telegram personal bridge, for real.** Whole chat histories are imported page by page
+  (resumable, fair between chats), attachments go both ways as files, reactions, edits,
+  deletions, replies, forwards, avatars, bios and online status sync; chats can be reloaded
+  or deleted locally; proxies (MTProto, SOCKS5) for hosts where Telegram is blocked.
+
+### This iteration
 - **Screen sharing rebuilt.** Capture now uses libwebrtc's own desktop capturer instead of
   xcap: on Wayland it goes through the ScreenCast portal (the system dialog picks the screen
   or window, so the right one is shared), elsewhere monitors and windows are listed directly.
