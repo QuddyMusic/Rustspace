@@ -174,6 +174,10 @@ pub(crate) struct SidebarDm {
     pub(crate) face: (String, Option<String>),
     /// Чат из личного моста (Telegram и т. п.).
     pub(crate) bridged: bool,
+    /// Название моста («Telegram»), если чат из него.
+    pub(crate) network: Option<&'static str>,
+    /// Групповая беседа (больше одного собеседника).
+    pub(crate) group: bool,
 }
 
 /// Кто сидит в голосовом канале, с флагами микрофона и звука.
@@ -308,6 +312,11 @@ pub(crate) fn dm_sidebar_items(cache: &Cache) -> Vec<SidebarDm> {
                 .members
                 .iter()
                 .any(|m| super::panels::is_bridge_puppet(&m.username)),
+            network: dm
+                .members
+                .iter()
+                .find_map(|m| super::panels::bridge_network(&m.username)),
+            group: dm.members.iter().filter(|m| m.id != me).count() > 1,
             avatar: {
                 let mut others = dm.members.iter().filter(|m| m.id != me);
                 match (others.next(), others.next()) {

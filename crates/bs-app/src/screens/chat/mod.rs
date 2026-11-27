@@ -2,6 +2,7 @@
 //! шапка и лента сообщений, поле ввода, панель участников.
 
 mod downloads;
+pub(crate) mod folders;
 mod forward;
 mod gallery;
 mod me_menu;
@@ -1185,6 +1186,8 @@ mod tests {
             avatar: Some("a.png".to_owned()),
             face: (id.to_owned(), None),
             bridged: false,
+            network: None,
+            group: false,
         }
     }
 

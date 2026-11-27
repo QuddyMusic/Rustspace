@@ -211,6 +211,9 @@ pub(crate) struct Prefs {
     pub(crate) developer_mode: bool,
     /// Сколько раз выбран каждый эмодзи («Часто используемые»).
     pub(crate) emoji_used: std::collections::BTreeMap<String, u32>,
+    /// Папки личных бесед и выбранная вкладка.
+    #[serde(default)]
+    pub(crate) chat_folders: crate::screens::chat::folders::ChatFolders,
 }
 
 /// Инстанс, в который входили с этого устройства.
@@ -265,6 +268,7 @@ impl Default for Prefs {
             preview_images: true,
             developer_mode: false,
             emoji_used: std::collections::BTreeMap::new(),
+            chat_folders: crate::screens::chat::folders::ChatFolders::default(),
             recent_instances: Vec::new(),
         }
     }

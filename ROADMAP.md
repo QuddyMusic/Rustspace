@@ -97,6 +97,9 @@ original server.
   checkout.
 
 ### This iteration
+- **Chat folders.** Tabs above the direct messages: All, Unread, People, Groups and one tab
+  per bridge (Telegram, Matrix, Discord), plus your own folders (the "+" tab or a chat's
+  context menu → "Add to folder"). Stored in the client settings.
 - **Built-in video player.** MP4/MOV with H.264 (Telegram videos and round video messages,
   phone videos) play right in the chat with sound, seeking and a full-window view; decoding
   is pure Rust (`rusty_h264`), the web version uses the browser's `<video>`. Thumbnails come

@@ -115,6 +115,7 @@ fn dm_menu(response: &egui::Response, dm: &SidebarDm, nav: &mut Option<Nav>) {
             });
             ui.close();
         }
+        super::folders::dm_menu(ui, &dm.id);
         if dm.bridged && ui.button(tr("Перечитать историю")).clicked() {
             *nav = Some(Nav::ResyncDm {
                 origin: dm.origin,
@@ -753,11 +754,15 @@ impl ChatScreen {
             });
         });
         ui.add_space(4.0);
+        let tab = super::folders::tabs_bar(ui, dms);
+        let folders = crate::prefs::get().chat_folders;
+        ui.add_space(4.0);
         let now = now_ms();
         let mut shown = 0;
         for dm in dms
             .iter()
             .filter(|d| !(d.origin == 0 && Some(d.id.as_str()) == saved))
+            .filter(|d| tab.matches(d, &folders))
             .filter(|d| filter.is_empty() || d.label.to_lowercase().contains(filter))
         {
             shown += 1;
@@ -791,14 +796,7 @@ impl ChatScreen {
             }
         }
         if shown == 0 {
-            ui.add_space(8.0);
-            ui.vertical_centered(|ui| {
-                ui.label(theme::muted(if filter.is_empty() {
-                    tr("Бесед пока нет")
-                } else {
-                    tr("Нет совпадений — Enter, чтобы искать людей")
-                }));
-            });
+            empty_hint(ui, &tab, filter);
         }
     }
 
@@ -1383,6 +1381,34 @@ fn user_bar_buttons(ui: &mut egui::Ui, muted: bool, deafened: bool, nav: &mut Op
     {
         *nav = Some(Nav::Voice(crate::voice::DockAction::ToggleMute));
     }
+}
+
+/// Название моста, если это его служебный пользователь.
+pub(crate) fn bridge_network(username: &str) -> Option<&'static str> {
+    if !is_bridge_puppet(username) {
+        return None;
+    }
+    Some(match username.get(..2) {
+        Some("tg") => "Telegram",
+        Some("mx") => "Matrix",
+        _ => "Discord",
+    })
+}
+
+/// Подсказка вместо пустого списка бесед.
+fn empty_hint(ui: &mut egui::Ui, tab: &super::folders::Tab, filter: &str) {
+    ui.add_space(8.0);
+    ui.vertical_centered(|ui| {
+        ui.label(theme::muted(
+            if matches!(tab, super::folders::Tab::Folder(_)) && filter.is_empty() {
+                tr("Папка пуста: ПКМ по беседе → «В папку»")
+            } else if filter.is_empty() {
+                tr("Бесед пока нет")
+            } else {
+                tr("Нет совпадений — Enter, чтобы искать людей")
+            },
+        ));
+    });
 }
 
 /// Служебный пользователь моста («Анна · Telegram»): имя вида `tg_p…`,
