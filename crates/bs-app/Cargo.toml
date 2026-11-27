@@ -44,7 +44,7 @@ voice = ["dep:bs-voice", "sounds"]
 camera = ["voice", "bs-voice/camera"]
 # Звуки интерфейса и проигрыватель аудиовложений (rodio, symphonia, Opus):
 # нужна библиотека ALSA на Linux (libasound2-dev).
-sounds = ["dep:rodio", "dep:ogg", "dep:opus-decoder"]
+sounds = ["dep:rodio", "dep:ogg", "dep:opus-decoder", "dep:symphonia"]
 # Глобальные горячие клавиши (X11, Windows, macOS; под Wayland — только в окне).
 global-hotkeys = ["dep:global-hotkey", "dep:zbus"]
 # Значок в трее и сворачивание в него; на Linux нужны GTK 3 и appindicator.
@@ -63,6 +63,8 @@ rodio = { version = "0.23", default-features = false, features = ["playback", "v
 # Ogg Opus (голосовые из Telegram и др.): контейнер и декодер на чистом Rust.
 ogg = { version = "0.9", optional = true }
 opus-decoder = { version = "0.1", optional = true }
+# Звук видео (AAC из MP4/MOV) — та же symphonia, что внутри rodio.
+symphonia = { version = "0.5", default-features = false, features = ["aac", "isomp4"], optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 bs-api = { workspace = true }
@@ -100,6 +102,8 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 
 # Настольная сборка: свой runtime, файлы, системные службы.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Встроенный видеоплеер: H.264 в MP4/MOV на чистом Rust.
+bs-media = { workspace = true, features = ["video"] }
 # Перевод без LLM: модели Firefox Translations на Rust (MPL-2.0) и определение языка (MIT).
 fxtranslate = { version = "0.5", features = ["icu-segmenter"] }
 # Открыть скачанный файл или показать его в файловом менеджере (MIT/Apache-2.0).
@@ -121,7 +125,7 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 base64 = "0.22"
-web-sys = { version = "0.3", features = ["Window", "Document", "console", "Storage", "Location", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Notification", "NotificationOptions", "NotificationPermission", "HtmlInputElement", "FileList", "File", "Event", "EventTarget", "WebSocket", "BinaryType", "MessageEvent", "CloseEvent", "RtcPeerConnection", "RtcConfiguration", "RtcIceServer", "RtcSessionDescriptionInit", "RtcSdpType", "RtcIceCandidate", "RtcIceCandidateInit", "RtcPeerConnectionIceEvent", "RtcTrackEvent", "RtcRtpTransceiver", "RtcRtpTransceiverInit", "RtcRtpTransceiverDirection", "MediaStream", "MediaStreamTrack", "MediaDevices", "MediaStreamConstraints", "HtmlAudioElement", "HtmlMediaElement", "Navigator"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "console", "Storage", "Location", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Notification", "NotificationOptions", "NotificationPermission", "HtmlInputElement", "FileList", "File", "Event", "EventTarget", "WebSocket", "BinaryType", "MessageEvent", "CloseEvent", "RtcPeerConnection", "RtcConfiguration", "RtcIceServer", "RtcSessionDescriptionInit", "RtcSdpType", "RtcIceCandidate", "RtcIceCandidateInit", "RtcPeerConnectionIceEvent", "RtcTrackEvent", "RtcRtpTransceiver", "RtcRtpTransceiverInit", "RtcRtpTransceiverDirection", "MediaStream", "MediaStreamTrack", "MediaDevices", "MediaStreamConstraints", "HtmlAudioElement", "HtmlMediaElement", "Navigator", "HtmlVideoElement", "CanvasRenderingContext2d", "ImageData"] }
 # Сигнализация LiveKit для голоса в браузере (Apache-2.0).
 livekit-protocol = "0.8.2"
 prost = "0.14"

@@ -46,6 +46,8 @@ reqwest = { workspace = true }
 url = { workspace = true }
 scraper = { version = "0.23", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "tiff"] }
+# Миниатюры и длительность видео H.264 без ffmpeg.
+bs-media = { workspace = true, features = ["video"] }
 rustls-native-certs = "0.8"
 webpki-roots = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

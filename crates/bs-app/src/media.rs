@@ -73,7 +73,7 @@ impl AttachmentView {
 
 /// Число пикселей как `f32` (размеры вложений невелики).
 #[allow(clippy::cast_precision_loss, reason = "размеры для раскладки")]
-const fn f32_of(value: u32) -> f32 {
+pub(crate) const fn f32_of(value: u32) -> f32 {
     value as f32
 }
 
@@ -129,10 +129,10 @@ pub(crate) type Hit = (Rect, String);
 pub(crate) type DownloadHit = (Rect, Click);
 
 /// Размер кнопки скачивания.
-const DL_BUTTON: f32 = 28.0;
+pub(crate) const DL_BUTTON: f32 = 28.0;
 
 /// Что вложение значит для скачивания.
-fn target_of(att: &AttachmentView) -> Target {
+pub(crate) fn target_of(att: &AttachmentView) -> Target {
     Target {
         value: att.filename.clone(),
         name: att.name.clone(),
@@ -140,13 +140,13 @@ fn target_of(att: &AttachmentView) -> Target {
 }
 
 /// Состояние скачивания файла.
-fn download_of(ui: &egui::Ui, att: &AttachmentView) -> Option<Download> {
+pub(crate) fn download_of(ui: &egui::Ui, att: &AttachmentView) -> Option<Download> {
     ImageHub::of(ui.ctx()).and_then(|hub| hub.download(&att.filename))
 }
 
 /// Рисует круглую кнопку скачивания в `rect` и возвращает её для обработки
 /// клика строкой сообщения. Показывает ход: проценты, галочку или ошибку.
-fn download_badge(
+pub(crate) fn download_badge(
     ui: &egui::Ui,
     rect: Rect,
     id: egui::Id,
@@ -315,7 +315,9 @@ pub(crate) fn show_attachment(
     downloads: &mut Vec<DownloadHit>,
 ) -> Option<Hit> {
     if !att.is_image() {
-        if crate::player::is_playable(&att.mimetype, &att.name, att.size) {
+        if crate::vplayer::is_video(&att.mimetype, &att.name, att.size) {
+            crate::video_ui::video_card(ui, att, downloads);
+        } else if crate::player::is_playable(&att.mimetype, &att.name, att.size) {
             audio_card(ui, att, downloads);
         } else {
             file_card(ui, att, downloads);

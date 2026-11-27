@@ -193,6 +193,10 @@ pub(crate) enum RawPurpose {
     Sticker(String),
     /// Проиграть встроенным проигрывателем (имя файла на сервере).
     Audio(String),
+    /// Показать встроенным видеоплеером.
+    Video(String),
+    /// Сделать превью видео (у сервера его нет).
+    VideoThumb(String),
 }
 
 impl ImageHub {

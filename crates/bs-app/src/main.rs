@@ -80,8 +80,10 @@ mod theme;
 mod translate;
 mod updates;
 mod video_media;
+mod video_ui;
 mod voice;
 mod voice_media;
+mod vplayer;
 mod widgets;
 #[cfg(windows)]
 mod windows_app;

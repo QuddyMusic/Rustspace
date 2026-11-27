@@ -808,6 +808,16 @@ async fn to_remote(
     })
 }
 
+/// Видеосообщение-«кружочек».
+fn is_round(document: &grammers_client::media::Document) -> bool {
+    match &document.raw.document {
+        Some(tl::enums::Document::Document(raw)) => raw.attributes.iter().any(|attribute| {
+            matches!(attribute, tl::enums::DocumentAttribute::Video(video) if video.round_message)
+        }),
+        _ => false,
+    }
+}
+
 /// Фото, файл, видео, голосовое или стикер сообщения.
 /// Файлы сообщения и пометка о пропущенном (слишком большом) файле.
 async fn message_files(
@@ -821,6 +831,8 @@ async fn message_files(
     let id = message.id();
     let name = match &media {
         Media::Photo(_) => format!("photo_{id}.jpg"),
+        // «Кружочки»: по имени клиент показывает их круглыми.
+        Media::Document(document) if is_round(document) => format!("video_note_{id}.mp4"),
         Media::Document(document) => match document.name().filter(|name| !name.trim().is_empty()) {
             Some(name) => name.to_owned(),
             None => format!(

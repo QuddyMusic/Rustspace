@@ -1884,5 +1884,7 @@
   "Удаление…": "Deleting…",
   "Перечитать историю": "Reload history",
   "История перечитывается — недостающие сообщения появятся в чате": "Reloading history — missing messages will appear in the chat",
-  "Не удалось перечитать историю: {err}": "Could not reload history: {err}"
+  "Не удалось перечитать историю: {err}": "Could not reload history: {err}",
+  "Кодек видео не поддерживается — скачайте файл": "Video codec is not supported — download the file",
+  "Видео не открылось: {err}": "Could not open the video: {err}"
 }

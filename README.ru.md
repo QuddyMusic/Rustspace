@@ -273,7 +273,7 @@ cargo run -p bs-tui -- --allow-insecure                # аргументы по
 
 | Флаг | Что добавляет | Что нужно для сборки |
 |---|---|---|
-| `sounds` | звуки интерфейса и встроенный проигрыватель аудио (rodio/symphonia; Ogg Opus — `opus-decoder` на чистом Rust) | Linux: `libasound2-dev` |
+| `sounds` | звуки интерфейса, встроенный проигрыватель аудио и звук видео (rodio/symphonia; Ogg Opus — `opus-decoder` на чистом Rust) | Linux: `libasound2-dev` |
 | `voice` | голос, демонстрация экрана, сцена звонка (включает `sounds`) | clang **21+**, `libclang`, `pkg-config`; Linux: PipeWire, заголовки X11/Wayland; `libwebrtc` скачивается при сборке |
 | `camera` | веб-камера через nokhwa (V4L2, Media Foundation, AVFoundation; включает `voice`) | — |
 | `tray` | значок в трее и сворачивание в него | Linux: `libgtk-3-dev`, `libayatana-appindicator3-dev` |
@@ -372,8 +372,10 @@ cargo xtask contract --url http://127.0.0.1:3000    # против запуще�
 мутаций. Телеметрию сервер не отправляет никогда. См. [ROADMAP.ru.md](ROADMAP.ru.md).
 
 **Отличия от оригинала в мелочах:** миниатюры и стикеры кодируются в WebP без потерь (файлы
-крупнее); миниатюры AVIF не делаются; для видео и звука нужны `ffmpeg` и `ffprobe` в `PATH`
-(без них файл принимается без длительности и миниатюры — как у оригинала).
+крупнее); миниатюры AVIF не делаются. Видео H.264 в MP4/MOV получает миниатюру, размеры и
+длительность от декодера на чистом Rust (`bs-media`); для остального видео и звука нужны
+`ffmpeg` и `ffprobe` в `PATH` (без них файл принимается без длительности и миниатюры — как у
+оригинала).
 
 ### Сборка
 

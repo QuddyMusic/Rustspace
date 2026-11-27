@@ -12,3 +12,10 @@ workspace = true
 [dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 thiserror = { workspace = true }
+# Видео (MP4/MOV + H.264) на чистом Rust; включается фичей `video`.
+mp4 = { version = "0.14", optional = true }
+rusty_h264-decoder = { version = "0.17", default-features = false, features = ["std"], optional = true }
+rusty_h264-common = { version = "0.17", default-features = false, features = ["std"], optional = true }
+
+[features]
+video = ["dep:mp4", "dep:rusty_h264-decoder", "dep:rusty_h264-common"]

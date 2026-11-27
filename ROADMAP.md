@@ -97,6 +97,10 @@ original server.
   checkout.
 
 ### This iteration
+- **Built-in video player.** MP4/MOV with H.264 (Telegram videos and round video messages,
+  phone videos) play right in the chat with sound, seeking and a full-window view; decoding
+  is pure Rust (`rusty_h264`), the web version uses the browser's `<video>`. Thumbnails come
+  from the server (now without ffmpeg) or are made by the client.
 - **Built-in audio player.** WAV, MP3, FLAC, Ogg Vorbis, Ogg Opus (Telegram voice messages)
   and AAC/M4A attachments play right in the chat: play/pause, seek bar and time; the web
   version uses the browser's own `<audio>`.

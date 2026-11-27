@@ -23,6 +23,9 @@ use crate::files::ProfileImage;
 const THUMBNAIL_MAX_WIDTH: u32 = 800;
 /// Предел на внешнюю программу.
 const FFMPEG_TIMEOUT: Duration = Duration::from_secs(10);
+/// Видео крупнее читаем своим декодером только через ffmpeg (файл целиком
+/// ложится в память).
+const OWN_VIDEO_MAX: u64 = 512 * 1024 * 1024;
 /// Кадр видео больше этого не разбирается.
 const MAX_FRAME_BYTES: usize = 50 * 1024 * 1024;
 /// Картинки больше этого числа точек не декодируются: защита от «бомб».
@@ -320,6 +323,29 @@ async fn video_thumbnail(path: &Path, target: PathBuf) -> Option<(i64, i64)> {
     .flatten()
 }
 
+/// Видео H.264 своим декодером: первый кадр в миниатюру, размеры, длительность.
+async fn own_video(path: &Path, target: PathBuf) -> Option<(i64, i64, f64)> {
+    let path = path.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let size = std::fs::metadata(&path).ok()?.len();
+        if size > OWN_VIDEO_MAX {
+            return None;
+        }
+        let bytes = std::fs::read(&path).ok()?;
+        let (info, frame) = bs_media::video::first_frame(&bytes).ok()?;
+        let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
+        let image = DynamicImage::ImageRgb8(DynamicImage::ImageRgba8(image).to_rgb8());
+        write_webp(&image, &target).then_some((
+            i64::from(info.width),
+            i64::from(info.height),
+            info.duration,
+        ))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 /// Обрабатывает принятый файл: миниатюра `thumb_name` в каталоге загрузок,
 /// размеры, длительность. Ошибки не мешают загрузке.
 pub async fn process(
@@ -344,6 +370,15 @@ pub async fn process(
             }
         }
     } else if mimetype.starts_with("video/") {
+        // H.264 в MP4/MOV разбирается своими силами, остальное — через ffmpeg.
+        if let Some(own) = own_video(source, target.clone()).await {
+            result.thumbnail = Some(thumb_name.to_owned());
+            result.width = Some(own.0);
+            result.height = Some(own.1);
+            result.duration = Some(own.2);
+            result.playable = classify_video_playable(mimetype, Some("h264"));
+            return result;
+        }
         if let Some((width, height)) = video_thumbnail(source, target).await {
             result.thumbnail = Some(thumb_name.to_owned());
             result.width = Some(width);
@@ -431,6 +466,29 @@ mod tests {
             .save_with_format(&path, format)
             .expect("картинка записана");
         path
+    }
+
+    #[tokio::test]
+    async fn h264_video_gets_a_thumbnail_without_ffmpeg() {
+        let dir = tempfile::tempdir().expect("каталог");
+        let video = dir.path().join("clip.mp4");
+        std::fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../bs-media/tests-data/rotated.mp4"
+            ),
+            &video,
+        )
+        .expect("копия");
+        let done = process(&video, "video/mp4", dir.path(), "3_thumb.webp").await;
+        assert_eq!(done.thumbnail.as_deref(), Some("3_thumb.webp"));
+        assert_eq!((done.width, done.height), (Some(96), Some(160)));
+        assert_eq!(done.playable, Some(true));
+        assert!(done.duration.is_some_and(|d| d > 0.1));
+        assert_eq!(
+            image_dimensions(&dir.path().join("3_thumb.webp")),
+            Some((96, 160))
+        );
     }
 
     #[tokio::test]

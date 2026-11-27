@@ -277,7 +277,7 @@ cargo run -p bs-tui -- --allow-insecure                # arguments after `--` go
 
 | Feature | What it adds | Extra build requirements |
 |---|---|---|
-| `sounds` | interface sounds and the built-in audio player (rodio/symphonia; Ogg Opus via the pure-Rust `opus-decoder`) | Linux: `libasound2-dev` |
+| `sounds` | interface sounds, the built-in audio player and video sound (rodio/symphonia; Ogg Opus via the pure-Rust `opus-decoder`) | Linux: `libasound2-dev` |
 | `voice` | voice, screen sharing, call stage (includes `sounds`) | clang **21+**, `libclang`, `pkg-config`; Linux: PipeWire, X11/Wayland headers; `libwebrtc` is downloaded at build time |
 | `camera` | webcam via nokhwa (V4L2, Media Foundation, AVFoundation; includes `voice`) | — |
 | `tray` | tray icon and hide-to-tray | Linux: `libgtk-3-dev`, `libayatana-appindicator3-dev` |
@@ -376,9 +376,10 @@ does not know about them works as before. Their tables live in the same database
 server never sends telemetry. See [ROADMAP.md](ROADMAP.md).
 
 **Small differences from the original:** thumbnails and stickers are encoded as lossless
-WebP (larger files); AVIF thumbnails are not made; video and audio need `ffmpeg` and
-`ffprobe` in `PATH` (without them a file is accepted without duration or thumbnail, as in
-the original).
+WebP (larger files); AVIF thumbnails are not made. H.264 video in MP4/MOV gets its
+thumbnail, size and duration from a pure-Rust decoder (`bs-media`); other video and audio
+need `ffmpeg` and `ffprobe` in `PATH` (without them a file is accepted without duration or
+thumbnail, as in the original).
 
 ### Build
 

@@ -13,6 +13,9 @@
 
 use std::io::Cursor;
 
+#[cfg(feature = "video")]
+pub mod video;
+
 use image::{
     AnimationDecoder as _, DynamicImage, ImageDecoder as _, ImageFormat, ImageReader,
     codecs::{gif::GifDecoder, webp::WebPDecoder},
