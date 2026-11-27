@@ -1086,7 +1086,6 @@ fn main_module<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R 
         .inner
 }
 
-
 /// Просит сервер перечитать историю мостового чата.
 fn resync_dm(bridge: &mut Bridge, origin: usize, dm_id: String) {
     bridge.focus_on(origin);

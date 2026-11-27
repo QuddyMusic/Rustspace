@@ -335,6 +335,30 @@ const EXTENSIONS: &[(&str, &[&str])] = &[
             "ALTER TABLE bs_personal_chats ADD COLUMN photo_id TEXT",
         ],
     ),
+    (
+        "0020_personal_imports",
+        &[
+            // Перенос истории чатов личных мостов: докуда дошли.
+            "CREATE TABLE bs_personal_imports (
+                account_id TEXT NOT NULL,
+                remote_chat TEXT NOT NULL,
+                oldest TEXT,
+                imported BIGINT NOT NULL DEFAULT 0,
+                failures BIGINT NOT NULL DEFAULT 0,
+                done INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (account_id, remote_chat)
+            )",
+            // Ответы на ещё не перенесённые сообщения: проставятся, когда
+            // перенос дойдёт до исходного сообщения.
+            "CREATE TABLE bs_personal_replies (
+                dm_message_id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                remote_chat TEXT NOT NULL,
+                reply_remote TEXT NOT NULL
+            )",
+            "CREATE INDEX bs_personal_replies_chat ON bs_personal_replies (account_id, remote_chat)",
+        ],
+    ),
 ];
 
 /// Создаёт недостающие таблицы расширений.

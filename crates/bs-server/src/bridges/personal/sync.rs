@@ -13,8 +13,6 @@ use crate::routes::users::{USER_COLUMNS, sanitize_user};
 use crate::state::{AppState, now_ms};
 use crate::{broadcast, dm, params, ws};
 
-/// Сколько последних сообщений переносимой истории клиенты видят сразу.
-const LIVE_TAIL: usize = 50;
 /// Как часто спрашивать «в сети» собеседников.
 const PRESENCE_EVERY: std::time::Duration = std::time::Duration::from_mins(1);
 
@@ -155,6 +153,11 @@ pub(crate) async fn deliver(state: &AppState, message: Remote) {
     deliver_as(state, message, true).await;
 }
 
+/// Старое сообщение из переносимой истории: без событий клиентам.
+pub(crate) async fn deliver_quiet(state: &AppState, message: Remote) {
+    deliver_as(state, message, false).await;
+}
+
 /// `live == false` — старое сообщение из истории: пишется молча, без
 /// событий клиентам (иначе перенос тысяч сообщений засыпал бы их событиями);
 /// клиент увидит его, когда подгрузит историю.
@@ -184,15 +187,15 @@ async fn deliver_as(state: &AppState, message: Remote, live: bool) {
             let channel = row.text("dm_channel_id")?;
             let (author, content) = if message.mine {
                 (row.text("user_id")?, message.text.clone())
-            } else if row.int("grouped")? != 0 && !message.text.is_empty() {
-                (
-                    row.text("puppet_id")?,
-                    format!(
-                        "**{}**: {}",
-                        crate::bridges::clip(&message.sender, 48),
-                        message.text
-                    ),
-                )
+            } else if row.int("grouped")? != 0 {
+                // В группе пишет один «двойник» чата: автора видно по имени.
+                let name = crate::bridges::clip(&message.sender, 48);
+                let text = if message.text.is_empty() {
+                    format!("**{name}**")
+                } else {
+                    format!("**{name}**: {}", message.text)
+                };
+                (row.text("puppet_id")?, text)
             } else {
                 (row.text("puppet_id")?, message.text.clone())
             };
@@ -204,6 +207,7 @@ async fn deliver_as(state: &AppState, message: Remote, live: bool) {
                 Some(remote) => local_of(tx, &message.account, Some(&message.chat), remote)?,
                 None => None,
             };
+            let unresolved = message.reply_to.is_some() && reply_to.is_none();
             let new = dm::NewMessage {
                 content: (!content.trim().is_empty()).then_some(content),
                 attachments: attachments.clone(),
@@ -220,10 +224,19 @@ async fn deliver_as(state: &AppState, message: Remote, live: bool) {
                 &new,
                 message.date.unwrap_or_else(now_ms),
             )?;
-            if let (Some(created), Some(remote_id)) = (created, &message.id)
-                && let Some(local) = created["id"].as_str()
-            {
+            let local = created
+                .as_ref()
+                .and_then(|created| created["id"].as_str().map(str::to_owned));
+            if let (Some(local), Some(remote_id)) = (&local, &message.id) {
                 remember(tx, &message.account, &message.chat, remote_id, local)?;
+            }
+            // Ответ на сообщение, до которого перенос ещё не дошёл.
+            if let (Some(local), Some(remote), true) = (&local, &message.reply_to, unresolved) {
+                tx.execute(
+                    "INSERT INTO bs_personal_replies (dm_message_id, account_id, remote_chat, reply_remote) \
+                     VALUES (?, ?, ?, ?) ON CONFLICT (dm_message_id) DO NOTHING",
+                    params![local, &message.account, &message.chat, remote],
+                )?;
             }
             Ok(())
         })
@@ -526,10 +539,11 @@ async fn apply_profile(state: &AppState, account: &str, chat: &str, profile: Rem
     }
 }
 
-/// После связывания чата: профиль собеседника и последние сообщения.
+/// После связывания чата: профиль собеседника и перенос истории.
 pub(crate) fn after_link(state: &AppState, account: &str, chat: &str) {
     let (app, account, chat) = (state.clone(), account.to_owned(), chat.to_owned());
     tokio::spawn(async move {
+        super::import::enqueue(&app, &account, &chat, false).await;
         let Ok(_permit) = HEAVY.acquire().await else {
             return;
         };
@@ -539,28 +553,39 @@ pub(crate) fn after_link(state: &AppState, account: &str, chat: &str) {
         if let Some(profile) = link.profile(&chat, None).await {
             apply_profile(&app, &account, &chat, profile).await;
         }
-        import_history(&app, &link, &account, &chat).await;
     });
 }
 
-/// Переносит всю историю чата. Уже перенесённые сообщения пропускаются
-/// (`deliver` знает их номера), так что повторный вызов только дополняет.
-async fn import_history(app: &AppState, link: &super::Link, account: &str, chat: &str) {
-    let (sink, mut incoming) = tokio::sync::mpsc::channel(4);
-    let consume = async {
-        let mut batch = Vec::new();
-        while let Some(message) = incoming.recv().await {
-            batch.push(message);
-            // Последние сообщения клиенты получат сразу, остальные молча.
-            if batch.len() > LIVE_TAIL {
-                deliver_as(app, batch.remove(0), false).await;
+/// Проставляет ответы, исходные сообщения которых уже перенесены.
+pub(crate) async fn fix_replies(state: &AppState, account: &str, chat: &str) {
+    let (account, chat) = (account.to_owned(), chat.to_owned());
+    let result = state
+        .run(move |tx, _| {
+            let pending = tx.query(
+                "SELECT dm_message_id, reply_remote FROM bs_personal_replies \
+                 WHERE account_id = ? AND remote_chat = ?",
+                params![&account, &chat],
+            )?;
+            for row in pending {
+                let (message, remote) = (row.text("dm_message_id")?, row.text("reply_remote")?);
+                let Some(target) = local_of(tx, &account, Some(&chat), &remote)? else {
+                    continue;
+                };
+                tx.execute(
+                    "UPDATE dm_messages SET reply_to_id = ? WHERE id = ?",
+                    params![&target, &message],
+                )?;
+                tx.execute(
+                    "DELETE FROM bs_personal_replies WHERE dm_message_id = ?",
+                    params![&message],
+                )?;
             }
-        }
-        for message in batch {
-            deliver_as(app, message, true).await;
-        }
-    };
-    tokio::join!(link.history(account, chat, sink), consume);
+            Ok(())
+        })
+        .await;
+    if let Err(err) = result {
+        tracing::warn!(?err, "личный мост: не удалось связать ответы");
+    }
 }
 
 /// Перечитать историю связанного чата (по id переписки у себя).
@@ -592,13 +617,14 @@ pub(crate) async fn resync_dm(
     if state.personal.link(&account).is_none() {
         return Ok(false);
     }
-    after_link(state, &account, &chat);
+    super::import::enqueue(state, &account, &chat, true).await;
     Ok(true)
 }
 
 /// Аккаунт подключился: обновить профили и следить за «в сети».
 pub(crate) fn connected(state: &AppState, account: &str) {
     refresh_profiles(state, account);
+    super::import::start(state, account);
     poll_presence(state, account);
 }
 

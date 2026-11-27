@@ -12,6 +12,7 @@
 //! зашифрованными ключом из `JWT_SECRET`. Discord сюда не входит: вход под
 //! личным аккаунтом нарушает его правила.
 
+mod import;
 pub mod matrix;
 pub mod mtproxy;
 pub mod sync;
@@ -157,11 +158,22 @@ impl Link {
         }
     }
 
-    /// Вся история чата, от старых к новым, по одному сообщению в `sink`.
-    async fn history(&self, account: &str, chat: &str, sink: tokio::sync::mpsc::Sender<Remote>) {
+    /// Страница истории старее сообщения `before` (без него — самая новая);
+    /// сообщения из `known` уже перенесены и не скачиваются.
+    async fn history_page(
+        &self,
+        account: &str,
+        chat: &str,
+        before: Option<&str>,
+        known: &std::collections::HashSet<String>,
+    ) -> Result<import::HistoryPage, String> {
         match self {
-            Self::Matrix(_) => {}
-            Self::Telegram(link) => link.history(account, chat, sink).await,
+            Self::Matrix(_) => Ok(import::HistoryPage {
+                messages: Vec::new(),
+                oldest: None,
+                end: true,
+            }),
+            Self::Telegram(link) => link.history_page(account, chat, before, known).await,
         }
     }
 
@@ -526,6 +538,7 @@ pub(crate) async fn remove_account(state: &AppState, user: &str, id: &str) -> Ap
     state
         .run(move |tx, _| {
             own_account(tx, &user, &id)?;
+            import::forget(tx, &id, None)?;
             tx.execute(
                 "DELETE FROM bs_personal_chats WHERE account_id = ?",
                 params![&id],
@@ -656,6 +669,12 @@ pub(crate) async fn unlink_chat(
     state
         .run(move |tx, _| {
             own_account(tx, &user, &id)?;
+            if let Some(row) = tx.query_one(
+                "SELECT remote_chat FROM bs_personal_chats WHERE account_id = ? AND id = ?",
+                params![&id, &chat],
+            )? {
+                import::forget(tx, &id, Some(&row.text("remote_chat")?))?;
+            }
             tx.execute(
                 "DELETE FROM bs_personal_chats WHERE account_id = ? AND id = ?",
                 params![&id, &chat],
@@ -698,6 +717,7 @@ pub(crate) async fn delete_bridged_dm(state: &AppState, user: &str, dm: &str) ->
                 "DELETE FROM bs_personal_messages WHERE account_id = ? AND remote_chat = ?",
                 params![&account, &chat],
             )?;
+            import::forget(tx, &account, Some(&chat))?;
             tx.execute(
                 "DELETE FROM bs_personal_chats WHERE account_id = ? AND remote_chat = ?",
                 params![&account, &chat],

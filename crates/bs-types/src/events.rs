@@ -650,6 +650,11 @@ pub enum ServerEvent {
         kind: String,
         channel_id: String,
     },
+    /// В ленту личного чата добавились старые сообщения (перенос истории
+    /// моста): загруженную ленту стоит перечитать.
+    RsDmHistory {
+        channel_id: String,
+    },
     /// Добавлена закладка (PR оригинала #474).
     BookmarkAdded {
         bookmark: serde_json::Value,

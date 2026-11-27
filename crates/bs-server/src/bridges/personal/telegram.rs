@@ -60,8 +60,8 @@ const MAX_FILE: usize = 50 * 1024 * 1024;
 /// Файлы из истории крупнее не переносим (пометка в тексте, файл остаётся
 /// в Telegram): история переносится вся, и диск сервера не резиновый.
 const HISTORY_FILE: usize = 20 * 1024 * 1024;
-/// Больше сообщений одного чата не переносим (каналы бывают огромными).
-const MAX_IMPORT: usize = 100_000;
+/// Сообщений на страницу переносимой истории (столько Telegram отдаёт за раз).
+const HISTORY_PAGE: usize = 100;
 
 /// Сколько диалогов показывать при выборе.
 const MAX_DIALOGS: usize = 1000;
@@ -431,44 +431,41 @@ impl Account {
     }
 
     /// Последние сообщения чата, от старых к новым.
-    pub(super) async fn history(
+    pub(super) async fn history_page(
         &self,
         account: &str,
         chat: &str,
-        sink: tokio::sync::mpsc::Sender<Remote>,
-    ) {
-        let Ok(peer) = self.peer(chat).await else {
-            return;
-        };
-        // Сначала только сами сообщения (без файлов), от новых к старым:
-        // Telegram отдаёт историю в этом порядке, а переносить надо с начала,
-        // чтобы ответы находили свои исходные сообщения.
-        let mut messages = self.client.iter_messages(peer);
-        let mut all = Vec::new();
-        while all.len() < MAX_IMPORT {
-            match messages.next().await {
-                Ok(Some(message)) => all.push(message),
-                Ok(None) => break,
-                Err(err) => {
-                    tracing::warn!(account, %err, "личный мост Telegram: история не загрузилась");
-                    break;
-                }
-            }
+        before: Option<&str>,
+        known: &std::collections::HashSet<String>,
+    ) -> Result<super::import::HistoryPage, String> {
+        let peer = self.peer(chat).await?;
+        let mut messages = self.client.iter_messages(peer).limit(HISTORY_PAGE);
+        if let Some(before) = before.and_then(|id| id.parse::<i32>().ok()) {
+            messages = messages.offset_id(before);
         }
-        tracing::info!(
-            account,
-            chat,
-            count = all.len(),
-            "личный мост Telegram: перенос истории"
-        );
-        while let Some(message) = all.pop() {
+        let mut page = Vec::new();
+        while let Some(message) = messages.next().await.map_err(|err| err.to_string())? {
+            page.push(message);
+        }
+        let end = page.len() < HISTORY_PAGE;
+        let oldest = page.last().map(|message| message.id().to_string());
+        let mut fresh = Vec::new();
+        // Telegram отдаёт от новых к старым, переносим от старых к новым.
+        for message in page.iter().rev() {
+            if known.contains(&message.id().to_string()) {
+                continue;
+            }
             if let Some(remote) =
-                to_remote(&self.client, account, chat, &message, HISTORY_FILE).await
-                && sink.send(remote).await.is_err()
+                to_remote(&self.client, account, chat, message, HISTORY_FILE).await
             {
-                return;
+                fresh.push(remote);
             }
         }
+        Ok(super::import::HistoryPage {
+            messages: fresh,
+            oldest,
+            end,
+        })
     }
 
     /// «В сети» собеседников личных чатов одним запросом.

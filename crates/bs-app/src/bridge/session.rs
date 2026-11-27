@@ -127,6 +127,9 @@ impl Session {
                 }
             }
             BridgeEvent::Server { event } => {
+                if let bs_types::ServerEvent::RsDmHistory { channel_id } = event.as_ref() {
+                    self.history_grew(channel_id);
+                }
                 self.extras.server_event(&event);
                 self.apply_server_event(*event);
             }
@@ -1515,6 +1518,20 @@ impl Session {
     /// Показано ли окно вокруг найденного сообщения вместо свежих.
     pub(crate) fn is_detached(&self, channel_id: &str) -> bool {
         self.detached.contains(channel_id)
+    }
+
+    /// В ленту канала задним числом добавились сообщения: короткая лента
+    /// грузится заново, длинная просто снова листается вверх.
+    fn history_grew(&mut self, channel_id: &str) {
+        let loaded = self
+            .cache
+            .as_ref()
+            .map_or(0, |cache| cache.dm_messages(channel_id).len());
+        if loaded < usize::from(super::HISTORY_PAGE) {
+            self.return_to_present(channel_id);
+        } else if let Some(state) = self.history.get_mut(channel_id) {
+            state.exhausted = false;
+        }
     }
 
     /// Возвращает канал к свежим сообщениям: старое окно забывается, лента
